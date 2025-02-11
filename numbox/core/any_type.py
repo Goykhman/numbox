@@ -1,7 +1,6 @@
 from numba import njit
 from numba.core.errors import NumbaError
 from numba.core.types import StructRef
-from numba.core.typing import Signature
 from numba.experimental.structref import define_boxing, new, register, StructRefProxy
 from numba.extending import overload, overload_method
 
@@ -63,6 +62,11 @@ class Any(StructRefProxy):
         raise NotImplementedError('You need to access `p` via `get_as`')
 
 
+def _any_deleted_ctor(p):
+    raise NumbaError(deleted_any_ctor_error)
+
+
+overload(Any)(_any_deleted_ctor)
 define_boxing(AnyTypeClass, Any)
 AnyType = AnyTypeClass([("p", ErasedType)])
 
@@ -85,40 +89,14 @@ def ol_get_as(self_class, ty_class):
 
 
 @overload_method(AnyTypeClass, "reset", strict=False)
-def ol_reset(self_class, val_class):
-    def _(self, val):
-        self.p = cast(_Content(val), ErasedType)
+def ol_reset(self_class, x_class):
+    def _(self, x):
+        self.p = cast(_Content(x), ErasedType)
     return _
 
 
-def any_constructor(p):
-    return NotImplementedError('Not for use from pure Python')
-
-
-@overload(any_constructor, strict=False)
-def ol_any_constructor(x_ty):
-    def _(x):
-        any = new(AnyType)
-        any.p = cast(_Content(x), ErasedType)
-        return any
-    return _
-
-
-def make_any_maker(sig=None):
-    if sig is not None:
-        assert isinstance(sig, Signature)
-
-    @njit(sig)
-    def make_any_(x):
-        return any_constructor(x)
-    return make_any_
-
-
-make_any = make_any_maker()
-
-
-def _any_deleted_ctor(p):
-    raise NumbaError(deleted_any_ctor_error)
-
-
-overload(Any)(_any_deleted_ctor)
+@njit
+def make_any(x):
+    any = new(AnyType)
+    any.p = cast(_Content(x), ErasedType)
+    return any

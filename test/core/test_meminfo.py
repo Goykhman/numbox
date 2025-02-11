@@ -24,7 +24,7 @@ def test_s1():
     assert s1_data_p_as_int - s1_meminfo_p_as_int == 8 * size_of_meminfo, """ 
         This just means that data pointed at by the `data_p` is lined up in memory
         right after the six size-8 fields of the `MemInfo` structure. This doesn't
-        always have to be the case, for instance in `demo_s2` a separate `MemInfo`
+        always have to be the case, for instance in `test_s2` a separate `MemInfo`
         is created to wrap `x1` array, and there is no reason to expect that the
         layout for that `MemInfo` in memory will be precisely such that the array
         data itself will follow right after it.
