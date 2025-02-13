@@ -27,8 +27,6 @@ class _Content:
 
 @overload(_Content, strict=False)
 def ol_content(x_ty):
-    """ Custom version of `numba.experimental.structref.define_constructor` that extracts
-    first-class function type from the `Dispatcher` to be used as struct's member type """
     x_ty = prune_type(x_ty)
     content_type = ContentTypeClass([("x", x_ty)])
 
@@ -51,15 +49,13 @@ class Any(StructRefProxy):
     def __new__(cls, x):
         raise NotImplementedError(deleted_any_ctor_error)
 
+    @njit
     def get_as(self, ty):
-        return get_as(self, ty)
+        return self.get_as(ty)
 
+    @njit
     def reset(self, val):
-        return reset(self, val)
-
-    @property
-    def p(self):
-        raise NotImplementedError('You need to access `p` via `get_as`')
+        return self.reset(val)
 
 
 def _any_deleted_ctor(p):
@@ -69,16 +65,6 @@ def _any_deleted_ctor(p):
 overload(Any)(_any_deleted_ctor)
 define_boxing(AnyTypeClass, Any)
 AnyType = AnyTypeClass([("p", ErasedType)])
-
-
-@njit
-def get_as(self, ty):
-    return self.get_as(ty)
-
-
-@njit
-def reset(self, val):
-    return self.reset(val)
 
 
 @overload_method(AnyTypeClass, "get_as", strict=False)
