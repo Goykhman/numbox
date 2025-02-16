@@ -1,4 +1,6 @@
 import numpy
+import os
+import pytest
 
 from numba import float64, int32, int64, njit, typeof
 from numba.core import types
@@ -50,6 +52,11 @@ def test_3():
     assert val.x2 == x
 
 
+@pytest.mark.skipif(
+    os.getenv("TEST_CACHEABLE_ONLY", False),
+    reason=""" Function references are not cacheable, so `make_any`
+    cache - if applicable - is invalidated every time it is called. """
+)
 def test_4():
     aux1_sig = float64(float64)
     aux1_ty = aux1_sig.as_type()
