@@ -8,11 +8,11 @@ from types import FunctionType as PyFunctionType
 from typing import Optional
 
 
-def make_swap_name(name):
+def make_proxy_name(name):
     return f'__{name}'
 
 
-def declare(sig, jit_options: Optional[dict] = None):
+def proxy(sig, jit_options: Optional[dict] = None):
     assert isinstance(sig, Signature)
     jit_options = isinstance(jit_options, dict) and jit_options or {}
 
@@ -21,10 +21,10 @@ def declare(sig, jit_options: Optional[dict] = None):
         func_jit = njit(sig, **jit_options)(func)
         llvm_cfunc_wrapper_name = func_jit.get_compile_result(sig).fndesc.llvm_cfunc_wrapper_name
         func_args_str = ', '.join(inspect.getfullargspec(func).args)
-        func_swap_name = make_swap_name(func.__name__)
+        func_proxy_name = make_proxy_name(func.__name__)
         code_txt = f"""
 @intrinsic
-def _{func_swap_name}(typingctx, {func_args_str}):
+def _{func_proxy_name}(typingctx, {func_args_str}):
     def codegen(context, builder, signature, args):
         func_ty_ll = ir.FunctionType(
             context.get_data_type(sig.return_type),
@@ -35,16 +35,16 @@ def _{func_swap_name}(typingctx, {func_args_str}):
     return sig, codegen
 
 @njit(sig, **jit_opts)
-def {func_swap_name}({func_args_str}):
-    return _{func_swap_name}({func_args_str})
+def {func_proxy_name}({func_args_str}):
+    return _{func_proxy_name}({func_args_str})
 """
         ns = {
             **inspect.getmodule(func).__dict__,
             **{'cgutils': cgutils, 'intrinsic': intrinsic, 'ir': ir, 'jit_opts': jit_options, 'njit': njit, 'sig': sig}
         }
-        if ns.get(func_swap_name) is not None:
-            raise ValueError(f"Name {func_swap_name} in module {inspect.getmodule(func)} is reserved")
+        if ns.get(func_proxy_name) is not None:
+            raise ValueError(f"Name {func_proxy_name} in module {inspect.getmodule(func)} is reserved")
         code = compile(code_txt, inspect.getfile(func), mode='exec')
         exec(code, ns)
-        return ns[func_swap_name]
+        return ns[func_proxy_name]
     return wrap
