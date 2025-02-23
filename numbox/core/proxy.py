@@ -24,6 +24,8 @@ def make_params_strings(func):
 def proxy(sig, jit_options: Optional[dict] = None):
     main_sig = isinstance(sig, Signature) and sig or isinstance(sig, (List, Tuple)) and sig[0]
     jit_options = isinstance(jit_options, dict) and jit_options or {}
+    jit_opts = jit_options.copy()
+    jit_opts.update(jit_opts, inline='always')
 
     def wrap(func):
         assert isinstance(func, PyFunctionType)
@@ -50,7 +52,7 @@ def {func_proxy_name}({func_args_str}):
         ns = {
             **inspect.getmodule(func).__dict__,
             **{
-                'cgutils': cgutils, 'intrinsic': intrinsic, 'ir': ir, 'jit_opts': jit_options, 'njit': njit,
+                'cgutils': cgutils, 'intrinsic': intrinsic, 'ir': ir, 'jit_opts': jit_opts, 'njit': njit,
                 'sig': sig, 'main_sig': main_sig
             }
         }
