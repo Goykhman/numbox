@@ -22,6 +22,29 @@ def make_params_strings(func):
 
 
 def proxy(sig, jit_options: Optional[dict] = None):
+    """ Create a proxy for the decorated function `func` with the given signature(s) `sig`.
+
+    The original function `func` will be eagerly JIT-compiled with the given signature(s).
+    A proxy with the name `func_proxy_name` will be created to call `func` in the LLVM scope.
+    The original function's variable will be bound to the proxy, i.e., calling the decorated
+    function will call the proxy.
+
+    The proxy is a JIT-compiled wrap that invokes the intrinsic that *declares* the `func`
+    and calls it with the original arguments. Declaration instructions are relatively cheap
+    to statically link into (potential) caller's LLVM code, which is the main motivation behind
+    this decorator.
+
+    Machine code for `func` can be cached when so specified in `jit_options`, in which case its
+    JIT-compilation will load the `func` into the LLVM scope. Caching option is the other major
+    motivation for this decorator, without the need to cache one can avoid static linking
+    of the callee's LLVM code into the caller's by simply ignoring the former.
+
+    In case when more than one signature is provided as the `sig` parameter, it is assumed
+    that the first signature is the 'main' one while the other ones are supplied to
+    allow for the `Omitted` types with default values for (some of) the parameters.
+
+    See tests for some examples of the use cases.
+    """
     main_sig = isinstance(sig, Signature) and sig or isinstance(sig, (List, Tuple)) and sig[0]
     jit_options = isinstance(jit_options, dict) and jit_options or {}
     jit_opts = jit_options.copy()
