@@ -1,11 +1,9 @@
 import numpy
-import os
-import pytest
 
 from numba import float64, int32, int64, njit, typeof
 from numba.core import types
 from numba.typed import Dict
-from numbox.core.any_type import AnyType, make_any
+from numbox.core.any_type import AnyType, make_any, make_any_maker
 from test.common_structrefs import S1, S1Type, S3, S3Type
 from numbox.core.meminfo import get_nrt_refcount, structref_meminfo
 from test.auxiliary_utils import deref_int64_intp
@@ -52,11 +50,6 @@ def test_3():
     assert val.x2 == x
 
 
-@pytest.mark.skipif(
-    os.getenv("TEST_CACHEABLE_ONLY", False),
-    reason=""" Function references are not cacheable, so `make_any`
-    cache - if applicable - is invalidated every time it is called. """
-)
 def test_4():
     aux1_sig = float64(float64)
     aux1_ty = aux1_sig.as_type()
@@ -65,8 +58,10 @@ def test_4():
     def aux1(x):
         return 2 * x
 
+    make_any_typed = make_any_maker(aux1_ty)
+
     def run():
-        a1 = make_any(aux1)
+        a1 = make_any_typed(aux1)
         f_ = a1.get_as(aux1_ty)
         return f_
 
