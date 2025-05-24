@@ -6,6 +6,7 @@ from numba.core.types import StructRef, Type
 from numba.experimental.structref import define_boxing, new, register, StructRefProxy
 from numba.extending import overload, overload_method
 
+from numbox.core.configurations import default_jit_options
 from numbox.utils.highlevel import prune_type
 from numbox.utils.lowlevel import cast, deref
 
@@ -25,9 +26,6 @@ class ContentTypeClass(StructRef):
 
 class _Content:
     pass
-
-
-default_jit_options = {'cache': True}
 
 
 @overload(_Content, strict=False, jit_options=default_jit_options)
@@ -54,11 +52,11 @@ class Any(StructRefProxy):
     def __new__(cls, x):
         raise NotImplementedError(deleted_any_ctor_error)
 
-    @njit(cache=True)
+    @njit(**default_jit_options)
     def get_as(self, ty):
         return self.get_as(ty)
 
-    @njit(cache=True)
+    @njit(**default_jit_options)
     def reset(self, val):
         return self.reset(val)
 
@@ -67,7 +65,7 @@ def _any_deleted_ctor(p):
     raise NumbaError(deleted_any_ctor_error)
 
 
-overload(Any)(_any_deleted_ctor)
+overload(Any, jit_options=default_jit_options)(_any_deleted_ctor)
 define_boxing(AnyTypeClass, Any)
 AnyType = AnyTypeClass([("p", ErasedType)])
 
