@@ -4,9 +4,10 @@ from numba import float64, int32, int64, njit, typeof
 from numba.core import types
 from numba.typed import Dict
 from numbox.core.any_type import AnyType, make_any, make_any_maker
-from test.common_structrefs import S1, S1Type, S3, S3Type
 from numbox.core.meminfo import get_nrt_refcount, structref_meminfo
+from numbox.utils.highlevel import cres_njit
 from test.auxiliary_utils import deref_int64_intp
+from test.common_structrefs import S1, S1Type, S3, S3Type
 
 
 def test_1():
@@ -62,6 +63,28 @@ def test_4():
 
     def run():
         a1 = make_any_typed(aux1)
+        f_ = a1.get_as(aux1_ty)
+        return f_
+
+    f = run()
+    assert id(f) == id(aux1)
+    assert abs(f(2.3) - 2 * 2.3) < 1e-15
+
+    f = njit(run)()
+    assert id(f) == id(aux1)
+    assert abs(f(2.3) - 2 * 2.3) < 1e-15
+
+
+def test_4_2():
+    aux1_sig = float64(float64)
+    aux1_ty = aux1_sig.as_type()
+
+    @cres_njit(aux1_sig)
+    def aux1(x):
+        return 2 * x
+
+    def run():
+        a1 = make_any(aux1)
         f_ = a1.get_as(aux1_ty)
         return f_
 
@@ -159,6 +182,7 @@ if __name__ == '__main__':
     test_2()
     test_3()
     test_4()
+    test_4_2()
     test_5()
     test_6()
     test_7()
