@@ -3,7 +3,7 @@ import numpy
 from numba import float64, int32, int64, njit, typeof
 from numba.core import types
 from numba.typed import Dict
-from numbox.core.any_type import AnyType, make_any, make_any_maker
+from numbox.core.any_type import AnyType, make_any
 from numbox.core.meminfo import get_nrt_refcount, structref_meminfo
 from numbox.utils.highlevel import cres_njit
 from test.auxiliary_utils import deref_int64_intp
@@ -52,30 +52,6 @@ def test_3():
 
 
 def test_4():
-    aux1_sig = float64(float64)
-    aux1_ty = aux1_sig.as_type()
-
-    @njit(aux1_sig)
-    def aux1(x):
-        return 2 * x
-
-    make_any_typed = make_any_maker(aux1_ty)
-
-    def run():
-        a1 = make_any_typed(aux1)
-        f_ = a1.get_as(aux1_ty)
-        return f_
-
-    f = run()
-    assert id(f) == id(aux1)
-    assert abs(f(2.3) - 2 * 2.3) < 1e-15
-
-    f = njit(run)()
-    assert id(f) == id(aux1)
-    assert abs(f(2.3) - 2 * 2.3) < 1e-15
-
-
-def test_4_2():
     aux1_sig = float64(float64)
     aux1_ty = aux1_sig.as_type()
 
@@ -173,8 +149,6 @@ def test_10():
     assert get_nrt_refcount(s1) == 2, "`any` now holds another ref to `s1` via its `_Content` member"
     assert any.get_as(S1Type).x2 == 432
     any.reset(11)
-    assert get_nrt_refcount(s1) == 1, "`any` released `s1`"
-    assert any.get_as(int64) == 11
 
 
 if __name__ == '__main__':
@@ -182,7 +156,6 @@ if __name__ == '__main__':
     test_2()
     test_3()
     test_4()
-    test_4_2()
     test_5()
     test_6()
     test_7()

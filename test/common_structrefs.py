@@ -1,6 +1,7 @@
 from numba import njit, float64, int16, int64
 from numba.core import types
 from numba.experimental import structref
+from numba.extending import overload
 
 
 @structref.register
@@ -28,10 +29,20 @@ class S1(structref.StructRefProxy):
         return self.x3
 
 
+structref.define_boxing(S1TypeClass, S1)
 fields_s1 = [("x1", int16), ("x2", int64), ("x3", float64)]
-structref.define_proxy(S1, S1TypeClass, [field[0] for field in fields_s1])
-
 S1Type = S1TypeClass(fields_s1)
+
+
+@overload(S1, strict=False)
+def ol_s1(x1_ty, x2_ty, x3_ty):
+    def _(x1, x2, x3):
+        s1_ = structref.new(S1Type)
+        s1_.x1 = x1
+        s1_.x2 = x2
+        s1_.x3 = x3
+        return s1_
+    return _
 
 
 @njit(S1Type(int16, int64, float64))
@@ -54,10 +65,18 @@ class S12(structref.StructRefProxy):
         return self.x1
 
 
+structref.define_boxing(S12TypeClass, S12)
 fields_s12 = [("x1", int16)]
-structref.define_proxy(S12, S12TypeClass, [field[0] for field in fields_s12])
-
 S12Type = S12TypeClass(fields_s12)
+
+
+@overload(S12, strict=False)
+def ol_s1(x1_ty):
+    def _(x1):
+        s12_ = structref.new(S12Type)
+        s12_.x1 = x1
+        return s12_
+    return _
 
 
 @njit(S12Type(int16))
@@ -75,11 +94,19 @@ class S2(structref.StructRefProxy):
         return s2_constructor(x1)
 
 
+structref.define_boxing(S2TypeClass, S2)
 x1_array_type = types.npytypes.Array(int64, 2, 'C')
 fields_s2 = [("x1", x1_array_type)]
-structref.define_proxy(S2, S2TypeClass, [field[0] for field in fields_s2])
-
 S2Type = S2TypeClass(fields_s2)
+
+
+@overload(S2, strict=False)
+def ol_s2(x1_ty):
+    def _(x1):
+        s2_ = structref.new(S2Type)
+        s2_.x1 = x1
+        return s2_
+    return _
 
 
 @njit(S2Type(x1_array_type))
@@ -107,10 +134,19 @@ class S3(structref.StructRefProxy):
         return self.x2
 
 
+structref.define_boxing(S3TypeClass, S3)
 fields_s3 = [("x1", S1Type), ("x2", float64)]
-structref.define_proxy(S3, S3TypeClass, [field[0] for field in fields_s3])
-
 S3Type = S3TypeClass(fields_s3)
+
+
+@overload(S3, strict=False)
+def ol_s2(x1_ty, x2_ty):
+    def _(x1, x2):
+        s3_ = structref.new(S3Type)
+        s3_.x1 = x1
+        s3_.x2 = x2
+        return s3_
+    return _
 
 
 @njit(S3Type(S1Type, float64))
