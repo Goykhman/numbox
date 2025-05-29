@@ -7,7 +7,7 @@ from numba.extending import intrinsic
 
 from numbox.core.meminfo import get_nrt_refcount, structref_meminfo
 from numbox.utils.highlevel import cres_njit
-from numbox.utils.lowlevel import cast, deref, extract_data_member, get_func_p_from_func_struct
+from numbox.utils.lowlevel import cast, deref, extract_struct_member, get_func_p_from_func_struct
 from test.auxiliary_utils import deref_int64_intp
 from test.common_structrefs import S1, S1Type, S12Type, S2
 
@@ -84,7 +84,7 @@ def test_extract_data_member():
         sig = member_ty(struct_ty, member_name_ty, member_type_ref)
 
         def codegen(context, builder, signature, args):
-            return extract_data_member(context, builder, struct_ty, args[0], member_name_)
+            return extract_struct_member(context, builder, struct_ty, args[0], member_name_)
         return sig, codegen
 
     member_name = "x3"

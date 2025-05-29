@@ -52,7 +52,7 @@ def deref(p, ty):
     return _deref(p, ty)
 
 
-def extract_data_member(
+def extract_struct_member(
     context: BaseContext,
     builder: IRBuilder,
     struct_fe_ty: StructRef,
