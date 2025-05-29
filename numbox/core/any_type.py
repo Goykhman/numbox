@@ -1,6 +1,6 @@
 from numba import njit
 from numba.core.errors import NumbaError
-from numba.core.types import StructRef, unicode_type
+from numba.core.types import StructRef, TypeRef, unicode_type
 from numba.experimental.structref import define_boxing, new, register, StructRefProxy
 from numba.extending import overload, overload_method
 
@@ -72,8 +72,8 @@ AnyType = AnyTypeClass([("p", ErasedType), ("t", unicode_type)])
 
 
 @overload_method(AnyTypeClass, "get_as", strict=False, jit_options=default_jit_options)
-def ol_get_as(self_ty, ty_class):
-    ty_code = str(ty_class.instance_type)
+def ol_get_as(self_ty, ty_ref: TypeRef):
+    ty_code = str(ty_ref.instance_type)
 
     def _(self, ty):
         if ty_code != self.t:

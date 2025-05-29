@@ -5,14 +5,6 @@ from numba.core.typing.templates import Signature
 from numba.experimental.function_type import FunctionType
 
 
-def prune_type(ty):
-    if isinstance(ty, Dispatcher):
-        sigs = ty.get_call_signatures()[0]
-        assert len(sigs) == 1, f"Ambiguous signature, {sigs}"
-        ty = FunctionType(sigs[0])
-    return ty
-
-
 def cres_njit(sig, **kwargs):
     """ Returns Python proxy to `FunctionType` rather than `CPUDispatcher` returned by `njit` """
     if not isinstance(sig, Signature):
@@ -26,3 +18,18 @@ def cres_njit(sig, **kwargs):
         cres_wap = CompileResultWAP(func_cres)
         return cres_wap
     return _
+
+
+def determine_field_index(struct_ty, field_name):
+    for i_, field_pair in enumerate(struct_ty._fields):
+        if field_pair[0] == field_name:
+            return i_
+    raise ValueError(f"{field_name} not in {struct_ty}")
+
+
+def prune_type(ty):
+    if isinstance(ty, Dispatcher):
+        sigs = ty.get_call_signatures()[0]
+        assert len(sigs) == 1, f"Ambiguous signature, {sigs}"
+        ty = FunctionType(sigs[0])
+    return ty

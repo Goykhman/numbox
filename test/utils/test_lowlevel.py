@@ -1,10 +1,15 @@
 import numba
 import numpy
+from llvmlite.ir import IntType
+from numba import float64, intp, njit
+from numba.experimental.function_type import _get_wrapper_address
+from numba.extending import intrinsic
 
-from test.common_structrefs import S1, S12Type, S2
 from numbox.core.meminfo import get_nrt_refcount, structref_meminfo
-from numbox.utils.lowlevel import cast, deref
+from numbox.utils.highlevel import cres_njit
+from numbox.utils.lowlevel import cast, deref, extract_data_member, get_func_p_from_func_struct
 from test.auxiliary_utils import deref_int64_intp
+from test.common_structrefs import S1, S1Type, S12Type, S2
 
 
 def test_1():
@@ -70,7 +75,55 @@ def test_3():
     assert a_ref_ct_3 == 2, "`deref` returns the original owner of the data payload"
 
 
+def test_extract_data_member():
+
+    @intrinsic(prefer_literal=True)
+    def _extract_data_member(typingctx, struct_ty, member_name_ty, member_type_ref):
+        member_name_ = member_name_ty.literal_value
+        member_ty = member_type_ref.instance_type
+        sig = member_ty(struct_ty, member_name_ty, member_type_ref)
+
+        def codegen(context, builder, signature, args):
+            return extract_data_member(context, builder, struct_ty, args[0], member_name_)
+        return sig, codegen
+
+    member_name = "x3"
+    x1_ty = S1Type.field_dict[member_name]
+
+    @numba.njit
+    def get_x3(s_):
+        return _extract_data_member(s_, member_name, x1_ty)
+
+    x3 = 3.14
+    s1 = S1(12, 137, x3)
+
+    assert abs(get_x3(s1) - x3) < 1e-15
+
+
+def test_get_func_p_from_func_struct():
+
+    @intrinsic
+    def _get_func_p_from_func_struct(typingctx, func_ty):
+        def codegen(context, builder, signature, args):
+            return builder.ptrtoint(get_func_p_from_func_struct(builder, args[0]), IntType(64))
+        return intp(func_ty), codegen
+
+    func_sig = float64(float64, float64)
+
+    @cres_njit(func_sig, cache=True)
+    def func(x, y):
+        return x + y
+
+    @njit(cache=True)
+    def get_func_p(func_):
+        return _get_func_p_from_func_struct(func_)
+
+    assert get_func_p(func) == _get_wrapper_address(func, func_sig)
+
+
 if __name__ == '__main__':
     test_1()
     test_2()
     test_3()
+    test_extract_data_member()
+    test_get_func_p_from_func_struct()
