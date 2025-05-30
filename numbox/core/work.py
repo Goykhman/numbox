@@ -1,5 +1,7 @@
 from numba import njit
-from numba.core.types import FunctionType, NoneType, StructRef, Tuple, unicode_type
+from numba.core.types import (
+    boolean, FunctionType, NoneType, StructRef, Tuple, unicode_type
+)
 from numba.core.typing.context import Context
 from numba.experimental.structref import define_boxing, new, register, StructRefProxy
 from numba.extending import intrinsic, overload, overload_method
@@ -49,6 +51,7 @@ def ol_work(name_ty, data_ty, sources_ty, derive_ty):
         ("data", data_ty),
         ("sources", Tuple(sources_ty)),
         ("derive", derive_ty),
+        ("derived", boolean)
     ]
     assert isinstance(derive_ty, (FunctionType, NoneType)), f"""Either None or Compile Result supported,
 not CPUDispatcher, got {derive_ty}, of type {type(derive_ty)}"""
@@ -60,6 +63,7 @@ not CPUDispatcher, got {derive_ty}, of type {type(derive_ty)}"""
         w.data = data_
         w.sources = sources_
         w.derive = derive_
+        w.derived = False
         return w
     return work_constructor
 
@@ -85,26 +89,28 @@ def make_work(name, data, sources=None, derive=None):
 
 
 @intrinsic
-def _call_function(typingctx: Context, func_ty: FunctionType, args_ty: Tuple):
+def _call_derive(typingctx: Context, derive_ty: FunctionType, sources_ty: Tuple):
     def codegen(context, builder, signature, arguments):
-        func_struct, args = arguments
+        derive_struct, sources = arguments
         derive_args = []
-        for arg_ind, arg_ty in enumerate(args_ty):
-            arg_struct = builder.extract_value(args, arg_ind)
-            data = extract_struct_member(context, builder, args_ty[arg_ind], arg_struct, "data")
+        for source_ind, source_ty in enumerate(sources_ty):
+            source = builder.extract_value(sources, source_ind)
+            data = extract_struct_member(context, builder, sources_ty[source_ind], source, "data")
             derive_args.append(data)
-        derive_p_raw = get_func_p_from_func_struct(builder, func_struct)
-        func_ty_ll = get_ll_func_sig(context, func_ty)
-        derive_p = builder.bitcast(derive_p_raw, func_ty_ll.as_pointer())
+        derive_p_raw = get_func_p_from_func_struct(builder, derive_struct)
+        derive_ty_ll = get_ll_func_sig(context, derive_ty)
+        derive_p = builder.bitcast(derive_p_raw, derive_ty_ll.as_pointer())
         res = builder.call(derive_p, derive_args)
         return res
-    sig = func_ty.signature.return_type(func_ty, args_ty)
+    sig = derive_ty.signature.return_type(derive_ty, sources_ty)
     return sig, codegen
 
 
 @overload_method(WorkTypeClass, "calculate", strict=False, jit_options=default_jit_options)
 def ol_calculate(self_class):
     def _(self):
-        v = _call_function(self.derive, self.sources)
-        self.data = v
+        if self.derive is not None and not self.derived:
+            v = _call_derive(self.derive, self.sources)
+            self.data = v
+            self.derived = True
     return _
