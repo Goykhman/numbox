@@ -18,6 +18,11 @@ class S1(structref.StructRefProxy):
     def x1(self):
         return self.x1
 
+    @x1.setter
+    @njit
+    def x1(self, val):
+        self.x1 = val
+
     @property
     @njit
     def x2(self):

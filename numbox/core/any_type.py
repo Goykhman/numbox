@@ -5,35 +5,9 @@ from numba.experimental.structref import define_boxing, new, register, StructRef
 from numba.extending import overload, overload_method
 
 from numbox.core.configurations import default_jit_options
-from numbox.utils.lowlevel import cast, deref
-
-
-@register
-class ErasedTypeClass(StructRef):
-    pass
-
-
-ErasedType = ErasedTypeClass([])
-
-
-@register
-class ContentTypeClass(StructRef):
-    pass
-
-
-class _Content:
-    pass
-
-
-@overload(_Content, strict=False, jit_options=default_jit_options)
-def ol_content(x_ty):
-    content_type = ContentTypeClass([("x", x_ty)])
-
-    def _(x):
-        c = new(content_type)
-        c.x = x
-        return c
-    return _
+from numbox.core.content_wrap import _Content
+from numbox.core.erased_type import ErasedType
+from numbox.utils.lowlevel import cast, deref_payload
 
 
 @register
@@ -78,7 +52,7 @@ def ol_get_as(self_ty, ty_ref: TypeRef):
     def _(self, ty):
         if ty_code != self.t:
             raise NumbaError(f"Any stored type code {self.t}, cannot decode as {ty_code}")
-        return deref(self.p, ty)
+        return deref_payload(self.p, ty)
     return _
 
 

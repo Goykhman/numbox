@@ -7,9 +7,12 @@ from numba.extending import intrinsic
 
 from numbox.core.meminfo import get_nrt_refcount, structref_meminfo
 from numbox.utils.highlevel import cres_njit
-from numbox.utils.lowlevel import cast, deref, extract_struct_member, get_func_p_from_func_struct
+from numbox.utils.lowlevel import (
+    cast, deref_payload, extract_struct_member, get_func_p_from_func_struct,
+    tuple_of_struct_ptrs_as_int, uniformize_tuple_of_structs
+)
 from test.auxiliary_utils import deref_int64_intp
-from test.common_structrefs import S1, S1Type, S12Type, S2
+from test.common_structrefs import S1, S1Type, S12, S12Type, S2
 
 
 def test_1():
@@ -34,7 +37,7 @@ def test_2():
     """ Round-trip for `deref` returns the original object """
     a = numpy.array([[34], [56]], dtype=numpy.int64)
     s2 = S2(a)
-    a1 = deref(s2, numba.types.npytypes.Array(numba.int64, 2, 'C'))
+    a1 = deref_payload(s2, numba.types.npytypes.Array(numba.int64, 2, 'C'))
     a_p = a.ctypes.data
     a1_p = a1.ctypes.data
     assert a_p == a1_p
@@ -62,7 +65,7 @@ def test_3():
         # `a` is wrapped in `MemInfo` pointed at by `s2`'s `MemInfo`'s data member
         a_wrap_meminfo_p = deref_int64_intp(s2_data_p)
 
-        a1 = deref(s2, arr_ty)
+        a1 = deref_payload(s2, arr_ty)
         a_ref_ct_3 = deref_int64_intp(a_meminfo_p)
 
         a1_wrap_meminfo_p = structref_meminfo(a1)[0]
@@ -121,9 +124,56 @@ def test_get_func_p_from_func_struct():
     assert get_func_p(func) == _get_wrapper_address(func, func_sig)
 
 
+def test_tuple_of_struct_ptrs_as_int():
+    s1 = S1(1, 2, 3.14)
+    s12 = S12(4)
+    t = tuple_of_struct_ptrs_as_int((s1, s12))
+    s1_meminfo_p_as_int = structref_meminfo(s1)[0]
+    s12_meminfo_p_as_int = structref_meminfo(s12)[0]
+    assert t[0] == s1_meminfo_p_as_int
+    assert t[1] == s12_meminfo_p_as_int
+
+
+def test_uniformize_tuple_of_structs():
+    s1_x1 = 11
+    s1_x2 = 137
+    s1_x3 = 3.14
+    s1 = S1(s1_x1, s1_x2, s1_x3)
+    s12_x1 = 44
+    s12 = S12(s12_x1)
+    t = uniformize_tuple_of_structs((s1, s12))
+
+    s1_meminfo_p_as_int = structref_meminfo(s1)[0]
+    s12_meminfo_p_as_int = structref_meminfo(s12)[0]
+
+    assert structref_meminfo(t[0])[0] == s1_meminfo_p_as_int
+    assert structref_meminfo(t[1])[0] == s12_meminfo_p_as_int
+
+    s1_ = cast(t[0], S1Type)
+    s12_ = cast(t[1], S12Type)
+
+    s1__meminfo_p_as_int = structref_meminfo(s1)[0]
+    s12__meminfo_p_as_int = structref_meminfo(s12)[0]
+    assert s1__meminfo_p_as_int == s1_meminfo_p_as_int
+    assert s12__meminfo_p_as_int == s12_meminfo_p_as_int
+
+    assert s1_.x1 == s1_x1
+
+    x1_pr = -23
+    s1.x1 = x1_pr
+    assert s1_.x1 == x1_pr
+
+    assert s1_.x2 == s1_x2
+    assert abs(s1_.x3 - s1_x3) < 1e-15
+
+    assert s12_.x1 == s12.x1
+
+
 if __name__ == '__main__':
     test_1()
     test_2()
     test_3()
     test_extract_data_member()
     test_get_func_p_from_func_struct()
+    test_tuple_of_struct_ptrs_as_int()
+    test_uniformize_tuple_of_structs()

@@ -17,9 +17,9 @@ def _structref_meminfo(typingctx, s_type):
         meminfo = context.nrt.get_meminfos(builder, s_type, s)[0]
         type_data, meminfo_p = meminfo
 
-        meminfo_p_as_int = builder.ptrtoint(meminfo_p, context.get_value_type(numba.intp))
+        meminfo_p_as_int = builder.ptrtoint(meminfo_p, context.get_data_type(numba.intp))
         data_p = context.nrt.meminfo_data(builder, meminfo_p)
-        data_p_as_int = builder.ptrtoint(data_p, context.get_value_type(numba.intp))
+        data_p_as_int = builder.ptrtoint(data_p, context.get_data_type(numba.intp))
 
         return context.make_tuple(builder, return_tuple_type, (meminfo_p_as_int, data_p_as_int))
 
