@@ -7,13 +7,13 @@ def test():
     n2 = make_node("n2", (n1,))
     n3 = make_node("n3")
     n4 = make_node("n4", (n2, n3))
-    assert n4.get_source(0).name == "n2"
-    assert n4.get_source(1).name == "n3"
-    assert n4.get_source(0).get_source(0).name == "n1"
+    assert n4.get_input(0).name == "n2"
+    assert n4.get_input(1).name == "n3"
+    assert n4.get_input(0).get_input(0).name == "n1"
     try:
-        _ = n1.get_source(0)
+        _ = n1.get_input(0)
     except NumbaError as e:
-        assert str(e) == "Requested source 0 while the node has 0 sources"
+        assert str(e) == "Requested input 0 while the node has 0 inputs"
 
-    assert n1.get_sources_names() == []
-    assert n4.get_sources_names() == ["n2", "n3"]
+    assert n1.get_inputs_names() == []
+    assert n4.get_inputs_names() == ["n2", "n3"]

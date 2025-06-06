@@ -11,16 +11,16 @@ from numbox.utils.lowlevel import cast, _uniformize_tuple_of_structs
 
 
 class Node(StructRefProxy):
-    def __new__(cls, name, sources):
-        return make_node(name, sources)
+    def __new__(cls, name, inputs):
+        return make_node(name, inputs)
 
     @njit(**default_jit_options)
-    def get_source(self, i):
-        return self.get_source(i)
+    def get_input(self, i):
+        return self.get_input(i)
 
     @njit(**default_jit_options)
-    def get_sources_names(self):
-        return self.get_sources_names()
+    def get_inputs_names(self):
+        return self.get_inputs_names()
 
     @property
     @njit(**default_jit_options)
@@ -29,8 +29,8 @@ class Node(StructRefProxy):
 
     @property
     @njit(**default_jit_options)
-    def sources(self):
-        return self.sources
+    def inputs(self):
+        return self.inputs
 
 
 @register
@@ -41,42 +41,42 @@ class NodeTypeClass(StructRef):
 define_boxing(NodeTypeClass, Node)
 node_attributes = [
     ("name", unicode_type),
-    ("sources", ListType(ErasedType))
+    ("inputs", ListType(ErasedType))
 ]
 NodeType = NodeTypeClass(node_attributes)
 
 
 @overload(Node, strict=False, jit_options=default_jit_options)
-def ol_node(name_ty, sources_ty):
-    def node_constructor(name, sources):
-        uniform_sources_tuple = _uniformize_tuple_of_structs(sources, ErasedType)
-        uniform_sources = List.empty_list(ErasedType)
-        for s in uniform_sources_tuple:
-            uniform_sources.append(s)
+def ol_node(name_ty, inputs_ty):
+    def node_constructor(name, inputs):
+        uniform_inputs_tuple = _uniformize_tuple_of_structs(inputs, ErasedType)
+        uniform_inputs = List.empty_list(ErasedType)
+        for s in uniform_inputs_tuple:
+            uniform_inputs.append(s)
         node = new(NodeType)
         node.name = name
-        node.sources = uniform_sources
+        node.inputs = uniform_inputs
         return node
     return node_constructor
 
 
-@overload_method(NodeTypeClass, "get_source", strict=False, jit_options=default_jit_options)
-def ol_get_source(self_ty, i_ty):
+@overload_method(NodeTypeClass, "get_input", strict=False, jit_options=default_jit_options)
+def ol_get_input(self_ty, i_ty):
     def _(self, i):
-        num_sources = len(self.sources)
-        if i >= num_sources:
-            raise NumbaError(f"Requested source {i} while the node has {num_sources} sources")
-        return cast(self.sources[i], NodeType)
+        num_inputs = len(self.inputs)
+        if i >= num_inputs:
+            raise NumbaError(f"Requested input {i} while the node has {num_inputs} inputs")
+        return cast(self.inputs[i], NodeType)
     return _
 
 
-@overload_method(NodeTypeClass, "get_sources_names", strict=False, jit_options=default_jit_options)
-def ol_get_sources_names(self_ty):
+@overload_method(NodeTypeClass, "get_inputs_names", strict=False, jit_options=default_jit_options)
+def ol_get_inputs_names(self_ty):
     def _(self):
-        return [cast(s, NodeType).name for s in self.sources]
+        return [cast(s, NodeType).name for s in self.inputs]
     return _
 
 
 @njit(**default_jit_options)
-def make_node(name, sources=()):
-    return Node(name, sources)
+def make_node(name, inputs=()):
+    return Node(name, inputs)

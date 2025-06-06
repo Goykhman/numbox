@@ -63,7 +63,8 @@ def extract_struct_member(
     member_name: str
 ):
     """ For the given struct object of the given numba (front-end) type extract
-     data member with the given name (must be literal, available at compile time) """
+    member with the given name (must be literal, available at compile time) """
+    member_ty = struct_fe_ty.field_dict[member_name]
     payload_ty = struct_fe_ty.get_data_type()
     meminfo = context.nrt.get_meminfos(builder, struct_fe_ty, struct_obj)[0]
     _, meminfo_p = meminfo
@@ -74,6 +75,7 @@ def extract_struct_member(
     member_ind = determine_field_index(struct_fe_ty, member_name)
     data_p = builder.gep(payload_p, (int32_t(0), int32_t(member_ind)))
     data = builder.load(data_p)
+    context.nrt.incref(builder, member_ty, data)
     return data
 
 

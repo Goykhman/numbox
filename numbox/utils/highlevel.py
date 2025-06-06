@@ -1,4 +1,7 @@
+import hashlib
 from numba import njit
+from numba.core.itanium_mangler import mangle_type_or_value
+from numba.core.types import Type
 from numba.core.types.functions import Dispatcher
 from numba.core.types.function_type import CompileResultWAP
 from numba.core.typing.templates import Signature
@@ -25,6 +28,11 @@ def determine_field_index(struct_ty, field_name):
         if field_pair[0] == field_name:
             return i_
     raise ValueError(f"{field_name} not in {struct_ty}")
+
+
+def hash_type(ty: Type):
+    mangled_ty = mangle_type_or_value(ty)
+    return hashlib.sha256(mangled_ty.encode('utf-8')).hexdigest()
 
 
 def prune_type(ty):
