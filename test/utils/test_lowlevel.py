@@ -1,14 +1,13 @@
 import numba
 import numpy
-from llvmlite.ir import IntType
-from numba import float64, intp, njit
+from numba import float64
 from numba.experimental.function_type import _get_wrapper_address
 from numba.extending import intrinsic
 
 from numbox.core.meminfo import get_nrt_refcount, structref_meminfo
 from numbox.utils.highlevel import cres_njit
 from numbox.utils.lowlevel import (
-    cast, deref_payload, extract_struct_member, get_func_p_from_func_struct,
+    cast, deref_payload, extract_struct_member, get_func_p_as_int_from_func_struct,
     tuple_of_struct_ptrs_as_int, uniformize_tuple_of_structs
 )
 from test.auxiliary_utils import deref_int64_intp
@@ -104,24 +103,13 @@ def test_extract_data_member():
 
 
 def test_get_func_p_from_func_struct():
-
-    @intrinsic
-    def _get_func_p_from_func_struct(typingctx, func_ty):
-        def codegen(context, builder, signature, args):
-            return builder.ptrtoint(get_func_p_from_func_struct(builder, args[0]), IntType(64))
-        return intp(func_ty), codegen
-
     func_sig = float64(float64, float64)
 
     @cres_njit(func_sig, cache=True)
     def func(x, y):
         return x + y
 
-    @njit(cache=True)
-    def get_func_p(func_):
-        return _get_func_p_from_func_struct(func_)
-
-    assert get_func_p(func) == _get_wrapper_address(func, func_sig)
+    assert get_func_p_as_int_from_func_struct(func) == _get_wrapper_address(func, func_sig)
 
 
 def test_tuple_of_struct_ptrs_as_int():

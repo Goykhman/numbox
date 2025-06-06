@@ -85,6 +85,18 @@ def get_func_p_from_func_struct(builder: IRBuilder, func_struct):
     return builder.extract_value(func_struct, func_raw_p_ind)
 
 
+@intrinsic
+def _get_func_p_as_int_from_func_struct(typingctx, func_ty):
+    def codegen(context, builder, signature, args):
+        return builder.ptrtoint(get_func_p_from_func_struct(builder, args[0]), ir.IntType(64))
+    return intp(func_ty), codegen
+
+
+@njit(**default_jit_options)
+def get_func_p_as_int_from_func_struct(func_):
+    return _get_func_p_as_int_from_func_struct(func_)
+
+
 def get_ll_func_sig(context: BaseContext, func_ty: FunctionType):
     func_sig = func_ty.signature
     return ir.FunctionType(

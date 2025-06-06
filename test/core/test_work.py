@@ -1,5 +1,6 @@
 import numpy
 import numpy as np
+from numba import njit
 from numba.core.types import Array, float64
 from numbox.core.work import make_work
 from numbox.utils.highlevel import cres_njit
@@ -130,3 +131,80 @@ def test_work_sources():
         return 137 * w3_
     w4 = make_work("w4", 0.0, sources=(w3,), derive=derive_w4)
     assert w4.get_inputs_names() == ["w3"]
+
+
+@cres_njit(float64())
+def derive_w1():
+    return 3.14
+
+
+@cres_njit(float64())
+def derive_w2():
+    return 1.41
+
+
+@cres_njit(float64(float64, float64))
+def derive_w3(w1_, w2_):
+    return w1_ * w2_
+
+
+@cres_njit(float64())
+def derive_w4():
+    return 1.72
+
+
+@cres_njit(float64(float64, float64))
+def derive_w5(w3_, w4_):
+    return w3_ + w4_
+
+
+def run_test_work_calculate():
+    w1 = make_work("w1", 0.0, derive=derive_w1)
+    w2 = make_work("w2", 0.0, derive=derive_w2)
+    w3 = make_work("w3", 0.0, sources=(w1, w2), derive=derive_w3)
+    w4 = make_work("w4", 0.0, derive=derive_w4)
+    w5 = make_work("w5", 0.0, sources=(w3, w4), derive=derive_w5)
+    w1_init_data = w1.data
+    w2_init_data = w2.data
+    w3_init_data = w3.data
+    w4_init_data = w4.data
+    w5_init_data = w5.data
+    w5.calculate()
+    return (
+        w1_init_data, w2_init_data, w3_init_data, w4_init_data, w5_init_data,
+        w1, w2, w3, w4, w5
+    )
+
+
+def test_work_calculate():
+    (
+        w1_init_data, w2_init_data, w3_init_data, w4_init_data, w5_init_data,
+        w1, w2, w3, w4, w5
+    ) = run_test_work_calculate()
+    assert w1_init_data == 0
+    assert w2_init_data == 0
+    assert w3_init_data == 0
+    assert w4_init_data == 0
+    assert w5_init_data == 0
+    assert abs(w1.data - 3.14) < 1e-15
+    assert abs(w2.data - 1.41) < 1e-15
+    assert abs(w3.data - w1.data * w2.data) < 1e-15
+    assert abs(w4.data - 1.72) < 1e-15
+    assert abs(w5.data - (w3.data + w4.data)) < 1e-15
+
+
+def test_work_calculate_jitted():
+    (
+        w1_init_data, w2_init_data, w3_init_data, w4_init_data, w5_init_data,
+        w1, w2, w3, w4, w5
+    ) = njit(cache=True)(run_test_work_calculate)()
+    assert w1_init_data == 0
+    assert w2_init_data == 0
+    assert w3_init_data == 0
+    assert w4_init_data == 0
+    assert w5_init_data == 0
+    assert abs(w1.data - 3.14) < 1e-15
+    assert abs(w2.data - 1.41) < 1e-15
+    assert abs(w3.data - w1.data * w2.data) < 1e-15
+    assert abs(w4.data - 1.72) < 1e-15
+    assert abs(w5.data - (w3.data + w4.data)) < 1e-15
