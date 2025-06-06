@@ -95,6 +95,8 @@ def get_ll_func_sig(context: BaseContext, func_ty: FunctionType):
 
 @intrinsic
 def _tuple_of_struct_ptrs_as_int(typingctx: Context, tup_ty: Tuple):
+    """ Prefer using `_uniformize_tuple_of_structs` instead, if possible at all,
+     to outsource smart pointer memory management to StructRef erased/void type. """
     tup_size = tup_ty.count
 
     def codegen(context, builder, signature, arguments):

@@ -7,7 +7,7 @@ from numba.extending import overload, overload_method
 from numbox.core.configurations import default_jit_options
 from numbox.core.content_wrap import _Content
 from numbox.core.erased_type import ErasedType
-from numbox.utils.lowlevel import cast, deref_payload
+from numbox.utils.lowlevel import _cast, _deref_payload
 
 
 @register
@@ -52,7 +52,7 @@ def ol_get_as(self_ty, ty_ref: TypeRef):
     def _(self, ty):
         if ty_code != self.t:
             raise NumbaError(f"Any stored type code {self.t}, cannot decode as {ty_code}")
-        return deref_payload(self.p, ty)
+        return _deref_payload(self.p, ty)
     return _
 
 
@@ -61,7 +61,7 @@ def ol_reset(self_ty, x_ty):
     ty_code = str(x_ty)
 
     def _(self, x):
-        self.p = cast(_Content(x), ErasedType)
+        self.p = _cast(_Content(x), ErasedType)
         self.t = ty_code
     return _
 
@@ -76,7 +76,7 @@ def ol_make_any(x_ty):
 
     def _(x):
         any = new(AnyType)
-        any.p = cast(_Content(x), ErasedType)
+        any.p = _cast(_Content(x), ErasedType)
         any.t = ty_code
         return any
     return _

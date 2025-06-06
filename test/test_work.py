@@ -129,4 +129,4 @@ def test_work_sources():
     def derive_w4(w3_):
         return 137 * w3_
     w4 = make_work("w4", 0.0, sources=(w3,), derive=derive_w4)
-    assert w4.get_inputs_names() == ["w3",]
+    assert w4.get_inputs_names() == ["w3"]

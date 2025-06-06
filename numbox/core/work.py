@@ -120,18 +120,18 @@ def _get_source_{sources_hash}_{source_ind}(typingctx: Context, sources_ty: Tupl
 """
 
 
-def _make_calculate_code(num_sources, sources_hash):
+def _make_calculate_code(num_sources, work_ty_hash):
     code_txt = StringIO()
     for source_ind_ in range(num_sources):
-        code_txt.write(_make_source_getter(source_ind_, sources_hash))
+        code_txt.write(_make_source_getter(source_ind_, work_ty_hash))
     code_txt.write(f"""
-def _calculate_{sources_hash}(work_):""")
+def _calculate_{work_ty_hash}(work_):""")
     if num_sources > 0:
         code_txt.write("""
     sources = work_.sources""")
         for source_ind_ in range(num_sources):
             code_txt.write(f"""
-    source_{source_ind_} = _get_source_{sources_hash}_{source_ind_}(sources)
+    source_{source_ind_} = _get_source_{work_ty_hash}_{source_ind_}(sources)
     source_{source_ind_}.calculate()""")
     code_txt.write("""
     v = _call_derive(work_.derive, work_.sources)
@@ -151,11 +151,11 @@ def ol_calculate(self_ty):
 
     sources_ty = self_ty.field_dict["sources"]
     num_sources = sources_ty.count
-    sources_hash = hash_type(self_ty)
-    code_txt = _make_calculate_code(num_sources, sources_hash)
-    ns = {**getmodule(_make_work).__dict__, **{}}
+    work_ty_hash = hash_type(self_ty)
+    code_txt = _make_calculate_code(num_sources, work_ty_hash)
+    ns = getmodule(_make_work).__dict__
     code = compile(code_txt, getfile(_make_work), mode="exec")
     exec(code, ns)
-    _calculate = ns[f"_calculate_{sources_hash}"]
+    _calculate = ns[f"_calculate_{work_ty_hash}"]
 
     return _calculate
