@@ -32,6 +32,9 @@ class Node(StructRefProxy):
     def inputs(self):
         return self.inputs
 
+    def __str__(self):
+        return self.name
+
 
 @register
 class NodeTypeClass(StructRef):
