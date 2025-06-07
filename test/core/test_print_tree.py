@@ -1,6 +1,9 @@
+import numpy
 from numbox.core.node import make_node
 from numbox.core.print_tree import make_image
 from numbox.core.work import make_work
+from test.random_graph import random_graph
+from test.core.random_image_ref import random_image_ref
 
 
 def test_make_node_graph():
@@ -17,6 +20,13 @@ fifth--third---first
        |
        fourth"""
     assert tree_image == tree_image_ref
+
+
+def test_node_graph_random():
+    numpy.random.seed(137)
+    tree = random_graph(50)
+    tree_image = make_image(tree)
+    assert tree_image == random_image_ref
 
 
 def test_make_work_graph():
