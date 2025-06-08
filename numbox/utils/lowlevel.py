@@ -2,7 +2,7 @@ from llvmlite import ir
 from llvmlite.ir.builder import IRBuilder
 from numba import njit
 from numba.core.base import BaseContext
-from numba.core.cgutils import int32_t, pack_array
+from numba.core.cgutils import int32_t, intp_t, pack_array
 from numba.core.types import FunctionType, intp, StructRef, TypeRef, Tuple, UniTuple
 from numba.core.typing.context import Context
 from numba.extending import intrinsic
@@ -88,13 +88,32 @@ def get_func_p_from_func_struct(builder: IRBuilder, func_struct):
 @intrinsic
 def _get_func_p_as_int_from_func_struct(typingctx, func_ty):
     def codegen(context, builder, signature, args):
-        return builder.ptrtoint(get_func_p_from_func_struct(builder, args[0]), ir.IntType(64))
+        return builder.ptrtoint(get_func_p_from_func_struct(builder, args[0]), intp_t)
     return intp(func_ty), codegen
 
 
 @njit(**default_jit_options)
 def get_func_p_as_int_from_func_struct(func_):
     return _get_func_p_as_int_from_func_struct(func_)
+
+
+@intrinsic
+def _get_func_tuple(typingctx, func_ty):
+    return_tuple_type = UniTuple(intp, 3)
+    sig = return_tuple_type(func_ty)
+
+    def codegen(context, builder, signature, args):
+        func_struct = args[0]
+        lst = []
+        for i in range(3):
+            lst.append(builder.ptrtoint(builder.extract_value(func_struct, i), intp_t))
+        return context.make_tuple(builder, return_tuple_type, lst)
+    return sig, codegen
+
+
+@njit(**default_jit_options)
+def get_func_tuple(func):
+    return _get_func_tuple(func)
 
 
 def get_ll_func_sig(context: BaseContext, func_ty: FunctionType):

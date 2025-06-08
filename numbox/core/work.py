@@ -36,6 +36,11 @@ class Work(Node):
     def sources(self):
         return self.sources
 
+    @property
+    @njit(**default_jit_options)
+    def derived(self):
+        return self.derived
+
     @njit(**default_jit_options)
     def calculate(self):
         return self.calculate()
@@ -95,7 +100,7 @@ def _call_derive(typingctx: Context, derive_ty: FunctionType, sources_ty: Tuple)
         derive_args = []
         for source_ind, source_ty in enumerate(sources_ty):
             source = builder.extract_value(sources, source_ind)
-            data = extract_struct_member(context, builder, sources_ty[source_ind], source, "data")
+            data = extract_struct_member(context, builder, source_ty, source, "data")
             derive_args.append(data)
         derive_p_raw = get_func_p_from_func_struct(builder, derive_struct)
         derive_ty_ll = get_ll_func_sig(context, derive_ty)
@@ -125,7 +130,9 @@ def _make_calculate_code(num_sources, work_ty_hash):
     for source_ind_ in range(num_sources):
         code_txt.write(_make_source_getter(source_ind_, work_ty_hash))
     code_txt.write(f"""
-def _calculate_{work_ty_hash}(work_):""")
+def _calculate_{work_ty_hash}(work_):
+    if work_.derived:
+        return""")
     if num_sources > 0:
         code_txt.write("""
     sources = work_.sources""")

@@ -1,14 +1,14 @@
 import numba
 import numpy
 from numba import float64
-from numba.experimental.function_type import _get_wrapper_address
+from numba.experimental.function_type import _get_jit_address, _get_wrapper_address
 from numba.extending import intrinsic
 
 from numbox.core.meminfo import get_nrt_refcount, structref_meminfo
 from numbox.utils.highlevel import cres_njit
 from numbox.utils.lowlevel import (
     cast, deref_payload, extract_struct_member, get_func_p_as_int_from_func_struct,
-    tuple_of_struct_ptrs_as_int, uniformize_tuple_of_structs
+    get_func_tuple, tuple_of_struct_ptrs_as_int, uniformize_tuple_of_structs
 )
 from test.auxiliary_utils import deref_int64_intp
 from test.common_structrefs import S1, S1Type, S12, S12Type, S2
@@ -110,6 +110,24 @@ def test_get_func_p_from_func_struct():
         return x + y
 
     assert get_func_p_as_int_from_func_struct(func) == _get_wrapper_address(func, func_sig)
+    assert get_func_p_as_int_from_func_struct(func) == func.address
+
+
+def test_get_func_tuple():
+    func_sig = float64(float64, float64)
+
+    @cres_njit(func_sig, cache=True)
+    def func(x, y):
+        return x + y
+
+    func_tup = get_func_tuple(func)
+    assert func_tup[0] == _get_wrapper_address(func, func_sig)
+    assert func_tup[1] == id(func)
+    assert func_tup[2] == 0, "void `jit_addr` in `FunctionModel` for cres"
+    assert func_tup[2] == _get_jit_address(func, func_sig), """
+void `jit_addr` in `FunctionModel` for cres, added to FunctionType data model in numba==0.61
+https://github.com/numba/numba/blob/release0.61/numba/experimental/function_type.py#L65
+"""
 
 
 def test_tuple_of_struct_ptrs_as_int():

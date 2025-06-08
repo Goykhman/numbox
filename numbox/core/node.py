@@ -7,7 +7,7 @@ from numba.extending import overload, overload_method
 
 from numbox.core.configurations import default_jit_options
 from numbox.core.erased_type import ErasedType
-from numbox.utils.lowlevel import cast, _uniformize_tuple_of_structs
+from numbox.utils.lowlevel import _cast, _uniformize_tuple_of_structs
 
 
 class Node(StructRefProxy):
@@ -69,14 +69,14 @@ def ol_get_input(self_ty, i_ty):
         num_inputs = len(self.inputs)
         if i >= num_inputs:
             raise NumbaError(f"Requested input {i} while the node has {num_inputs} inputs")
-        return cast(self.inputs[i], NodeType)
+        return _cast(self.inputs[i], NodeType)
     return _
 
 
 @overload_method(NodeTypeClass, "get_inputs_names", strict=False, jit_options=default_jit_options)
 def ol_get_inputs_names(self_ty):
     def _(self):
-        return [cast(s, NodeType).name for s in self.inputs]
+        return [_cast(s, NodeType).name for s in self.inputs]
     return _
 
 
