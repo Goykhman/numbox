@@ -32,4 +32,4 @@ def random_node(all_nodes, max_size):
 def random_graph(max_size):
     all_nodes = {}
     _, tree_ = random_node(all_nodes, max_size)
-    return tree_
+    return tree_, all_nodes

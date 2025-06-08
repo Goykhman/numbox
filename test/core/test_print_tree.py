@@ -24,9 +24,10 @@ fifth--third---first
 
 def test_node_graph_random():
     numpy.random.seed(137)
-    tree = random_graph(50)
+    tree, all_nodes = random_graph(50)
     tree_image = make_image(tree)
     assert tree_image == random_image_ref
+    assert all_nodes["vayg"].all_inputs_names() == ["tankwfu", "nwuh", "yjthkuaqw"]
 
 
 def test_make_work_graph():

@@ -17,3 +17,4 @@ def test():
 
     assert n1.get_inputs_names() == []
     assert n4.get_inputs_names() == ["n2", "n3"]
+    assert n4.all_inputs_names() == ["n2", "n1", "n3"]

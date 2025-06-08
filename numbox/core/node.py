@@ -1,9 +1,11 @@
 from numba import njit
+from numba.core.cgutils import add_global_variable
 from numba.core.errors import NumbaError
-from numba.core.types import ListType, StructRef, unicode_type
+from numba.core.types import DictType, ListType, StructRef, unicode_type, void
+from numba.typed.typeddict import Dict
 from numba.typed.typedlist import List
 from numba.experimental.structref import define_boxing, new, register, StructRefProxy
-from numba.extending import overload, overload_method
+from numba.extending import intrinsic, overload, overload_method
 
 from numbox.core.configurations import default_jit_options
 from numbox.core.erased_type import ErasedType
@@ -31,6 +33,13 @@ class Node(StructRefProxy):
     @njit(**default_jit_options)
     def inputs(self):
         return self.inputs
+
+    def all_inputs_names(self):
+        return list(self._all_inputs_names())
+
+    @njit(**default_jit_options)
+    def _all_inputs_names(self):
+        return self.all_inputs_names()
 
     def __str__(self):
         return self.name
@@ -77,6 +86,32 @@ def ol_get_input(self_ty, i_ty):
 def ol_get_inputs_names(self_ty):
     def _(self):
         return [_cast(s, NodeType).name for s in self.inputs]
+    return _
+
+
+@njit
+def _all_inputs_names(node_):
+    return node_.all_inputs_names()
+
+
+@njit(**default_jit_options)
+def _all_input_names(node, names_):
+    for i in range(len(node.inputs)):
+        input_ = node.get_input(i)
+        names_.append(input_.name)
+        _all_input_names(input_, names_)
+
+
+@overload_method(NodeTypeClass, "all_inputs_names", strict=False, jit_options=default_jit_options)
+def ol_all_inputs_names(self_ty):
+    def _(self):
+        names = List.empty_list(unicode_type)
+        for i in range(len(self.inputs)):
+            input_node = self.get_input(i)
+            name = input_node.name
+            names.append(name)
+            _all_input_names(input_node, names)
+        return names
     return _
 
 
