@@ -5,7 +5,7 @@ from numba.experimental.function_type import _get_jit_address, _get_wrapper_addr
 from numba.extending import intrinsic
 
 from numbox.core.meminfo import get_nrt_refcount, structref_meminfo
-from numbox.utils.highlevel import cres_njit
+from numbox.utils.highlevel import cres
 from numbox.utils.lowlevel import (
     cast, deref_payload, extract_struct_member, get_func_p_as_int_from_func_struct,
     get_func_tuple, tuple_of_struct_ptrs_as_int, uniformize_tuple_of_structs
@@ -105,7 +105,7 @@ def test_extract_data_member():
 def test_get_func_p_from_func_struct():
     func_sig = float64(float64, float64)
 
-    @cres_njit(func_sig, cache=True)
+    @cres(func_sig, cache=True)
     def func(x, y):
         return x + y
 
@@ -116,7 +116,7 @@ def test_get_func_p_from_func_struct():
 def test_get_func_tuple():
     func_sig = float64(float64, float64)
 
-    @cres_njit(func_sig, cache=True)
+    @cres(func_sig, cache=True)
     def func(x, y):
         return x + y
 

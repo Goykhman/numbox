@@ -51,7 +51,7 @@ def ol_get_as(self_ty, ty_ref: TypeRef):
 
     def _(self, ty):
         if ty_code != self.t:
-            raise NumbaError(f"Any stored type code {self.t}, cannot decode as {ty_code}")
+            raise NumbaError(f"Any stored type {self.t}, cannot decode as {ty_code}")
         return _deref_payload(self.p, ty)
     return _
 

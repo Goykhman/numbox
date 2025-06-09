@@ -1,14 +1,14 @@
 from numba import float64, njit, typeof
 from numba.core.types.function_type import FunctionType
 from numba.core.types.functions import Dispatcher
-from numbox.utils.highlevel import cres_njit, determine_field_index
+from numbox.utils.highlevel import cres, determine_field_index
 from test.common_structrefs import S1Type
 
 
 def test_cres_njit():
     aux_sig = float64(float64)
 
-    @cres_njit(aux_sig, cache=True)
+    @cres(aux_sig, cache=True)
     def aux_1(x):
         return 2 * x
 

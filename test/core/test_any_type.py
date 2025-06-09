@@ -6,7 +6,7 @@ from numba.typed import Dict
 from numbox.core.any_type import AnyType, make_any
 from numba.core.errors import NumbaError
 from numbox.core.meminfo import get_nrt_refcount, structref_meminfo
-from numbox.utils.highlevel import cres_njit
+from numbox.utils.highlevel import cres
 from test.auxiliary_utils import deref_int64_intp
 from test.common_structrefs import S1, S1Type, S3, S3Type
 
@@ -19,7 +19,7 @@ def test_1():
     try:
         any1.get_as(float64)
     except NumbaError as e:
-        assert str(e) == "Any stored type code int64, cannot decode as float64"
+        assert str(e) == "Any stored type int64, cannot decode as float64"
 
 
 def test_2():
@@ -61,7 +61,7 @@ def test_4():
     aux1_sig = float64(float64)
     aux1_ty = aux1_sig.as_type()
 
-    @cres_njit(aux1_sig)
+    @cres(aux1_sig)
     def aux1(x):
         return 2 * x
 

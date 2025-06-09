@@ -7,7 +7,7 @@ import numpy
 import sys
 
 from numbox.core.work import make_work
-from numbox.utils.highlevel import cres_njit
+from numbox.utils.highlevel import cres
 from numbox.utils.timer import timer
 
 
@@ -74,7 +74,7 @@ double_2_ty = numba.types.Array(numba.types.float64, 2, "C")
 derive_p_sig = double_2_ty(double_1_ty, double_2_ty)
 
 
-@cres_njit(derive_p_sig, cache=True)
+@cres(derive_p_sig, cache=True)
 def derive_p(p0_, tr_):
     p_ = numpy.zeros(shape=(H, M), dtype=numpy.float64)
     p_[0, :] = p0_

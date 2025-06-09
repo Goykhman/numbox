@@ -3,11 +3,11 @@ import numpy as np
 from numba import njit
 from numba.core.types import Array, float64
 from numbox.core.work import make_work
-from numbox.utils.highlevel import cres_njit
+from numbox.utils.highlevel import cres
 
 
 def test_make_work():
-    @cres_njit(Array(float64, 2, "C")(Array(float64, 2, "C")))
+    @cres(Array(float64, 2, "C")(Array(float64, 2, "C")))
     def derive_p2(data_):
         ret = np.ones((100, 100), dtype=np.float64)
         return ret
@@ -81,7 +81,7 @@ double_2_ty = Array(float64, 2, "C")
 derive_p_sig = double_2_ty(double_1_ty, double_2_ty)
 
 
-@cres_njit(derive_p_sig, cache=True)
+@cres(derive_p_sig, cache=True)
 def derive_p(p0_, tr_):
     p_ = numpy.zeros(shape=(time_horizon, num_of_inner_states), dtype=numpy.float64)
     p_[0, :] = p0_
@@ -120,40 +120,40 @@ def test_work_sources():
     w1 = make_work("w1", 3.14)
     w2 = make_work("w2", 2)
 
-    @cres_njit(float64(float64, float64))
+    @cres(float64(float64, float64))
     def derive_w3(w1_, w2_):
         return w1_ + w2_
     w3 = make_work("w3", 0.0, sources=(w1, w2), derive=derive_w3)
     assert w3.get_inputs_names() == ["w1", "w2"]
 
-    @cres_njit(float64(float64))
+    @cres(float64(float64))
     def derive_w4(w3_):
         return 137 * w3_
     w4 = make_work("w4", 0.0, sources=(w3,), derive=derive_w4)
     assert w4.get_inputs_names() == ["w3"]
 
 
-@cres_njit(float64())
+@cres(float64())
 def derive_w1():
     return 3.14
 
 
-@cres_njit(float64())
+@cres(float64())
 def derive_w2():
     return 1.41
 
 
-@cres_njit(float64(float64, float64))
+@cres(float64(float64, float64))
 def derive_w3(w1_, w2_):
     return w1_ * w2_
 
 
-@cres_njit(float64())
+@cres(float64())
 def derive_w4():
     return 1.72
 
 
-@cres_njit(float64(float64, float64))
+@cres(float64(float64, float64))
 def derive_w5(w3_, w4_):
     return w3_ + w4_
 

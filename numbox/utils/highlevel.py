@@ -8,7 +8,7 @@ from numba.core.typing.templates import Signature
 from numba.experimental.function_type import FunctionType
 
 
-def cres_njit(sig, **kwargs):
+def cres(sig, **kwargs):
     """ Returns Python proxy to `FunctionType` rather than `CPUDispatcher` returned by `njit` """
     if not isinstance(sig, Signature):
         raise ValueError(f"Expected a single signature, found {sig} of type {type(sig)}")
