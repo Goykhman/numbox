@@ -1,7 +1,7 @@
 import numpy
-import numpy as np
 from numba import njit
 from numba.core.types import Array, float64
+
 from numbox.core.work import make_work
 from numbox.utils.highlevel import cres
 
@@ -9,13 +9,13 @@ from numbox.utils.highlevel import cres
 def test_make_work():
     @cres(Array(float64, 2, "C")(Array(float64, 2, "C")))
     def derive_p2(data_):
-        ret = np.ones((100, 100), dtype=np.float64)
+        ret = numpy.ones((100, 100), dtype=numpy.float64)
         return ret
 
     for _ in range(1_000):
-        p1 = make_work("p", np.zeros((100, 100), dtype=np.float64))
+        p1 = make_work("p", numpy.zeros((100, 100), dtype=numpy.float64))
         p1.calculate()
-        p2 = make_work("p", np.zeros((100, 100), dtype=np.float64), sources=(p1,), derive=derive_p2)
+        p2 = make_work("p", numpy.zeros((100, 100), dtype=numpy.float64), sources=(p1,), derive=derive_p2)
         p2.calculate()
         assert abs(p2.data[1][2] - 1.0) < 1e-15
 
@@ -111,7 +111,7 @@ conditional on state at `t-1`"""
         print(f"\nentity {entity_id}:")
         for t in range(time_horizon):
             ref_data = p_ref_data_all[entity_id, t, :]
-            assert np.allclose(p.data[t, :], ref_data)
+            assert numpy.allclose(p.data[t, :], ref_data)
             print(f"probabilities at time {t} <- {p.data[t, :]}")
             assert abs(p.data[t, :].sum() - 1.0) < 1e-15, "calculated probabilities are still normalized"
 
