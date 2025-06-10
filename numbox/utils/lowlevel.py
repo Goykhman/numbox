@@ -60,7 +60,8 @@ def extract_struct_member(
     builder: IRBuilder,
     struct_fe_ty: StructRef,
     struct_obj,
-    member_name: str
+    member_name: str,
+    incref: bool = False
 ):
     """ For the given struct object of the given numba (front-end) type extract
     member with the given name (must be literal, available at compile time) """
@@ -75,7 +76,8 @@ def extract_struct_member(
     member_ind = determine_field_index(struct_fe_ty, member_name)
     data_p = builder.gep(payload_p, (int32_t(0), int32_t(member_ind)))
     data = builder.load(data_p)
-    context.nrt.incref(builder, member_ty, data)
+    if incref:
+        context.nrt.incref(builder, member_ty, data)
     return data
 
 

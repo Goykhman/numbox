@@ -31,8 +31,7 @@ def _structref_meminfo(typingctx, s_type):
 def structref_meminfo(s):
     """
     :param s: instance of StructRef
-    :return: tuple of pointers (as 64-bit integers) to
-    meminfo member of the StructRef and its data payload.
+    :return: tuple of pointers (as 64-bit integers) to meminfo member of the StructRef and its data payload.
     """
     return _structref_meminfo(s)
 
@@ -53,7 +52,7 @@ def get_nrt_refcount(meminfo_p):
             NRT_ExternalAllocator *external_allocator;
         };
 
-    see https://github.com/numba/numba/blob/main/numba/core/runtime/nrt.cpp#L17
+    see `nrt <https://github.com/numba/numba/blob/main/numba/core/runtime/nrt.cpp#L17>`_.
     """
     meminfo_p, data_p = structref_meminfo(meminfo_p)
     return ctypes.c_int64.from_address(meminfo_p).value
