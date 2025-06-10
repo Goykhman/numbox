@@ -7,9 +7,8 @@ from numbox.utils.highlevel import cres
 
 
 def make_work_helper(name, init_data, sources=(), derive_py=None, jit_options=None):
-    """ Utility for creating instances of `Work` from Python scope;
-     doesn't add any functionality that is not otherwise available in
-     jitted scope. """
+    """ Utility for creating instances of `Work` from Python scope.
+     Python abstraction for the jitted scope functionality. """
     assert isinstance(derive_py, (NoneType, PyFunctionType))
     if sources or derive_py:
         jit_options = jit_options if jit_options is not None else {}

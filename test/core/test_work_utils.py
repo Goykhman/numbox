@@ -97,4 +97,4 @@ y2--y0--x0
         tau"""
 
     assert y2.depends_on("time")
-    assert not y0.depends_on("time")
+    assert not y0.depends_on(time)

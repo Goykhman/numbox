@@ -80,3 +80,11 @@ numbox.core.work
    :members:
    :show-inheritance:
    :undoc-members:
+
+numbox.core.work_utils
+----------------------
+
+.. automodule:: numbox.core.work_utils
+   :members:
+   :show-inheritance:
+   :undoc-members:

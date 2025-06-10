@@ -2,7 +2,7 @@
 
 A toolbox of low-level utilities for working with [numba](https://numba.pydata.org/).
 
-Documentation available at [numbox](https://goykhman.github.io/numbox)
+Documentation is available at [numbox](https://goykhman.github.io/numbox)
 
 ## Tools
 

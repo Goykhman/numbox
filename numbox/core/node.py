@@ -1,6 +1,6 @@
 from numba import njit
 from numba.core.errors import NumbaError
-from numba.core.types import ListType, StructRef, unicode_type
+from numba.core.types import ListType, Literal, StructRef, unicode_type, UnicodeType
 from numba.typed.typedlist import List
 from numba.experimental.structref import define_boxing, new, register, StructRefProxy
 from numba.extending import overload, overload_method
@@ -122,8 +122,14 @@ def ol_all_inputs_names(self_ty):
 
 @overload_method(NodeTypeClass, "depends_on", strict=False, jit_options=default_jit_options)
 def ol_depends_on(self_ty, name_ty):
-    def _(self, name_):
-        return name_ in self.all_inputs_names()
+    if isinstance(name_ty, (Literal, UnicodeType,)):
+        def _(self, name_):
+            return name_ in self.all_inputs_names()
+    else:
+        assert isinstance(name_ty, NodeTypeClass), f"Cannot handle {name_ty}"
+
+        def _(self, name_):
+            return name_.name in self.all_inputs_names()
     return _
 
 
