@@ -62,7 +62,8 @@ def test_simple_time_3():
 
     def derive_y0(x0_):
         return x0_ * 1.41 + 1.72
-    y0 = make_work_helper("y0", make_init_data(), (x0,), derive_y0)
+    y0_init_data = make_init_data()
+    y0 = make_work_helper("y0", y0_init_data, (x0,), derive_y0)
 
     def derive_y1(x0_, time_, tau_):
         y1_data_ = numpy.empty((h,), dtype=numpy.float64)
@@ -72,11 +73,13 @@ def test_simple_time_3():
             else:
                 y1_data_[time_ind] = 1.4 * x0_
         return y1_data_
-    y1 = make_work_helper("y1", make_init_data(shape=(h,), ty=numpy.float64), (x0, time, tau), derive_y1)
+    y1_init_data = make_init_data(shape=(h,), ty=numpy.float64)
+    y1 = make_work_helper("y1", y1_init_data, (x0, time, tau), derive_y1)
 
     def derive_y2(y0_, y1_):
         return y0_ + 2 * y1_
-    y2 = make_work_helper("y2", make_init_data(shape=(h,), ty=numpy.float64), (y0, y1), derive_y2)
+    y2_init_data = make_init_data(shape=(h,), ty=numpy.float64)
+    y2 = make_work_helper("y2", y2_init_data, (y0, y1), derive_y2)
 
     y2.calculate()
 

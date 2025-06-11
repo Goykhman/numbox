@@ -1,6 +1,7 @@
 import numpy
+import pytest
 from numba import njit
-from numba.core.types import Array, float64
+from numba.core.types import Array, float64, int64
 
 from numbox.core.work import make_work
 from numbox.utils.highlevel import cres
@@ -120,7 +121,7 @@ def test_work_sources():
     w1 = make_work("w1", 3.14)
     w2 = make_work("w2", 2)
 
-    @cres(float64(float64, float64))
+    @cres(float64(float64, int64))
     def derive_w3(w1_, w2_):
         return w1_ + w2_
     w3 = make_work("w3", 0.0, sources=(w1, w2), derive=derive_w3)
@@ -197,7 +198,7 @@ def test_work_calculate_jitted():
     (
         w1_init_data, w2_init_data, w3_init_data, w4_init_data, w5_init_data,
         w1, w2, w3, w4, w5
-    ) = njit(cache=True)(run_test_work_calculate)()
+    ) = njit(run_test_work_calculate)()
     assert w1_init_data == 0
     assert w2_init_data == 0
     assert w3_init_data == 0
@@ -208,3 +209,10 @@ def test_work_calculate_jitted():
     assert abs(w3.data - w1.data * w2.data) < 1e-15
     assert abs(w4.data - 1.72) < 1e-15
     assert abs(w5.data - (w3.data + w4.data)) < 1e-15
+
+
+def test_bad_signature_make_work():
+    with pytest.raises(ValueError) as e:
+        _ = make_work("", 0.0, sources=(), derive=derive_w3)
+    assert str(e.value) == """Signatures do not match, derive defines (float64, float64) -> float64
+but data and sources imply () -> float64"""

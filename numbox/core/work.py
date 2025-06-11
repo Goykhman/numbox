@@ -23,6 +23,30 @@ class WorkTypeClass(NodeTypeClass):
 
 
 class Work(Node):
+    """
+    Structure describing a unit of work.
+
+    Instances of this class can be connected in a graph with other `Work` instances.
+
+    Attributes
+    ----------
+    name : str
+        Name of the structure instance.
+    inputs : List[NodeType]
+        Uniform list of `Work.sources`, cast as `NodeType`.
+    data : Any
+        Scalar or array data payload contained in (and calculated by) this structure.
+    sources : Tuple[Work, ...]
+        Heterogeneous tuple of `Work` instances that this `Work` instance depends on.
+    derive : FunctionType
+        Function of the signature determined by the data types of `sources` and `data`.
+    derived : bool
+        Flag indicating whether the `data` has already been calculated.
+
+    (`name`, `inputs`) attributes of the `Work` structure payload are
+    homogeneously typed across all instances of `Work` and accommodate
+    cast-ability to the :obj:`numbox.core.node.Node` base of `NodeType`.
+    """
     def __new__(cls, *args, **kws):
         return make_work(*args, **kws)
 
@@ -49,8 +73,33 @@ class Work(Node):
 define_boxing(WorkTypeClass, Work)
 
 
+def _verify_signature(data_ty, sources_ty, derive_ty):
+    args_ty = []
+    for source_ind in range(sources_ty.count):
+        source_ty = sources_ty[source_ind]
+        source_data_ty = source_ty.field_dict["data"]
+        args_ty.append(source_data_ty)
+    derive_sig = data_ty(*args_ty)
+    if isinstance(derive_ty, FunctionType):
+        if derive_ty.signature != derive_sig:
+            raise ValueError(
+                f"""Signatures do not match, derive defines {derive_ty.signature}
+but data and sources imply {derive_sig}"""
+            )
+
+
 @overload(Work, strict=False, jit_options=default_jit_options)
 def ol_work(name_ty, data_ty, sources_ty, derive_ty):
+    """
+    Dynamically create `WorkType`, depending on the type of `data`, `sources`, and `derive`.
+
+    Different instances of `Work` accommodate various types of data they might contain,
+    various heterogeneous types of other instances of `Work` it might depend on,
+    and custom `derive` function objects used to calculate the instance's `data` depending
+    on the `data` of its `sources`.
+
+    (`name`, `data`) initialize the :obj:`numbox.core.node.Node` header of the composition.
+    """
     work_attributes_ = node_attributes + [
         ("data", data_ty),
         ("sources", sources_ty),
@@ -59,6 +108,7 @@ def ol_work(name_ty, data_ty, sources_ty, derive_ty):
     ]
     assert isinstance(derive_ty, (FunctionType, NoneType)), f"""Either None or Compile Result supported,
 not CPUDispatcher, got {derive_ty}, of type {type(derive_ty)}"""
+    _verify_signature(data_ty, sources_ty, derive_ty)
     work_type_ = WorkTypeClass(work_attributes_)
 
     def work_constructor(name_, data_, sources_, derive_):
