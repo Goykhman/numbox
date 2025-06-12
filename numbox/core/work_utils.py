@@ -12,7 +12,9 @@ def make_work_helper(name, init_data, sources=(), derive_py=None, jit_options=No
     assert isinstance(derive_py, (NoneType, PyFunctionType))
     if sources or derive_py:
         jit_options = jit_options if jit_options is not None else {}
-        sources_ty = [typeof(source.data) for source in sources]
+        sources_ty = []
+        for source in sources:
+            sources_ty.append(typeof(source.data))
         derive_sig = typeof(init_data)(*sources_ty)
         derive = cres(derive_sig, **jit_options)(derive_py)
         return make_work(name, data=init_data, sources=sources, derive=derive)

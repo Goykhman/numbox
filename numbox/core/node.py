@@ -18,8 +18,11 @@ class Node(StructRefProxy):
     def get_input(self, i):
         return self.get_input(i)
 
-    @njit(**default_jit_options)
     def get_inputs_names(self):
+        return list(self._get_inputs_names())
+
+    @njit(**default_jit_options)
+    def _get_inputs_names(self):
         return self.get_inputs_names()
 
     @property
@@ -87,7 +90,10 @@ def ol_get_input(self_ty, i_ty):
 @overload_method(NodeTypeClass, "get_inputs_names", strict=False, jit_options=default_jit_options)
 def ol_get_inputs_names(self_ty):
     def _(self):
-        return [_cast(s, NodeType).name for s in self.inputs]
+        names_ = List.empty_list(unicode_type)
+        for s in self.inputs:
+            names_.append(_cast(s, NodeType).name)
+        return names_
     return _
 
 

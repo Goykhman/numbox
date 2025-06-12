@@ -120,10 +120,10 @@ def get_func_tuple(func):
 
 def get_ll_func_sig(context: BaseContext, func_ty: FunctionType):
     func_sig = func_ty.signature
-    return ir.FunctionType(
-        context.get_data_type(func_sig.return_type),
-        [context.get_data_type(arg) for arg in func_sig.args]
-    )
+    arg_types = []
+    for arg in func_sig.args:
+        arg_types.append(context.get_data_type(arg))
+    return ir.FunctionType(context.get_data_type(func_sig.return_type), arg_types)
 
 
 @intrinsic
