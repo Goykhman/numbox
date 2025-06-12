@@ -8,8 +8,8 @@ from numba.extending import intrinsic, overload, overload_method
 from numba.typed.typedlist import List
 
 from numbox.core.configurations import default_jit_options
-from numbox.core.erased_type import ErasedType
-from numbox.core.node import Node, NodeTypeClass, node_attributes
+from numbox.core.any.erased_type import ErasedType
+from numbox.core.work.node import Node, NodeTypeClass, node_attributes
 from numbox.utils.highlevel import hash_type
 from numbox.utils.lowlevel import (
     extract_struct_member, get_func_p_from_func_struct, get_ll_func_sig,

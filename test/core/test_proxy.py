@@ -1,7 +1,7 @@
 import re
 from numba import float64
 from numba.core.types import Omitted
-from numbox.core.proxy import proxy, make_proxy_name
+from numbox.core.proxy.proxy import proxy, make_proxy_name
 
 
 aux_1_sig = float64(float64)

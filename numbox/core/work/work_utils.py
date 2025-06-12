@@ -2,7 +2,7 @@ import numpy
 from numba import typeof
 from types import FunctionType as PyFunctionType, NoneType
 
-from numbox.core.work import make_work
+from numbox.core.work.work import make_work
 from numbox.utils.highlevel import cres
 
 

@@ -3,7 +3,7 @@ import pytest
 from numba import njit
 from numba.core.types import Array, float64, int64
 
-from numbox.core.work import make_work
+from numbox.core.work.work import make_work
 from numbox.utils.highlevel import cres
 
 

@@ -3,8 +3,8 @@ import numpy as np
 import pytest
 
 from numbox.core.configurations import default_jit_options
-from numbox.core.print_tree import make_image
-from numbox.core.work_utils import make_init_data, make_work_helper
+from numbox.core.work.print_tree import make_image
+from numbox.core.work.work_utils import make_init_data, make_work_helper
 
 
 def test_make_work_helper():

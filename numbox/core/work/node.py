@@ -6,7 +6,7 @@ from numba.experimental.structref import define_boxing, new, register, StructRef
 from numba.extending import overload, overload_method
 
 from numbox.core.configurations import default_jit_options
-from numbox.core.erased_type import ErasedType
+from numbox.core.any.erased_type import ErasedType
 from numbox.utils.lowlevel import _cast, _uniformize_tuple_of_structs
 
 

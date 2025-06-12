@@ -1,6 +1,6 @@
 import numpy
 import string
-from numbox.core.node import make_node
+from numbox.core.work.node import make_node
 
 
 letters = [c for c in string.ascii_lowercase]

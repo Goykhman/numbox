@@ -1,7 +1,7 @@
 import ctypes
 import numpy
 
-from numbox.core.meminfo import structref_meminfo, get_nrt_refcount
+from numbox.utils.meminfo import structref_meminfo, get_nrt_refcount
 from test.common_structrefs import S1, S2
 
 

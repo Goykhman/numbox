@@ -1,7 +1,7 @@
 import numpy
-from numbox.core.node import make_node
-from numbox.core.print_tree import make_image
-from numbox.core.work import make_work
+from numbox.core.work.node import make_node
+from numbox.core.work.print_tree import make_image
+from numbox.core.work.work import make_work
 from test.random_graph import random_graph
 from test.core.random_image_ref import random_image_ref
 

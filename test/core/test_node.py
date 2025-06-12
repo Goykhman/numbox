@@ -1,5 +1,5 @@
 from numba.core.errors import NumbaError
-from numbox.core.node import make_node
+from numbox.core.work.node import make_node
 
 
 def test():

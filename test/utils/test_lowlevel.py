@@ -4,7 +4,7 @@ from numba import float64
 from numba.experimental.function_type import _get_jit_address, _get_wrapper_address
 from numba.extending import intrinsic
 
-from numbox.core.meminfo import get_nrt_refcount, structref_meminfo
+from numbox.utils.meminfo import get_nrt_refcount, structref_meminfo
 from numbox.utils.highlevel import cres
 from numbox.utils.lowlevel import (
     cast, deref_payload, extract_struct_member, get_func_p_as_int_from_func_struct,

@@ -3,9 +3,9 @@ import numpy
 from numba import float64, int32, int64, njit, typeof
 from numba.core import types
 from numba.typed import Dict
-from numbox.core.any_type import AnyType, make_any
+from numbox.core.any.any_type import AnyType, make_any
 from numba.core.errors import NumbaError
-from numbox.core.meminfo import get_nrt_refcount, structref_meminfo
+from numbox.utils.meminfo import get_nrt_refcount, structref_meminfo
 from numbox.utils.highlevel import cres
 from test.auxiliary_utils import deref_int64_intp
 from test.common_structrefs import S1, S1Type, S3, S3Type

@@ -8,7 +8,7 @@ from numba.core.typing.context import Context
 from numba.extending import intrinsic
 
 from numbox.core.configurations import default_jit_options
-from numbox.core.void_type import VoidType
+from numbox.utils.void_type import VoidType
 from numbox.utils.highlevel import determine_field_index
 
 
