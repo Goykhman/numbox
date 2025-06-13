@@ -90,12 +90,11 @@ def calculate_numba(p):
     p.calculate()
 
 
-@timer
-def run_numba():
+def run_numba(derive_p_):
     for entity_id in range(N):
         p0_data = numpy.random.rand(M)
         p0_data = p0_data / p0_data.sum()
-        p0 = make_work("p0", p0_data)
+        p0 = make_work(f"p0_{entity_id}", p0_data)
 
         # uncomment these when not doing benchmarking
         # p0_data_0_init = p0_data[0]
@@ -104,10 +103,10 @@ def run_numba():
         tr_data = numpy.random.rand(M, M)
         # given from-state, normalize probabilities to all to-states
         tr_data = tr_data / tr_data.sum(axis=0)
-        tr = make_work("tr", tr_data)
+        tr = make_work(f"tr_{entity_id}", tr_data)
 
         p_data = numpy.zeros(shape=(H, M), dtype=numpy.float64)
-        p = make_work("p", p_data, sources=(p0, tr), derive=derive_p)
+        p = make_work(f"p_{entity_id}", p_data, sources=(p0, tr), derive=derive_p_)
         calculate_numba(p)
 
         # initial data is just stored in its column
@@ -117,10 +116,20 @@ def run_numba():
         # assert abs(p.data[-1].sum() - 1.0) < 1e-14, f"final probabilities are still normalized"
 
 
+run_numba_unjitted = timer(run_numba)
+run_numba_jitted = timer(numba.njit(cache=True)(run_numba))
+
+
 def benchmark():
-    run_numba()  # first run, to cache compiled functions
-    run_numba()
+    """ Run more than once to load in the cache """
+    print("un-jitted for-loop over entities", file=sys.stderr)
+    run_numba_unjitted(derive_p)
     run_numpy()
+    rel_factor_ = timer.times["run_numpy"] / timer.times["run_numba"]
+    print(f"time(numpy) / time(numba) = {rel_factor_}", file=sys.stderr)
+
+    print("\njitted for-loop over entities", file=sys.stderr)
+    run_numba_jitted(derive_p)
     rel_factor_ = timer.times["run_numpy"] / timer.times["run_numba"]
     print(f"time(numpy) / time(numba) = {rel_factor_}", file=sys.stderr)
 
