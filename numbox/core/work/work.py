@@ -32,8 +32,8 @@ class Work(Node):
     ----------
     name : str
         Name of the structure instance.
-    inputs : List[NodeType]
-        Uniform list of `Work.sources`, cast as `NodeType`.
+    inputs : List[ErasedType]
+        Uniform list of `Work.sources`, cast as `ErasedType`.
     data : Any
         Scalar or array data payload contained in (and calculated by) this structure.
     sources : Tuple[Work, ...]

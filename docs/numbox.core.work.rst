@@ -1,8 +1,47 @@
 numbox.core.work
 ================
 
+Overview
+++++++++
+
+Functionality for fully-jitted and light-weight calculation on a graph.
+
+Modules
+++++++++
+
 numbox.core.work.node
 ---------------------
+
+Overview
+********
+
+:class:`numbox.core.work.node.Node` represents a node on a directed acyclic graph
+(`DAG <https://en.wikipedia.org/wiki/Directed_acyclic_graph>`_)
+that can exist
+in a fully jitted scope and optionally cross the border to the Python interpreter side.
+
+`Node` can be used on its own (in which case the preferred way to
+create it is via the factory function :func:`numbox.core.work.node.make_node`)
+or as a base to more functionally-rich graph nodes,
+such as :class:`numbox.core.work.work.Work`.
+
+The logic of `Node` and its sub-classes follows a graph-optional design - no
+graph orchestration structure is required to register and manage the graph
+of `Node` instance objects - which in turn reduced unnecessary computation overhead
+and simplifies the program design.
+
+To that end, each node is identified by its name and contains a uniformly-typed
+container member with all the input nodes references that it bears a directed dependency relationship too.
+This enables a traversal not only of the graph of `Node` instances itself but also graphs of its subclasses,
+such as, a graph of `Work` nodes.
+
+`Node` implementation makes heavy use of numba
+`meminfo <https://numba.readthedocs.io/en/stable/developer/numba-runtime.html?highlight=meminfo#memory-management>`_
+paradigm that manages memory-allocated
+payload via smart pointer (meminfo pointer) reference counting. This allows the user to reference the desired
+memory location via a specially-designed structref type, such as,
+:class:`numbox.core.any.erased_type.ErasedType`, or :class:`numbox.core.utils.void_type.VoidType`,
+and dereference its payload accordingly and as needed via the appropriate :func:`numbox.utils.lowlevel.cast`.
 
 .. automodule:: numbox.core.work.node
    :members:
@@ -70,6 +109,12 @@ Defines :class:`numbox.core.work.work.Work` StructRef.
 `Work` is a unit of calculation work that is designed to
 be included as a node on a jitted graph of other `Work` nodes.
 
+`Work` type subclasses :class:`numbox.core.work.node.Node` and follows the logic of its graph design.
+However, since numba StructRef does not support low-level subclasses (between `NodeType` and `WorkType`),
+the relation between `Node` and `Work` follows the composition pattern.
+Namely, the members of the `Node` payload are a header in the payload of `Work`, allowing
+to perform a meaningful :func:`numbox.utils.lowlevel.cast`.
+
 The best way to create `Work` object instance is via the :func:`numbox.core.work.work.make_work` constructor
 that can be invoked either from Python or jitted scope (plain-Python or jitted `run` function below)::
 
@@ -94,6 +139,26 @@ When called from jitted scope, if cacheability of the caller function
 is a requirement, the `derive` function should be passed to it as
 a `FunctionType` (not `njit`-produced `CPUDispatcher`) argument, i.e.,
 decorated with :func:`numbox.utils.highlevel.cres`).
+
+Behind the scenes, `Work` accommodates individual access to its `sources`
+(other `Work` nodes that are pointing to the given `Work` node on the DAG)
+via a 'Python-native compiler' backdoor, which is essentially a relative pre-runtime
+technique to Python-compile and execute custom functions before preparing for
+overload in the numba jitted scope. This technique is fully compatible with caching of
+jitted functions and provides a natural Python counterpart to virtual functions that
+are not supported in numba. Here it is extensively utilized in
+:func:`numbox.core.work.work.ol_calculate` that overloads `calculate` method of
+the `Work` class.
+
+Invoking `calculate` method on the `Work` node triggers DFS calculation of its
+sources - all of the sources are calculated before the node itself is calculated.
+Calculation of the `Work` node sets the value of its `data` attribute to the
+outcome of the calculation, which in turn can depend on the `data` values of its
+sources.
+
+To avoid repeated calculation of the same node, `Work` has `derived` boolean flag
+that is set to `True` once the node has been calculated, preventing subsequent
+re-derivation.
 
 .. automodule:: numbox.core.work.work
    :members:
