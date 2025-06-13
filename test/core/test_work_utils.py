@@ -2,10 +2,16 @@ import numpy
 import numpy as np
 import pytest
 
+from numba import float64
+from numba.core.types import unicode_type
+from numba.typed.typeddict import Dict
+from numba.typed.typedlist import List
+
 from numbox.core.configurations import default_jit_options
 from numbox.core.work.print_tree import make_image
 from numbox.core.work.work_utils import make_init_data, make_work_helper
 from test.auxiliary_utils import collect_and_run_tests
+from test.common_structrefs import S1
 
 
 def test_make_work_helper():
@@ -102,6 +108,54 @@ y2--y0--x0
 
     assert y2.depends_on("time")
     assert not y0.depends_on(time)
+
+
+def test_dict_data():
+    d1_ = {"pi": 3.14, "e": 2.17}
+    d1 = Dict.empty(key_type=unicode_type, value_type=float64)
+    for k, v in d1_.items():
+        d1[k] = v
+    w1 = make_work_helper("w1", init_data=d1)
+
+    def derive_w2(w1_dict):
+        return w1_dict["pi"] * w1_dict["e"]
+
+    w2 = make_work_helper(
+        "w2", make_init_data(), sources=(w1,), derive_py=derive_w2, jit_options=default_jit_options
+    )
+    w2.calculate()
+    assert numpy.isclose(w2.data, 3.14 * 2.17)
+
+
+def test_list_data():
+    l1_ = [3.14, 2.17]
+    l1 = List.empty_list(item_type=float64)
+    for item in l1_:
+        l1.append(item)
+    w1 = make_work_helper("w1", init_data=l1)
+
+    def derive_w2(w1_lst):
+        return w1_lst[0] * w1_lst[1]
+
+    w2 = make_work_helper(
+        "w2", make_init_data(), sources=(w1,), derive_py=derive_w2, jit_options=default_jit_options
+    )
+    w2.calculate()
+    assert numpy.isclose(w2.data, 3.14 * 2.17)
+
+
+def test_structref_data():
+    w1_data = S1(12, 137, 1.41)
+    w1 = make_work_helper("w1", init_data=w1_data)
+
+    def derive_w2(w1_struct):
+        return w1_struct.x1 * w1_struct.x3 + w1_struct.x2
+
+    w2 = make_work_helper(
+        "w2", make_init_data(), sources=(w1,), derive_py=derive_w2, jit_options=default_jit_options
+    )
+    w2.calculate()
+    assert numpy.isclose(w2.data, 12 * 1.41 + 137)
 
 
 if __name__ == "__main__":
