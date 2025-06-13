@@ -6,7 +6,7 @@ import numba
 import numpy
 import sys
 
-from numbox.core.work import make_work
+from numbox.core.work.work import make_work
 from numbox.utils.highlevel import cres
 from numbox.utils.timer import timer
 

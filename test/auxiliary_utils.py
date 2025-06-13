@@ -1,6 +1,21 @@
+import inspect
+import logging
+import sys
 from numba import njit
 from numba.core import types
 from numba.extending import intrinsic
+
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
+
+def collect_and_run_tests(module_name):
+    module = sys.modules[module_name]
+    for name, item in module.__dict__.items():
+        if name.startswith("test_") and callable(item):
+            logger.info(f" Running {name}")
+            item()
 
 
 @intrinsic

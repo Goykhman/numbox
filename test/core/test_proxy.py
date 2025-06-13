@@ -2,6 +2,7 @@ import re
 from numba import float64
 from numba.core.types import Omitted
 from numbox.core.proxy.proxy import proxy, make_proxy_name
+from test.auxiliary_utils import collect_and_run_tests
 
 
 aux_1_sig = float64(float64)
@@ -37,6 +38,5 @@ def test_2():
     assert abs(aux_2(2.2, 1.4) - (3.14 * 2.2 + 1.4)) < 1e-15
 
 
-if __name__ == '__main__':
-    test_1()
-    test_2()
+if __name__ == "__main__":
+    collect_and_run_tests(__name__)

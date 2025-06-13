@@ -7,7 +7,7 @@ from numbox.core.any.any_type import AnyType, make_any
 from numba.core.errors import NumbaError
 from numbox.utils.meminfo import get_nrt_refcount, structref_meminfo
 from numbox.utils.highlevel import cres
-from test.auxiliary_utils import deref_int64_intp
+from test.auxiliary_utils import collect_and_run_tests, deref_int64_intp
 from test.common_structrefs import S1, S1Type, S3, S3Type
 
 
@@ -158,13 +158,4 @@ def test_10():
 
 
 if __name__ == '__main__':
-    test_1()
-    test_2()
-    test_3()
-    test_4()
-    test_5()
-    test_6()
-    test_7()
-    test_8()
-    test_9()
-    test_10()
+    collect_and_run_tests(__name__)

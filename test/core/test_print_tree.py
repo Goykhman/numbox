@@ -2,6 +2,7 @@ import numpy
 from numbox.core.work.node import make_node
 from numbox.core.work.print_tree import make_image
 from numbox.core.work.work import make_work
+from test.auxiliary_utils import collect_and_run_tests
 from test.random_graph import random_graph
 from test.core.random_image_ref import random_image_ref
 
@@ -42,3 +43,7 @@ fifth--third---second--first
        |
        fourth"""
     assert tree_image == tree_image_ref
+
+
+if __name__ == "__main__":
+    collect_and_run_tests(__name__)

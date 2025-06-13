@@ -2,6 +2,7 @@ import ctypes
 import numpy
 
 from numbox.utils.meminfo import structref_meminfo, get_nrt_refcount
+from test.auxiliary_utils import collect_and_run_tests
 from test.common_structrefs import S1, S2
 
 
@@ -21,7 +22,7 @@ def test_s1():
     data_p = ctypes.c_int64.from_address(data_pp).value
     assert data_p == s1_data_p_as_int
 
-    assert s1_data_p_as_int - s1_meminfo_p_as_int == 8 * size_of_meminfo, """ 
+    assert s1_data_p_as_int - s1_meminfo_p_as_int == 8 * size_of_meminfo, """
         This just means that data pointed at by the `data_p` is lined up in memory
         right after the six size-8 fields of the `MemInfo` structure. This doesn't
         always have to be the case, for instance in `test_s2` a separate `MemInfo`
@@ -53,5 +54,4 @@ def test_s2():
 
 
 if __name__ == "__main__":
-    test_s1()
-    test_s2()
+    collect_and_run_tests(__name__)

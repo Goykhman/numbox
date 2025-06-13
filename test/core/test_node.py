@@ -1,5 +1,6 @@
 from numba.core.errors import NumbaError
 from numbox.core.work.node import make_node
+from test.auxiliary_utils import collect_and_run_tests
 
 
 def test():
@@ -18,3 +19,7 @@ def test():
     assert n1.get_inputs_names() == []
     assert n4.get_inputs_names() == ["n2", "n3"]
     assert n4.all_inputs_names() == ["n2", "n1", "n3"]
+
+
+if __name__ == "__main__":
+    collect_and_run_tests(__name__)

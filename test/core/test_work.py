@@ -5,6 +5,7 @@ from numba.core.types import Array, float64, int64
 
 from numbox.core.work.work import make_work
 from numbox.utils.highlevel import cres
+from test.auxiliary_utils import collect_and_run_tests
 
 
 def test_make_work():
@@ -68,7 +69,7 @@ p_ref_data_all = numpy.array([
         [0.67909781, 0.15897281, 0.16192938]
     ],
     [
-        [0.5, 0.1,0.4],
+        [0.5, 0.1, 0.4],
         [0.475, 0.39, 0.135],
         [0.405, 0.42975, 0.16525],
         [0.4020625, 0.4252125, 0.172725],
@@ -95,7 +96,7 @@ def derive_p(p0_, tr_):
 
 def test_work():
     for transition in transitions:
-        assert numpy.allclose(transition.sum(axis=0), 1.0), """complete set of states at `t` 
+        assert numpy.allclose(transition.sum(axis=0), 1.0), """complete set of states at `t`
 conditional on state at `t-1`"""
     for entity_id in range(num_of_entities):
         p0_data = p0_data_all[entity_id]
@@ -159,12 +160,12 @@ def derive_w5(w3_, w4_):
     return w3_ + w4_
 
 
-def run_test_work_calculate():
-    w1 = make_work("w1", 0.0, derive=derive_w1)
-    w2 = make_work("w2", 0.0, derive=derive_w2)
-    w3 = make_work("w3", 0.0, sources=(w1, w2), derive=derive_w3)
-    w4 = make_work("w4", 0.0, derive=derive_w4)
-    w5 = make_work("w5", 0.0, sources=(w3, w4), derive=derive_w5)
+def run_test_work_calculate(derive_w1_, derive_w2_, derive_w3_, derive_w4_, derive_w5_):
+    w1 = make_work("w1", 0.0, derive=derive_w1_)
+    w2 = make_work("w2", 0.0, derive=derive_w2_)
+    w3 = make_work("w3", 0.0, sources=(w1, w2), derive=derive_w3_)
+    w4 = make_work("w4", 0.0, derive=derive_w4_)
+    w5 = make_work("w5", 0.0, sources=(w3, w4), derive=derive_w5_)
     w1_init_data = w1.data
     w2_init_data = w2.data
     w3_init_data = w3.data
@@ -181,7 +182,7 @@ def test_work_calculate():
     (
         w1_init_data, w2_init_data, w3_init_data, w4_init_data, w5_init_data,
         w1, w2, w3, w4, w5
-    ) = run_test_work_calculate()
+    ) = run_test_work_calculate(derive_w1, derive_w2, derive_w3, derive_w4, derive_w5)
     assert w1_init_data == 0
     assert w2_init_data == 0
     assert w3_init_data == 0
@@ -198,7 +199,7 @@ def test_work_calculate_jitted():
     (
         w1_init_data, w2_init_data, w3_init_data, w4_init_data, w5_init_data,
         w1, w2, w3, w4, w5
-    ) = njit(run_test_work_calculate)()
+    ) = njit(cache=True)(run_test_work_calculate)(derive_w1, derive_w2, derive_w3, derive_w4, derive_w5)
     assert w1_init_data == 0
     assert w2_init_data == 0
     assert w3_init_data == 0
@@ -216,3 +217,7 @@ def test_bad_signature_make_work():
         _ = make_work("", 0.0, sources=(), derive=derive_w3)
     assert str(e.value) == """Signatures do not match, derive defines (float64, float64) -> float64
 but data and sources imply () -> float64"""
+
+
+if __name__ == "__main__":
+    collect_and_run_tests(__name__)

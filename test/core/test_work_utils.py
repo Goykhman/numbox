@@ -5,6 +5,7 @@ import pytest
 from numbox.core.configurations import default_jit_options
 from numbox.core.work.print_tree import make_image
 from numbox.core.work.work_utils import make_init_data, make_work_helper
+from test.auxiliary_utils import collect_and_run_tests
 
 
 def test_make_work_helper():
@@ -101,3 +102,7 @@ y2--y0--x0
 
     assert y2.depends_on("time")
     assert not y0.depends_on(time)
+
+
+if __name__ == "__main__":
+    collect_and_run_tests(__name__)
