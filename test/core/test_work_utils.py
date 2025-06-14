@@ -149,13 +149,29 @@ def test_structref_data():
     w1 = make_work_helper("w1", init_data=w1_data)
 
     def derive_w2(w1_struct):
-        return w1_struct.x1 * w1_struct.x3 + w1_struct.x2
+        return w1_struct.x1 * w1_struct.x3 + w1_struct.x2 / (w1_struct.calculate(5.3) + 1)
 
     w2 = make_work_helper(
         "w2", make_init_data(), sources=(w1,), derive_py=derive_w2, jit_options=default_jit_options
     )
     w2.calculate()
-    assert numpy.isclose(w2.data, 12 * 1.41 + 137)
+    assert numpy.isclose(w2.data, 12 * 1.41 + 137/ ((137 + 5.3) + 1))
+
+
+def test_struct_array_data():
+    w1_data_ty = numpy.dtype([("name", "|S16"), ("x", numpy.int32), ("y", numpy.float64)])
+    w1_data = numpy.array(("fine_euler", 137, 2.17), dtype=w1_data_ty)  # structured scalar
+    w1 = make_work_helper("w1", init_data=w1_data)
+
+    def derive_w2(w1_struct):
+        w2_ = w1_struct["x"] * w1_struct["y"]
+        return w2_.item()
+
+    w2 = make_work_helper(
+        "w2", make_init_data(), sources=(w1,), derive_py=derive_w2, jit_options=default_jit_options
+    )
+    w2.calculate()
+    assert numpy.isclose(w2.data, 137 * 2.17)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 from numba import njit, float64, int16, int64
 from numba.core import types
 from numba.experimental import structref
-from numba.extending import overload
+from numba.extending import overload, overload_method
 
 
 @structref.register
@@ -33,6 +33,10 @@ class S1(structref.StructRefProxy):
     def x3(self):
         return self.x3
 
+    @njit
+    def calculate(self, x):
+        return self.calculate(x)
+
 
 structref.define_boxing(S1TypeClass, S1)
 fields_s1 = [("x1", int16), ("x2", int64), ("x3", float64)]
@@ -53,6 +57,13 @@ def ol_s1(x1_ty, x2_ty, x3_ty):
 @njit(S1Type(int16, int64, float64))
 def s1_constructor(x1, x2, x3):
     return S1(x1, x2, x3)
+
+
+@overload_method(S1TypeClass, "calculate", strict=False)
+def ol_calculate(self_ty, x_ty):
+    def _(self, x):
+        return self.x2 + x
+    return _
 
 
 @structref.register
