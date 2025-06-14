@@ -1,0 +1,490 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.work &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="numbox.utils" href="numbox.utils.html" />
+    <link rel="prev" title="numbox.core.proxy" href="numbox.core.proxy.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">numbox</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.any.html">numbox.core.any</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.proxy.html">numbox.core.proxy</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbox.core.work</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#modules">Modules</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox-core-work-node">numbox.core.work.node</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox-core-work-print-tree">numbox.core.work.print_tree</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox-core-work-work">numbox.core.work.work</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox-core-work-work-utils">numbox.core.work.work_utils</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.utils.html">numbox.utils</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">numbox</a></li>
+      <li class="breadcrumb-item active">numbox.core.work</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbox.core.work.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbox-core-work">
+<h1>numbox.core.work<a class="headerlink" href="#numbox-core-work" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>Functionality for fully-jitted and light-weight calculation on a graph.</p>
+</section>
+<section id="modules">
+<h2>Modules<a class="headerlink" href="#modules" title="Link to this heading"></a></h2>
+<section id="numbox-core-work-node">
+<h3>numbox.core.work.node<a class="headerlink" href="#numbox-core-work-node" title="Link to this heading"></a></h3>
+<section id="id1">
+<h4>Overview<a class="headerlink" href="#id1" title="Link to this heading"></a></h4>
+<p><a class="reference internal" href="#numbox.core.work.node.Node" title="numbox.core.work.node.Node"><code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.work.node.Node</span></code></a> represents a node on a directed acyclic graph
+(<a class="reference external" href="https://en.wikipedia.org/wiki/Directed_acyclic_graph">DAG</a>)
+that can exist
+in a fully jitted scope and optionally cross the border to the Python interpreter side.</p>
+<p><cite>Node</cite> can be used on its own (in which case the preferred way to
+create it is via the factory function <a class="reference internal" href="#numbox.core.work.node.make_node" title="numbox.core.work.node.make_node"><code class="xref py py-func docutils literal notranslate"><span class="pre">numbox.core.work.node.make_node()</span></code></a>)
+or as a base to more functionally-rich graph nodes,
+such as <a class="reference internal" href="#numbox.core.work.work.Work" title="numbox.core.work.work.Work"><code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.work.work.Work</span></code></a>.</p>
+<p>The logic of <cite>Node</cite> and its sub-classes follows a graph-optional design - no
+graph orchestration structure is required to register and manage the graph
+of <cite>Node</cite> instance objects - which in turn reduced unnecessary computation overhead
+and simplifies the program design.</p>
+<p>To that end, each node is identified by its name and contains a uniformly-typed
+container member with all the input nodes references that it bears a directed dependency relationship too.
+This enables a traversal not only of the graph of <cite>Node</cite> instances itself but also graphs of its subclasses,
+such as, a graph of <cite>Work</cite> nodes.</p>
+<p><cite>Node</cite> implementation makes heavy use of numba
+<a class="reference external" href="https://numba.readthedocs.io/en/stable/developer/numba-runtime.html?highlight=meminfo#memory-management">meminfo</a>
+paradigm that manages memory-allocated
+payload via smart pointer (meminfo pointer) reference counting. This allows the user to reference the desired
+memory location via a specially-designed structref type, such as,
+<code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.any.erased_type.ErasedType</span></code>, or <code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.utils.void_type.VoidType</span></code>,
+and dereference its payload accordingly and as needed via the appropriate <a class="reference internal" href="numbox.utils.html#numbox.utils.lowlevel.cast" title="numbox.utils.lowlevel.cast"><code class="xref py py-func docutils literal notranslate"><span class="pre">numbox.utils.lowlevel.cast()</span></code></a>.</p>
+<dl class="py class" id="module-numbox.core.work.node">
+<dt class="sig sig-object py" id="numbox.core.work.node.Node">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.work.node.</span></span><span class="sig-name descname"><span class="pre">Node</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/node.html#Node"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.node.Node" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">StructRefProxy</span></code></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.work.node.Node.all_inputs_names">
+<span class="sig-name descname"><span class="pre">all_inputs_names</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/node.html#Node.all_inputs_names"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.node.Node.all_inputs_names" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.work.node.Node.depends_on">
+<span class="sig-name descname"><span class="pre">depends_on</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name_</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/node.html#Node.depends_on"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.node.Node.depends_on" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.work.node.Node.get_input">
+<span class="sig-name descname"><span class="pre">get_input</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">i</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/node.html#Node.get_input"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.node.Node.get_input" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.work.node.Node.get_inputs_names">
+<span class="sig-name descname"><span class="pre">get_inputs_names</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/node.html#Node.get_inputs_names"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.node.Node.get_inputs_names" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="numbox.core.work.node.Node.inputs">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">inputs</span></span><a class="headerlink" href="#numbox.core.work.node.Node.inputs" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="numbox.core.work.node.Node.name">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">name</span></span><a class="headerlink" href="#numbox.core.work.node.Node.name" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.work.node.NodeTypeClass">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.work.node.</span></span><span class="sig-name descname"><span class="pre">NodeTypeClass</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/node.html#NodeTypeClass"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.node.NodeTypeClass" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">StructRef</span></code></p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.work.node.make_node">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.work.node.</span></span><span class="sig-name descname"><span class="pre">make_node</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputs</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">()</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/node.html#make_node"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.node.make_node" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.work.node.ol_all_inputs_names">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.work.node.</span></span><span class="sig-name descname"><span class="pre">ol_all_inputs_names</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self_ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/node.html#ol_all_inputs_names"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.node.ol_all_inputs_names" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.work.node.ol_depends_on">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.work.node.</span></span><span class="sig-name descname"><span class="pre">ol_depends_on</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self_ty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name_ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/node.html#ol_depends_on"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.node.ol_depends_on" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.work.node.ol_get_input">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.work.node.</span></span><span class="sig-name descname"><span class="pre">ol_get_input</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self_ty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">i_ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/node.html#ol_get_input"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.node.ol_get_input" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.work.node.ol_get_inputs_names">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.work.node.</span></span><span class="sig-name descname"><span class="pre">ol_get_inputs_names</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self_ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/node.html#ol_get_inputs_names"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.node.ol_get_inputs_names" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.work.node.ol_node">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.work.node.</span></span><span class="sig-name descname"><span class="pre">ol_node</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name_ty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputs_ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/node.html#ol_node"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.node.ol_node" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+</section>
+<section id="numbox-core-work-print-tree">
+<h3>numbox.core.work.print_tree<a class="headerlink" href="#numbox-core-work-print-tree" title="Link to this heading"></a></h3>
+<section id="id2">
+<h4>Overview<a class="headerlink" href="#id2" title="Link to this heading"></a></h4>
+<p>Provides utilities to print a tree from the given node’s dependencies.
+The node can be either instance of <a class="reference internal" href="#numbox.core.work.node.Node" title="numbox.core.work.node.Node"><code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.work.node.Node</span></code></a>
+or <a class="reference internal" href="#numbox.core.work.work.Work" title="numbox.core.work.work.Work"><code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.work.work.Work</span></code></a>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.work.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_node</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.work.print_tree</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_image</span>
+
+<span class="n">n1</span> <span class="o">=</span> <span class="n">make_node</span><span class="p">(</span><span class="s2">&quot;first&quot;</span><span class="p">)</span>
+<span class="n">n2</span> <span class="o">=</span> <span class="n">make_node</span><span class="p">(</span><span class="s2">&quot;second&quot;</span><span class="p">)</span>
+<span class="n">n3</span> <span class="o">=</span> <span class="n">make_node</span><span class="p">(</span><span class="s2">&quot;third&quot;</span><span class="p">,</span> <span class="n">inputs</span><span class="o">=</span><span class="p">(</span><span class="n">n1</span><span class="p">,</span> <span class="n">n2</span><span class="p">))</span>
+<span class="n">n4</span> <span class="o">=</span> <span class="n">make_node</span><span class="p">(</span><span class="s2">&quot;fourth&quot;</span><span class="p">)</span>
+<span class="n">n5</span> <span class="o">=</span> <span class="n">make_node</span><span class="p">(</span><span class="s2">&quot;fifth&quot;</span><span class="p">,</span> <span class="n">inputs</span><span class="o">=</span><span class="p">(</span><span class="n">n3</span><span class="p">,</span> <span class="n">n4</span><span class="p">))</span>
+<span class="n">tree_image</span> <span class="o">=</span> <span class="n">make_image</span><span class="p">(</span><span class="n">n5</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">tree_image</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>which produces:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fifth</span><span class="o">--</span><span class="n">third</span><span class="o">---</span><span class="n">first</span>
+       <span class="o">|</span>       <span class="o">|</span>
+       <span class="o">|</span>       <span class="n">second</span>
+       <span class="o">|</span>
+       <span class="n">fourth</span>
+</pre></div>
+</div>
+<p>Notice that the tree depth extends in horizontal direction.</p>
+<p>For the sake of readability, if multiple nodes depend on the given node, the
+latter will be accordingly displayed multiple times on the tree image, for instance:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">n1</span> <span class="o">=</span> <span class="n">make_node</span><span class="p">(</span><span class="s2">&quot;n1&quot;</span><span class="p">)</span>
+<span class="n">n2</span> <span class="o">=</span> <span class="n">make_node</span><span class="p">(</span><span class="s2">&quot;n2&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">n1</span><span class="p">,))</span>
+<span class="n">n3</span> <span class="o">=</span> <span class="n">make_node</span><span class="p">(</span><span class="s2">&quot;n3&quot;</span><span class="p">,</span> <span class="n">inputs</span><span class="o">=</span><span class="p">(</span><span class="n">n1</span><span class="p">,))</span>
+<span class="n">n4</span> <span class="o">=</span> <span class="n">make_node</span><span class="p">(</span><span class="s2">&quot;n4&quot;</span><span class="p">,</span> <span class="n">inputs</span><span class="o">=</span><span class="p">(</span><span class="n">n2</span><span class="p">,</span> <span class="n">n3</span><span class="p">))</span>
+<span class="n">tree_image</span> <span class="o">=</span> <span class="n">make_image</span><span class="p">(</span><span class="n">n4</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>produces:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">n4</span><span class="o">--</span><span class="n">n2</span><span class="o">--</span><span class="n">n1</span>
+    <span class="o">|</span>
+    <span class="n">n3</span><span class="o">--</span><span class="n">n1</span>
+</pre></div>
+</div>
+<dl class="py class" id="module-numbox.core.work.print_tree">
+<dt class="sig sig-object py" id="numbox.core.work.print_tree.ImmutableItemDict">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.work.print_tree.</span></span><span class="sig-name descname"><span class="pre">ImmutableItemDict</span></span><a class="reference internal" href="_modules/numbox/core/work/print_tree.html#ImmutableItemDict"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.print_tree.ImmutableItemDict" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code></p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.work.print_tree.calculate_col_widths">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.work.print_tree.</span></span><span class="sig-name descname"><span class="pre">calculate_col_widths</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">graph</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/print_tree.html#calculate_col_widths"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.print_tree.calculate_col_widths" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.work.print_tree.make_graph">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.work.print_tree.</span></span><span class="sig-name descname"><span class="pre">make_graph</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">node</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/print_tree.html#make_graph"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.print_tree.make_graph" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.work.print_tree.make_image">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.work.print_tree.</span></span><span class="sig-name descname"><span class="pre">make_image</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">node</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/print_tree.html#make_image"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.print_tree.make_image" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+</section>
+<section id="numbox-core-work-work">
+<h3>numbox.core.work.work<a class="headerlink" href="#numbox-core-work-work" title="Link to this heading"></a></h3>
+<section id="id3">
+<h4>Overview<a class="headerlink" href="#id3" title="Link to this heading"></a></h4>
+<p>Defines <a class="reference internal" href="#numbox.core.work.work.Work" title="numbox.core.work.work.Work"><code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.work.work.Work</span></code></a> StructRef.
+<cite>Work</cite> is a unit of calculation work that is designed to
+be included as a node on a jitted graph of other <cite>Work</cite> nodes.</p>
+<p><cite>Work</cite> type subclasses <a class="reference internal" href="#numbox.core.work.node.Node" title="numbox.core.work.node.Node"><code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.work.node.Node</span></code></a> and follows the logic of its graph design.
+However, since numba StructRef does not support low-level subclasses (between <cite>NodeType</cite> and <cite>WorkType</cite>),
+the relation between <cite>Node</cite> and <cite>Work</cite> follows the composition pattern.
+Namely, the members of the <cite>Node</cite> payload are a header in the payload of <cite>Work</cite>, allowing
+to perform a meaningful <a class="reference internal" href="numbox.utils.html#numbox.utils.lowlevel.cast" title="numbox.utils.lowlevel.cast"><code class="xref py py-func docutils literal notranslate"><span class="pre">numbox.utils.lowlevel.cast()</span></code></a>.</p>
+<p>The best way to create <cite>Work</cite> object instance is via the <a class="reference internal" href="#numbox.core.work.work.make_work" title="numbox.core.work.work.make_work"><code class="xref py py-func docutils literal notranslate"><span class="pre">numbox.core.work.work.make_work()</span></code></a> constructor
+that can be invoked either from Python or jitted scope (plain-Python or jitted <cite>run</cite> function below):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">float64</span><span class="p">,</span> <span class="n">njit</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.work.work</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_work</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.highlevel</span><span class="w"> </span><span class="kn">import</span> <span class="n">cres</span>
+
+<span class="nd">@cres</span><span class="p">(</span><span class="n">float64</span><span class="p">(),</span> <span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">derive_work</span><span class="p">():</span>
+    <span class="k">return</span> <span class="mf">3.14</span>
+
+<span class="nd">@njit</span><span class="p">(</span><span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">derive_</span><span class="p">):</span>
+    <span class="n">work</span> <span class="o">=</span> <span class="n">make_work</span><span class="p">(</span><span class="s2">&quot;work&quot;</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="n">derive</span><span class="o">=</span><span class="n">derive_</span><span class="p">)</span>
+    <span class="n">work</span><span class="o">.</span><span class="n">calculate</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">work</span><span class="o">.</span><span class="n">data</span>
+
+<span class="k">assert</span> <span class="n">numpy</span><span class="o">.</span><span class="n">isclose</span><span class="p">(</span><span class="n">run</span><span class="p">(</span><span class="n">derive_work</span><span class="p">),</span> <span class="mf">3.14</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>When called from jitted scope, if cacheability of the caller function
+is a requirement, the <cite>derive</cite> function should be passed to it as
+a <cite>FunctionType</cite> (not <cite>njit</cite>-produced <cite>CPUDispatcher</cite>) argument, i.e.,
+decorated with <a class="reference internal" href="numbox.utils.html#numbox.utils.highlevel.cres" title="numbox.utils.highlevel.cres"><code class="xref py py-func docutils literal notranslate"><span class="pre">numbox.utils.highlevel.cres()</span></code></a>).</p>
+<p>Behind the scenes, <cite>Work</cite> accommodates individual access to its <cite>sources</cite>
+(other <cite>Work</cite> nodes that are pointing to the given <cite>Work</cite> node on the DAG)
+via a ‘Python-native compiler’ backdoor, which is essentially a relative pre-runtime
+technique to Python-compile and execute custom functions before preparing for
+overload in the numba jitted scope. This technique is fully compatible with caching of
+jitted functions and provides a natural Python counterpart to virtual functions that
+are not supported in numba. Here it is extensively utilized in
+<a class="reference internal" href="#numbox.core.work.work.ol_calculate" title="numbox.core.work.work.ol_calculate"><code class="xref py py-func docutils literal notranslate"><span class="pre">numbox.core.work.work.ol_calculate()</span></code></a> that overloads <cite>calculate</cite> method of
+the <cite>Work</cite> class.</p>
+<p>Invoking <cite>calculate</cite> method on the <cite>Work</cite> node triggers DFS calculation of its
+sources - all of the sources are calculated before the node itself is calculated.
+Calculation of the <cite>Work</cite> node sets the value of its <cite>data</cite> attribute to the
+outcome of the calculation, which in turn can depend on the <cite>data</cite> values of its
+sources.</p>
+<p>To avoid repeated calculation of the same node, <cite>Work</cite> has <cite>derived</cite> boolean flag
+that is set to <cite>True</cite> once the node has been calculated, preventing subsequent
+re-derivation.</p>
+<dl class="py class" id="module-numbox.core.work.work">
+<dt class="sig sig-object py" id="numbox.core.work.work.Work">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.work.work.</span></span><span class="sig-name descname"><span class="pre">Work</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kws</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/work.html#Work"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.work.Work" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#numbox.core.work.node.Node" title="numbox.core.work.node.Node"><code class="xref py py-class docutils literal notranslate"><span class="pre">Node</span></code></a></p>
+<p>Structure describing a unit of work.</p>
+<p>Instances of this class can be connected in a graph with other <cite>Work</cite> instances.</p>
+<section id="attributes">
+<h5>Attributes<a class="headerlink" href="#attributes" title="Link to this heading"></a></h5>
+<dl class="simple">
+<dt>name<span class="classifier">str</span></dt><dd><p>Name of the structure instance.</p>
+</dd>
+<dt>inputs<span class="classifier">List[ErasedType]</span></dt><dd><p>Uniform list of <cite>Work.sources</cite>, cast as <cite>ErasedType</cite>.</p>
+</dd>
+<dt>data<span class="classifier">Any</span></dt><dd><p>Scalar or array data payload contained in (and calculated by) this structure.</p>
+</dd>
+<dt>sources<span class="classifier">Tuple[Work, …]</span></dt><dd><p>Heterogeneous tuple of <cite>Work</cite> instances that this <cite>Work</cite> instance depends on.</p>
+</dd>
+<dt>derive<span class="classifier">FunctionType</span></dt><dd><p>Function of the signature determined by the data types of <cite>sources</cite> and <cite>data</cite>.</p>
+</dd>
+<dt>derived<span class="classifier">bool</span></dt><dd><p>Flag indicating whether the <cite>data</cite> has already been calculated.</p>
+</dd>
+</dl>
+<p>(<cite>name</cite>, <cite>inputs</cite>) attributes of the <cite>Work</cite> structure payload are
+homogeneously typed across all instances of <cite>Work</cite> and accommodate
+cast-ability to the <code class="xref py py-obj docutils literal notranslate"><span class="pre">numbox.core.node.Node</span></code> base of <cite>NodeType</cite>.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.work.work.Work.calculate">
+<span class="sig-name descname"><span class="pre">calculate</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/work.html#Work.calculate"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.work.Work.calculate" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="numbox.core.work.work.Work.data">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">data</span></span><a class="headerlink" href="#numbox.core.work.work.Work.data" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="numbox.core.work.work.Work.derived">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">derived</span></span><a class="headerlink" href="#numbox.core.work.work.Work.derived" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="numbox.core.work.work.Work.sources">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">sources</span></span><a class="headerlink" href="#numbox.core.work.work.Work.sources" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.work.work.WorkTypeClass">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.work.work.</span></span><span class="sig-name descname"><span class="pre">WorkTypeClass</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/work.html#WorkTypeClass"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.work.WorkTypeClass" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#numbox.core.work.node.NodeTypeClass" title="numbox.core.work.node.NodeTypeClass"><code class="xref py py-class docutils literal notranslate"><span class="pre">NodeTypeClass</span></code></a></p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.work.work.make_work">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.work.work.</span></span><span class="sig-name descname"><span class="pre">make_work</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sources</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">derive</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/work.html#make_work"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.work.make_work" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.work.work.ol_calculate">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.work.work.</span></span><span class="sig-name descname"><span class="pre">ol_calculate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self_ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/work.html#ol_calculate"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.work.ol_calculate" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.work.work.ol_make_work">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.work.work.</span></span><span class="sig-name descname"><span class="pre">ol_make_work</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name_ty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_ty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sources_ty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">derive_ty_</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/work.html#ol_make_work"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.work.ol_make_work" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.work.work.ol_work">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.work.work.</span></span><span class="sig-name descname"><span class="pre">ol_work</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name_ty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_ty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sources_ty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">derive_ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/work.html#ol_work"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.work.ol_work" title="Link to this definition"></a></dt>
+<dd><p>Dynamically create <cite>WorkType</cite>, depending on the type of <cite>data</cite>, <cite>sources</cite>, and <cite>derive</cite>.</p>
+<p>Different instances of <cite>Work</cite> accommodate various types of data they might contain,
+various heterogeneous types of other instances of <cite>Work</cite> it might depend on,
+and custom <cite>derive</cite> function objects used to calculate the instance’s <cite>data</cite> depending
+on the <cite>data</cite> of its <cite>sources</cite>.</p>
+<p>(<cite>name</cite>, <cite>data</cite>) initialize the <code class="xref py py-obj docutils literal notranslate"><span class="pre">numbox.core.node.Node</span></code> header of the composition.</p>
+</dd></dl>
+
+</section>
+</section>
+<section id="numbox-core-work-work-utils">
+<h3>numbox.core.work.work_utils<a class="headerlink" href="#numbox-core-work-work-utils" title="Link to this heading"></a></h3>
+<section id="id4">
+<h4>Overview<a class="headerlink" href="#id4" title="Link to this heading"></a></h4>
+<p>Convenience utilities for creating <cite>Work</cite>-graphs from Python scope.</p>
+<p>The <a class="reference internal" href="#numbox.core.work.work.make_work" title="numbox.core.work.work.make_work"><code class="xref py py-func docutils literal notranslate"><span class="pre">numbox.core.work.work.make_work()</span></code></a> constructor accepts
+<cite>cres</cite>-compiled derive function as an argument that requires
+an explicitly provided signature of the <cite>derive</cite> function.
+Return type of the <cite>derive</cite> function should match the type of the <cite>data</cite> attribute
+of the corresponding <cite>Work</cite> instance while its argument types
+should match the <cite>data</cite> types of the <cite>Work</cite> instance sources.</p>
+<p>Utilities defined in this module make it easier to ensure these
+requirements are met with a minimal amount of coding:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.work.work_utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_init_data</span><span class="p">,</span> <span class="n">make_work_helper</span>
+
+
+<span class="n">pi</span> <span class="o">=</span> <span class="n">make_work_helper</span><span class="p">(</span><span class="s2">&quot;pi&quot;</span><span class="p">,</span> <span class="mf">3.1415</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">derive_circumference</span><span class="p">(</span><span class="n">diameter_</span><span class="p">,</span> <span class="n">pi_</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">diameter_</span> <span class="o">*</span> <span class="n">pi_</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">diameter_</span><span class="p">):</span>
+    <span class="n">diameter</span> <span class="o">=</span> <span class="n">make_work_helper</span><span class="p">(</span><span class="s2">&quot;diameter&quot;</span><span class="p">,</span> <span class="n">diameter_</span><span class="p">)</span>
+    <span class="n">circumference</span> <span class="o">=</span> <span class="n">make_work_helper</span><span class="p">(</span>
+        <span class="s2">&quot;circumference&quot;</span><span class="p">,</span>
+        <span class="n">make_init_data</span><span class="p">(),</span>
+        <span class="n">sources</span><span class="o">=</span><span class="p">(</span><span class="n">diameter</span><span class="p">,</span> <span class="n">pi</span><span class="p">),</span>
+        <span class="n">derive_py</span><span class="o">=</span><span class="n">derive_circumference</span><span class="p">,</span>
+        <span class="n">jit_options</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;cache&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
+    <span class="p">)</span>
+    <span class="n">circumference</span><span class="o">.</span><span class="n">calculate</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">circumference</span><span class="o">.</span><span class="n">data</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">assert</span> <span class="n">numpy</span><span class="o">.</span><span class="n">isclose</span><span class="p">(</span><span class="n">run</span><span class="p">(</span><span class="mf">1.41</span><span class="p">),</span> <span class="mf">3.1415</span> <span class="o">*</span> <span class="mf">1.41</span><span class="p">)</span>
+</pre></div>
+</div>
+<dl class="py function" id="module-numbox.core.work.work_utils">
+<dt class="sig sig-object py" id="numbox.core.work.work_utils.make_init_data">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.work.work_utils.</span></span><span class="sig-name descname"><span class="pre">make_init_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">shape</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">val</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ty</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/work_utils.html#make_init_data"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.work_utils.make_init_data" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.work.work_utils.make_work_helper">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.work.work_utils.</span></span><span class="sig-name descname"><span class="pre">make_work_helper</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">init_data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sources</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">derive_py</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">jit_options</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/work/work_utils.html#make_work_helper"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.work.work_utils.make_work_helper" title="Link to this definition"></a></dt>
+<dd><p>Utility for creating instances of <cite>Work</cite> from Python scope.
+Python abstraction for the jitted scope functionality.</p>
+</dd></dl>
+
+</section>
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="numbox.core.proxy.html" class="btn btn-neutral float-left" title="numbox.core.proxy" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="numbox.utils.html" class="btn btn-neutral float-right" title="numbox.utils" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
