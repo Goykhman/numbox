@@ -7,8 +7,8 @@ from numba.experimental.structref import define_boxing, new, register
 from numba.extending import intrinsic, overload, overload_method
 from numba.typed.typedlist import List
 
-from numbox.core.configurations import default_jit_options
 from numbox.core.any.erased_type import ErasedType
+from numbox.core.configurations import default_jit_options
 from numbox.core.work.node import Node, NodeTypeClass, node_attributes
 from numbox.utils.highlevel import hash_type
 from numbox.utils.lowlevel import (
