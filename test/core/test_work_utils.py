@@ -144,7 +144,7 @@ def test_list_data():
     assert numpy.isclose(w2.data, 3.14 * 2.17)
 
 
-def test_structref_data():
+def test_structref_data_1():
     w1_data = S1(12, 137, 1.41)
     w1 = make_work_helper("w1", init_data=w1_data)
 
@@ -156,6 +156,21 @@ def test_structref_data():
     )
     w2.calculate()
     assert numpy.isclose(w2.data, 12 * 1.41 + 137/ ((137 + 5.3) + 1))
+
+
+def test_structref_data_2():
+    w1_data = S1(12, 137, 1.41)
+    w1 = make_work_helper("w1", init_data=w1_data)
+    w2 = make_work_helper("w2", init_data=2.31)
+
+    def derive_w3(w1_struct, w2_data):
+        return w1_struct.x1 * w1_struct.x3 + w1_struct.x2 / (w1_struct.calculate(5.3) + w2_data)
+
+    w3 = make_work_helper(
+        "w3", make_init_data(), sources=(w1, w2), derive_py=derive_w3, jit_options=default_jit_options
+    )
+    w3.calculate()
+    assert numpy.isclose(w3.data, 12 * 1.41 + 137 / ((137 + 5.3) + 2.31))
 
 
 def test_struct_array_data():

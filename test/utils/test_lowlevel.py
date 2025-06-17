@@ -1,5 +1,6 @@
 import numba
 import numpy
+from ctypes import c_char_p, c_void_p
 from numba import float64
 from numba.experimental.function_type import _get_jit_address, _get_wrapper_address
 from numba.extending import intrinsic
@@ -8,9 +9,10 @@ from numbox.utils.meminfo import get_nrt_refcount, structref_meminfo
 from numbox.utils.highlevel import cres
 from numbox.utils.lowlevel import (
     cast, deref_payload, extract_struct_member, get_func_p_as_int_from_func_struct,
-    get_func_tuple, tuple_of_struct_ptrs_as_int, uniformize_tuple_of_structs
+    get_func_tuple, get_str_from_p_as_int, get_unicode_data_p, tuple_of_struct_ptrs_as_int,
+    uniformize_tuple_of_structs
 )
-from test.auxiliary_utils import deref_int64_intp
+from test.auxiliary_utils import collect_and_run_tests, deref_int64_intp, str_from_p_as_int
 from test.common_structrefs import S1, S1Type, S12, S12Type, S2
 
 
@@ -130,6 +132,21 @@ https://github.com/numba/numba/blob/release0.61/numba/experimental/function_type
 """
 
 
+def test_get_unicode_data_p():
+    s1_ = "a random string"
+    s1_a = get_unicode_data_p(s1_)
+    assert str_from_p_as_int(s1_a) == s1_
+
+
+def test_get_str_from_p_as_int():
+    s1_ = "a random string"
+    s1_b = s1_.encode("utf-8")
+    s1 = c_char_p(s1_b)
+    s1_p = c_void_p.from_buffer(s1).value
+    s1 = get_str_from_p_as_int(s1_p)
+    assert s1 == s1_
+
+
 def test_tuple_of_struct_ptrs_as_int():
     s1 = S1(1, 2, 3.14)
     s12 = S12(4)
@@ -176,10 +193,4 @@ def test_uniformize_tuple_of_structs():
 
 
 if __name__ == '__main__':
-    test_1()
-    test_2()
-    test_3()
-    test_extract_data_member()
-    test_get_func_p_from_func_struct()
-    test_tuple_of_struct_ptrs_as_int()
-    test_uniformize_tuple_of_structs()
+    collect_and_run_tests(__name__)

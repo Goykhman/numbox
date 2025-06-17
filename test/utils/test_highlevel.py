@@ -2,6 +2,7 @@ from numba import float64, njit, typeof
 from numba.core.types.function_type import FunctionType
 from numba.core.types.functions import Dispatcher
 from numbox.utils.highlevel import cres, determine_field_index
+from test.auxiliary_utils import collect_and_run_tests
 from test.common_structrefs import S1Type
 
 
@@ -37,3 +38,7 @@ def test_determine_field_index():
     assert determine_field_index(S1Type, "x1") == 0
     assert determine_field_index(S1Type, "x2") == 1
     assert determine_field_index(S1Type, "x3") == 2
+
+
+if __name__ == '__main__':
+    collect_and_run_tests(__name__)

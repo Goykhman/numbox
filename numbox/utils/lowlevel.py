@@ -1,15 +1,20 @@
 from llvmlite import ir
 from llvmlite.ir.builder import IRBuilder
-from numba import njit
+from numba import carray, njit
 from numba.core.base import BaseContext
-from numba.core.cgutils import int32_t, intp_t, pack_array
-from numba.core.types import FunctionType, intp, StructRef, TypeRef, Tuple, UniTuple
+from numba.core.cgutils import int32_t, intp_t, pack_array, voidptr_t
+from numba.core.types import (
+    FunctionType, intp, StructRef, TypeRef, Tuple, char, UnicodeType, unicode_type, UniTuple, voidptr
+)
 from numba.core.typing.context import Context
 from numba.extending import intrinsic
 
 from numbox.core.configurations import default_jit_options
 from numbox.utils.void_type import VoidType
 from numbox.utils.highlevel import determine_field_index
+
+
+MAX_STR_LENGTH = 2 ** 31 - 1
 
 
 @intrinsic
@@ -30,6 +35,14 @@ def _cast(typingctx: Context, source_ty, dest_ty_ref: TypeRef):
 def cast(source, dest_ty):
     """ Cast `source` to the type `dest_ty` """
     return _cast(source, dest_ty)
+
+
+@intrinsic
+def _cast_int_to_void_p(typingctx, p_ty):
+    """ Cast 64-bit integer to void pointer type """
+    def codegen(context, builder, signature, arguments):
+        return builder.inttoptr(arguments[0], voidptr_t)
+    return voidptr(p_ty), codegen
 
 
 @intrinsic
@@ -124,6 +137,41 @@ def get_ll_func_sig(context: BaseContext, func_ty: FunctionType):
     for arg in func_sig.args:
         arg_types.append(context.get_data_type(arg))
     return ir.FunctionType(context.get_data_type(func_sig.return_type), arg_types)
+
+
+@njit(unicode_type(intp), **default_jit_options)
+def get_str_from_p_as_int(p):
+    """ Given pointer to null-terminated array of characters as an integer `p`,
+    return unicode string object copying the original string's data """
+    void_p = _cast_int_to_void_p(p)
+    s = ""
+    mem_view = carray(void_p, shape=(MAX_STR_LENGTH,), dtype=char)
+    for char_as_code_p in mem_view:
+        if char_as_code_p == 0:
+            return s
+        s += chr(char_as_code_p)
+    return s
+
+
+@intrinsic
+def _get_unicode_data_p(typingctx, str_ty):
+    def codegen(context, builder, signature, arguments):
+        str_ = arguments[0]
+        meminfo = context.nrt.get_meminfos(builder, unicode_type, str_)[0]
+        _, meminfo_p = meminfo
+        payload_p = context.nrt.meminfo_data(builder, meminfo_p)
+        return builder.ptrtoint(payload_p, context.get_data_type(intp))
+    assert isinstance(str_ty, UnicodeType)
+    return intp(str_ty), codegen
+
+
+@njit(**default_jit_options)
+def get_unicode_data_p(s):
+    """ Given Python unicode string, return pointer to its data payload,
+    array of null-terminated characters.
+    See https://github.com/numba/numba/blob/release0.61/numba/cpython/unicode.py#L83
+    """
+    return _get_unicode_data_p(s)
 
 
 @intrinsic
