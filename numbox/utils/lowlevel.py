@@ -9,12 +9,9 @@ from numba.core.types import (
 from numba.core.typing.context import Context
 from numba.extending import intrinsic
 
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import default_jit_options, MAX_STR_LENGTH
 from numbox.utils.void_type import VoidType
 from numbox.utils.highlevel import determine_field_index
-
-
-MAX_STR_LENGTH = 2 ** 31 - 1
 
 
 @intrinsic
