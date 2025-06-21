@@ -1,7 +1,7 @@
 from inspect import getfile, getmodule
 from io import StringIO
 from numba import njit
-from numba.core.types import boolean, FunctionType, NoneType, Tuple
+from numba.core.types import boolean, DictType, FunctionType, NoneType, Tuple
 from numba.core.typing.context import Context
 from numba.experimental.structref import define_boxing, new, register
 from numba.extending import intrinsic, overload, overload_method
@@ -67,6 +67,10 @@ class Work(Node):
     @njit(**default_jit_options)
     def calculate(self):
         return self.calculate()
+
+    @njit(**default_jit_options)
+    def load(self, data):
+        return self.load(data)
 
 
 define_boxing(WorkTypeClass, Work)
@@ -178,7 +182,7 @@ def _make_calculate_code(num_sources):
     code_txt = StringIO()
     for source_ind_ in range(num_sources):
         code_txt.write(_make_source_getter(source_ind_))
-    code_txt.write(f"""
+    code_txt.write("""
 def _calculate_(work_):
     if work_.derived:
         return""")
@@ -219,3 +223,71 @@ def ol_calculate(self_ty):
         _calculate = ns["_calculate_"]
         _calculate_registry[num_sources] = _calculate
     return _calculate
+
+
+@intrinsic
+def _cast_to_work_data(typingctx, work_ty, data_as_any_ty: ErasedType):
+    data_ty = work_ty.field_dict["data"]
+    sig = data_ty(work_ty, data_as_any_ty)
+
+    def codegen(context, builder, signature, arguments):
+        data_as_any = arguments[1]
+        ty_ll = context.get_data_type(data_ty)
+        _, meminfo_p = context.nrt.get_meminfos(builder, data_as_any_ty, data_as_any)[0]
+        payload_p = context.nrt.meminfo_data(builder, meminfo_p)
+        x_as_ty_p = builder.bitcast(payload_p, ty_ll.as_pointer())
+        val = builder.load(x_as_ty_p)
+        context.nrt.incref(builder, data_ty, val)
+        return val
+    return sig, codegen
+
+
+def _make_loader_code(num_sources):
+    code_txt = StringIO()
+    for source_ind_ in range(num_sources):
+        code_txt.write(_make_source_getter(source_ind_))
+    code_txt.write("""
+def _loader_(work_, data_):
+    reset = False
+    work_name = work_.name
+    if work_name in data_:
+        work_.data = _cast_to_work_data(work_, data_[work_name].p)
+        reset = True""")
+    if num_sources > 0:
+        code_txt.write("""
+    sources = work_.sources""")
+        for source_ind_ in range(num_sources):
+            code_txt.write(f"""
+    source_{source_ind_} = _get_source_{source_ind_}(sources)
+    reset = reset or source_{source_ind_}.load(data_)
+""")
+    code_txt.write("""
+    work_.derived = not reset
+    return reset
+""")
+    return code_txt.getvalue()
+
+
+_loader_registry = {}
+
+
+def _load_graph(*args):
+    raise NotImplementedError("Not to be called from Python scope")
+
+
+@overload_method(WorkTypeClass, "load", strict=False, jit_options=default_jit_options)
+def ol_load(work_ty, data_ty: DictType):
+    """ Load `data` into the graph with the root node `work`.
+     Data is provided as dictionary mapping node name to `Any` type
+     containing erased payload `p` of the `work.data` type. """
+    sources_ty = work_ty.field_dict["sources"]
+    num_sources = sources_ty.count
+    _loader = _loader_registry.get(num_sources, None)
+    if _loader is None:
+        code_txt = _make_loader_code(num_sources)
+        ns = getmodule(_load_graph).__dict__
+        code = compile(code_txt, getfile(_load_graph), mode="exec")
+        exec(code, ns)
+        _loader = ns["_loader_"]
+        _loader_registry[num_sources] = _loader
+    return _loader
