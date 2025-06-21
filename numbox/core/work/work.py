@@ -259,10 +259,11 @@ def _loader_(work_, data_):
         for source_ind_ in range(num_sources):
             code_txt.write(f"""
     source_{source_ind_} = _get_source_{source_ind_}(sources)
-    reset = reset or source_{source_ind_}.load(data_)
+    reset_source = source_{source_ind_}.load(data_)
+    reset = reset or reset_source
 """)
     code_txt.write("""
-    work_.derived = not reset
+    work_.derived = work_.derived and not reset
     return reset
 """)
     return code_txt.getvalue()
