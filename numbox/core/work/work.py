@@ -91,6 +91,20 @@ but data and sources imply {derive_sig}"""
             )
 
 
+def _create_work_type(data_ty, sources_ty, derive_ty):
+    assert isinstance(derive_ty, (FunctionType, NoneType)), f"""Either None or Compile Result supported,
+not CPUDispatcher, got {derive_ty}, of type {type(derive_ty)}"""
+    work_attributes_ = node_attributes + [
+        ("data", data_ty),
+        ("sources", sources_ty),
+        ("derive", derive_ty),
+        ("derived", boolean)
+    ]
+    _verify_signature(data_ty, sources_ty, derive_ty)
+    work_type_ = WorkTypeClass(work_attributes_)
+    return work_type_
+
+
 @overload(Work, strict=False, jit_options=default_jit_options)
 def ol_work(name_ty, data_ty, sources_ty, derive_ty):
     """
@@ -103,16 +117,7 @@ def ol_work(name_ty, data_ty, sources_ty, derive_ty):
 
     (`name`, `data`) initialize the :obj:`numbox.core.node.Node` header of the composition.
     """
-    assert isinstance(derive_ty, (FunctionType, NoneType)), f"""Either None or Compile Result supported,
-not CPUDispatcher, got {derive_ty}, of type {type(derive_ty)}"""
-    work_attributes_ = node_attributes + [
-        ("data", data_ty),
-        ("sources", sources_ty),
-        ("derive", derive_ty),
-        ("derived", boolean)
-    ]
-    _verify_signature(data_ty, sources_ty, derive_ty)
-    work_type_ = WorkTypeClass(work_attributes_)
+    work_type_ = _create_work_type(data_ty, sources_ty, derive_ty)
 
     def work_constructor(name_, data_, sources_, derive_):
         uniform_inputs_tuple = _uniformize_tuple_of_structs(sources_, ErasedType)
@@ -130,20 +135,9 @@ not CPUDispatcher, got {derive_ty}, of type {type(derive_ty)}"""
     return work_constructor
 
 
-def _make_work(*_, **__):
-    raise NotImplementedError
-
-
-@overload(_make_work, strict=False, jit_options=default_jit_options)
-def ol_make_work(name_ty, data_ty, sources_ty, derive_ty_):
-    def _(name_, data_, sources_, derive_):
-        return Work(name_, data_, sources_, derive_)
-    return _
-
-
 @njit(**default_jit_options)
 def make_work(name, data, sources=(), derive=None):
-    return _make_work(name, data, sources, derive)
+    return Work(name, data, sources, derive)
 
 
 @intrinsic
@@ -217,8 +211,8 @@ def ol_calculate(self_ty):
     _calculate = _calculate_registry.get(num_sources, None)
     if _calculate is None:
         code_txt = _make_calculate_code(num_sources)
-        ns = getmodule(_make_work).__dict__
-        code = compile(code_txt, getfile(_make_work), mode="exec")
+        ns = getmodule(_create_work_type).__dict__
+        code = compile(code_txt, getfile(_create_work_type), mode="exec")
         exec(code, ns)
         _calculate = ns["_calculate_"]
         _calculate_registry[num_sources] = _calculate
