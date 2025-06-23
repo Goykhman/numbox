@@ -1,16 +1,16 @@
 from numba import njit
 from numba.core.errors import NumbaError
-from numba.core.types import ListType, Literal, StructRef, unicode_type, UnicodeType
+from numba.core.types import ListType, Literal, unicode_type, UnicodeType
+from numbox.core.work.node_base import NodeBaseType, NodeBase, NodeBaseTypeClass, node_base_attributes
 from numba.typed.typedlist import List
-from numba.experimental.structref import define_boxing, new, register, StructRefProxy
+from numba.experimental.structref import define_boxing, new, register
 from numba.extending import overload, overload_method
 
 from numbox.core.configurations import default_jit_options
-from numbox.core.any.erased_type import ErasedType
 from numbox.utils.lowlevel import _cast, _uniformize_tuple_of_structs
 
 
-class Node(StructRefProxy):
+class Node(NodeBase):
     def __new__(cls, name, inputs):
         return make_node(name, inputs)
 
@@ -18,22 +18,18 @@ class Node(StructRefProxy):
     def get_input(self, i):
         return self.get_input(i)
 
-    def get_inputs_names(self):
-        return list(self._get_inputs_names())
-
-    @njit(**default_jit_options)
-    def _get_inputs_names(self):
-        return self.get_inputs_names()
-
     @property
     @njit(**default_jit_options)
     def name(self):
         return self.name
 
     @property
-    @njit(**default_jit_options)
     def inputs(self):
-        return self.inputs
+        return tuple(self._inputs())
+
+    @njit(**default_jit_options)
+    def _inputs(self):
+        return self.get_inputs()
 
     def all_inputs_names(self):
         return list(self._all_inputs_names())
@@ -46,19 +42,15 @@ class Node(StructRefProxy):
     def depends_on(self, name_):
         return self.depends_on(name_)
 
-    def __str__(self):
-        return self.name
-
 
 @register
-class NodeTypeClass(StructRef):
+class NodeTypeClass(NodeBaseTypeClass):
     pass
 
 
 define_boxing(NodeTypeClass, Node)
-node_attributes = [
-    ("name", unicode_type),
-    ("inputs", ListType(ErasedType))
+node_attributes = node_base_attributes + [
+    ("inputs", ListType(NodeBaseType))
 ]
 NodeType = NodeTypeClass(node_attributes)
 
@@ -66,8 +58,8 @@ NodeType = NodeTypeClass(node_attributes)
 @overload(Node, strict=False, jit_options=default_jit_options)
 def ol_node(name_ty, inputs_ty):
     def node_constructor(name, inputs):
-        uniform_inputs_tuple = _uniformize_tuple_of_structs(inputs, ErasedType)
-        uniform_inputs = List.empty_list(ErasedType)
+        uniform_inputs_tuple = _uniformize_tuple_of_structs(inputs, NodeBaseType)
+        uniform_inputs = List.empty_list(NodeBaseType)
         for s in uniform_inputs_tuple:
             uniform_inputs.append(s)
         node = new(NodeType)
@@ -87,13 +79,13 @@ def ol_get_input(self_ty, i_ty):
     return _
 
 
-@overload_method(NodeTypeClass, "get_inputs_names", strict=False, jit_options=default_jit_options)
-def ol_get_inputs_names(self_ty):
+@overload_method(NodeTypeClass, "get_inputs", strict=False, jit_options=default_jit_options)
+def ol_get_inputs(self_ty):
     def _(self):
-        names_ = List.empty_list(unicode_type)
+        inputs_list = List.empty_list(NodeType)
         for s in self.inputs:
-            names_.append(_cast(s, NodeType).name)
-        return names_
+            inputs_list.append(_cast(s, NodeType))
+        return inputs_list
     return _
 
 
@@ -104,8 +96,7 @@ def _all_inputs_names(node_):
 
 @njit(**default_jit_options)
 def _all_input_names(node, names_):
-    for i in range(len(node.inputs)):
-        input_ = node.get_input(i)
+    for input_ in _cast(node, NodeType).get_inputs():
         name_ = input_.name
         if name_ not in names_:
             names_.append(name_)

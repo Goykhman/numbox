@@ -48,6 +48,20 @@ and dereference its payload accordingly when needed via the appropriate :func:`n
    :show-inheritance:
    :undoc-members:
 
+numbox.core.work.node_base
+--------------------------
+
+Overview
+********
+
+Base class for :class:`numbox.core.work.node.Node`. Contains functionality
+dependent only on the node name.
+
+.. automodule:: numbox.core.work.node_base
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 numbox.core.work.print\_tree
 ----------------------------
 

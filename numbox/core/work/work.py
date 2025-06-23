@@ -1,6 +1,7 @@
 from inspect import getfile, getmodule
 from io import StringIO
-from numba import njit
+from numba import njit, typeof
+from numba.core.errors import NumbaError
 from numba.core.types import boolean, DictType, FunctionType, NoneType, Tuple
 from numba.core.typing.context import Context
 from numba.experimental.structref import define_boxing, new, register
@@ -10,8 +11,9 @@ from numba.typed.typedlist import List
 from numbox.core.any.erased_type import ErasedType
 from numbox.core.configurations import default_jit_options
 from numbox.core.work.node import Node, NodeTypeClass, node_attributes
+from numbox.core.work.node_base import NodeBaseType
 from numbox.utils.lowlevel import (
-    extract_struct_member, get_func_p_from_func_struct, get_ll_func_sig,
+    extract_struct_member, cast, get_func_p_from_func_struct, get_ll_func_sig,
     _uniformize_tuple_of_structs
 )
 
@@ -31,8 +33,8 @@ class Work(Node):
     ----------
     name : str
         Name of the structure instance.
-    inputs : List[ErasedType]
-        Uniform list of `Work.sources`, cast as `ErasedType`.
+    inputs : List[NodeBaseType]
+        Uniform list of `Work.sources`, cast as `NodeBaseType`.
     data : Any
         Scalar or array data payload contained in (and calculated by) this structure.
     sources : Tuple[Work, ...]
@@ -71,6 +73,14 @@ class Work(Node):
     @njit(**default_jit_options)
     def load(self, data):
         return self.load(data)
+
+    def get_input(self, i):
+        source_ty = typeof(self).field_dict["sources"][i]
+        return cast(self._get_input(i), source_ty)
+
+    @njit(**default_jit_options)
+    def _get_input(self, i):
+        return self.get_input(i)
 
 
 define_boxing(WorkTypeClass, Work)
@@ -120,8 +130,8 @@ def ol_work(name_ty, data_ty, sources_ty, derive_ty):
     work_type_ = _create_work_type(data_ty, sources_ty, derive_ty)
 
     def work_constructor(name_, data_, sources_, derive_):
-        uniform_inputs_tuple = _uniformize_tuple_of_structs(sources_, ErasedType)
-        uniform_inputs = List.empty_list(ErasedType)
+        uniform_inputs_tuple = _uniformize_tuple_of_structs(sources_, NodeBaseType)
+        uniform_inputs = List.empty_list(NodeBaseType)
         for s in uniform_inputs_tuple:
             uniform_inputs.append(s)
         w = new(work_type_)
@@ -266,10 +276,6 @@ def _loader_(work_, data_):
 _loader_registry = {}
 
 
-def _load_graph(*args):
-    raise NotImplementedError("Not to be called from Python scope")
-
-
 @overload_method(WorkTypeClass, "load", strict=False, jit_options=default_jit_options)
 def ol_load(work_ty, data_ty: DictType):
     """ Load `data` into the graph with the root node `work`.
@@ -280,9 +286,21 @@ def ol_load(work_ty, data_ty: DictType):
     _loader = _loader_registry.get(num_sources, None)
     if _loader is None:
         code_txt = _make_loader_code(num_sources)
-        ns = getmodule(_load_graph).__dict__
-        code = compile(code_txt, getfile(_load_graph), mode="exec")
+        ns = getmodule(_verify_signature).__dict__
+        code = compile(code_txt, getfile(_verify_signature), mode="exec")
         exec(code, ns)
         _loader = ns["_loader_"]
         _loader_registry[num_sources] = _loader
     return _loader
+
+
+@overload_method(WorkTypeClass, "get_input", strict=False, jit_options=default_jit_options)
+def ol_get_input(self_ty, i_ty):
+    sources_ty = self_ty.field_dict["sources"]
+    num_inputs = sources_ty.count
+
+    def _(self, i):
+        if i >= num_inputs:
+            raise NumbaError(f"Requested input {i} while the node has {num_inputs} inputs")
+        return self.inputs[i]
+    return _

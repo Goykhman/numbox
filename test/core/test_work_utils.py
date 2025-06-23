@@ -155,7 +155,7 @@ def test_structref_data_1():
         "w2", make_init_data(), sources=(w1,), derive_py=derive_w2, jit_options=default_jit_options
     )
     w2.calculate()
-    assert numpy.isclose(w2.data, 12 * 1.41 + 137/ ((137 + 5.3) + 1))
+    assert numpy.isclose(w2.data, 12 * 1.41 + 137 / ((137 + 5.3) + 1))
 
 
 def test_structref_data_2():
