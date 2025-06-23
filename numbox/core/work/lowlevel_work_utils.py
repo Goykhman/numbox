@@ -59,7 +59,7 @@ def _create_work_type(data_ty, sources_ty, derive_ty, inputs_ty):
     return work_type_
 
 
-def create_uniform_inputs(context, builder, tup_ty, tup, inputs_ty):
+def create_uniform_inputs(context, builder, tup_ty, tup):
     tup_size = tup_ty.count
     for tup_ind in range(tup_size):
         item_ty = tup_ty[tup_ind]
@@ -73,12 +73,11 @@ def create_uniform_inputs(context, builder, tup_ty, tup, inputs_ty):
         context.nrt.incref(builder, NodeBaseType, val)
         array_values.append(val)
     inputs = pack_array(builder, array_values, context.get_data_type(NodeBaseType))
-    context.nrt.incref(builder, inputs_ty, inputs)
     return inputs
 
 
 def store_inputs(context, builder, sources_ty, sources, data_pointer, inputs_ty):
-    inputs = create_uniform_inputs(context, builder, sources_ty, sources, inputs_ty)
+    inputs = create_uniform_inputs(context, builder, sources_ty, sources)
     inputs_p = builder.gep(data_pointer, (int32_t(0), int32_t(1)))
     builder.store(inputs, inputs_p)
 

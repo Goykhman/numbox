@@ -1,10 +1,79 @@
-from numba import float64, njit
+from numba import njit
+from numba.core.types import float64, UniTuple
+from numba.extending import intrinsic
 from numpy import isclose
 
-from numbox.core.work.lowlevel_work_utils import ll_make_work
+from numbox.utils.meminfo import _structref_meminfo
+from numbox.core.work.node_base import NodeBaseType
+from numbox.core.work.lowlevel_work_utils import ll_make_work, create_uniform_inputs
 from numbox.core.work.print_tree import make_image
 from numbox.utils.highlevel import cres
-from test.auxiliary_utils import collect_and_run_tests
+from test.auxiliary_utils import collect_and_run_tests, _deref_int64_intp
+
+
+def test_create_uniform_inputs():
+    """ Ascertain that reference count of memory regions managed by the uniform
+     tuple created by `create_uniform_inputs` agree with expectations. """
+
+    @intrinsic
+    def _create_uniform_inputs(typingctx, tup_ty):
+        def codegen(context, builder, signature, arguments):
+            tup = arguments[0]
+            return create_uniform_inputs(context, builder, tup_ty, tup)
+        return UniTuple(NodeBaseType, 2)(tup_ty), codegen
+
+    @njit
+    def uniform_tup_ref_ct():
+        w1 = ll_make_work("w1", 0.0, (), None)
+        w1_mi_ = _structref_meminfo(w1)
+        w1_payload_p_ = w1_mi_[1]
+        w1_mi_ref_ct_ = _deref_int64_intp(w1_mi_[0])
+
+        w2 = ll_make_work("w2", 0.0, (), None)
+        w2_mi_ = _structref_meminfo(w2)
+        w2_payload_p_ = w2_mi_[1]
+        w2_mi_ref_ct_ = _deref_int64_intp(w2_mi_[0])
+
+        het_tup = (w1, w2)
+        tup_ = _create_uniform_inputs(het_tup)
+
+        tup_mi_ = _structref_meminfo(tup_)
+        tup_payload_p_ = tup_mi_[1]
+        tup_mi_ref_ct_ = _deref_int64_intp(tup_mi_[0])
+
+        w1_ = tup_[0]
+        w1__mi_ = _structref_meminfo(w1_)
+        w1__payload_p_ = w1__mi_[1]
+        w1__mi_ref_ct_ = _deref_int64_intp(w1__mi_[0])
+
+        w2_ = tup_[1]
+        w2__mi_ = _structref_meminfo(w2_)
+        w2__payload_p_ = w2__mi_[1]
+        w2__mi_ref_ct_ = _deref_int64_intp(w2__mi_[0])
+
+        return (
+            tup_, w1, w2, w1_, w2_,
+            tup_mi_ref_ct_, tup_payload_p_, w1_payload_p_, w2_payload_p_, w1__payload_p_, w2__payload_p_,
+            w1_mi_ref_ct_, w2_mi_ref_ct_, w1__mi_ref_ct_, w2__mi_ref_ct_
+        )
+
+    (
+        tup, w1, w2, w1_, w2_,
+        tup_mi_ref_ct, tup_payload_p, w1_payload_p, w2_payload_p, w1__payload_p, w2__payload_p,
+        w1_mi_ref_ct, w2_mi_ref_ct, w1__mi_ref_ct, w2__mi_ref_ct
+    ) = uniform_tup_ref_ct()
+
+    assert w1_mi_ref_ct == 1, f"Got {w1_mi_ref_ct} but just initialized ref count should be 1"
+    assert w2_mi_ref_ct == 1, f"Got {w2_mi_ref_ct} but just initialized ref count should be 1"
+
+    assert w1__mi_ref_ct == 3, f"Got {w1_mi_ref_ct} but expected 3 from w1, w1_, tup"
+    assert w2__mi_ref_ct == 3, f"Got {w2_mi_ref_ct} but expected 3 from w2, w2_, tup"
+
+    assert w1_payload_p == w1__payload_p, f"Original data should be recovered, got {w1_payload_p, w1__payload_p}"
+    assert w2_payload_p == w2__payload_p, f"Original data should be recovered, got {w2_payload_p, w2__payload_p}"
+
+    assert tup_payload_p == w1_payload_p, r"w1 memory region should be aligned with {w1, w2} tuple's"
+    assert tup_mi_ref_ct == 3, f"Got {tup_mi_ref_ct} but expected 3 for the memory region pointed at by tup"
 
 
 def test_make_work_ll():

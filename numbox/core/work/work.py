@@ -3,10 +3,10 @@ from io import StringIO
 from numba import njit, typeof
 from numba.core.errors import NumbaError
 from numba.core.types import (
-    DictType, FunctionType, Literal, NoneType, Tuple, UniTuple, unicode_type, UnicodeType
+    DictType, FunctionType, NoneType, Tuple, UniTuple, unicode_type
 )
 from numba.core.typing.context import Context
-from numba.experimental.structref import define_boxing, new, register, StructRefProxy
+from numba.experimental.structref import define_boxing
 from numba.extending import intrinsic, overload, overload_method
 from numba.typed.typedlist import List
 
@@ -118,22 +118,6 @@ def _deleted_work_ctor(*args, **kwargs):
 
 
 overload(Work, jit_options=default_jit_options)(_deleted_work_ctor)
-# overload(Work)(_deleted_work_ctor, jit_options=default_jit_options)
-
-
-# @overload(Work, strict=False, jit_options=default_jit_options)
-# def ol_work(name_ty, data_ty, sources_ty, derive_ty):
-#     """
-#     Dynamically create `WorkType`, depending on the type of `data`, `sources`, and `derive`.
-#
-#     Different instances of `Work` accommodate various types of data they might contain,
-#     various heterogeneous types of other instances of `Work` it might depend on,
-#     and custom `derive` function objects used to calculate the instance's `data` depending
-#     on the `data` of its `sources`.
-#
-#     (`name`,) initialize the :obj:`numbox.core.node_base.NodeBase` header of the composition.
-#     """
-#     raise NotImplementedError("Use `make_work` instead")
 
 
 @njit(**default_jit_options)
