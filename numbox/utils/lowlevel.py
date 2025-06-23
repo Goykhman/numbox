@@ -3,8 +3,10 @@ from llvmlite.ir.builder import IRBuilder
 from numba import carray, njit
 from numba.core.base import BaseContext
 from numba.core.cgutils import int32_t, intp_t, pack_array, voidptr_t
+from numba.experimental.jitclass.base import imp_dtor
 from numba.core.types import (
-    FunctionType, intp, StructRef, TypeRef, Tuple, char, UnicodeType, unicode_type, UniTuple, voidptr
+    FunctionType, intp, StructRef, TypeRef, Tuple, char,
+    UnicodeType, unicode_type, uintp, UniTuple, voidptr
 )
 from numba.core.typing.context import Context
 from numba.extending import intrinsic
@@ -169,6 +171,46 @@ def get_unicode_data_p(s):
     See https://github.com/numba/numba/blob/release0.61/numba/cpython/unicode.py#L83
     """
     return _get_unicode_data_p(s)
+
+
+def _new(context, builder, struct_ty_):
+    """
+    This is essentially
+     `numba new <https://github.com/numba/numba/blob/release0.61/numba/experimental/structref.py#L301>`_
+
+    Returns structref (structure with one member being pointer to its meminfo) and the pointer to its payload.
+    """
+    model = context.data_model_manager[struct_ty_.get_data_type()]
+    alloc_type = model.get_value_type()
+    alloc_size = context.get_abi_sizeof(alloc_type)
+    meminfo = context.nrt.meminfo_alloc_dtor(
+        builder,
+        context.get_constant(uintp, alloc_size),
+        imp_dtor(context, builder.module, struct_ty_),
+    )
+    data_pointer = context.nrt.meminfo_data(builder, meminfo)
+    data_pointer = builder.bitcast(data_pointer, alloc_type.as_pointer())
+    # builder.store(get_null_value(alloc_type), data_pointer)
+    work_ = context.make_helper(builder, struct_ty_)
+    work_.meminfo = meminfo
+    return work_._getvalue(), data_pointer
+
+
+def populate_structref(context, builder, structref_type_, args, data_pointer, args_names):
+    """ Store `args` with names `args_names` in structref with type `structref_type_`
+    with payload at `data_pointer`.
+
+    This is not a substitute for 'setattr' and is only to be used when initializing
+    a new structref, as it does not take care of decref'ing of any possible `MemInfo`
+    that might be already referenced by a member of the structref (on the other hand,
+    it appears that neither does the numba standard implementation...) """
+    field_dict = structref_type_.field_dict
+    for arg_name, arg_ in zip(args_names, args):
+        arg_ty = field_dict[arg_name]
+        member_ind = determine_field_index(structref_type_, arg_name)
+        data_p = builder.gep(data_pointer, (int32_t(0), int32_t(member_ind)))
+        context.nrt.incref(builder, arg_ty, arg_)
+        builder.store(arg_, data_p)
 
 
 @intrinsic

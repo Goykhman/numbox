@@ -13,7 +13,7 @@ from numbox.utils.lowlevel import (
     uniformize_tuple_of_structs
 )
 from test.auxiliary_utils import collect_and_run_tests, deref_int64_intp, str_from_p_as_int
-from test.common_structrefs import S1, S1Type, S12, S12Type, S2
+from test.common_structrefs import ll_make_s4, S1, S1Type, S12, S12Type, S2
 
 
 def test_1():
@@ -57,26 +57,31 @@ def test_3():
         """ This is jitted because we want `a` to get wrapped in a `MemInfo`, which requires NRT """
         a = numpy.array([[34], [56]], dtype=numpy.int64)
         a_meminfo_p = structref_meminfo(a)[0]
-        a_ref_ct = deref_int64_intp(a_meminfo_p)
+        a_ref_ct_1_ = deref_int64_intp(a_meminfo_p)
 
         s2 = S2(a)
-        a_ref_ct_2 = deref_int64_intp(a_meminfo_p)
+        a_ref_ct_2_ = deref_int64_intp(a_meminfo_p)
 
         s2_data_p = structref_meminfo(s2)[1]
         # `a` is wrapped in `MemInfo` pointed at by `s2`'s `MemInfo`'s data member
-        a_wrap_meminfo_p = deref_int64_intp(s2_data_p)
+        a_wrap_meminfo_p_ = deref_int64_intp(s2_data_p)
 
         a1 = deref_payload(s2, arr_ty)
-        a_ref_ct_3 = deref_int64_intp(a_meminfo_p)
+        a_ref_ct_3_ = deref_int64_intp(a_meminfo_p)
 
-        a1_wrap_meminfo_p = structref_meminfo(a1)[0]
-        return a_wrap_meminfo_p, a1_wrap_meminfo_p, a_ref_ct, a_ref_ct_2, a_ref_ct_3
+        a1_wrap_meminfo_p_ = structref_meminfo(a1)[0]
 
-    a_wrap_meminfo_p, a1_wrap_meminfo_p, a_ref_ct, a_ref_ct_2, a_ref_ct_3 = aux()
+        return (
+            a, a1, a_wrap_meminfo_p_, a1_wrap_meminfo_p_, a_ref_ct_1_, a_ref_ct_2_, a_ref_ct_3_
+        )
+
+    (
+        a, a1, a_wrap_meminfo_p, a1_wrap_meminfo_p, a_ref_ct_1, a_ref_ct_2, a_ref_ct_3
+    ) = aux()
     assert a_wrap_meminfo_p == a1_wrap_meminfo_p
-    assert a_ref_ct == 1
+    assert a_ref_ct_1 == 1
     assert a_ref_ct_2 == 2
-    assert a_ref_ct_3 == 2, "`deref` returns the original owner of the data payload"
+    assert a_ref_ct_3 == 3
 
 
 def test_extract_data_member():
@@ -145,6 +150,23 @@ def test_get_str_from_p_as_int():
     s1_p = c_void_p.from_buffer(s1).value
     s1 = get_str_from_p_as_int(s1_p)
     assert s1 == s1_
+
+
+def test_populate_structref():
+    @numba.njit
+    def make_s4():
+        """ In a jitted context `a` gets its own meminfo """
+        a_ = numpy.array([2.17, 3.14], dtype=numpy.float64)
+        a_meminfo_p = structref_meminfo(a_)[0]
+        a_ref_ct_1_ = deref_int64_intp(a_meminfo_p)
+        s4_ = ll_make_s4(a_)
+        a_ref_ct_2_ = deref_int64_intp(a_meminfo_p)
+        return a_, s4_, a_ref_ct_1_, a_ref_ct_2_
+
+    a, s4, a_ref_ct_1, a_ref_ct_2 = make_s4()
+    assert a_ref_ct_1 == 1
+    assert a_ref_ct_2 == 2
+    assert a.ctypes.data == s4.x.ctypes.data
 
 
 def test_tuple_of_struct_ptrs_as_int():

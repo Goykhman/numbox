@@ -1,7 +1,9 @@
 from numba import njit, float64, int16, int64
 from numba.core import types
 from numba.experimental import structref
-from numba.extending import overload, overload_method
+from numba.extending import intrinsic, overload, overload_method
+
+from numbox.utils.lowlevel import _new, populate_structref
 
 
 @structref.register
@@ -109,9 +111,14 @@ class S2(structref.StructRefProxy):
     def __new__(cls, x1):
         return s2_constructor(x1)
 
+    @property
+    @njit
+    def x1(self):
+        return self.x1
+
 
 structref.define_boxing(S2TypeClass, S2)
-x1_array_type = types.npytypes.Array(int64, 2, 'C')
+x1_array_type = types.npytypes.Array(int64, 2, "C")
 fields_s2 = [("x1", x1_array_type)]
 S2Type = S2TypeClass(fields_s2)
 
@@ -168,3 +175,44 @@ def ol_s2(x1_ty, x2_ty):
 @njit(S3Type(S1Type, float64))
 def s3_constructor(x1, x2):
     return S3(x1, x2)
+
+
+class S4(structref.StructRefProxy):
+    def __new__(cls, *args):
+        raise NotImplementedError("Not intended to be instantiated in Python")
+
+    @property
+    @njit
+    def x(self):
+        return self.x
+
+
+@structref.register
+class S4TypeClass(types.StructRef):
+    pass
+
+
+structref.define_boxing(S4TypeClass, S4)
+
+
+@intrinsic(prefer_literal=False)
+def ll_make_s4(typingctx, x_ty):
+    """
+    Purely intrinsic structref constructor.
+
+    It's preferable to use this kind of constructor when a lot
+    of instances of the corresponding structure are expected to
+    be created in a jitted scope, as it significantly reduces
+    compilation time, cache size, and memory needs.
+    """
+    attributes_ = [
+        ("x", x_ty)
+    ]
+    work_type_ = S4TypeClass(attributes_)
+    args_names = ["x"]
+
+    def codegen(context, builder, signature, args):
+        work_value, data_pointer = _new(context, builder, work_type_)
+        populate_structref(context, builder, work_type_, args, data_pointer, args_names)
+        return work_value
+    return work_type_(x_ty), codegen
