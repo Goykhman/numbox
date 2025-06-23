@@ -2,28 +2,32 @@ from inspect import getfile, getmodule
 from io import StringIO
 from numba import njit, typeof
 from numba.core.errors import NumbaError
-from numba.core.types import boolean, DictType, FunctionType, NoneType, Tuple
+from numba.core.types import (
+    DictType, FunctionType, Literal, NoneType, Tuple, UniTuple, unicode_type, UnicodeType
+)
 from numba.core.typing.context import Context
-from numba.experimental.structref import define_boxing, new, register
+from numba.experimental.structref import define_boxing, new, register, StructRefProxy
 from numba.extending import intrinsic, overload, overload_method
 from numba.typed.typedlist import List
 
 from numbox.core.any.erased_type import ErasedType
 from numbox.core.configurations import default_jit_options
-from numbox.core.work.node import Node, NodeTypeClass, node_attributes
-from numbox.core.work.node_base import NodeBaseType
+from numbox.core.work.lowlevel_work_utils import ll_make_work, WorkTypeClass
+from numbox.core.work.node_base import NodeBase, NodeBaseType, NodeBaseTypeClass, node_base_attributes
 from numbox.utils.lowlevel import (
     extract_struct_member, cast, get_func_p_from_func_struct, get_ll_func_sig,
     _uniformize_tuple_of_structs
 )
 
 
-@register
-class WorkTypeClass(NodeTypeClass):
-    pass
+def _file_anchor():
+    raise NotImplementedError
 
 
-class Work(Node):
+deleted_work_ctor_error = "Use `make_work` instead"
+
+
+class Work(NodeBase):
     """
     Structure describing a unit of work.
 
@@ -33,8 +37,8 @@ class Work(Node):
     ----------
     name : str
         Name of the structure instance.
-    inputs : List[NodeBaseType]
-        Uniform list of `Work.sources`, cast as `NodeBaseType`.
+    inputs : UniTuple[NodeBaseType]
+        Uniform tuple of `Work.sources`, cast as `NodeBaseType`.
     data : Any
         Scalar or array data payload contained in (and calculated by) this structure.
     sources : Tuple[Work, ...]
@@ -44,12 +48,12 @@ class Work(Node):
     derived : bool
         Flag indicating whether the `data` has already been calculated.
 
-    (`name`, `inputs`) attributes of the `Work` structure payload are
+    (`name`, ) attributes of the `Work` structure payload are
     homogeneously typed across all instances of `Work` and accommodate
-    cast-ability to the :obj:`numbox.core.node.Node` base of `NodeType`.
+    cast-ability to the :obj:`numbox.core.node_base.NodeBase` base of `NodeBaseType`.
     """
     def __new__(cls, *args, **kws):
-        return make_work(*args, **kws)
+        raise NotImplementedError(deleted_work_ctor_error)
 
     @property
     @njit(**default_jit_options)
@@ -82,72 +86,59 @@ class Work(Node):
     def _get_input(self, i):
         return self.get_input(i)
 
+    @property
+    @njit(**default_jit_options)
+    def inputs(self):
+        return self.inputs
+
+    def get_inputs_names(self):
+        return list(self._get_inputs_names())
+
+    @njit(**default_jit_options)
+    def _get_inputs_names(self):
+        return self.get_inputs_names()
+
+    # def all_inputs_names(self):
+    #     return list(self._all_inputs_names())
+    #
+    # @njit(**default_jit_options)
+    # def _all_inputs_names(self):
+    #     return self.all_inputs_names()
+    #
+    # @njit(**default_jit_options)
+    # def depends_on(self, name_):
+    #     return self.depends_on(name_)
+
 
 define_boxing(WorkTypeClass, Work)
 
 
-def _verify_signature(data_ty, sources_ty, derive_ty):
-    args_ty = []
-    for source_ind in range(sources_ty.count):
-        source_ty = sources_ty[source_ind]
-        source_data_ty = source_ty.field_dict["data"]
-        args_ty.append(source_data_ty)
-    derive_sig = data_ty(*args_ty)
-    if isinstance(derive_ty, FunctionType):
-        if derive_ty.signature != derive_sig:
-            raise ValueError(
-                f"""Signatures do not match, derive defines {derive_ty.signature}
-but data and sources imply {derive_sig}"""
-            )
+def _deleted_work_ctor(*args, **kwargs):
+    raise NumbaError(deleted_work_ctor_error)
 
 
-def _create_work_type(data_ty, sources_ty, derive_ty):
-    assert isinstance(derive_ty, (FunctionType, NoneType)), f"""Either None or Compile Result supported,
-not CPUDispatcher, got {derive_ty}, of type {type(derive_ty)}"""
-    work_attributes_ = node_attributes + [
-        ("data", data_ty),
-        ("sources", sources_ty),
-        ("derive", derive_ty),
-        ("derived", boolean)
-    ]
-    _verify_signature(data_ty, sources_ty, derive_ty)
-    work_type_ = WorkTypeClass(work_attributes_)
-    return work_type_
+overload(Work, jit_options=default_jit_options)(_deleted_work_ctor)
+# overload(Work)(_deleted_work_ctor, jit_options=default_jit_options)
 
 
-@overload(Work, strict=False, jit_options=default_jit_options)
-def ol_work(name_ty, data_ty, sources_ty, derive_ty):
-    """
-    Dynamically create `WorkType`, depending on the type of `data`, `sources`, and `derive`.
-
-    Different instances of `Work` accommodate various types of data they might contain,
-    various heterogeneous types of other instances of `Work` it might depend on,
-    and custom `derive` function objects used to calculate the instance's `data` depending
-    on the `data` of its `sources`.
-
-    (`name`, `data`) initialize the :obj:`numbox.core.node.Node` header of the composition.
-    """
-    work_type_ = _create_work_type(data_ty, sources_ty, derive_ty)
-
-    def work_constructor(name_, data_, sources_, derive_):
-        uniform_inputs_tuple = _uniformize_tuple_of_structs(sources_, NodeBaseType)
-        uniform_inputs = List.empty_list(NodeBaseType)
-        for s in uniform_inputs_tuple:
-            uniform_inputs.append(s)
-        w = new(work_type_)
-        w.name = name_
-        w.inputs = uniform_inputs
-        w.data = data_
-        w.sources = sources_
-        w.derive = derive_
-        w.derived = False
-        return w
-    return work_constructor
+# @overload(Work, strict=False, jit_options=default_jit_options)
+# def ol_work(name_ty, data_ty, sources_ty, derive_ty):
+#     """
+#     Dynamically create `WorkType`, depending on the type of `data`, `sources`, and `derive`.
+#
+#     Different instances of `Work` accommodate various types of data they might contain,
+#     various heterogeneous types of other instances of `Work` it might depend on,
+#     and custom `derive` function objects used to calculate the instance's `data` depending
+#     on the `data` of its `sources`.
+#
+#     (`name`,) initialize the :obj:`numbox.core.node_base.NodeBase` header of the composition.
+#     """
+#     raise NotImplementedError("Use `make_work` instead")
 
 
 @njit(**default_jit_options)
 def make_work(name, data, sources=(), derive=None):
-    return Work(name, data, sources, derive)
+    return ll_make_work(name, data, sources, derive)
 
 
 @intrinsic
@@ -221,8 +212,8 @@ def ol_calculate(self_ty):
     _calculate = _calculate_registry.get(num_sources, None)
     if _calculate is None:
         code_txt = _make_calculate_code(num_sources)
-        ns = getmodule(_create_work_type).__dict__
-        code = compile(code_txt, getfile(_create_work_type), mode="exec")
+        ns = getmodule(_file_anchor).__dict__
+        code = compile(code_txt, getfile(_file_anchor), mode="exec")
         exec(code, ns)
         _calculate = ns["_calculate_"]
         _calculate_registry[num_sources] = _calculate
@@ -286,8 +277,8 @@ def ol_load(work_ty, data_ty: DictType):
     _loader = _loader_registry.get(num_sources, None)
     if _loader is None:
         code_txt = _make_loader_code(num_sources)
-        ns = getmodule(_verify_signature).__dict__
-        code = compile(code_txt, getfile(_verify_signature), mode="exec")
+        ns = getmodule(_file_anchor).__dict__
+        code = compile(code_txt, getfile(_file_anchor), mode="exec")
         exec(code, ns)
         _loader = ns["_loader_"]
         _loader_registry[num_sources] = _loader
@@ -296,11 +287,57 @@ def ol_load(work_ty, data_ty: DictType):
 
 @overload_method(WorkTypeClass, "get_input", strict=False, jit_options=default_jit_options)
 def ol_get_input(self_ty, i_ty):
-    sources_ty = self_ty.field_dict["sources"]
-    num_inputs = sources_ty.count
-
     def _(self, i):
+        num_inputs = len(self.inputs)
         if i >= num_inputs:
             raise NumbaError(f"Requested input {i} while the node has {num_inputs} inputs")
         return self.inputs[i]
     return _
+
+
+@overload_method(WorkTypeClass, "get_inputs_names", strict=False, jit_options=default_jit_options)
+def ol_get_inputs_names(self_ty):
+    def _(self):
+        names_ = List.empty_list(unicode_type)
+        for s in self.inputs:
+            names_.append(s.name)
+        return names_
+    return _
+
+
+# @njit(**default_jit_options)
+# def _all_input_names(node_, names_):
+#     node = _cast(node_, NodeType)
+#     for i in range(len(node.inputs)):
+#         input_ = node.get_input(i)
+#         name_ = input_.name
+#         if name_ not in names_:
+#             names_.append(name_)
+#         _all_input_names(input_, names_)
+#
+#
+# @overload_method(WorkTypeClass, "all_inputs_names", strict=False, jit_options=default_jit_options)
+# def ol_all_inputs_names(self_ty):
+#     def _(self):
+#         names = List.empty_list(unicode_type)
+#         for i in range(len(self.inputs)):
+#             input_node = self.get_input(i)
+#             name_ = input_node.name
+#             if name_ not in names:
+#                 names.append(name_)
+#             _all_input_names(input_node, names)
+#         return names
+#     return _
+#
+#
+# @overload_method(WorkTypeClass, "depends_on", strict=False, jit_options=default_jit_options)
+# def ol_depends_on(self_ty, name_ty):
+#     if isinstance(name_ty, (Literal, UnicodeType,)):
+#         def _(self, name_):
+#             return name_ in self.all_inputs_names()
+#     else:
+#         assert isinstance(name_ty, WorkTypeClass), f"Cannot handle {name_ty}"
+#
+#         def _(self, name_):
+#             return name_.name in self.all_inputs_names()
+#     return _

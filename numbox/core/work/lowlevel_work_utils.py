@@ -1,11 +1,62 @@
 from llvmlite import ir
 from numba.core.cgutils import int32_t, pack_array
-from numba.core.types import boolean, FunctionType, NoneType, StructRef, unicode_type, UniTuple
+from numba.core.types import boolean, FunctionType, NoneType, StructRef, UniTuple
+from numba.experimental.structref import register
 from numba.extending import intrinsic
 
-from numbox.core.work.work import _verify_signature, WorkTypeClass
 from numbox.core.work.node_base import NodeBaseType, node_base_attributes
 from numbox.utils.lowlevel import _new, populate_structref
+
+
+def derive_ty_error(derive_ty):
+    return f"Either None or Compile Result supported, not CPUDispatcher, got {derive_ty}, of type {type(derive_ty)}"
+
+
+def _verify_signature(data_ty, sources_ty, derive_ty):
+    args_ty = []
+    for source_ind in range(sources_ty.count):
+        source_ty = sources_ty[source_ind]
+        source_data_ty = source_ty.field_dict["data"]
+        args_ty.append(source_data_ty)
+    derive_sig = data_ty(*args_ty)
+    if isinstance(derive_ty, FunctionType):
+        if derive_ty.signature != derive_sig:
+            raise ValueError(
+                f"""Signatures do not match, derive defines {derive_ty.signature}
+but data and sources imply {derive_sig}"""
+            )
+    else:
+        assert isinstance(derive_ty, NoneType), derive_ty_error(derive_ty)
+
+
+@register
+class WorkTypeClass(StructRef):
+    pass
+
+
+def _create_work_type(data_ty, sources_ty, derive_ty, inputs_ty):
+    """
+    Dynamically create `WorkType`, depending on the type of `data`, `sources`, and `derive`.
+
+    Different instances of `Work` accommodate various types of data they might contain,
+    various heterogeneous types of other instances of `Work` it might depend on,
+    and custom `derive` function objects used to calculate the instance's `data` depending
+    on the `data` of its `sources`.
+
+    (`name`,) tuple initializes the :obj:`numbox.core.node_base.NodeBase`
+    header of the composition.
+    """
+    assert isinstance(derive_ty, (FunctionType, NoneType)), derive_ty_error(derive_ty)
+    work_attributes_ = node_base_attributes + [
+        ("inputs", inputs_ty),
+        ("data", data_ty),
+        ("sources", sources_ty),
+        ("derive", derive_ty),
+        ("derived", boolean)
+    ]
+    _verify_signature(data_ty, sources_ty, derive_ty)
+    work_type_ = WorkTypeClass(work_attributes_)
+    return work_type_
 
 
 def create_uniform_inputs(context, builder, tup_ty, tup, inputs_ty):
@@ -37,6 +88,15 @@ def store_derived(builder, data_pointer):
     builder.store(ir.IntType(1)(0), derived_p)
 
 
+def ensure_work_boxing():
+    """
+    this will trigger `define_boxing` in the imported `numbox.core.work.work`;
+    resolves circular import but prepares boxing to Python object of
+    the low-level created work type.
+    """
+    from numbox.core.work.work import Work  # noqa: F401
+
+
 @intrinsic(prefer_literal=False)
 def ll_make_work(typingctx, name_ty, data_ty, sources_ty, derive_ty):
     """
@@ -51,18 +111,10 @@ def ll_make_work(typingctx, name_ty, data_ty, sources_ty, derive_ty):
     which might save memory and cache disk space demand but significantly
     lengthens compilation time.)
     """
-    assert isinstance(derive_ty, (FunctionType, NoneType)), f"""Either None or Compile Result supported,
-not CPUDispatcher, got {derive_ty}, of type {type(derive_ty)}"""
-    inputs_ty = UniTuple(NodeBaseType, sources_ty.count)
-    work_attributes_ = node_base_attributes + [
-        ("inputs", inputs_ty),
-        ("data", data_ty),
-        ("sources", sources_ty),
-        ("derive", derive_ty),
-        ("derived", boolean),
-    ]
     _verify_signature(data_ty, sources_ty, derive_ty)
-    work_type_ = WorkTypeClass(work_attributes_)
+    inputs_ty = UniTuple(NodeBaseType, sources_ty.count)
+    work_type_ = _create_work_type(data_ty, sources_ty, derive_ty, inputs_ty)
+    ensure_work_boxing()
     args_names = ["name", "data", "sources", "derive"]
 
     def codegen(context, builder, signature, args):

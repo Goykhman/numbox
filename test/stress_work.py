@@ -2,15 +2,11 @@ import random
 
 from inspect import getfile, getmodule
 from numba import float64, njit
-from numpy import ndarray
 from numpy.random import randint, seed
 from time import perf_counter
 
 from numbox.core.configurations import default_jit_options
-from numbox.core.work.print_tree import make_image
 from numbox.core.work.lowlevel_work_utils import ll_make_work
-from numbox.core.work.work import make_work, Work
-from numbox.core.work.work_utils import make_init_data, make_work_helper
 from numbox.utils.highlevel import cres
 
 
@@ -91,7 +87,7 @@ def create_nodes(calc_1_, calc_2_, calc_3_):
     return w_{len(lines_) - 1} 
 """
     ns = getmodule(create_pure_inputs).__dict__
-    # print(f"code_txt =\n{code_txt}")
+    ns["ll_make_work"] = ll_make_work
     code = compile(code_txt, getfile(create_pure_inputs), mode="exec")
     exec(code, ns)
     return ns["create_nodes"]
@@ -104,6 +100,8 @@ if __name__ == "__main__":
     w = create_nodes(calc_1, calc_2, calc_3)
     t1 = perf_counter()
     print(f"Created nodes in {t1-t0}")
+
+    # from numbox.core.work.print_tree import make_image
     # w_image = make_image(w)
     # print(w_image)
 

@@ -1,35 +1,37 @@
-from numba import njit
+from numba import njit, typeof
 from numba.core.errors import NumbaError
 from numba.core.types import ListType, Literal, unicode_type, UnicodeType
-from numbox.core.work.node_base import NodeBaseType, NodeBase, NodeBaseTypeClass, node_base_attributes
 from numba.typed.typedlist import List
 from numba.experimental.structref import define_boxing, new, register
 from numba.extending import overload, overload_method
 
 from numbox.core.configurations import default_jit_options
-from numbox.utils.lowlevel import _cast, _uniformize_tuple_of_structs
+from numbox.core.work.node_base import NodeBase, NodeBaseType, NodeBaseTypeClass, node_base_attributes
+from numbox.utils.lowlevel import cast, _cast, _uniformize_tuple_of_structs
 
 
 class Node(NodeBase):
     def __new__(cls, name, inputs):
         return make_node(name, inputs)
 
+    @property
     @njit(**default_jit_options)
+    def inputs(self):
+        return self.inputs
+
     def get_input(self, i):
+        return cast(self._get_input(i), typeof(self))
+
+    @njit(**default_jit_options)
+    def _get_input(self, i):
         return self.get_input(i)
 
-    @property
-    @njit(**default_jit_options)
-    def name(self):
-        return self.name
-
-    @property
-    def inputs(self):
-        return tuple(self._inputs())
+    def get_inputs_names(self):
+        return list(self._get_inputs_names())
 
     @njit(**default_jit_options)
-    def _inputs(self):
-        return self.get_inputs()
+    def _get_inputs_names(self):
+        return self.get_inputs_names()
 
     def all_inputs_names(self):
         return list(self._all_inputs_names())
@@ -75,28 +77,25 @@ def ol_get_input(self_ty, i_ty):
         num_inputs = len(self.inputs)
         if i >= num_inputs:
             raise NumbaError(f"Requested input {i} while the node has {num_inputs} inputs")
-        return _cast(self.inputs[i], NodeType)
+        return self.inputs[i]
     return _
 
 
-@overload_method(NodeTypeClass, "get_inputs", strict=False, jit_options=default_jit_options)
-def ol_get_inputs(self_ty):
+@overload_method(NodeTypeClass, "get_inputs_names", strict=False, jit_options=default_jit_options)
+def ol_get_inputs_names(self_ty):
     def _(self):
-        inputs_list = List.empty_list(NodeType)
+        names_ = List.empty_list(unicode_type)
         for s in self.inputs:
-            inputs_list.append(_cast(s, NodeType))
-        return inputs_list
+            names_.append(s.name)
+        return names_
     return _
-
-
-@njit
-def _all_inputs_names(node_):
-    return node_.all_inputs_names()
 
 
 @njit(**default_jit_options)
-def _all_input_names(node, names_):
-    for input_ in _cast(node, NodeType).get_inputs():
+def _all_input_names(node_, names_):
+    node = _cast(node_, NodeType)
+    for i in range(len(node.inputs)):
+        input_ = node.get_input(i)
         name_ = input_.name
         if name_ not in names_:
             names_.append(name_)
