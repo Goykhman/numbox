@@ -8,6 +8,7 @@ from time import perf_counter
 from numbox.core.configurations import default_jit_options
 from numbox.core.work.lowlevel_work_utils import ll_make_work
 from numbox.utils.highlevel import cres
+from numbox.utils.timer import timer
 
 
 random.seed(1)
@@ -93,30 +94,28 @@ def create_nodes(calc_1_, calc_2_, calc_3_):
     return ns["create_nodes"]
 
 
+@timer
+def do_create_nodes(create_nodes_):
+    create_nodes = njit(**default_jit_options)(create_nodes_)
+    w = create_nodes(calc_1, calc_2, calc_3)
+    return w
+
+
+@timer
+def do_make_image(w_):
+    from numbox.core.work.print_tree import make_image
+    w_image = make_image(w_)
+    print(w_image)
+
+
+@timer
+def do_calculate(w_):
+    w_.calculate()
+
+
 if __name__ == "__main__":
     create_nodes = make_create_nodes_func(1000)
-    t0 = perf_counter()
-    create_nodes = njit(**default_jit_options)(create_nodes)
-    w = create_nodes(calc_1, calc_2, calc_3)
-    t1 = perf_counter()
-    print(f"Created nodes in {t1-t0}")
-
-    # from numbox.core.work.print_tree import make_image
-    # w_image = make_image(w)
-    # print(w_image)
-
-    t2 = perf_counter()
-    w.calculate()
-    t3 = perf_counter()
-    print(f"Calculated in {t3 - t2}")
-
-    t2 = perf_counter()
-    w.calculate()
-    t3 = perf_counter()
-    print(f"Calculated in {t3 - t2}")
-
-    t2 = perf_counter()
-    w.calculate()
-    t3 = perf_counter()
-    print(f"Calculated in {t3 - t2}")
+    w = do_create_nodes(create_nodes)
+    do_make_image(w)
+    do_calculate(w)
     print(w.data)

@@ -208,11 +208,11 @@ def ll_make_s4(typingctx, x_ty):
     attributes_ = [
         ("x", x_ty)
     ]
-    work_type_ = S4TypeClass(attributes_)
+    s4_type_ = S4TypeClass(attributes_)
     args_names = ["x"]
 
     def codegen(context, builder, signature, args):
-        work_value, data_pointer = _new(context, builder, work_type_)
-        populate_structref(context, builder, work_type_, args, data_pointer, args_names)
+        work_value, data_pointer = _new(context, builder, s4_type_)
+        populate_structref(context, builder, s4_type_, args, data_pointer, args_names)
         return work_value
-    return work_type_(x_ty), codegen
+    return s4_type_(x_ty), codegen

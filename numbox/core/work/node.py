@@ -41,8 +41,8 @@ class Node(NodeBase):
         return self.all_inputs_names()
 
     @njit(**default_jit_options)
-    def depends_on(self, name_):
-        return self.depends_on(name_)
+    def depends_on(self, obj_):
+        return self.depends_on(obj_)
 
 
 @register
@@ -117,15 +117,15 @@ def ol_all_inputs_names(self_ty):
 
 
 @overload_method(NodeTypeClass, "depends_on", strict=False, jit_options=default_jit_options)
-def ol_depends_on(self_ty, name_ty):
-    if isinstance(name_ty, (Literal, UnicodeType,)):
+def ol_depends_on(self_ty, obj_ty):
+    if isinstance(obj_ty, (Literal, UnicodeType,)):
         def _(self, name_):
             return name_ in self.all_inputs_names()
     else:
-        assert isinstance(name_ty, NodeTypeClass), f"Cannot handle {name_ty}"
+        assert isinstance(obj_ty, NodeTypeClass), f"Cannot handle {obj_ty}"
 
-        def _(self, name_):
-            return name_.name in self.all_inputs_names()
+        def _(self, obj_):
+            return obj_.name in self.all_inputs_names()
     return _
 
 

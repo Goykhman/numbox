@@ -1,22 +1,22 @@
 from inspect import getfile, getmodule
 from io import StringIO
-from numba import njit, typeof
+from numba import njit
 from numba.core.errors import NumbaError
 from numba.core.types import (
-    DictType, FunctionType, NoneType, Tuple, UniTuple, unicode_type
+    DictType, FunctionType, Literal, NoneType, Tuple, unicode_type, UnicodeType
 )
 from numba.core.typing.context import Context
-from numba.experimental.structref import define_boxing
+from numba.experimental.structref import define_boxing, new
 from numba.extending import intrinsic, overload, overload_method
 from numba.typed.typedlist import List
 
 from numbox.core.any.erased_type import ErasedType
 from numbox.core.configurations import default_jit_options
 from numbox.core.work.lowlevel_work_utils import ll_make_work, WorkTypeClass
-from numbox.core.work.node_base import NodeBase, NodeBaseType, NodeBaseTypeClass, node_base_attributes
+from numbox.core.work.node import NodeType
+from numbox.core.work.node_base import NodeBase, NodeBaseType
 from numbox.utils.lowlevel import (
-    extract_struct_member, cast, get_func_p_from_func_struct, get_ll_func_sig,
-    _uniformize_tuple_of_structs
+    extract_struct_member, _cast, is_not_null, get_func_p_from_func_struct, get_ll_func_sig
 )
 
 
@@ -78,13 +78,10 @@ class Work(NodeBase):
     def load(self, data):
         return self.load(data)
 
-    def get_input(self, i):
-        source_ty = typeof(self).field_dict["sources"][i]
-        return cast(self._get_input(i), source_ty)
-
     @njit(**default_jit_options)
-    def _get_input(self, i):
-        return self.get_input(i)
+    def get_input(self, i):
+        inputs_vector = self.make_inputs_vector()
+        return _cast(inputs_vector[i], NodeType)
 
     @property
     @njit(**default_jit_options)
@@ -98,16 +95,24 @@ class Work(NodeBase):
     def _get_inputs_names(self):
         return self.get_inputs_names()
 
-    # def all_inputs_names(self):
-    #     return list(self._all_inputs_names())
-    #
-    # @njit(**default_jit_options)
-    # def _all_inputs_names(self):
-    #     return self.all_inputs_names()
-    #
-    # @njit(**default_jit_options)
-    # def depends_on(self, name_):
-    #     return self.depends_on(name_)
+    @njit(**default_jit_options)
+    def make_inputs_vector(self):
+        return self.make_inputs_vector()
+
+    def all_inputs_names(self):
+        return list(self._all_inputs_names())
+
+    @njit(**default_jit_options)
+    def _all_inputs_names(self):
+        return self.all_inputs_names()
+
+    @njit(**default_jit_options)
+    def depends_on(self, obj_):
+        return self.depends_on(obj_)
+
+    @njit(**default_jit_options)
+    def as_node(self):
+        return self.as_node()
 
 
 define_boxing(WorkTypeClass, Work)
@@ -289,39 +294,85 @@ def ol_get_inputs_names(self_ty):
     return _
 
 
-# @njit(**default_jit_options)
-# def _all_input_names(node_, names_):
-#     node = _cast(node_, NodeType)
-#     for i in range(len(node.inputs)):
-#         input_ = node.get_input(i)
-#         name_ = input_.name
-#         if name_ not in names_:
-#             names_.append(name_)
-#         _all_input_names(input_, names_)
-#
-#
-# @overload_method(WorkTypeClass, "all_inputs_names", strict=False, jit_options=default_jit_options)
-# def ol_all_inputs_names(self_ty):
-#     def _(self):
-#         names = List.empty_list(unicode_type)
-#         for i in range(len(self.inputs)):
-#             input_node = self.get_input(i)
-#             name_ = input_node.name
-#             if name_ not in names:
-#                 names.append(name_)
-#             _all_input_names(input_node, names)
-#         return names
-#     return _
-#
-#
-# @overload_method(WorkTypeClass, "depends_on", strict=False, jit_options=default_jit_options)
-# def ol_depends_on(self_ty, name_ty):
-#     if isinstance(name_ty, (Literal, UnicodeType,)):
-#         def _(self, name_):
-#             return name_ in self.all_inputs_names()
-#     else:
-#         assert isinstance(name_ty, WorkTypeClass), f"Cannot handle {name_ty}"
-#
-#         def _(self, name_):
-#             return name_.name in self.all_inputs_names()
-#     return _
+def make_inputs_vector_code(num_sources):
+    code_txt = StringIO()
+    for source_ind_ in range(num_sources):
+        code_txt.write(_make_source_getter(source_ind_))
+    code_txt.write("""
+def _inputs_vector_(work_):
+    node = work_.node
+    if is_not_null(node):
+        return node.inputs
+    inputs_vector = List.empty_list(NodeBaseType)""")
+    if num_sources > 0:
+        code_txt.write("""
+    sources = work_.sources""")
+        for source_ind_ in range(num_sources):
+            code_txt.write(f"""
+    source_{source_ind_} = _get_source_{source_ind_}(sources)
+    node = source_{source_ind_}.as_node()
+    inputs_vector.append(_cast(node, NodeBaseType))
+""")
+    code_txt.write("""
+    return inputs_vector""")
+    return code_txt.getvalue()
+
+
+_inputs_vector_registry = {}
+
+
+@overload_method(WorkTypeClass, "make_inputs_vector", strict=False, jit_options=default_jit_options)
+def ol_make_inputs_vector(self_ty):
+    sources_ty = self_ty.field_dict["sources"]
+    num_sources = sources_ty.count
+    if num_sources == 0:
+        def _(self):
+            inputs_vector = List.empty_list(NodeBaseType)
+            return inputs_vector
+        return _
+    _inputs_vector = _inputs_vector_registry.get(num_sources, None)
+    if _inputs_vector is None:
+        code_txt = make_inputs_vector_code(num_sources)
+        ns = {**getmodule(_file_anchor).__dict__, **{"new": new}}
+        code = compile(code_txt, getfile(_file_anchor), mode="exec")
+        exec(code, ns)
+        _inputs_vector = ns["_inputs_vector_"]
+        _inputs_vector_registry[num_sources] = _inputs_vector
+    return _inputs_vector
+
+
+@overload_method(WorkTypeClass, "as_node", strict=False, jit_options=default_jit_options)
+def ol_as_node(self_ty):
+    def _(self):
+        node = self.node
+        if is_not_null(node):
+            return node
+        node = new(NodeType)
+        node.name = self.name
+        node.inputs = self.make_inputs_vector()
+        self.node = node
+        return node
+    return _
+
+
+@overload_method(WorkTypeClass, "all_inputs_names", strict=False, jit_options=default_jit_options)
+def ol_all_inputs_names(self_ty):
+    def _(self):
+        node = self.as_node()
+        return node.all_inputs_names()
+    return _
+
+
+@overload_method(WorkTypeClass, "depends_on", strict=False, jit_options=default_jit_options)
+def ol_depends_on(self_ty, obj_ty):
+    if isinstance(obj_ty, (Literal, UnicodeType,)):
+        def _(self, name_):
+            node = self.as_node()
+            return name_ in node.all_inputs_names()
+    else:
+        assert isinstance(obj_ty, WorkTypeClass), f"Cannot handle {obj_ty}"
+
+        def _(self, obj_):
+            node = self.as_node()
+            return obj_.name in node.all_inputs_names()
+    return _

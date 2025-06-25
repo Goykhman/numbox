@@ -2,10 +2,10 @@ from llvmlite import ir
 from llvmlite.ir.builder import IRBuilder
 from numba import carray, njit
 from numba.core.base import BaseContext
-from numba.core.cgutils import int32_t, intp_t, pack_array, voidptr_t
+from numba.core.cgutils import int32_t, intp_t, is_not_null as cgutils_is_not_null, pack_array, voidptr_t
 from numba.experimental.jitclass.base import imp_dtor
 from numba.core.types import (
-    FunctionType, intp, StructRef, TypeRef, Tuple, char,
+    boolean, FunctionType, intp, StructRef, TypeRef, Tuple, char,
     UnicodeType, unicode_type, uintp, UniTuple, voidptr
 )
 from numba.core.typing.context import Context
@@ -171,6 +171,16 @@ def get_unicode_data_p(s):
     See https://github.com/numba/numba/blob/release0.61/numba/cpython/unicode.py#L83
     """
     return _get_unicode_data_p(s)
+
+
+@intrinsic
+def is_not_null(typingctx, struct_ty):
+    def codegen(context, builder, signature, arguments):
+        struct_ = arguments[0]
+        meminfo = context.nrt.get_meminfos(builder, struct_ty, struct_)[0]
+        type_data, meminfo_p = meminfo
+        return cgutils_is_not_null(builder, meminfo_p)
+    return boolean(struct_ty), codegen
 
 
 def _new(context, builder, struct_ty_):

@@ -1,10 +1,11 @@
-from llvmlite import ir
-from numba.core.cgutils import int32_t, pack_array
-from numba.core.types import boolean, FunctionType, NoneType, StructRef, UniTuple
+from numba.core.cgutils import get_null_value, int8_t, int32_t, pack_array
+from numba.core.types import FunctionType, int8, NoneType, StructRef, UniTuple
 from numba.experimental.structref import register
 from numba.extending import intrinsic
 
+from numbox.core.work.node import NodeType
 from numbox.core.work.node_base import NodeBaseType, node_base_attributes
+from numbox.utils.highlevel import determine_field_index
 from numbox.utils.lowlevel import _new, populate_structref
 
 
@@ -52,7 +53,8 @@ def _create_work_type(data_ty, sources_ty, derive_ty, inputs_ty):
         ("data", data_ty),
         ("sources", sources_ty),
         ("derive", derive_ty),
-        ("derived", boolean)
+        ("derived", int8),
+        ("node", NodeType)
     ]
     _verify_signature(data_ty, sources_ty, derive_ty)
     work_type_ = WorkTypeClass(work_attributes_)
@@ -76,15 +78,20 @@ def create_uniform_inputs(context, builder, tup_ty, tup):
     return inputs
 
 
-def store_inputs(context, builder, sources_ty, sources, data_pointer, inputs_ty):
+def store_inputs(context, builder, sources_ty, sources, data_pointer, inputs_index):
     inputs = create_uniform_inputs(context, builder, sources_ty, sources)
-    inputs_p = builder.gep(data_pointer, (int32_t(0), int32_t(1)))
+    inputs_p = builder.gep(data_pointer, (int32_t(0), int32_t(inputs_index)))
     builder.store(inputs, inputs_p)
 
 
-def store_derived(builder, data_pointer):
-    derived_p = builder.gep(data_pointer, (int32_t(0), int32_t(5)))
-    builder.store(ir.IntType(1)(0), derived_p)
+def store_derived(builder, data_pointer, derived_index):
+    derived_p = builder.gep(data_pointer, (int32_t(0), int32_t(derived_index)))
+    builder.store(int8_t(0), derived_p)
+
+
+def store_node(context, builder, data_pointer, node_index):
+    node_p = builder.gep(data_pointer, (int32_t(0), int32_t(node_index)))
+    builder.store(get_null_value(context.get_value_type(NodeType)), node_p)
 
 
 def ensure_work_boxing():
@@ -120,7 +127,11 @@ def ll_make_work(typingctx, name_ty, data_ty, sources_ty, derive_ty):
         work_value, data_pointer = _new(context, builder, work_type_)
         populate_structref(context, builder, work_type_, args, data_pointer, args_names)
         if len(sources_ty) > 0:
-            store_inputs(context, builder, sources_ty, args[2], data_pointer, inputs_ty)
-        store_derived(builder, data_pointer)
+            store_inputs(
+                context, builder, sources_ty, args[2], data_pointer,
+                determine_field_index(work_type_, "inputs")
+            )
+        store_derived(builder, data_pointer, determine_field_index(work_type_, "derived"))
+        store_node(context, builder, data_pointer, determine_field_index(work_type_, "node"))
         return work_value
     return work_type_(name_ty, data_ty, sources_ty, derive_ty), codegen
