@@ -45,8 +45,10 @@ class Work(NodeBase):
         Heterogeneous tuple of `Work` instances that this `Work` instance depends on.
     derive : FunctionType
         Function of the signature determined by the data types of `sources` and `data`.
-    derived : bool
+    derived : int8
         Flag indicating whether the `data` has already been calculated.
+    node : NodeType
+        Work as Node, with its sources in a List.
 
     (`name`, ) attributes of the `Work` structure payload are
     homogeneously typed across all instances of `Work` and accommodate
@@ -54,6 +56,11 @@ class Work(NodeBase):
     """
     def __new__(cls, *args, **kws):
         raise NotImplementedError(deleted_work_ctor_error)
+
+    @property
+    @njit(**default_jit_options)
+    def inputs(self):
+        return self.inputs
 
     @property
     @njit(**default_jit_options)
@@ -71,6 +78,10 @@ class Work(NodeBase):
         return self.derived
 
     @njit(**default_jit_options)
+    def as_node(self):
+        return self.as_node()
+
+    @njit(**default_jit_options)
     def calculate(self):
         return self.calculate()
 
@@ -80,13 +91,7 @@ class Work(NodeBase):
 
     @njit(**default_jit_options)
     def get_input(self, i):
-        inputs_vector = self.make_inputs_vector()
-        return _cast(inputs_vector[i], NodeType)
-
-    @property
-    @njit(**default_jit_options)
-    def inputs(self):
-        return self.inputs
+        return self.get_input(i)
 
     def get_inputs_names(self):
         return list(self._get_inputs_names())
@@ -109,10 +114,6 @@ class Work(NodeBase):
     @njit(**default_jit_options)
     def depends_on(self, obj_):
         return self.depends_on(obj_)
-
-    @njit(**default_jit_options)
-    def as_node(self):
-        return self.as_node()
 
 
 define_boxing(WorkTypeClass, Work)
@@ -280,7 +281,8 @@ def ol_get_input(self_ty, i_ty):
         num_inputs = len(self.inputs)
         if i >= num_inputs:
             raise NumbaError(f"Requested input {i} while the node has {num_inputs} inputs")
-        return self.inputs[i]
+        inputs_vector = self.make_inputs_vector()
+        return _cast(inputs_vector[i], NodeType)
     return _
 
 
