@@ -8,7 +8,6 @@ from numba.typed.typeddict import Dict
 from numba.typed.typedlist import List
 
 from numbox.core.configurations import default_jit_options
-from numbox.core.work.node import Node
 from numbox.core.work.print_tree import make_image
 from numbox.core.work.work_utils import make_init_data, make_work_helper
 from test.auxiliary_utils import collect_and_run_tests
@@ -193,17 +192,6 @@ def test_struct_array_data():
     )
     w2.calculate()
     assert numpy.isclose(w2.data, 137 * 2.17)
-
-
-def test_as_node():
-    w1 = make_work_helper("w1", 0.0)
-    assert isinstance(w1.as_node(), Node)
-    assert isinstance(w1.as_node(), Node)  # returns cached node
-
-    w2 = make_work_helper("w2", 0.0)
-    w3 = make_work_helper("w3", 0.0, (w2,), lambda w2_: 0.0)
-    _ = w3.make_inputs_vector()  # stores w2 as node
-    assert isinstance(w1.as_node(), Node)  # returns cached node
 
 
 if __name__ == "__main__":

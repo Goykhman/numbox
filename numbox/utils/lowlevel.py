@@ -206,16 +206,18 @@ def _new(context, builder, struct_ty_):
     return work_._getvalue(), data_pointer
 
 
-def populate_structref(context, builder, structref_type_, args, data_pointer, args_names):
-    """ Store `args` with names `args_names` in structref with type `structref_type_`
-    with payload at `data_pointer`.
+def populate_structref(context, builder, structref_type_, args, data_pointer, ordered_args_names):
+    """ Store `args` with the corresponding ordered names `ordered_args_names`
+    in structref with type `structref_type_` and payload at `data_pointer`.
 
     This is not a substitute for 'setattr' and is only to be used when initializing
     a new structref, as it does not take care of decref'ing of any possible `MemInfo`
-    that might be already referenced by a member of the structref (on the other hand,
-    it appears that neither does the numba standard implementation...) """
+    that might be already referenced by a member of the structref. (On the other hand,
+    it appears that neither does numba <=0.61 standard
+    `implementation <https://github.com/numba/numba/issues/10129>`_)
+    """
     field_dict = structref_type_.field_dict
-    for arg_name, arg_ in zip(args_names, args):
+    for arg_name, arg_ in zip(ordered_args_names, args):
         arg_ty = field_dict[arg_name]
         member_ind = determine_field_index(structref_type_, arg_name)
         data_p = builder.gep(data_pointer, (int32_t(0), int32_t(member_ind)))

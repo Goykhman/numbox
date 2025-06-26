@@ -21,7 +21,7 @@ that exists in a fully jitted scope and is accessible both at the low-level and 
 
 `Node` can be used on its own (in which case the recommended way to
 create it is via the factory function :func:`numbox.core.work.node.make_node`)
-or as a base to more functionally-rich graph nodes,
+or as a prototype to more functionally-rich graph nodes,
 such as :class:`numbox.core.work.work.Work`.
 
 The logic of `Node` and its sub-classes follows a graph-optional design - no
@@ -29,18 +29,20 @@ graph orchestration structure is required to register and manage the graph
 of `Node` instance objects - which in turn reduces unnecessary computation overhead
 and simplifies the program design.
 
-To that end, each node is identified by its name and contains a uniformly-typed
-container member with all the input nodes references that it bears a directed dependency relationship to.
+To that end, each node is identified by its name and contains a uniformly-typed vector-like
+container member (rendered by the numba-native `numba.core.typed.List`) with all the
+input nodes references that it bears a directed dependency relationship to.
 This enables a traversal not only of graphs of `Node` instances themselves
-but also graphs of objects of its subclasses, such as, the graphs of `Work` nodes.
+but also graphs of objects representable by it, such as, the graphs of `Work` nodes.
 
-`Node` implementation makes heavy use of numba
+`Node` implementation makes heavy use of the numba
 `meminfo <https://numba.readthedocs.io/en/stable/developer/numba-runtime.html?highlight=meminfo#memory-management>`_
 paradigm that manages memory-allocated
 payload via smart pointer (pointer to numba's meminfo object) reference counting.
 This allows users to reference the desired
 memory location via a 'void' structref type, such as,
 :class:`numbox.core.any.erased_type.ErasedType`, or :class:`numbox.core.utils.void_type.VoidType`,
+or base structref type, such as, :class:`numbox.core.work.node_base.NodeBaseType`,
 and dereference its payload accordingly when needed via the appropriate :func:`numbox.utils.lowlevel.cast`.
 
 .. automodule:: numbox.core.work.node
@@ -54,8 +56,8 @@ numbox.core.work.node_base
 Overview
 ********
 
-Base class for :class:`numbox.core.work.node.Node`. Contains functionality
-dependent only on the node name.
+Base class for :class:`numbox.core.work.node.Node` and :class:`numbox.core.work.work.Work`.
+Contains functionality dependent only on the node name.
 
 .. automodule:: numbox.core.work.node_base
    :members:
@@ -128,14 +130,16 @@ Defines :class:`numbox.core.work.work.Work` StructRef.
 `Work` is a unit of calculation work that is designed to
 be included as a node on a jitted graph of other `Work` nodes.
 
-`Work` type subclasses :class:`numbox.core.work.node.Node` and follows the logic of its graph design.
+`Work` type subclasses :class:`numbox.core.work.node_base.NodeBase`
+and follows the logic of graph design of :class:`numbox.core.work.node.Node`.
 However, since numba StructRef does not support low-level subclasses,
-there is no inheritance relation between `NodeType` and `WorkType`,
+there is no inheritance relation between `NodeBaseType` and `WorkType`,
 leaving the data design to follow the composition pattern.
-Namely, the members of the `Node` payload are a header in the payload of `Work`, allowing
+Namely, the member (`name`) of the `NodeBase` payload is a header in the payload of `Work`, allowing
 to perform a meaningful :func:`numbox.utils.lowlevel.cast`.
 
-The best way to create `Work` object instance is via the :func:`numbox.core.work.work.make_work` constructor
+The main way to create `Work` object instance is via the :func:`numbox.core.work.work.make_work`
+constructor (`Work(...)` instantiation is in fact disabled both in Python and jitted scope)
 that can be invoked either from Python or jitted scope (plain-Python or jitted `run` function below)::
 
     import numpy
@@ -162,12 +166,56 @@ decorated with :func:`numbox.utils.highlevel.cres`). Otherwise,
 simply pulling `derive_work` from the global scope within
 argument-less `run` will prevent its caching.
 
+For performance-critical large graphs containing hundreds or more nodes created
+in a jitted scope, using :func:`numbox.core.work.work.make_work` is not
+feasible as it either results in large memory use (and takes up a lot of
+disk space when the jitted caller is cached), or takes a substantial time to
+compile when `make_work` is declared with `inline=True` directive (albeit
+resulting in a much slimmer and optimized final compilation result).
+For that purpose it is recommended to use a low-level intrinsic
+:func:`numbox.core.work.lowlevel_work_utils.ll_make_work` as follows::
+
+    from numba import njit
+    from numba.core.types import float64
+    from numpy import isclose
+
+    from numbox.core.work.node_base import NodeBaseType
+    from numbox.core.work.lowlevel_work_utils import ll_make_work, create_uniform_inputs
+    from numbox.core.work.print_tree import make_image
+    from numbox.utils.highlevel import cres
+
+    @cres(float64())
+    def derive_v0():
+        return 3.14
+
+    @njit(cache=True)
+    def v0_maker(derive_):
+        return ll_make_work("v0", 0.0, (), derive_)
+
+    v0 = v0_maker(derive_v0)
+    assert v0.data == 0
+    assert v0.name == "v0"
+    assert v0.inputs == ()
+    assert not v0.derived
+    v0.calculate()
+    assert isclose(v0.data, 3.14)
+
+Importantly, `Work` objects support :func:`numbox.core.work.work.ol_as_node`
+rendition `as_node` that creates a :class:`numbox.core.work.node.Node` instance
+with the same name as the `Work` instance and the vector of inputs of the
+:class:`numbox.core.work.node_base.NodeBase` type referencing the original `Work`
+instance's sources. Upon the first invocation of `as_node` on the given `Work`
+instance, `Node` representations for itself and recursively all its sources
+are created and stored in their `node` attributes only once. Subsequent invocations
+of `as_node` on either the given `Work` node or any of nodes on its sub-graph
+will return the previously created `Node` objects stored as the `node` attribute.
+
 Graph manager
 *************
 
 While not a requirement, it is recommended that the `Work` instance's `name` attribute matches the name
 of the variable to which that instance is assigned.
-Moreoever, no out-of-the-box assertions for uniqueness of the `Work` names is provided.
+Moreover, no out-of-the-box assertions for uniqueness of the `Work` names is provided.
 The users are free to implement their own graph managers that register the `Work`
 nodes and assert additional requirements on the names as needed. The core numbox library
 maintains agnostic position to whether such an overhead is universally beneficial (and

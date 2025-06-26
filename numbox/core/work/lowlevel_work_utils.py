@@ -97,8 +97,8 @@ def store_node(context, builder, data_pointer, node_index):
 def ensure_work_boxing():
     """
     this will trigger `define_boxing` in the imported `numbox.core.work.work`;
-    resolves circular import but prepares boxing to Python object of
-    the low-level created work type.
+    resolves circular import and prepares boxing to Python object of
+    the low-level created work types.
     """
     from numbox.core.work.work import Work  # noqa: F401
 
@@ -121,11 +121,11 @@ def ll_make_work(typingctx, name_ty, data_ty, sources_ty, derive_ty):
     inputs_ty = UniTuple(NodeBaseType, sources_ty.count)
     work_type_ = _create_work_type(data_ty, sources_ty, derive_ty, inputs_ty)
     ensure_work_boxing()
-    args_names = ["name", "data", "sources", "derive"]
+    ordered_args_names = ["name", "data", "sources", "derive"]
 
     def codegen(context, builder, signature, args):
         work_value, data_pointer = _new(context, builder, work_type_)
-        populate_structref(context, builder, work_type_, args, data_pointer, args_names)
+        populate_structref(context, builder, work_type_, args, data_pointer, ordered_args_names)
         if len(sources_ty) > 0:
             store_inputs(
                 context, builder, sources_ty, args[2], data_pointer,
