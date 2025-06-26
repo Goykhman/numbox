@@ -89,7 +89,7 @@ S12Type = S12TypeClass(fields_s12)
 
 
 @overload(S12, strict=False)
-def ol_s1(x1_ty):
+def ol_s12(x1_ty):
     def _(x1):
         s12_ = structref.new(S12Type)
         s12_.x1 = x1
