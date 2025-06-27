@@ -211,16 +211,16 @@ def ol_calculate(self_ty):
 
 
 @intrinsic
-def _cast_to_work_data(typingctx, work_ty, data_as_any_ty: ErasedType):
+def _cast_to_work_data(typingctx, work_ty, data_as_erased_ty: ErasedType):
     data_ty = work_ty.field_dict["data"]
-    sig = data_ty(work_ty, data_as_any_ty)
+    sig = data_ty(work_ty, data_as_erased_ty)
 
     def codegen(context, builder, signature, arguments):
-        data_as_any = arguments[1]
-        ty_ll = context.get_data_type(data_ty)
-        _, meminfo_p = context.nrt.get_meminfos(builder, data_as_any_ty, data_as_any)[0]
+        data_as_erased = arguments[1]
+        data_ty_ll = context.get_data_type(data_ty)
+        _, meminfo_p = context.nrt.get_meminfos(builder, data_as_erased_ty, data_as_erased)[0]
         payload_p = context.nrt.meminfo_data(builder, meminfo_p)
-        x_as_ty_p = builder.bitcast(payload_p, ty_ll.as_pointer())
+        x_as_ty_p = builder.bitcast(payload_p, data_ty_ll.as_pointer())
         val = builder.load(x_as_ty_p)
         context.nrt.incref(builder, data_ty, val)
         return val

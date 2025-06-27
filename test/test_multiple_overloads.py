@@ -8,6 +8,7 @@ types are then created.
 
 from numpy import isclose
 from numba.core.types import int16
+from test.auxiliary_utils import collect_and_run_tests
 from test.multiple_overloads import Entity
 
 
@@ -26,3 +27,7 @@ def test_1():
     e4_x1 = "a string"
     e4 = Entity(e4_x1)
     aux(e1, e2, e3, e4)
+
+
+if __name__ == "__main__":
+    collect_and_run_tests(__name__)
