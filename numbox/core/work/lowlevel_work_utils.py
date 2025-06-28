@@ -125,7 +125,7 @@ def ll_make_work(typingctx, name_ty, data_ty, sources_ty, derive_ty):
 
     def codegen(context, builder, signature, args):
         work_value, data_pointer = _new(context, builder, work_type_)
-        populate_structref(context, builder, work_type_, args, data_pointer, ordered_args_names)
+        populate_structref(context, builder, signature, work_type_, work_value, args, ordered_args_names)
         if len(sources_ty) > 0:
             store_inputs(
                 context, builder, sources_ty, args[2], data_pointer,

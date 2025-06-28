@@ -4,6 +4,7 @@ from numba import carray, njit
 from numba.core.base import BaseContext
 from numba.core.cgutils import int32_t, intp_t, is_not_null as cgutils_is_not_null, pack_array, voidptr_t
 from numba.experimental.jitclass.base import imp_dtor
+from numba.experimental.structref import _Utils
 from numba.core.types import (
     boolean, FunctionType, intp, StructRef, TypeRef, Tuple, char,
     UnicodeType, unicode_type, uintp, UniTuple, voidptr
@@ -206,23 +207,30 @@ def _new(context, builder, struct_ty_):
     return work_._getvalue(), data_pointer
 
 
-def populate_structref(context, builder, structref_type_, args, data_pointer, ordered_args_names):
+def populate_structref(
+    context, builder, signature, structref_type_, structref_, args, ordered_args_names, decref_old=False
+):
     """ Store `args` with the corresponding ordered names `ordered_args_names`
     in structref with type `structref_type_` and payload at `data_pointer`.
 
-    This is not a substitute for 'setattr' and is only to be used when initializing
-    a new structref, as it does not take care of decref'ing of any possible `MemInfo`
-    that might be already referenced by a member of the structref. (On the other hand,
-    it appears that neither does numba <=0.61 standard
-    `implementation <https://github.com/numba/numba/issues/10129>`_)
+    Based on numba.experimental.structref::define_attributes::struct_setattr_impl
+
+    Do not call `decref_old` when populating a newly-created structref, as there's nothing to decref there.
     """
     field_dict = structref_type_.field_dict
-    for arg_name, arg_ in zip(ordered_args_names, args):
-        arg_ty = field_dict[arg_name]
-        member_ind = determine_field_index(structref_type_, arg_name)
-        data_p = builder.gep(data_pointer, (int32_t(0), int32_t(member_ind)))
-        context.nrt.incref(builder, arg_ty, arg_)
-        builder.store(arg_, data_p)
+
+    utils = _Utils(context, builder, structref_type_)
+    dataval = utils.get_data_struct(structref_)
+
+    for arg_i, (arg_name, arg) in enumerate(zip(ordered_args_names, args)):
+        arg_ty = signature.args[arg_i]
+        field_type = field_dict[arg_name]
+        casted = context.cast(builder, arg, arg_ty, field_type)
+        old_value = getattr(dataval, arg_name)
+        context.nrt.incref(builder, arg_ty, casted)
+        if decref_old:
+            context.nrt.decref(builder, arg_ty, old_value)
+        setattr(dataval, arg_name, casted)
 
 
 @intrinsic

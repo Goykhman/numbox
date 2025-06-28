@@ -212,7 +212,7 @@ def ll_make_s4(typingctx, x_ty):
     args_names = ["x"]
 
     def codegen(context, builder, signature, args):
-        work_value, data_pointer = _new(context, builder, s4_type_)
-        populate_structref(context, builder, s4_type_, args, data_pointer, args_names)
-        return work_value
+        s4_, data_pointer = _new(context, builder, s4_type_)
+        populate_structref(context, builder, signature, s4_type_, s4_, args, args_names)
+        return s4_
     return s4_type_(x_ty), codegen

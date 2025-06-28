@@ -90,6 +90,8 @@ Execution of do_create_nodes took 0.159s
 Execution of run took 3.779s (0.664s for 1,000 entities)
 ~0.7Gb memory used (about the same for 1,000 entities)
 """
+import sys
+
 from numbox.utils.timer import timer
 from test.stress_work import multiple_run, single_run
 
@@ -104,8 +106,10 @@ def do_make_image(w_):
 if __name__ == "__main__":
     num_of_inputs = 1000
     num_of_entities = 10000
+    print("multiple run", file=sys.stderr)
     total_data = multiple_run(num_of_inputs, num_of_entities)
     print(f"total_data = {total_data}")
+    print("single run", file=sys.stderr)
     w = single_run(num_of_inputs)
     print(f"w.data = {w.data}")
     # do_make_image(w)
