@@ -1,79 +1,15 @@
-""" Stress-testing `Work` graphs (on Apple M1 Pro 16 Gb)
-
-*** 1,000 input nodes, ~ 2,000 total nodes ***
-
-Stats when making image:
-
-First run over a clear cache:
-
-Execution of do_create_nodes took 22.207s
-Execution of do_make_image took 88.870s
-Execution of do_calculate took 18.521s
-
-Second run loading cache:
-
-Execution of do_create_nodes took 0.159s
-Execution of do_make_image took 0.593s
-Execution of do_calculate took 0.148s
-
-Stats without making image:
-
-First run over a clear cache:
-
-Execution of do_create_nodes took 23.089s
-Execution of do_calculate took 18.254s
-
-~0.6 Gb memory used, cache size ~380 Mb,
-25 Mb for `create_nodes` the rest is `Work` nodes calculations
-
-Second run loading cache:
-
-Execution of do_create_nodes took 0.169s
-Execution of do_calculate took 0.148s
-
-~0.1 Gb memory used
-
-*** 5,000 input nodes, ~ 10,000 total nodes ***
-
-Stats when making image:
-
-First run over a clear cache:
-
-Execution of do_create_nodes took 817.861s
-Execution of do_make_image took 631.145s
-Execution of do_calculate took 161.130s
-
-Second run loading cache:
-
-Execution of do_create_nodes took 0.953s
-Execution of do_make_image took 2.671s
-Execution of do_calculate took 0.874s
-
-Stats without making image:
-
-First run over a clear cache:
-
-Execution of do_create_nodes took 820.860s
-Execution of do_calculate took 156.426s
-
-~5.75 Gb memory used, cache size ~3.05 Gb,
-25 Mb for `create_nodes` the rest is `Work` nodes calculations
-
-Second run loading cache:
-
-Execution of do_create_nodes took 0.973s
-Execution of do_calculate took 0.875s
-
-~1.5 Gb memory used
-
-"""
+import numpy
 import random
 
 from inspect import getfile, getmodule
-from numba import float64, njit
+from numba import njit
+from numba.core.types import float64, unicode_type
+from numba.typed import Dict
 from numpy.random import randint, seed
 
+from numbox.core.any.any_type import AnyType
 from numbox.core.configurations import default_jit_options
+from numbox.core.work.loader_utils import load_array_row_into_dict
 from numbox.core.work.lowlevel_work_utils import ll_make_work
 from numbox.utils.highlevel import cres
 from numbox.utils.timer import timer
@@ -83,6 +19,7 @@ random.seed(1)
 seed(1)
 
 
+NUM_OF_ENTITIES_DEFAULT = 1000
 NUM_OF_PURE_INPUTS_DEFAULT = 1000
 
 
@@ -170,20 +107,47 @@ def do_create_nodes(create_nodes_):
 
 
 @timer
-def do_make_image(w_):
-    from numbox.core.work.print_tree import make_image
-    w_image = make_image(w_)
-    print(w_image)
-
-
-@timer
 def do_calculate(w_):
     w_.calculate()
 
 
-if __name__ == "__main__":
-    create_nodes = make_create_nodes_func(1000)
+def single_run(num_of_inputs):
+    create_nodes = make_create_nodes_func(num_of_inputs)
     w = do_create_nodes(create_nodes)
-    # do_make_image(w)
     do_calculate(w)
-    print(w.data)
+    return w
+
+
+def prepare_input_data(num_of_sources=NUM_OF_PURE_INPUTS_DEFAULT, num_of_entities=NUM_OF_ENTITIES_DEFAULT):
+    data_ty = numpy.dtype([(f"w_{i}", numpy.float64) for i in range(num_of_sources)], align=True)
+    data_ = numpy.empty((num_of_entities,), dtype=data_ty)
+    for i in range(num_of_sources):
+        value_ = 10 * numpy.random.rand(num_of_entities)
+        data_[f"w_{i}"] = value_
+    return data_
+
+
+@njit(**default_jit_options)
+def run_entity(total, loader_dict):
+    total.load(loader_dict)
+    total.calculate()
+    return total.data
+
+
+@timer
+@njit(**default_jit_options)
+def run(total, data, loader_dict, num_of_entities=NUM_OF_ENTITIES_DEFAULT):
+    total_data = numpy.empty((num_of_entities,), dtype=float64)
+    for i in range(num_of_entities):
+        load_array_row_into_dict(data, i, loader_dict)
+        total_data[i] = run_entity(total, loader_dict)
+    return total_data
+
+
+def multiple_run(num_of_inputs, num_of_entities):
+    create_nodes = make_create_nodes_func(num_of_inputs)
+    node = do_create_nodes(create_nodes)
+    data = prepare_input_data(num_of_inputs, num_of_entities)
+    loader_dict = Dict.empty(unicode_type, AnyType)
+    total_data = run(node, data, loader_dict, num_of_entities)
+    return total_data
