@@ -17,7 +17,8 @@ NUM_OF_ENTITIES = 10
 
 data_ty = numpy.dtype([
     ("quantity", numpy.int16),
-    ("value", numpy.float64)
+    ("value", numpy.float64),
+    ("state", "|S10")
 ], align=True)
 
 
@@ -25,8 +26,10 @@ def prepare_input_data(num_of_entities=NUM_OF_ENTITIES):
     data_ = numpy.empty((num_of_entities,), dtype=data_ty)
     quantity_ = numpy.random.randint(1, 10, size=num_of_entities, dtype=numpy.int16)
     value_ = 10 * numpy.random.rand(num_of_entities)
+    state_ = numpy.random.choice(["liquid", "gas", "solid", "plasma", "qgcond"], size=num_of_entities).astype("|S10")
     data_["quantity"] = quantity_
     data_["value"] = value_
+    data_["state"] = state_
     return data_
 
 
@@ -46,18 +49,34 @@ def test_load_array_row_into_dict(num_of_entities=NUM_OF_ENTITIES):
             ) == data[i][member_name]
 
 
-@cres(float64(int16, float64), **default_jit_options)
-def derive_total(quantity_, value_):
-    prod_ = quantity_ * value_
+derive_total_sig = float64(*[np_struct_member_type(data_ty, name) for name in data_ty.names])
+
+
+@cres(derive_total_sig, **default_jit_options)
+def derive_total(quantity_, value_, state_):
+    if state_ == b"liquid":
+        prod_ = 0.1 * quantity_ * value_
+    elif state_ == b"gas":
+        prod_ = 0.2 * quantity_ * value_
+    elif state_ == b"solid":
+        prod_ = 0.3 * quantity_ * value_
+    elif state_ == b"plasma":
+        prod_ = 0.4 * quantity_ * value_
+    else:
+        prod_ = numpy.nan
     return prod_
+
+
+state_ty = np_struct_member_type(data_ty, "state")
 
 
 @njit(**default_jit_options)
 def make_graph(derive_total_):
     quantity = ll_make_work("quantity", int16(0), (), None)
     value = ll_make_work("value", 0.0, (), None)
+    state = ll_make_work("state", b"", (), None, data_ty_ref=state_ty)
 
-    total = ll_make_work("total", 0.0, (quantity, value), derive_total_)
+    total = ll_make_work("total", 0.0, (quantity, value, state), derive_total_)
     return total
 
 
@@ -82,7 +101,15 @@ def test_loader_utils_1():
     data = prepare_input_data()
     loader_dict = Dict.empty(unicode_type, AnyType)
     total_data = run(total, data, loader_dict)
-    assert numpy.allclose(total_data, data["quantity"] * data["value"])
+
+    state = data["state"]
+    prod = data["value"] * data["quantity"]
+    ref_array = numpy.select(
+        [state == b"liquid", state == b"gas", state == b"solid", state == b"plasma", state == b"qgcond"],
+        [0.1 * prod, 0.2 * prod, 0.3 * prod, 0.4 * prod, numpy.nan]
+    )
+
+    assert numpy.allclose(total_data, ref_array, equal_nan=True)
 
 
 if __name__ == "__main__":

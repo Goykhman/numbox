@@ -2,7 +2,7 @@ import numpy
 
 from inspect import getfile, getmodule
 from io import StringIO
-from numba import typeof
+from numba import from_dtype
 from numba.core.types import Record, unicode_type
 from numba.extending import overload
 
@@ -45,4 +45,4 @@ def ol_load_array_row_into_dict(array_ty, row_ind_ty, loader_dict_ty):
 
 
 def np_struct_member_type(data_ty_: numpy.dtypes.VoidDType, member_name):
-    return typeof(data_ty_).dtype.fields[member_name].type
+    return from_dtype(data_ty_).fields[member_name].type

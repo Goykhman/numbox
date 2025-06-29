@@ -1,5 +1,5 @@
 from numba.core.cgutils import get_null_value, int8_t, int32_t, pack_array
-from numba.core.types import FunctionType, int8, NoneType, StructRef, UniTuple
+from numba.core.types import FunctionType, int8, NoneType, StructRef, TypeRef, UniTuple
 from numba.experimental.structref import register
 from numba.extending import intrinsic
 
@@ -104,7 +104,7 @@ def ensure_work_boxing():
 
 
 @intrinsic(prefer_literal=False)
-def ll_make_work(typingctx, name_ty, data_ty, sources_ty, derive_ty):
+def ll_make_work(typingctx, name_ty, data_ty, sources_ty, derive_ty, data_ty_ref: TypeRef = NoneType):
     """
     Purely intrinsic work constructor, alternative to overloaded
     `numbox.core.work.work.Work`.
@@ -117,6 +117,8 @@ def ll_make_work(typingctx, name_ty, data_ty, sources_ty, derive_ty):
     which might save memory and cache disk space demand but significantly
     lengthens compilation time.)
     """
+    if data_ty_ref != NoneType:
+        data_ty = data_ty_ref.instance_type
     _verify_signature(data_ty, sources_ty, derive_ty)
     inputs_ty = UniTuple(NodeBaseType, sources_ty.count)
     work_type_ = _create_work_type(data_ty, sources_ty, derive_ty, inputs_ty)
@@ -125,7 +127,7 @@ def ll_make_work(typingctx, name_ty, data_ty, sources_ty, derive_ty):
 
     def codegen(context, builder, signature, args):
         work_value, data_pointer = _new(context, builder, work_type_)
-        populate_structref(context, builder, signature, work_type_, work_value, args, ordered_args_names)
+        populate_structref(context, builder, signature, work_type_, work_value, args[:4], ordered_args_names)
         if len(sources_ty) > 0:
             store_inputs(
                 context, builder, sources_ty, args[2], data_pointer,
@@ -134,4 +136,4 @@ def ll_make_work(typingctx, name_ty, data_ty, sources_ty, derive_ty):
         store_derived(builder, data_pointer, determine_field_index(work_type_, "derived"))
         store_node(context, builder, data_pointer, determine_field_index(work_type_, "node"))
         return work_value
-    return work_type_(name_ty, data_ty, sources_ty, derive_ty), codegen
+    return work_type_(name_ty, data_ty, sources_ty, derive_ty, data_ty_ref), codegen
