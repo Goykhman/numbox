@@ -4,6 +4,7 @@ from numpy import isclose
 
 from numbox.core.any.any_type import AnyType, make_any
 from numbox.core.work.work_utils import make_work_helper
+from test.auxiliary_utils import collect_and_run_tests
 
 
 def test_loader_1():
@@ -84,3 +85,7 @@ def test_loader_3():
 
     w3.calculate()
     assert isclose(w3.data, 1.72 + 3 * 137)
+
+
+if __name__ == "__main__":
+    collect_and_run_tests(__name__)

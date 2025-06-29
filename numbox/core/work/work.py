@@ -90,6 +90,10 @@ class Work(NodeBase):
         return self.load(data)
 
     @njit(**default_jit_options)
+    def combine(self, data):
+        return self.combine(data)
+
+    @njit(**default_jit_options)
     def get_input(self, i):
         return self.get_input(i)
 
@@ -275,6 +279,50 @@ def ol_load(work_ty, data_ty: DictType):
     return _loader
 
 
+def _make_combine_code(num_sources):
+    code_txt = StringIO()
+    for source_ind_ in range(num_sources):
+        code_txt.write(_make_source_getter(source_ind_))
+    code_txt.write("""
+def _combine_(work_, data_):
+    work_name = work_.name
+    if work_name in data_:
+        data_[work_name].reset(work_.data)""")
+    if num_sources > 0:
+        code_txt.write("""
+    sources = work_.sources""")
+        for source_ind_ in range(num_sources):
+            code_txt.write(f"""
+    source_{source_ind_} = _get_source_{source_ind_}(sources)
+    source_{source_ind_}.combine(data_)
+""")
+    code_txt.write("""
+    return
+""")
+    return code_txt.getvalue()
+
+
+_combine_registry = {}
+
+
+@overload_method(WorkTypeClass, "combine", strict=False, jit_options=default_jit_options)
+def ol_combine(work_ty, data_ty: DictType):
+    """ Harvest nodes data from the graph with the root node `work`.
+     `data` is provided as dictionary mapping node name to `Any` type
+     containing erased payload `p` to be reset to `data`. """
+    sources_ty = work_ty.field_dict["sources"]
+    num_sources = sources_ty.count
+    _combine = _combine_registry.get(num_sources, None)
+    if _combine is None:
+        code_txt = _make_combine_code(num_sources)
+        ns = getmodule(_file_anchor).__dict__
+        code = compile(code_txt, getfile(_file_anchor), mode="exec")
+        exec(code, ns)
+        _combine = ns["_combine_"]
+        _combine_registry[num_sources] = _combine
+    return _combine
+
+
 @overload_method(WorkTypeClass, "get_input", strict=False, jit_options=default_jit_options)
 def ol_get_input(self_ty, i_ty):
     def _(self, i):
@@ -296,7 +344,7 @@ def ol_get_inputs_names(self_ty):
     return _
 
 
-def make_inputs_vector_code(num_sources):
+def _make_inputs_vector_code(num_sources):
     code_txt = StringIO()
     for source_ind_ in range(num_sources):
         code_txt.write(_make_source_getter(source_ind_))
@@ -334,7 +382,7 @@ def ol_make_inputs_vector(self_ty):
         return _
     _inputs_vector = _inputs_vector_registry.get(num_sources, None)
     if _inputs_vector is None:
-        code_txt = make_inputs_vector_code(num_sources)
+        code_txt = _make_inputs_vector_code(num_sources)
         ns = {**getmodule(_file_anchor).__dict__, **{"new": new}}
         code = compile(code_txt, getfile(_file_anchor), mode="exec")
         exec(code, ns)
