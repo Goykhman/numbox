@@ -4,7 +4,7 @@ from numbox.core.bindings.signatures import signatures
 from numbox.core.bindings.utils import load_lib
 
 
-load_lib("m")
+load_lib("c")
 
 
 @cres(signatures.get("rand"), cache=True)

@@ -3,7 +3,7 @@ from io import StringIO
 from numba import njit
 from numba.core.errors import NumbaError
 from numba.core.types import (
-    DictType, FunctionType, Literal, NoneType, Tuple, unicode_type, UnicodeType
+    DictType, FunctionType, Integer, Literal, NoneType, Tuple, unicode_type, UnicodeType
 )
 from numba.core.typing.context import Context
 from numba.experimental.structref import define_boxing, new
@@ -284,9 +284,13 @@ def _make_combine_code(num_sources):
     for source_ind_ in range(num_sources):
         code_txt.write(_make_source_getter(source_ind_))
     code_txt.write("""
-def _combine_(work_, data_):
+def _combine_(work_, data_, ct_=0):
+    print(f"work_ = {work_.name} ct_ = {ct_} len(data) = {len(data_)}")
+    if ct_ == len(data_):
+        return ct_
     work_name = work_.name
     if work_name in data_:
+        ct_ += 1
         data_[work_name].reset(work_.data)""")
     if num_sources > 0:
         code_txt.write("""
@@ -294,10 +298,10 @@ def _combine_(work_, data_):
         for source_ind_ in range(num_sources):
             code_txt.write(f"""
     source_{source_ind_} = _get_source_{source_ind_}(sources)
-    source_{source_ind_}.combine(data_)
+    ct_ = source_{source_ind_}.combine(data_, ct_)
 """)
     code_txt.write("""
-    return
+    return ct_
 """)
     return code_txt.getvalue()
 
@@ -306,7 +310,7 @@ _combine_registry = {}
 
 
 @overload_method(WorkTypeClass, "combine", strict=False, jit_options=default_jit_options)
-def ol_combine(work_ty, data_ty: DictType):
+def ol_combine(work_ty, data_ty: DictType, ct_ty=Integer):
     """ Harvest nodes data from the graph with the root node `work`.
      `data` is provided as dictionary mapping node name to `Any` type
      containing erased payload `p` to be reset to `data`. """
