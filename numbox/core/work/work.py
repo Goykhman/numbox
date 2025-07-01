@@ -285,7 +285,6 @@ def _make_combine_code(num_sources):
         code_txt.write(_make_source_getter(source_ind_))
     code_txt.write("""
 def _combine_(work_, data_, ct_=0):
-    print(f"work_ = {work_.name} ct_ = {ct_} len(data) = {len(data_)}")
     if ct_ == len(data_):
         return ct_
     work_name = work_.name
