@@ -40,6 +40,13 @@ class Node(NodeBase):
     def _all_inputs_names(self):
         return self.all_inputs_names()
 
+    def all_end_nodes(self):
+        return list(self._all_end_nodes())
+
+    @njit(**default_jit_options)
+    def _all_end_nodes(self):
+        return self.all_end_nodes()
+
     @njit(**default_jit_options)
     def depends_on(self, obj_):
         return self.depends_on(obj_)
@@ -112,6 +119,31 @@ def ol_all_inputs_names(self_ty):
             if name_ not in names:
                 names.append(name_)
             _all_input_names(input_node, names)
+        return names
+    return _
+
+
+@njit(**default_jit_options)
+def _all_end_nodes(node_, names_):
+    node = _cast(node_, NodeType)
+    for i in range(len(node.inputs)):
+        input_ = node.get_input(i)
+        name_ = input_.name
+        if name_ not in names_ and len(_cast(input_, NodeType).inputs) == 0:
+            names_.append(name_)
+        _all_end_nodes(input_, names_)
+
+
+@overload_method(NodeTypeClass, "all_end_nodes", strict=False, jit_options=default_jit_options)
+def ol_all_end_nodes(self_ty):
+    def _(self):
+        names = List.empty_list(unicode_type)
+        for i in range(len(self.inputs)):
+            input_ = self.get_input(i)
+            name_ = input_.name
+            if name_ not in names and len(_cast(input_, NodeType).inputs) == 0:
+                names.append(name_)
+            _all_end_nodes(input_, names)
         return names
     return _
 

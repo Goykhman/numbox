@@ -115,6 +115,13 @@ class Work(NodeBase):
     def _all_inputs_names(self):
         return self.all_inputs_names()
 
+    def all_end_nodes(self):
+        return list(self._all_end_nodes())
+
+    @njit(**default_jit_options)
+    def _all_end_nodes(self):
+        return self.all_end_nodes()
+
     @njit(**default_jit_options)
     def depends_on(self, obj_):
         return self.depends_on(obj_)
@@ -413,6 +420,14 @@ def ol_all_inputs_names(self_ty):
     def _(self):
         node = self.as_node()
         return node.all_inputs_names()
+    return _
+
+
+@overload_method(WorkTypeClass, "all_end_nodes", strict=False, jit_options=default_jit_options)
+def ol_all_end_nodes(self_ty):
+    def _(self):
+        node = self.as_node()
+        return node.all_end_nodes()
     return _
 
 

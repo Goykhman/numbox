@@ -109,6 +109,10 @@ y2--y0--x0
     assert y2.depends_on("time")
     assert not y0.depends_on(time)
     assert y2.all_inputs_names() == ["y0", "x0", "y1", "time", "tau"]
+    assert x0.all_end_nodes() == []
+    assert y0.all_end_nodes() == ["x0"]
+    assert y1.all_end_nodes() == ["x0", "time", "tau"]
+    assert y2.all_end_nodes() == ["x0", "time", "tau"]
 
     y2_node = y2.as_node()
     assert y2_node.name == "y2"
