@@ -9,6 +9,90 @@ Functionality for fully-jitted and light-weight calculation on a graph.
 Modules
 ++++++++
 
+numbox.core.work.builder
+------------------------
+
+Overview
+********
+
+Pure Python abstraction for creation of JIT'ed graph of :class:`numbox.core.work.work.Work` nodes.
+Users can define input nodes::
+
+    from numba import int16
+    from numbox.core.work.builder import End
+
+    w1_ = End(name="w1", init_value=137, ty=int16)
+    w2_ = End(name="w2", init_value=3.14)
+    inputs = [w1_, w2_]
+
+where optional capability to specify numba types of the end nodes has been illustrated.
+Suppose two more values, `w3` and `w4`, are derived as follows::
+
+    def derive_w3(w1_, w2_):
+        if w1_ < 0:
+            return 0.0
+        elif w1_ < 1:
+            return 2 * w2_
+        return 3 * w2_
+
+
+    def derive_w4(w1_):
+        return 2 * w1_
+
+Users can then declare the corresponding nodes as::
+
+    from numbox.core.work.builder import Derived
+
+    w3_ = Derived(name="w3", init_value=0.0, derive=derive_w3, sources=(w1_, w2_))
+    w4_ = Derived(name="w4", init_value=0.0, derive=derive_w4, sources=(w1_,))
+    derived = [w3_, w4_]
+
+DAG with the access nodes `w3` and `w4` can then be constructed and used as follows [#f1]_::
+
+    from numbox.core.work.builder import make_graph
+
+    (w3, w4) = make_graph(inputs, derived, (w3_, w4_))
+
+One can the compute and access values of the derived nodes::
+
+    from numpy import isclose
+
+    assert w3.data == 0
+    w3.calculate()
+    assert isclose(w3.data, 9.42)
+    assert w4.data == 0
+    w4.calculate()
+    assert isclose(w4.data, 274)
+
+One can inspect graph structure as::
+
+    from numbox.core.work.print_tree import make_image
+
+    print(make_image(w3))
+
+which outputs::
+
+    w3--w1
+    |
+    w2
+
+The visualization utility for a sub-graph tree :func:`numbox.core.work.print_tree.make_graph`
+spans the breadth in the vertical direction and the depth in the horizontal direction.
+
+Each `Work` can be represented as light-weight :class:`numbox.core.work.node.Node` type,
+which stores its `node` attribute upon first invocation::
+
+    w3_n = w3.as_node()
+
+This enables an assortment of utilities, such as::
+
+    assert w3.all_inputs_names() == ["w1", "w2"]
+    assert w3.depends_on("w1")
+    assert w3.get_input(0).name == "w1"
+
+
+.. [#f1] Behind the scenes, :func:`numbox.core.work.builder.make_graph` compiles (and optionally caches) a graph maker with low-level intrinsic constructors of the individual work nodes inlined into it. All the Python 'derive' functions defined for the `Derived` nodes are compiled for the signatures inferred from the types of the derived nodes and their sources.
+
 numbox.core.work.node
 ---------------------
 
