@@ -18,13 +18,15 @@ Overview
 Pure Python abstraction for creation of JIT'ed graph of :class:`numbox.core.work.work.Work` nodes.
 Users can define end nodes::
 
+    from numbox.core.work.builder import End
+
     w1_ = End(name="w1", init_value=137, ty=int16)
     w2_ = End(name="w2", init_value=3.14)
     w5_ = End(name="w5", init_value=10)
     w6_ = End(name="w6", init_value=7.5)
     inputs = [w1_, w2_, w5_, w6_]
 
-where optional capability to specify numba types of the end nodes has been illustrated.
+where optional capability to specify numba types of the nodes has been illustrated.
 Suppose more values, `w3`, `w4`, `w7`, `w8`, `w9`, `w10`, are derived as follows::
 
     def derive_w3(w1_, w2_):
@@ -145,7 +147,7 @@ From the given access node, values of the other nodes can be combined as follows
     assert isclose(sheaf["w7"].get_as(float64), 109.42)
     assert isclose(sheaf["w8"].get_as(float64), 23.55)
 
-Graph nodes can be loaded from the access node with given values as follows::
+Graph nodes can be loaded from the access node with given values as follows [#f2]_::
 
     from numba.core.types import unicode_type
     from numba.typed.typeddict import Dict
@@ -155,13 +157,36 @@ Graph nodes can be loaded from the access node with given values as follows::
     load_data["w1"] = make_any(12)
     w10.load(load_data)
 
-Recalculating the graph then renders new values of the affected nodes::
+Recalculating the graph then renders new values of the affected nodes [#f3]_::
 
     w10.calculate()
     w10.combine(sheaf)
     assert isclose(sheaf["w4"].get_as(float64), 24)
 
 .. [#f1] Behind the scenes, :func:`numbox.core.work.builder.make_graph` compiles (and optionally caches) a graph maker with low-level intrinsic constructors of the individual work nodes inlined into it. All the Python 'derive' functions defined for the `Derived` nodes are compiled for the signatures inferred from the types of the derived nodes and their sources.
+.. [#f2] For numpy-compatible data types, additional utilities are available in :mod:`numbox.core.work.loader_utils`.
+.. [#f3] For numpy-compatible data types, additional utilities are available in :mod:`numbox.core.work.combine_utils`.
+
+.. automodule:: numbox.core.work.builder
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+numbox.core.work.combine_utils
+------------------------------
+
+.. automodule:: numbox.core.work.combine_utils
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+numbox.core.work.loader_utils
+-----------------------------
+
+.. automodule:: numbox.core.work.loader_utils
+   :members:
+   :show-inheritance:
+   :undoc-members:
 
 numbox.core.work.node
 ---------------------
