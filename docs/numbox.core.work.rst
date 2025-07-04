@@ -18,6 +18,7 @@ Overview
 Pure Python abstraction for creation of JIT'ed graph of :class:`numbox.core.work.work.Work` nodes.
 Users can define end nodes::
 
+    from numba.core.types import int16
     from numbox.core.work.builder import End
 
     w1_ = End(name="w1", init_value=137, ty=int16)
@@ -136,26 +137,30 @@ This enables an assortment of utilities, such as::
     assert w3.get_input(0).name == "w1"
     assert w10.get_input(3).name == "w8"
 
-From the given access node, values of the other nodes can be combined as follows::
+From the given access node, values of nodes can be combined as follows::
 
+    from numba.core.types import float64
     from numbox.core.work.combine_utils import make_sheaf_dict
 
-    requested = ("w4", "w7", "w8")
+    requested = ("w1", "w4", "w7", "w8")
     sheaf = make_sheaf_dict(requested)
     w10.combine(sheaf)
     assert isclose(sheaf["w4"].get_as(float64), 274)
     assert isclose(sheaf["w7"].get_as(float64), 109.42)
     assert isclose(sheaf["w8"].get_as(float64), 23.55)
 
-Graph nodes can be loaded from the access node with given values as follows [#f2]_::
+Graph nodes can be loaded from the access node as follows [#f2]_::
 
-    from numba.core.types import unicode_type
+    from numba.core.types import int16, unicode_type
     from numba.typed.typeddict import Dict
     from numbox.core.any.any_type import Any, make_any
 
     load_data = Dict.empty(key_type=unicode_type, value_type=AnyType)
+    assert sheaf["w1"].get_as(int16) == 137
     load_data["w1"] = make_any(12)
     w10.load(load_data)
+    w10.combine(sheaf)
+    assert sheaf["w1"].get_as(int16) == 12
 
 Recalculating the graph then renders new values of the affected nodes [#f3]_::
 

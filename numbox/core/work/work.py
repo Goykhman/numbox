@@ -3,11 +3,12 @@ from io import StringIO
 from numba import njit
 from numba.core.errors import NumbaError
 from numba.core.types import (
-    DictType, FunctionType, Integer, Literal, NoneType, Tuple, unicode_type, UnicodeType
+    boolean, DictType, FunctionType, Literal, NoneType, Tuple, unicode_type, UnicodeType
 )
 from numba.core.typing.context import Context
 from numba.experimental.structref import define_boxing, new
 from numba.extending import intrinsic, overload, overload_method
+from numba.typed.typeddict import Dict
 from numba.typed.typedlist import List
 
 from numbox.core.any.erased_type import ErasedType
@@ -291,12 +292,14 @@ def _make_combine_code(num_sources):
     for source_ind_ in range(num_sources):
         code_txt.write(_make_source_getter(source_ind_))
     code_txt.write("""
-def _combine_(work_, data_, ct_=0):
-    if ct_ == len(data_):
-        return ct_
+def _combine_(work_, data_, harvested_=None):
+    if harvested_ is None:
+        harvested_ = Dict.empty(key_type=unicode_type, value_type=boolean)
+    if len(harvested_) == len(data_):
+        return
     work_name = work_.name
     if work_name in data_:
-        ct_ += 1
+        harvested_[work_name] = True
         data_[work_name].reset(work_.data)""")
     if num_sources > 0:
         code_txt.write("""
@@ -304,10 +307,10 @@ def _combine_(work_, data_, ct_=0):
         for source_ind_ in range(num_sources):
             code_txt.write(f"""
     source_{source_ind_} = _get_source_{source_ind_}(sources)
-    ct_ = source_{source_ind_}.combine(data_, ct_)
+    source_{source_ind_}.combine(data_, harvested_)
 """)
     code_txt.write("""
-    return ct_
+    return
 """)
     return code_txt.getvalue()
 
@@ -316,7 +319,7 @@ _combine_registry = {}
 
 
 @overload_method(WorkTypeClass, "combine", strict=False, jit_options=default_jit_options)
-def ol_combine(work_ty, data_ty: DictType, ct_ty=Integer):
+def ol_combine(work_ty, data_ty: DictType, harvested_ty=NoneType):
     """ Harvest nodes data from the graph with the root node `work`.
      `data` is provided as dictionary mapping node name to `Any` type
      containing erased payload `p` to be reset to `data`. """
@@ -325,7 +328,7 @@ def ol_combine(work_ty, data_ty: DictType, ct_ty=Integer):
     _combine = _combine_registry.get(num_sources, None)
     if _combine is None:
         code_txt = _make_combine_code(num_sources)
-        ns = getmodule(_file_anchor).__dict__
+        ns = {**getmodule(_file_anchor).__dict__, **{"boolean": boolean, "Dict": Dict}}
         code = compile(code_txt, getfile(_file_anchor), mode="exec")
         exec(code, ns)
         _combine = ns["_combine_"]

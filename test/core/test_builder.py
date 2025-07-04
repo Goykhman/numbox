@@ -130,7 +130,7 @@ w10--w3--w1
     w8_r = w10.get_input(3)
     assert w8_r.name == "w8"
 
-    requested = ("w4", "w7", "w8")
+    requested = ("w1", "w4", "w7", "w8")
     sheaf = make_sheaf_dict(requested)
     w10.combine(sheaf)
     assert isclose(sheaf["w4"].get_as(float64), 274)
@@ -139,7 +139,10 @@ w10--w3--w1
 
     load_data = Dict.empty(key_type=unicode_type, value_type=AnyType)
     load_data["w1"] = make_any(12)
+    assert sheaf["w1"].get_as(int16) == 137
     w10.load(load_data)
+    w10.combine(sheaf)
+    assert sheaf["w1"].get_as(int16) == 12
     w10.calculate()
     w10.combine(sheaf)
     assert isclose(sheaf["w4"].get_as(float64), 24)
