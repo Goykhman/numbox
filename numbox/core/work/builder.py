@@ -3,7 +3,7 @@ from inspect import getfile, getmodule
 from io import StringIO
 from numba import njit, typeof
 from numba.core.types import Type
-from typing import Any, Callable, NamedTuple, Optional, Sequence
+from typing import Any, Callable, NamedTuple, Optional, Sequence, Union
 
 from numbox.core.configurations import default_jit_options
 from numbox.core.work.lowlevel_work_utils import ll_make_work
@@ -24,7 +24,7 @@ class Derived(NamedTuple):
     name: str
     init_value: Any
     derive: Callable
-    sources: Sequence[End]
+    sources: Sequence[Union['Derived', End]]
     ty: Optional[type | Type] = None
 
 

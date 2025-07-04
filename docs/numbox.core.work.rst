@@ -16,17 +16,16 @@ Overview
 ********
 
 Pure Python abstraction for creation of JIT'ed graph of :class:`numbox.core.work.work.Work` nodes.
-Users can define input nodes::
-
-    from numba import int16
-    from numbox.core.work.builder import End
+Users can define end nodes::
 
     w1_ = End(name="w1", init_value=137, ty=int16)
     w2_ = End(name="w2", init_value=3.14)
-    inputs = [w1_, w2_]
+    w5_ = End(name="w5", init_value=10)
+    w6_ = End(name="w6", init_value=7.5)
+    inputs = [w1_, w2_, w5_, w6_]
 
 where optional capability to specify numba types of the end nodes has been illustrated.
-Suppose two more values, `w3` and `w4`, are derived as follows::
+Suppose more values, `w3`, `w4`, `w7`, `w8`, `w9`, `w10`, are derived as follows::
 
     def derive_w3(w1_, w2_):
         if w1_ < 0:
@@ -35,9 +34,23 @@ Suppose two more values, `w3` and `w4`, are derived as follows::
             return 2 * w2_
         return 3 * w2_
 
-
     def derive_w4(w1_):
         return 2 * w1_
+
+    def derive_w7(w3_, w5_):
+        return w3_ + (w5_ ** 2)
+
+    def derive_w8(w6_, w2_):
+        if w6_ > 5:
+            return w6_ * w2_
+        else:
+            return w6_ + w2_
+
+    def derive_w9(w3_, w4_, w7_):
+        return (w4_ - w3_) / (abs(w7_) + 1e-5)
+
+    def derive_w10(w3_, w4_, w7_, w8_, w9_):
+        return (w3_ + w4_ + w7_) * 0.1 + (w8_ - w9_)
 
 Users can then declare the corresponding nodes as::
 
@@ -45,39 +58,68 @@ Users can then declare the corresponding nodes as::
 
     w3_ = Derived(name="w3", init_value=0.0, derive=derive_w3, sources=(w1_, w2_))
     w4_ = Derived(name="w4", init_value=0.0, derive=derive_w4, sources=(w1_,))
-    derived = [w3_, w4_]
+    w7_ = Derived(name="w7", init_value=0.0, derive=derive_w7, sources=(w3_, w5_))
+    w8_ = Derived(name="w8", init_value=0.0, derive=derive_w8, sources=(w6_, w2_))
+    w9_ = Derived(name="w9", init_value=0.0, derive=derive_w9, sources=(w3_, w4_, w7_))
+    w10_ = Derived(name="w10", init_value=0.0, derive=derive_w10, sources=(w3_, w4_, w7_, w8_, w9_))
+    derived = [w3_, w4_, w7_, w8_, w9_, w10_]
 
-DAG with the access nodes `w3` and `w4` can then be constructed and used as follows [#f1]_::
+DAG with the access nodes `w7`, `w9`, `w10`, can then be constructed and used as follows [#f1]_::
 
     from numbox.core.work.builder import make_graph
 
-    (w3, w4) = make_graph(inputs, derived, (w3_, w4_))
+    (w7, w9, w10) = make_graph(inputs, derived, (w7_, w9_, w10_))
 
-One can the compute and access values of the derived nodes::
+One can then compute and access values of the derived nodes::
 
     from numpy import isclose
 
-    assert w3.data == 0
-    w3.calculate()
-    assert isclose(w3.data, 9.42)
-    assert w4.data == 0
-    w4.calculate()
-    assert isclose(w4.data, 274)
+    assert w10.data == 0
+    w10.calculate()
+    assert isclose(w7.data, 109.42)
+    assert isclose(w9.data, 2.418022)
+    assert isclose(w10.data, 60.416)
 
-One can inspect graph structure as::
+Graph structure can be inspected as::
 
     from numbox.core.work.print_tree import make_image
 
-    print(make_image(w3))
+    print(make_image(w10))
 
 which outputs::
 
-    w3--w1
-    |
-    w2
+    w10--w3--w1
+         |   |
+         |   w2
+         |
+         w4--w1
+         |
+         w7--w3--w1
+         |   |   |
+         |   |   w2
+         |   |
+         |   w5
+         |
+         w8--w6
+         |   |
+         |   w2
+         |
+         w9--w3--w1
+             |   |
+             |   w2
+             |
+             w4--w1
+             |
+             w7--w3--w1
+                 |   |
+                 |   w2
+                 |
+                 w5
 
 The visualization utility for a sub-graph tree :func:`numbox.core.work.print_tree.make_graph`
 spans the breadth in the vertical direction and the depth in the horizontal direction.
+The nodes are uniquely identified by their names.
+To simplify the image structure, the same node can appear on one graph image multiple times.
 
 Each `Work` can be represented as light-weight :class:`numbox.core.work.node.Node` type,
 which stores its `node` attribute upon first invocation::
@@ -87,9 +129,37 @@ which stores its `node` attribute upon first invocation::
 This enables an assortment of utilities, such as::
 
     assert w3.all_inputs_names() == ["w1", "w2"]
+    assert w7.all_inputs_names() == ["w3", "w1", "w2", "w5"]
     assert w3.depends_on("w1")
     assert w3.get_input(0).name == "w1"
+    assert w10.get_input(3).name == "w8"
 
+From the given access node, values of the other nodes can be combined as follows::
+
+    from numbox.core.work.combine_utils import make_sheaf_dict
+
+    requested = ("w4", "w7", "w8")
+    sheaf = make_sheaf_dict(requested)
+    w10.combine(sheaf)
+    assert isclose(sheaf["w4"].get_as(float64), 274)
+    assert isclose(sheaf["w7"].get_as(float64), 109.42)
+    assert isclose(sheaf["w8"].get_as(float64), 23.55)
+
+Graph nodes can be loaded from the access node with given values as follows::
+
+    from numba.core.types import unicode_type
+    from numba.typed.typeddict import Dict
+    from numbox.core.any.any_type import Any, make_any
+
+    load_data = Dict.empty(key_type=unicode_type, value_type=AnyType)
+    load_data["w1"] = make_any(12)
+    w10.load(load_data)
+
+Recalculating the graph then renders new values of the affected nodes::
+
+    w10.calculate()
+    w10.combine(sheaf)
+    assert isclose(sheaf["w4"].get_as(float64), 24)
 
 .. [#f1] Behind the scenes, :func:`numbox.core.work.builder.make_graph` compiles (and optionally caches) a graph maker with low-level intrinsic constructors of the individual work nodes inlined into it. All the Python 'derive' functions defined for the `Derived` nodes are compiled for the signatures inferred from the types of the derived nodes and their sources.
 
