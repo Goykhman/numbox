@@ -1,3 +1,4 @@
+from hashlib import md5
 from inspect import getfile, getmodule
 from io import StringIO
 from numba import njit, typeof
@@ -78,6 +79,11 @@ def _verify_access_nodes(
         assert access_node in all_inputs_ or access_node in all_derived_, f"{access_node} cannot be reached"
 
 
+def code_block_hash(code_txt: str):
+    """ Re-compile and re-save cache when source code has changed. """
+    return md5(code_txt.encode("utf-8")).hexdigest()
+
+
 def make_graph(
     all_inputs_: Sequence[End],
     all_derived_: Sequence[Derived],
@@ -102,14 +108,16 @@ def make_graph(
     for derived_ in all_derived_:
         line_ = _derived_line(derived_, ns, _make_args, jit_options)
         code_txt.write(f"\n\t{line_}")
+    hash_ = code_block_hash(code_txt.getvalue())
     code_txt.write(f"""\n\taccess_tuple = ({", ".join([n.name for n in access_nodes])})""")
     code_txt.write(f"\n\treturn access_tuple")
     code_txt = code_txt.getvalue()
     make_params = ", ".join(_make_args)
+    make_name = f"_make_{hash_}"
     code_txt = f"""
 @njit(**jit_options)
-def _make_({make_params}):""" + code_txt + f"""
-return_node_ = _make_({make_params})
+def {make_name}({make_params}):""" + code_txt + f"""
+return_node_ = {make_name}({make_params})
 """
     code = compile(code_txt, getfile(_file_anchor), mode="exec")
     exec(code, ns)
