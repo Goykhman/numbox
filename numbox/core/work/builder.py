@@ -1,5 +1,5 @@
 from hashlib import md5
-from inspect import getfile, getmodule
+from inspect import getfile, getmodule, getsource
 from io import StringIO
 from itertools import chain
 from numba import njit, typeof
@@ -61,13 +61,17 @@ def _derived_cres(ty, sources: Sequence[End], derive, jit_options=None):
     return derive_cres
 
 
-def _derived_line(derived_: Derived, ns: dict, initializers: dict, _make_args: list, jit_options=None):
+def _derived_line(
+    derived_: Derived, ns: dict, initializers: dict, derive_hashes: list, _make_args: list, jit_options=None
+):
     name_ = derived_.name
     init_ = derived_.init_value
     sources_ = ", ".join([s.name for s in derived_.sources])
     sources_ = sources_ + ", " if "," not in sources_ else sources_
     ty_ = get_ty(derived_)
-    derive_ = _derived_cres(ty_, derived_.sources, derived_.derive, jit_options)
+    derive_func = derived_.derive
+    derive_hashes.append(md5(getsource(derive_func).encode("utf-8")).hexdigest())
+    derive_ = _derived_cres(ty_, derived_.sources, derive_func, jit_options)
     derive_name = f"{name_}_derive"
     init_name = f"{name_}_init"
     _make_args.append(derive_name)
@@ -110,13 +114,14 @@ def make_graph(
     _make_args = []
     code_txt = StringIO()
     initializers = {}
+    derive_hashes=[]
     for input_ in all_inputs_:
         line_ = _input_line(input_, ns, initializers)
         code_txt.write(f"\n\t{line_}")
     for derived_ in all_derived_:
-        line_ = _derived_line(derived_, ns, initializers, _make_args, jit_options)
+        line_ = _derived_line(derived_, ns, initializers, derive_hashes, _make_args, jit_options)
         code_txt.write(f"\n\t{line_}")
-    hash_str = f"code_block = {code_txt.getvalue()} initializers = {list(initializers.values())}"
+    hash_str = f"code_block = {code_txt.getvalue()} initializers = {list(initializers.values())} derive_hashes = {derive_hashes}"
     hash_ = code_block_hash(hash_str)
     code_txt.write(f"""\n\taccess_tuple = ({", ".join([n.name for n in access_nodes])})""")
     code_txt.write(f"\n\treturn access_tuple")

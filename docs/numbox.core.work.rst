@@ -168,6 +168,17 @@ Recalculating the graph then renders new values of the affected nodes [#f3]_::
     w10.combine(sheaf)
     assert isclose(sheaf["w4"].get_as(float64), 24)
 
+Builder supports smart caching of compiled code that builds the graph from the specified
+`End` and `Derived` nodes. If caching of the JIT'ed functions is configured (which is a default behavior),
+the graph maker is re-compiled only when `init_value` or `derive` functions of the nodes are changed.
+
+The `init_value` attribute of the `End` and `Derived` nodes can be assigned a variety of values,
+including scalars, arrays, and instances of `StructRef`. In the latter case, it is recommended
+to define `__repr__` method of the StructRef proxy class, so that the builder knows when the
+values contained in the StructRef have changed. Otherwise, the default `__repr__` of the
+StructRef containing dynamic address of the struct object will be used, making the builder
+recompile every time it's invoked.
+
 .. [#f1] Behind the scenes, :func:`numbox.core.work.builder.make_graph` compiles (and optionally caches) a graph maker with low-level intrinsic constructors of the individual work nodes inlined into it. All the Python 'derive' functions defined for the `Derived` nodes are compiled for the signatures inferred from the types of the derived nodes and their sources.
 .. [#f2] For numpy-compatible data types, additional utilities are available in :mod:`numbox.core.work.loader_utils`.
 .. [#f3] For numpy-compatible data types, additional utilities are available in :mod:`numbox.core.work.combine_utils`.
