@@ -1,6 +1,7 @@
 from hashlib import md5
 from inspect import getfile, getmodule
 from io import StringIO
+from itertools import chain
 from numba import njit, typeof
 from numba.core.types import Type
 from typing import Any, Callable, NamedTuple, Optional, Sequence, Union
@@ -31,15 +32,18 @@ class Derived(NamedTuple):
 SpecTy = Derived | End
 
 
-def _input_line(input_: End, ns):
+def _input_line(input_: End, ns: dict, initializers: dict):
     name_ = input_.name
     init_ = input_.init_value
+    init_name = f"{name_}_init"
+    ns[init_name] = init_
+    initializers[init_name] = init_
     ty_ = input_.ty
     if ty_ is not None:
         type_name = f"{name_}_ty"
         ns[type_name] = ty_
-        return f"""{name_} = ll_make_work("{name_}", {init_}, (), None, {type_name})"""
-    return f"""{name_} = ll_make_work("{name_}", {init_}, (), None)"""
+        return f"""{name_} = ll_make_work("{name_}", {init_name}, (), None, {type_name})"""
+    return f"""{name_} = ll_make_work("{name_}", {init_name}, (), None)"""
 
 
 def get_ty(spec_):
@@ -57,7 +61,7 @@ def _derived_cres(ty, sources: Sequence[End], derive, jit_options=None):
     return derive_cres
 
 
-def _derived_line(derived_: Derived, ns: dict, _make_args: list, jit_options=None):
+def _derived_line(derived_: Derived, ns: dict, initializers: dict, _make_args: list, jit_options=None):
     name_ = derived_.name
     init_ = derived_.init_value
     sources_ = ", ".join([s.name for s in derived_.sources])
@@ -65,9 +69,12 @@ def _derived_line(derived_: Derived, ns: dict, _make_args: list, jit_options=Non
     ty_ = get_ty(derived_)
     derive_ = _derived_cres(ty_, derived_.sources, derived_.derive, jit_options)
     derive_name = f"{name_}_derive"
+    init_name = f"{name_}_init"
     _make_args.append(derive_name)
     ns[derive_name] = derive_
-    return f"""{name_} = ll_make_work("{name_}", {init_}, ({sources_}), {derive_name})"""
+    ns[init_name] = init_
+    initializers[init_name] = init_
+    return f"""{name_} = ll_make_work("{name_}", {init_name}, ({sources_}), {derive_name})"""
 
 
 def _verify_access_nodes(
@@ -102,17 +109,19 @@ def make_graph(
     }
     _make_args = []
     code_txt = StringIO()
+    initializers = {}
     for input_ in all_inputs_:
-        line_ = _input_line(input_, ns)
+        line_ = _input_line(input_, ns, initializers)
         code_txt.write(f"\n\t{line_}")
     for derived_ in all_derived_:
-        line_ = _derived_line(derived_, ns, _make_args, jit_options)
+        line_ = _derived_line(derived_, ns, initializers, _make_args, jit_options)
         code_txt.write(f"\n\t{line_}")
-    hash_ = code_block_hash(code_txt.getvalue())
+    hash_str = f"code_block = {code_txt.getvalue()} initializers = {list(initializers.values())}"
+    hash_ = code_block_hash(hash_str)
     code_txt.write(f"""\n\taccess_tuple = ({", ".join([n.name for n in access_nodes])})""")
     code_txt.write(f"\n\treturn access_tuple")
     code_txt = code_txt.getvalue()
-    make_params = ", ".join(_make_args)
+    make_params = ", ".join(chain(_make_args, initializers.keys()))
     make_name = f"_make_{hash_}"
     code_txt = f"""
 @njit(**jit_options)

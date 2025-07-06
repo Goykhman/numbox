@@ -1,4 +1,7 @@
-from numba.core.types import float64, int16, unicode_type
+import numpy
+
+from numba import from_dtype
+from numba.core.types import Array, float64, int16, int64, unicode_type
 from numba.typed.typeddict import Dict
 from numpy import isclose
 
@@ -146,6 +149,65 @@ w10--w3--w1
     w10.calculate()
     w10.combine(sheaf)
     assert isclose(sheaf["w4"].get_as(float64), 24)
+
+
+T = 10
+tau = End(name="tau", init_value=numpy.arange(T), ty=Array(int64, 1, "C", readonly=False, aligned=True))
+e1 = End(name="e1", init_value=1.4142135623730951)
+e2 = End(name="e2", init_value=1.7320508075688772)
+a_ty = numpy.dtype([("c1", numpy.float64), ("c2", numpy.float64)])
+a = End(name="a", init_value=numpy.empty((T,), a_ty), ty=Array(from_dtype(a_ty), 1, "C", readonly=False, aligned=True))
+
+
+def derive_c1(tau_, a_, e1_):
+    for t in tau_:
+        a_[t]["c1"] = e1_ ** 2 + 2 * (t + 1)
+    return 0
+
+
+def derive_c2(tau_, a_, e2_, c1_):
+    for t in tau_:
+        a_[t]["c2"] = 3 * e2_ ** 2 - 4 * (t + 1) + a_[t].c1
+    return 0
+
+
+c1 = Derived(name="c1", init_value=1, derive=derive_c1, sources=(tau, a, e1))
+c2 = Derived(name="c2", init_value=1, derive=derive_c2, sources=(tau, a, e2, c1))
+
+
+def test_4():
+    inputs_ = [tau, a, e1, e2]
+    derived_ = [c1, c2]
+    c1_, c2_, a_ = make_graph(inputs_, derived_, (c1, c2, a))
+    assert c1_.data == 1
+    c1_.calculate()
+    assert c1_.data == 0
+    assert isclose(a_.data[5]["c1"], 14)
+    assert c2_.data == 1
+    c2_.calculate()
+    assert c2_.data == 0
+    assert isclose(a_.data[6]["c2"], -19 + a_.data[6]["c1"])
+    assert make_image(c2_) == """
+c2--tau
+    |
+    a
+    |
+    e2
+    |
+    c1---tau
+         |
+         a
+         |
+         e1"""
+
+
+def test_5():
+    from test.common_structrefs import S1
+    e1 = End(name="e1", init_value=S1(141, 137, 3.14))
+    e1_ = make_graph([e1,], [], e1)
+    assert e1_.data.x1 == 141
+    assert e1_.data.x2 == 137
+    assert isclose(e1_.data.x3, 3.14)
 
 
 if __name__ == "__main__":

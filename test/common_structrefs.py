@@ -15,6 +15,9 @@ class S1(structref.StructRefProxy):
     def __new__(cls, x1, x2, x3):
         return s1_constructor(x1, x2, x3)
 
+    def __repr__(self):
+        return f"S1(x1={self.x1}, x2={self.x2}, x3={self.x3})"
+
     @property
     @njit
     def x1(self):
@@ -163,7 +166,7 @@ S3Type = S3TypeClass(fields_s3)
 
 
 @overload(S3, strict=False)
-def ol_s2(x1_ty, x2_ty):
+def ol_s3(x1_ty, x2_ty):
     def _(x1, x2):
         s3_ = structref.new(S3Type)
         s3_.x1 = x1
