@@ -1,7 +1,7 @@
 import numpy
 
 from numba import from_dtype
-from numba.core.types import Array, float64, int16, int64, unicode_type
+from numba.core.types import Array, float32, float64, int16, int64, unicode_type
 from numba.typed.typeddict import Dict
 from numpy import isclose
 
@@ -208,6 +208,121 @@ def test_5():
     assert e1_.data.x1 == 141
     assert e1_.data.x2 == 137
     assert isclose(e1_.data.x3, 3.14)
+
+
+x_ = End(name="x", init_value=numpy.array([1.0, 2.0, 3.0], dtype=numpy.float32))
+y_ = End(name="y", init_value=numpy.array([0.5, 0.25, 0.75], dtype=numpy.float32))
+threshold_ = End(name="threshold", init_value=1.5, ty=float32)
+alpha_ = End(name="alpha", init_value=0.1, ty=float32)
+beta_ = End(name="beta", init_value=0.01, ty=float32)
+
+
+def derive_mask(x_, threshold_):
+    return x_ > threshold_
+
+
+mask_ = Derived(
+    name="mask",
+    init_value=numpy.full_like(x_.init_value, False, dtype=bool),
+    derive=derive_mask,
+    sources=(x_, threshold_),
+)
+
+
+def derive_scaled_y(y_, mask_, alpha_):
+    return numpy.where(mask_, y_ * alpha_, y_)
+
+
+scaled_y_ = Derived(
+    name="scaled_y",
+    init_value=numpy.zeros_like(y_.init_value, dtype=numpy.float32),
+    derive=derive_scaled_y,
+    sources=(y_, mask_, alpha_),
+)
+
+
+def derive_weighted_sum(x_, scaled_y_, beta_):
+    return numpy.sum(x_ * scaled_y_ + beta_)
+
+
+weighted_sum_ = Derived(
+    name="weighted_sum",
+    init_value=float32(0.0),
+    derive=derive_weighted_sum,
+    sources=(x_, scaled_y_, beta_),
+)
+
+
+def derive_running_avg(x_, y_):
+    avg = numpy.zeros_like(x_, dtype=numpy.float32)
+    for i in range(len(x_)):
+        avg[i] = numpy.mean(x_[:i+1] + y_[:i+1])
+    return avg
+
+
+running_avg_ = Derived(
+    name="running_avg",
+    init_value=numpy.zeros_like(x_.init_value, dtype=numpy.float32),
+    derive=derive_running_avg,
+    sources=(x_, y_),
+)
+
+
+def derive_interaction(running_avg_, scaled_y_):
+    return numpy.tanh(running_avg_ * scaled_y_)
+
+
+interaction_ = Derived(
+    name="interaction",
+    init_value=numpy.zeros_like(x_.init_value, dtype=numpy.float32),
+    derive=derive_interaction,
+    sources=(running_avg_, scaled_y_),
+)
+
+
+def derive_output(interaction_, weighted_sum_):
+    return numpy.mean(interaction_) + weighted_sum_
+
+
+output_ = Derived(
+    name="output",
+    init_value=float32(0.0),
+    derive=derive_output,
+    sources=(interaction_, weighted_sum_),
+)
+
+
+def test_6():
+    inputs_ = [x_, y_, threshold_, alpha_, beta_]
+    derived_ = [mask_, scaled_y_, weighted_sum_, running_avg_, interaction_, output_]
+    output = make_graph(inputs_, derived_, (output_,))
+    assert output.data == 0
+    output.calculate()
+    assert isclose(output.data, 1.09410762)
+    assert make_image(output) == """
+output--interaction---running_avg--x
+        |             |            |
+        |             |            y
+        |             |
+        |             scaled_y-----y
+        |                          |
+        |                          mask---x
+        |                          |      |
+        |                          |      threshold
+        |                          |
+        |                          alpha
+        |
+        weighted_sum--x
+                      |
+                      scaled_y-----y
+                      |            |
+                      |            mask---x
+                      |            |      |
+                      |            |      threshold
+                      |            |
+                      |            alpha
+                      |
+                      beta"""
 
 
 if __name__ == "__main__":

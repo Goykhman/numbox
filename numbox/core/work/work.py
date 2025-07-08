@@ -441,9 +441,8 @@ def ol_depends_on(self_ty, obj_ty):
             node = self.as_node()
             return name_ in node.all_inputs_names()
     else:
-        assert isinstance(obj_ty, WorkTypeClass), f"Cannot handle {obj_ty}"
-
         def _(self, obj_):
             node = self.as_node()
             return obj_.name in node.all_inputs_names()
+        assert isinstance(obj_ty, WorkTypeClass), f"Cannot handle {obj_ty}"
     return _
