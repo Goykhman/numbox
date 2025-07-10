@@ -15,18 +15,44 @@ def _file_anchor():
     raise NotImplementedError
 
 
-class End(NamedTuple):
+_nodes_names = set()
+
+
+class _End(NamedTuple):
     name: str
     init_value: Any
     ty: Optional[type | Type] = None
 
 
-class Derived(NamedTuple):
+def _new(cls, super_proxy, *args, **kwargs):
+    name = kwargs.get("name")
+    assert name, "`name` key-word argument has not been provided"
+    if name in _nodes_names:
+        raise ValueError(f"Node '{name}' has already been defined on this graph. Pick a different name.")
+    _nodes_names.add(name)
+    return super_proxy.__new__(cls, *args, **kwargs)
+
+
+class End(_End):
+    __slots__ = ()
+
+    def __new__(cls, *args, **kwargs):
+        return _new(cls, super(), *args, **kwargs)
+
+
+class _Derived(NamedTuple):
     name: str
     init_value: Any
     derive: Callable
     sources: Sequence[Union['Derived', End]]
     ty: Optional[type | Type] = None
+
+
+class Derived(_Derived):
+    __slots__ = ()
+
+    def __new__(cls, *args, **kwargs):
+        return _new(cls, super(), *args, **kwargs)
 
 
 SpecTy = Derived | End

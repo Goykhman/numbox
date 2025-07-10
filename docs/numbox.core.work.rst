@@ -83,6 +83,9 @@ One can then compute and access values of the derived nodes::
     assert isclose(w9.data, 2.418022)
     assert isclose(w10.data, 60.416)
 
+Nodes are required to have unique `name` attribute. Attempting to declare multiple
+nodes, either `End` or `Derived`, with the same `name` will raise `ValueError`.
+
 Graph structure can be inspected as::
 
     from numbox.core.work.print_tree import make_image

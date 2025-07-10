@@ -1,4 +1,5 @@
 import numpy
+import pytest
 
 from numba import from_dtype
 from numba.core.types import Array, float32, float64, int16, int64, unicode_type
@@ -236,7 +237,7 @@ c2--tau
 
 def test_5():
     from test.common_structrefs import S1
-    e1 = End(name="e1", init_value=S1(141, 137, 3.14))
+    e1 = End(name="test_5_e1", init_value=S1(141, 137, 3.14))
     e1_ = make_graph([e1,], [], e1)
     assert e1_.data.x1 == 141
     assert e1_.data.x2 == 137
@@ -401,6 +402,13 @@ output--interaction---running_avg--x
                       |            alpha
                       |
                       beta"""
+
+
+def test_7():
+    node1 = End(name="node1", init_value=3.14)  # noqa: F841
+    with pytest.raises(ValueError) as e:
+        node1_double = End(name="node1", init_value=3.14)  # noqa: F841
+        assert str(e) == "Node 'node1' has already been defined on this graph. Pick a different name."
 
 
 if __name__ == "__main__":
