@@ -179,6 +179,45 @@ values contained in the StructRef have changed. Otherwise, the default `__repr__
 StructRef containing dynamic address of the struct object will be used, making the builder
 recompile every time it's invoked.
 
+From each given accessor `Work` node, one can trace down its derivation to all the `End` nodes::
+
+    from numbox.core.work.explain import explain
+
+    derivation_of_w9 = explain(w9)
+    print(derivation_of_w9)
+
+will return::
+
+    w1: end node
+
+    w2: end node
+
+    w3: derive_w3(w1, w2)
+
+        def derive_w3(w1_, w2_):
+            if w1_ < 0:
+                return 0.0
+            elif w1_ < 1:
+                return 2 * w2_
+            return 3 * w2_
+
+    w4: derive_w4(w1)
+
+        def derive_w4(w1_):
+            return 2 * w1_
+
+    w5: end node
+
+    w7: derive_w7(w3, w5)
+
+        def derive_w7(w3_, w5_):
+            return w3_ + (w5_ ** 2)
+
+    w9: derive_w9(w3, w4, w7)
+
+        def derive_w9(w3_, w4_, w7_):
+            return (w4_ - w3_) / (abs(w7_) + 1e-5)
+
 .. [#f1] Behind the scenes, :func:`numbox.core.work.builder.make_graph` compiles (and optionally caches) a graph maker with low-level intrinsic constructors of the individual work nodes inlined into it. All the Python 'derive' functions defined for the `Derived` nodes are compiled for the signatures inferred from the types of the derived nodes and their sources.
 .. [#f2] For numpy-compatible data types, additional utilities are available in :mod:`numbox.core.work.loader_utils`.
 .. [#f3] For numpy-compatible data types, additional utilities are available in :mod:`numbox.core.work.combine_utils`.

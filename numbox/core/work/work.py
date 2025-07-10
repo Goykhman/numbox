@@ -17,7 +17,7 @@ from numbox.core.work.lowlevel_work_utils import ll_make_work, WorkTypeClass
 from numbox.core.work.node import NodeType
 from numbox.core.work.node_base import NodeBase, NodeBaseType
 from numbox.utils.lowlevel import (
-    extract_struct_member, _cast, is_not_null, get_func_p_from_func_struct, get_ll_func_sig
+    extract_struct_member, _cast, _get_func_tuple, is_not_null, get_func_p_from_func_struct, get_ll_func_sig
 )
 
 
@@ -72,6 +72,11 @@ class Work(NodeBase):
     @njit(**default_jit_options)
     def sources(self):
         return self.sources
+
+    @property
+    @njit(**default_jit_options)
+    def derive(self):
+        return _get_func_tuple(self.derive)
 
     @property
     @njit(**default_jit_options)

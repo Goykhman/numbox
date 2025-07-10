@@ -50,6 +50,9 @@ def get_ty(spec_):
     return spec_.ty or typeof(spec_.init_value)
 
 
+_derive_funcs = {}
+
+
 def _derived_cres(ty, sources: Sequence[End], derive, jit_options=None):
     jit_options = jit_options if jit_options is not None else {}
     sources_ty = []
@@ -58,6 +61,7 @@ def _derived_cres(ty, sources: Sequence[End], derive, jit_options=None):
         sources_ty.append(source_ty)
     derive_sig = ty(*sources_ty)
     derive_cres = cres(derive_sig, **jit_options)(derive)
+    _derive_funcs[id(derive_cres)] = derive
     return derive_cres
 
 

@@ -8,6 +8,7 @@ from numpy import isclose
 from numbox.core.any.any_type import AnyType, make_any
 from numbox.core.work.builder import Derived, End, make_graph
 from numbox.core.work.combine_utils import make_sheaf_dict
+from numbox.core.work.explain import explain
 from numbox.core.work.print_tree import make_image
 from test.auxiliary_utils import collect_and_run_tests
 
@@ -149,6 +150,38 @@ w10--w3--w1
     w10.calculate()
     w10.combine(sheaf)
     assert isclose(sheaf["w4"].get_as(float64), 24)
+
+    derivation_of_w9 = explain(w9)
+    assert derivation_of_w9 == """w1: end node
+
+w2: end node
+
+w3: derive_w3(w1, w2)
+
+    def derive_w3(w1_, w2_):
+        if w1_ < 0:
+            return 0.0
+        elif w1_ < 1:
+            return 2 * w2_
+        return 3 * w2_
+
+w4: derive_w4(w1)
+
+    def derive_w4(w1_):
+        return 2 * w1_
+
+w5: end node
+
+w7: derive_w7(w3, w5)
+
+    def derive_w7(w3_, w5_):
+        return w3_ + (w5_ ** 2)
+
+w9: derive_w9(w3, w4, w7)
+
+    def derive_w9(w3_, w4_, w7_):
+        return (w4_ - w3_) / (abs(w7_) + 1e-5)
+"""
 
 
 T = 10
@@ -297,6 +330,51 @@ def test_6():
     derived_ = [mask_, scaled_y_, weighted_sum_, running_avg_, interaction_, output_]
     output = make_graph(inputs_, derived_, (output_,))
     assert output.data == 0
+    assert output.all_end_nodes() == [input_.name for input_ in inputs_]
+    derivation_of_output = explain(output)
+    assert derivation_of_output == """x: end node
+
+y: end node
+
+running_avg: derive_running_avg(x, y)
+
+    def derive_running_avg(x_, y_):
+        avg = numpy.zeros_like(x_, dtype=numpy.float32)
+        for i in range(len(x_)):
+            avg[i] = numpy.mean(x_[:i+1] + y_[:i+1])
+        return avg
+
+threshold: end node
+
+mask: derive_mask(x, threshold)
+
+    def derive_mask(x_, threshold_):
+        return x_ > threshold_
+
+alpha: end node
+
+scaled_y: derive_scaled_y(y, mask, alpha)
+
+    def derive_scaled_y(y_, mask_, alpha_):
+        return numpy.where(mask_, y_ * alpha_, y_)
+
+interaction: derive_interaction(running_avg, scaled_y)
+
+    def derive_interaction(running_avg_, scaled_y_):
+        return numpy.tanh(running_avg_ * scaled_y_)
+
+beta: end node
+
+weighted_sum: derive_weighted_sum(x, scaled_y, beta)
+
+    def derive_weighted_sum(x_, scaled_y_, beta_):
+        return numpy.sum(x_ * scaled_y_ + beta_)
+
+output: derive_output(interaction, weighted_sum)
+
+    def derive_output(interaction_, weighted_sum_):
+        return numpy.mean(interaction_) + weighted_sum_
+"""
     output.calculate()
     assert isclose(output.data, 1.09410762)
     assert make_image(output) == """
