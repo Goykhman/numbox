@@ -18,7 +18,6 @@ w1_ = End(name="w1", init_value=137, ty=int16)
 w2_ = End(name="w2", init_value=3.14)
 w5_ = End(name="w5", init_value=10)
 w6_ = End(name="w6", init_value=7.5)
-inputs = [w1_, w2_, w5_, w6_]
 
 
 def derive_w3(w1_, w2_):
@@ -58,11 +57,10 @@ w7_ = Derived(name="w7", init_value=0.0, derive=derive_w7, sources=(w3_, w5_))
 w8_ = Derived(name="w8", init_value=0.0, derive=derive_w8, sources=(w6_, w2_))
 w9_ = Derived(name="w9", init_value=0.0, derive=derive_w9, sources=(w3_, w4_, w7_))
 w10_ = Derived(name="w10", init_value=0.0, derive=derive_w10, sources=(w3_, w4_, w7_, w8_, w9_))
-derived = [w3_, w4_, w7_, w8_, w9_, w10_]
 
 
 def test_1():
-    w3 = make_graph(inputs, derived, w3_)
+    w3 = make_graph(w3_)
     assert w3.data == 0
     w3.calculate()
     assert isclose(w3.data, 9.42)
@@ -73,7 +71,7 @@ w3--w1
 
 
 def test_2():
-    (w3, w4) = make_graph(inputs, derived, (w3_, w4_))
+    (w3, w4) = make_graph(w3_, w4_)
     assert w3.data == 0
     w3.calculate()
     assert isclose(w3.data, 9.42)
@@ -85,7 +83,7 @@ w4--w1"""
 
 
 def test_3():
-    (w7, w9, w10) = make_graph(inputs, derived, (w7_, w9_, w10_))
+    (w7, w9, w10) = make_graph(w7_, w9_, w10_)
     assert make_image(w9) == """
 w9--w3--w1
     |   |
@@ -214,7 +212,7 @@ c2 = Derived(name="c2", init_value=1, derive=derive_c2, sources=(tau, a, e2, c1)
 def test_4():
     inputs_ = [tau, a, e1, e2]
     derived_ = [c1, c2]
-    c1_, c2_, a_ = make_graph(inputs_, derived_, (c1, c2, a))
+    c1_, c2_, a_ = make_graph(c1, c2, a)
     assert c1_.data == 1
     c1_.calculate()
     assert c1_.data == 0
@@ -240,7 +238,7 @@ c2--tau
 def test_5():
     from test.common_structrefs import S1
     e1 = End(name="test_5_e1", init_value=S1(141, 137, 3.14))
-    e1_ = make_graph([e1,], [], e1)
+    e1_ = make_graph(e1)
     assert e1_.data.x1 == 141
     assert e1_.data.x2 == 137
     assert isclose(e1_.data.x3, 3.14)
@@ -329,11 +327,9 @@ output_ = Derived(
 
 
 def test_6():
-    inputs_ = [x_, y_, threshold_, alpha_, beta_]
-    derived_ = [mask_, scaled_y_, weighted_sum_, running_avg_, interaction_, output_]
-    output = make_graph(inputs_, derived_, (output_,))
+    output = make_graph(output_)
     assert output.data == 0
-    assert output.all_end_nodes() == [input_.name for input_ in inputs_]
+    assert output.all_end_nodes() == ["x", "y", "threshold", "alpha", "beta"]
     derivation_of_output = explain(output)
     assert derivation_of_output == """All required end nodes: ['x', 'y', 'threshold', 'alpha', 'beta']
 

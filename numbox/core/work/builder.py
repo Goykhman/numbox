@@ -4,7 +4,7 @@ from io import StringIO
 from itertools import chain
 from numba import njit, typeof
 from numba.core.types import Type
-from typing import Any, Callable, NamedTuple, Optional, Sequence, Union
+from typing import Any, Callable, Dict, NamedTuple, Optional, Sequence, Union
 
 from numbox.core.configurations import default_jit_options
 from numbox.core.work.lowlevel_work_utils import ll_make_work
@@ -15,7 +15,7 @@ def _file_anchor():
     raise NotImplementedError
 
 
-_nodes_names = set()
+_specs_registry = dict()
 
 
 class _End(NamedTuple):
@@ -27,10 +27,11 @@ class _End(NamedTuple):
 def _new(cls, super_proxy, *args, **kwargs):
     name = kwargs.get("name")
     assert name, "`name` key-word argument has not been provided"
-    if name in _nodes_names:
+    if name in _specs_registry:
         raise ValueError(f"Node '{name}' has already been defined on this graph. Pick a different name.")
-    _nodes_names.add(name)
-    return super_proxy.__new__(cls, *args, **kwargs)
+    spec_ = super_proxy.__new__(cls, *args, **kwargs)
+    _specs_registry[name] = spec_
+    return spec_
 
 
 class End(_End):
@@ -111,29 +112,34 @@ def _derived_line(
     return f"""{name_} = ll_make_work("{name_}", {init_name}, ({sources_}), {derive_name})"""
 
 
-def _verify_access_nodes(
-    all_inputs_: Sequence[End],
-    all_derived_: Sequence[Derived],
-    access_nodes: Sequence[SpecTy]
-):
-    for access_node in access_nodes:
-        assert access_node in all_inputs_ or access_node in all_derived_, f"{access_node} cannot be reached"
-
-
 def code_block_hash(code_txt: str):
     """ Re-compile and re-save cache when source code has changed. """
     return md5(code_txt.encode("utf-8")).hexdigest()
 
 
-def make_graph(
-    all_inputs_: Sequence[End],
-    all_derived_: Sequence[Derived],
-    access_nodes: SpecTy | Sequence[SpecTy],
-    jit_options: Optional[dict] = None
-):
-    if isinstance(access_nodes, SpecTy):
-        access_nodes = (access_nodes,)
-    _verify_access_nodes(all_inputs_, all_derived_, access_nodes)
+def _infer_end_and_derived_nodes(spec: SpecTy, all_inputs_: Dict[str, Type], all_derived_: Dict[str, Type]):
+    if spec.name in all_inputs_ or spec.name in all_derived_:
+        return
+    if isinstance(spec, End):
+        all_inputs_[spec.name] = get_ty(spec)
+        return
+    for source in spec.sources:
+        _infer_end_and_derived_nodes(source, all_inputs_, all_derived_)
+    all_derived_[spec.name] = get_ty(spec)
+
+
+def infer_end_and_derived_nodes(access_nodes: SpecTy | Sequence[SpecTy]):
+    all_inputs_ = dict()
+    all_derived_ = dict()
+    for access_node in access_nodes:
+        _infer_end_and_derived_nodes(access_node, all_inputs_, all_derived_)
+    all_inputs_lst = [_specs_registry[name] for name in all_inputs_.keys()]
+    all_derived_lst = [_specs_registry[name] for name in all_derived_.keys()]
+    return all_inputs_lst, all_derived_lst
+
+
+def make_graph(*access_nodes: SpecTy | Sequence[SpecTy], jit_options: Optional[dict] = None):
+    all_inputs_, all_derived_ = infer_end_and_derived_nodes(access_nodes)
     if jit_options is None:
         jit_options = {}
     jit_options = {**default_jit_options, **jit_options}
@@ -144,14 +150,14 @@ def make_graph(
     _make_args = []
     code_txt = StringIO()
     initializers = {}
-    derive_hashes=[]
+    derive_hashes = []
     for input_ in all_inputs_:
         line_ = _input_line(input_, ns, initializers)
         code_txt.write(f"\n\t{line_}")
     for derived_ in all_derived_:
         line_ = _derived_line(derived_, ns, initializers, derive_hashes, _make_args, jit_options)
         code_txt.write(f"\n\t{line_}")
-    hash_str = f"code_block = {code_txt.getvalue()} initializers = {list(initializers.values())} derive_hashes = {derive_hashes}"
+    hash_str = f"code_block = {code_txt.getvalue()} initializers = {list(initializers.values())} derive_hashes = {derive_hashes}"  # noqa: E501
     hash_ = code_block_hash(hash_str)
     code_txt.write(f"""\n\taccess_tuple = ({", ".join([n.name for n in access_nodes])})""")
     code_txt.write(f"\n\treturn access_tuple")
