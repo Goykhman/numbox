@@ -191,6 +191,8 @@ From each given accessor `Work` node, one can trace down its derivation to all t
 
 will return::
 
+    All required end nodes: ['w1', 'w2', 'w5']
+
     w1: end node
 
     w2: end node
@@ -220,6 +222,10 @@ will return::
 
         def derive_w9(w3_, w4_, w7_):
             return (w4_ - w3_) / (abs(w7_) + 1e-5)
+
+This provides information of what pure inputs / end nodes are required to derive
+the given node as well as the logical sequence of steps (as indicated by the graph structure)
+to carry out the derivation.
 
 .. [#f1] Behind the scenes, :func:`numbox.core.work.builder.make_graph` compiles (and optionally caches) a graph maker with low-level intrinsic constructors of the individual work nodes inlined into it. All the Python 'derive' functions defined for the `Derived` nodes are compiled for the signatures inferred from the types of the derived nodes and their sources.
 .. [#f2] For numpy-compatible data types, additional utilities are available in :mod:`numbox.core.work.loader_utils`.

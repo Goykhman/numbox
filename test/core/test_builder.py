@@ -153,7 +153,9 @@ w10--w3--w1
     assert isclose(sheaf["w4"].get_as(float64), 24)
 
     derivation_of_w9 = explain(w9)
-    assert derivation_of_w9 == """w1: end node
+    assert derivation_of_w9 == """All required end nodes: ['w1', 'w2', 'w5']
+
+w1: end node
 
 w2: end node
 
@@ -333,7 +335,9 @@ def test_6():
     assert output.data == 0
     assert output.all_end_nodes() == [input_.name for input_ in inputs_]
     derivation_of_output = explain(output)
-    assert derivation_of_output == """x: end node
+    assert derivation_of_output == """All required end nodes: ['x', 'y', 'threshold', 'alpha', 'beta']
+
+x: end node
 
 y: end node
 

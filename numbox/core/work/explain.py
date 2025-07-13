@@ -30,6 +30,9 @@ def _explain(work: Work, derivation_: list, derived_: set):
 
 
 def explain(work: Work):
+    all_end_nodes = work.all_end_nodes()
     derivation = []
     _explain(work, derivation, set())
-    return "\n".join(derivation)
+    explain_txt = f"All required end nodes: {all_end_nodes}\n\n"
+    explain_txt += "\n".join(derivation)
+    return explain_txt
