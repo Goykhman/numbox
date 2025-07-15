@@ -7,6 +7,7 @@ from numba.typed.typeddict import Dict
 from numpy import isclose
 
 from numbox.core.any.any_type import AnyType, make_any
+from numbox.core.work.work import Work
 from numbox.core.work.builder import Derived, End, make_graph
 from numbox.core.work.combine_utils import make_sheaf_dict
 from numbox.core.work.explain import explain
@@ -62,6 +63,7 @@ w10_ = Derived(name="w10", init_value=0.0, derive=derive_w10, sources=(w3_, w4_,
 def test_1():
     access = make_graph(w3_)
     w3 = access.w3
+    assert isinstance(w3, Work)
 
     assert w3.data == 0
     w3.calculate()
