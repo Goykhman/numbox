@@ -90,7 +90,7 @@ def make_create_nodes_func(num_of_pure_inputs):
     code_txt = f"""
 def create_nodes(calc_1_, calc_2_, calc_3_):
 {func_block}
-    return w_{len(lines_) - 1} 
+    return w_{len(lines_) - 1}
 """
     ns = getmodule(create_pure_inputs).__dict__
     ns["ll_make_work"] = ll_make_work

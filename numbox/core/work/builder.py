@@ -1,3 +1,4 @@
+from collections import namedtuple
 from hashlib import md5
 from inspect import getfile, getmodule, getsource
 from io import StringIO
@@ -159,17 +160,21 @@ def make_graph(*access_nodes: SpecTy | Sequence[SpecTy], jit_options: Optional[d
         code_txt.write(f"\n\t{line_}")
     hash_str = f"code_block = {code_txt.getvalue()} initializers = {list(initializers.values())} derive_hashes = {derive_hashes}"  # noqa: E501
     hash_ = code_block_hash(hash_str)
-    code_txt.write(f"""\n\taccess_tuple = ({", ".join([n.name for n in access_nodes])})""")
-    code_txt.write(f"\n\treturn access_tuple")
+    access_nodes_names = [n.name for n in access_nodes]
+    tup_ = ", ".join(access_nodes_names)
+    tup_ = tup_ + ", " if ", " not in tup_ else tup_
+    code_txt.write(f"""\n\taccess_tuple = ({tup_})""")
+    code_txt.write("\n\treturn access_tuple")
     code_txt = code_txt.getvalue()
     make_params = ", ".join(chain(_make_args, initializers.keys()))
     make_name = f"_make_{hash_}"
     code_txt = f"""
 @njit(**jit_options)
 def {make_name}({make_params}):""" + code_txt + f"""
-return_node_ = {make_name}({make_params})
+access_tuple_ = {make_name}({make_params})
 """
     code = compile(code_txt, getfile(_file_anchor), mode="exec")
     exec(code, ns)
-    return_node_ = ns["return_node_"]
-    return return_node_
+    access_tuple_ = ns["access_tuple_"]
+    Access = namedtuple("Access", access_nodes_names)
+    return Access(*access_tuple_)
