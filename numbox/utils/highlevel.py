@@ -1,5 +1,6 @@
 import hashlib
-from inspect import getfile, getmodule
+import re
+from inspect import getfile, getmodule, getsource
 from io import StringIO
 from numba import njit
 from numba.core.itanium_mangler import mangle_type_or_value
@@ -9,8 +10,12 @@ from numba.core.types.function_type import CompileResultWAP
 from numba.core.typing.templates import Signature
 from numba.experimental.function_type import FunctionType
 from numba.experimental.structref import define_proxy, StructRefProxy
+from numba.extending import overload_method
+from textwrap import dedent, indent
+from typing import Callable, Dict, Iterable, Optional
 
 from numbox.core.configurations import default_jit_options
+from numbox.utils.standard import make_params_strings
 
 
 def _file_anchor():
@@ -44,7 +49,14 @@ def hash_type(ty: Type):
     return hashlib.sha256(mangled_ty.encode('utf-8')).hexdigest()
 
 
-def make_structref(name, fields, struct_type_class, jit_options=None):
+def make_structref(
+    name: str,
+    fields: Iterable[str],
+    struct_type_class: type | Type,
+    *,
+    methods: Optional[Dict[str, Callable]] = None,
+    jit_options=None
+):
     """
     Makes structure type with `name` and `fields` from the StructRef type class.
     A unique `struct_type_class` for each structref needs to be provided.
@@ -62,20 +74,46 @@ def make_structref(name, fields, struct_type_class, jit_options=None):
     code_txt.write(f"""
 class {name}(StructRefProxy):
     def __new__(cls, {params}):
-        return super().__new__(cls, {params})""")
+        return StructRefProxy.__new__(cls, {params})""")
     for field in fields:
         code_txt.write(f"""
     @property
     @njit(**jit_options)
     def {field}(self):
         return self.{field}""")
-    code_txt = code_txt.getvalue()
+    methods_code_txt = StringIO()
+    if methods is not None:
+        assert isinstance(methods, dict), f"Expected dictionary of methods names to callable, got {methods}"
+        for method_name, method in methods.items():
+            params_str, names_params_str = make_params_strings(method)
+            names_params_str_wo_self = ", ".join(names_params_str.split(", ")[1:])
+            method_source = dedent(getsource(method))
+            method_hash = hashlib.sha256(method_source.encode("utf-8")).hexdigest()
+            code_txt.write(f"""
+    def {method_name}({params_str}):
+        return self.{method_name}_{method_hash}({names_params_str_wo_self})
+    @njit(**jit_options)
+    def {method_name}_{method_hash}({params_str}):
+        return self.{method_name}({names_params_str_wo_self})""")
+            method_header = re.findall(r"^\s*def\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*:[^\n]*", method_source, re.MULTILINE)
+            assert len(method_header) == 1, method_header
+            method_name, params_str_ = method_header[0]
+            assert params_str == params_str_, (params_str, params_str_)
+            method_source = re.sub(r"\bdef\s+([a-zA-Z_]\w*)\b", f"def _", method_source)
+            methods_code_txt.write(f"""
+@overload_method({struct_type_class.__name__}, "{method_name}", jit_options=jit_options)
+def ol_{method_name}_{method_hash}({params_str}):
+{indent(method_source, "    ")}
+    return _""")
+    code_txt = code_txt.getvalue() + methods_code_txt.getvalue()
     ns = {
         **getmodule(_file_anchor).__dict__,
         **{
             "jit_options": jit_options,
             "njit": njit,
+            "overload_method": overload_method,
             "StructRefProxy": StructRefProxy,
+            struct_type_class.__name__: struct_type_class
         }
     }
     code = compile(code_txt, getfile(_file_anchor), mode="exec")

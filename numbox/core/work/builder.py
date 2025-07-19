@@ -1,5 +1,5 @@
 from collections import namedtuple
-from hashlib import md5
+from hashlib import sha256
 from inspect import getfile, getmodule, getsource
 from io import StringIO
 from itertools import chain
@@ -102,7 +102,7 @@ def _derived_line(
     sources_ = sources_ + ", " if "," not in sources_ else sources_
     ty_ = get_ty(derived_)
     derive_func = derived_.derive
-    derive_hashes.append(md5(getsource(derive_func).encode("utf-8")).hexdigest())
+    derive_hashes.append(sha256(getsource(derive_func).encode("utf-8")).hexdigest())
     derive_ = _derived_cres(ty_, derived_.sources, derive_func, jit_options)
     derive_name = f"{name_}_derive"
     init_name = f"{name_}_init"
@@ -115,7 +115,7 @@ def _derived_line(
 
 def code_block_hash(code_txt: str):
     """ Re-compile and re-save cache when source code has changed. """
-    return md5(code_txt.encode("utf-8")).hexdigest()
+    return sha256(code_txt.encode("utf-8")).hexdigest()
 
 
 def _infer_end_and_derived_nodes(spec: SpecTy, all_inputs_: Dict[str, Type], all_derived_: Dict[str, Type]):

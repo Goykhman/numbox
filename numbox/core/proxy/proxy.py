@@ -7,18 +7,11 @@ from numba.extending import intrinsic  # noqa: F401
 from types import FunctionType as PyFunctionType
 from typing import List, Optional, Tuple
 
+from numbox.utils.standard import make_params_strings
+
 
 def make_proxy_name(name):
     return f'__{name}'
-
-
-def make_params_strings(func):
-    func_params = inspect.signature(func).parameters
-    func_params_str = ', '.join(
-        [k if v.default == inspect._empty else f'{k}={v.default}' for k, v in func_params.items()]
-    )
-    func_names_params_str = ', '.join(func_params.keys())
-    return func_params_str, func_names_params_str
 
 
 def proxy(sig, jit_options: Optional[dict] = None):

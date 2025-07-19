@@ -7,7 +7,7 @@ from numpy import isclose
 from numbox.utils.highlevel import cres, determine_field_index, make_structref
 from test.auxiliary_utils import collect_and_run_tests
 from test.common_structrefs import S1Type
-from test.utils.common_struct_type_classes import S1TypeClass, S2TypeClass
+from test.utils.common_struct_type_classes import S1TypeClass, S2TypeClass, S3TypeClass
 
 
 def test_cres_njit():
@@ -63,6 +63,27 @@ def test_make_structref_1():
     assert s2_1.y == 45
     assert s2_1.z == s2_1_z
     assert aux_test_make_structref(s2_1) == 45
+
+
+def test_make_structref_2():
+    def calculate_1(self, z, w=1):
+        return self.x + z * w
+
+    def calculate_2(self):
+        return self.y * 3
+    m1 = {"calculate_1": calculate_1, "calculate_2": calculate_2}
+    make_s3 = make_structref("S1", ("x", "y"), S3TypeClass, methods=m1)
+    s1 = make_s3(2.17, 3.14)
+
+    @njit(cache=True)
+    def aux(s1_):
+        return s1_.calculate_1(5, 6)
+
+    ref = 2.17 + 5 * 6
+    assert isclose(s1.calculate_1(5, 6), ref)
+    assert isclose(aux(s1), ref)
+
+    assert isclose(s1.calculate_2(), 9.42)
 
 
 if __name__ == '__main__':
