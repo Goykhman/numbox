@@ -7,6 +7,8 @@ numbox
 
 A toolbox of low-level utilities for working with `numba <https://numba.pydata.org>`_.
 
+Source code on `GitHub <https://github.com/goykhman/numbox>`_.
+
 
 .. toctree::
    :maxdepth: 2

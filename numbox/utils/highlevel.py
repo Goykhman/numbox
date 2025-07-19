@@ -51,11 +51,11 @@ def hash_type(ty: Type):
 
 def make_structref(
     name: str,
-    fields: Iterable[str],
+    fields: Iterable[str] | Dict[str, Type],
     struct_type_class: type | Type,
     *,
     methods: Optional[Dict[str, Callable]] = None,
-    jit_options=None
+    jit_options: Optional[dict] = None
 ):
     """
     Makes structure type with `name` and `fields` from the StructRef type class.
@@ -66,15 +66,25 @@ def make_structref(
     is entirely hard-coded rather than created dynamically.)
     In particular, that's why `struct_type_class` cannot be incorporated into
     the dynamic compile / exec routine here.
+    Dictionary of methods to be bound to the created structref can be provided as well.
     """
+    if isinstance(fields, dict):
+        fields, fields_types = list(fields.keys()), list(fields.values())
+    else:
+        fields_types = None
     if jit_options is None:
         jit_options = default_jit_options
     code_txt = StringIO()
     params = ", ".join([field for field in fields])
+    new_returns = f"StructRefProxy.__new__(cls, {params})" if fields_types is None else f"_make_{name}({params})"
+    repr_str = f"f'{name}(" + ", ".join([f"{field}={{self.{field}}}" for field in fields]) +")'"
     code_txt.write(f"""
 class {name}(StructRefProxy):
     def __new__(cls, {params}):
-        return StructRefProxy.__new__(cls, {params})""")
+        return {new_returns}
+
+    def __repr__(self):
+        return {repr_str}""")
     for field in fields:
         code_txt.write(f"""
     @property
@@ -105,10 +115,26 @@ class {name}(StructRefProxy):
 def ol_{method_name}_{method_hash}({params_str}):
 {indent(method_source, "    ")}
     return _""")
+    code_txt.write(f"""
+define_proxy({name}, {struct_type_class.__name__}, fields)
+""")
+    if fields_types is not None:
+        code_txt.write(f"""
+fields_and_their_types = list(zip(fields, fields_types))    
+{name}Type = {struct_type_class.__name__}(fields_and_their_types)
+_make_{name}_sig = {name}Type(*fields_types)     
+
+@njit(_make_{name}_sig, **jit_options)
+def _make_{name}({params}):
+    return {name}({params})
+""")
     code_txt = code_txt.getvalue() + methods_code_txt.getvalue()
     ns = {
         **getmodule(_file_anchor).__dict__,
         **{
+            "fields": fields,
+            "fields_types": fields_types,
+            "define_proxy": define_proxy,
             "jit_options": jit_options,
             "njit": njit,
             "overload_method": overload_method,
@@ -118,7 +144,6 @@ def ol_{method_name}_{method_hash}({params_str}):
     }
     code = compile(code_txt, getfile(_file_anchor), mode="exec")
     exec(code, ns)
-    define_proxy(ns[name], struct_type_class, fields)
     return ns[name]
 
 

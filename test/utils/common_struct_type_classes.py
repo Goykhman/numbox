@@ -15,3 +15,8 @@ class S2TypeClass(StructRef):
 @register
 class S3TypeClass(StructRef):
     pass
+
+
+@register
+class S4TypeClass(StructRef):
+    pass

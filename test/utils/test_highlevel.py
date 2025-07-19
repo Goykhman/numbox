@@ -1,5 +1,5 @@
 from numba import njit, typeof
-from numba.core.types import float64
+from numba.core.types import float64, int8, unicode_type
 from numba.core.types.function_type import FunctionType
 from numba.core.types.functions import Dispatcher
 from numpy import isclose
@@ -7,7 +7,7 @@ from numpy import isclose
 from numbox.utils.highlevel import cres, determine_field_index, make_structref
 from test.auxiliary_utils import collect_and_run_tests
 from test.common_structrefs import S1Type
-from test.utils.common_struct_type_classes import S1TypeClass, S2TypeClass, S3TypeClass
+from test.utils.common_struct_type_classes import S1TypeClass, S2TypeClass, S3TypeClass, S4TypeClass
 
 
 def test_cres_njit():
@@ -84,6 +84,13 @@ def test_make_structref_2():
     assert isclose(aux(s1), ref)
 
     assert isclose(s1.calculate_2(), 9.42)
+
+
+def test_make_structref_3():
+    make_s4 = make_structref("S4", {"x": int8, "y": unicode_type}, S4TypeClass)
+    s4_1 = make_s4(50, "hello")
+    assert str(typeof(s4_1)) == "numba.S4TypeClass(('x', int8), ('y', unicode_type))"
+    assert str(s4_1) == "S4(x=50, y=hello)"
 
 
 if __name__ == '__main__':
