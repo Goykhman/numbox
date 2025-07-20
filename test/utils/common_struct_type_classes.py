@@ -20,3 +20,8 @@ class S3TypeClass(StructRef):
 @register
 class S4TypeClass(StructRef):
     pass
+
+
+@register
+class S5TypeClass(StructRef):
+    pass
