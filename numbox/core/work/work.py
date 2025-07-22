@@ -166,6 +166,9 @@ def _call_derive(typingctx: Context, derive_ty: FunctionType, sources_ty: Tuple)
     return sig, codegen
 
 
+_source_getter_registry = {}
+
+
 def _make_source_getter(source_ind):
     return f"""
 @intrinsic
@@ -182,8 +185,6 @@ def _get_source_{source_ind}(typingctx: Context, sources_ty: Tuple):
 
 def _make_calculate_code(num_sources):
     code_txt = StringIO()
-    for source_ind_ in range(num_sources):
-        code_txt.write(_make_source_getter(source_ind_))
     code_txt.write("""
 def _calculate_(work_):
     if work_.derived:
@@ -194,7 +195,8 @@ def _calculate_(work_):
         for source_ind_ in range(num_sources):
             code_txt.write(f"""
     source_{source_ind_} = _get_source_{source_ind_}(sources)
-    source_{source_ind_}.calculate()""")
+    if not source_{source_ind_}.derived:
+        source_{source_ind_}.calculate()""")
     code_txt.write("""
     v = _call_derive(work_.derive, work_.sources)
     work_.derived = True
@@ -204,6 +206,15 @@ def _calculate_(work_):
 
 
 _calculate_registry = {}
+
+
+def ensure_presence_of_source_getters_in_ns(num_sources_, ns_):
+    for source_i in range(num_sources_):
+        _source_getter = _source_getter_registry.get(source_i, None)
+        source_getter_code_txt = _make_source_getter(source_i)
+        source_getter_code = compile(source_getter_code_txt, getfile(_file_anchor), mode="exec")
+        exec(source_getter_code, ns_)
+        _source_getter_registry[source_i] = True
 
 
 @overload_method(WorkTypeClass, "calculate", strict=False, jit_options=default_jit_options)
@@ -217,13 +228,15 @@ def ol_calculate(self_ty):
     sources_ty = self_ty.field_dict["sources"]
     num_sources = sources_ty.count
     _calculate = _calculate_registry.get(num_sources, None)
-    if _calculate is None:
-        code_txt = _make_calculate_code(num_sources)
-        ns = getmodule(_file_anchor).__dict__
-        code = compile(code_txt, getfile(_file_anchor), mode="exec")
-        exec(code, ns)
-        _calculate = ns["_calculate_"]
-        _calculate_registry[num_sources] = _calculate
+    if _calculate is not None:
+        return _calculate
+    ns = getmodule(_file_anchor).__dict__
+    ensure_presence_of_source_getters_in_ns(num_sources, ns)
+    code_txt = _make_calculate_code(num_sources)
+    code = compile(code_txt, getfile(_file_anchor), mode="exec")
+    exec(code, ns)
+    _calculate = ns["_calculate_"]
+    _calculate_registry[num_sources] = _calculate
     return _calculate
 
 
@@ -246,8 +259,6 @@ def _cast_to_work_data(typingctx, work_ty, data_as_erased_ty: ErasedType):
 
 def _make_loader_code(num_sources):
     code_txt = StringIO()
-    for source_ind_ in range(num_sources):
-        code_txt.write(_make_source_getter(source_ind_))
     code_txt.write("""
 def _loader_(work_, data_):
     reset = False
@@ -282,20 +293,20 @@ def ol_load(work_ty, data_ty: DictType):
     sources_ty = work_ty.field_dict["sources"]
     num_sources = sources_ty.count
     _loader = _loader_registry.get(num_sources, None)
-    if _loader is None:
-        code_txt = _make_loader_code(num_sources)
-        ns = getmodule(_file_anchor).__dict__
-        code = compile(code_txt, getfile(_file_anchor), mode="exec")
-        exec(code, ns)
-        _loader = ns["_loader_"]
-        _loader_registry[num_sources] = _loader
+    if _loader is not None:
+        return _loader
+    ns = getmodule(_file_anchor).__dict__
+    ensure_presence_of_source_getters_in_ns(num_sources, ns)
+    code_txt = _make_loader_code(num_sources)
+    code = compile(code_txt, getfile(_file_anchor), mode="exec")
+    exec(code, ns)
+    _loader = ns["_loader_"]
+    _loader_registry[num_sources] = _loader
     return _loader
 
 
 def _make_combine_code(num_sources):
     code_txt = StringIO()
-    for source_ind_ in range(num_sources):
-        code_txt.write(_make_source_getter(source_ind_))
     code_txt.write("""
 def _combine_(work_, data_, harvested_=None):
     if harvested_ is None:
@@ -331,13 +342,15 @@ def ol_combine(work_ty, data_ty: DictType, harvested_ty=NoneType):
     sources_ty = work_ty.field_dict["sources"]
     num_sources = sources_ty.count
     _combine = _combine_registry.get(num_sources, None)
-    if _combine is None:
-        code_txt = _make_combine_code(num_sources)
-        ns = {**getmodule(_file_anchor).__dict__, **{"boolean": boolean, "Dict": Dict}}
-        code = compile(code_txt, getfile(_file_anchor), mode="exec")
-        exec(code, ns)
-        _combine = ns["_combine_"]
-        _combine_registry[num_sources] = _combine
+    if _combine is not None:
+        return _combine
+    ns = {**getmodule(_file_anchor).__dict__, **{"boolean": boolean, "Dict": Dict}}
+    ensure_presence_of_source_getters_in_ns(num_sources, ns)
+    code_txt = _make_combine_code(num_sources)
+    code = compile(code_txt, getfile(_file_anchor), mode="exec")
+    exec(code, ns)
+    _combine = ns["_combine_"]
+    _combine_registry[num_sources] = _combine
     return _combine
 
 
@@ -364,8 +377,6 @@ def ol_get_inputs_names(self_ty):
 
 def _make_inputs_vector_code(num_sources):
     code_txt = StringIO()
-    for source_ind_ in range(num_sources):
-        code_txt.write(_make_source_getter(source_ind_))
     code_txt.write("""
 def _inputs_vector_(work_):
     node = work_.node
@@ -399,13 +410,15 @@ def ol_make_inputs_vector(self_ty):
             return inputs_vector
         return _
     _inputs_vector = _inputs_vector_registry.get(num_sources, None)
-    if _inputs_vector is None:
-        code_txt = _make_inputs_vector_code(num_sources)
-        ns = {**getmodule(_file_anchor).__dict__, **{"new": new}}
-        code = compile(code_txt, getfile(_file_anchor), mode="exec")
-        exec(code, ns)
-        _inputs_vector = ns["_inputs_vector_"]
-        _inputs_vector_registry[num_sources] = _inputs_vector
+    if _inputs_vector is not None:
+        return _inputs_vector
+    ns = {**getmodule(_file_anchor).__dict__, **{"new": new}}
+    ensure_presence_of_source_getters_in_ns(num_sources, ns)
+    code_txt = _make_inputs_vector_code(num_sources)
+    code = compile(code_txt, getfile(_file_anchor), mode="exec")
+    exec(code, ns)
+    _inputs_vector = ns["_inputs_vector_"]
+    _inputs_vector_registry[num_sources] = _inputs_vector
     return _inputs_vector
 
 
