@@ -422,5 +422,32 @@ def test_7():
         assert str(e) == "Node 'node1' has already been defined on this graph. Pick a different name."
 
 
+def test_8():
+    reg_1 = {}
+    end_1 = End(name="end_1", init_value=0.0, registry=reg_1)
+    assert reg_1["end_1"] == end_1
+    reg_2 = {}
+    end_1_another = End(name="end_1", init_value=0.0, registry=reg_2)
+    assert reg_2["end_1"] == end_1_another
+    der_1 = Derived(name="der_1", init_value=0.0, sources=(end_1,), registry=reg_1, derive=lambda x: x + 2.17)
+    accessors_1 = make_graph(der_1, registry=reg_1)
+    der_1_ = accessors_1.der_1
+    der_1_.calculate()
+    assert isclose(der_1_.data, 2.17)
+    der_1_another = Derived(
+        name="der_1", init_value=0.0, sources=(end_1_another,), registry=reg_2, derive=lambda x: x + 3.14
+    )
+    accessors_2 = make_graph(der_1_another, registry=reg_2)
+    der_1_another_ = accessors_2.der_1
+    der_1_another_.calculate()
+    assert isclose(der_1_another_.data, 3.14)
+    assert list(reg_1.keys()) == ["end_1", "der_1"]
+    assert list(reg_2.keys()) == ["end_1", "der_1"]
+    assert reg_1["der_1"] == der_1
+    assert reg_2["der_1"] == der_1_another
+    from numbox.core.work.builder import _specs_registry
+    assert not (_specs_registry.get("end_1") or _specs_registry.get("der_1"))
+
+
 if __name__ == "__main__":
     collect_and_run_tests(__name__)

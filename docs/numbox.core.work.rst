@@ -54,7 +54,9 @@ Suppose more values, `w3`, `w4`, `w7`, `w8`, `w9`, `w10`, are derived as follows
     def derive_w10(w3_, w4_, w7_, w8_, w9_):
         return (w3_ + w4_ + w7_) * 0.1 + (w8_ - w9_)
 
-Users can then declare the corresponding nodes as::
+Users can then declare the corresponding nodes (in fact `End` and `Derived`
+are better termed as 'node specs', while instances of :class:`numbox.core.work.work.Work` are
+the actual node objects) as::
 
     from numbox.core.work.builder import Derived
 
@@ -235,6 +237,39 @@ will return::
 This provides information of what pure inputs / end nodes are required to derive
 the given node as well as the logical sequence of steps (as indicated by the graph structure)
 to carry out the derivation.
+
+By default, defining `End` or `Derived` node spec will store the created node spec instance
+in the global registry `_specs_registry` (in :mod:`numbox.core.work.builder`) as a value paired to the key
+given by the node's name.
+Attempting to create more than one node with the same name will then raise an error.
+
+Optionally, any number of (local) registries can be created to register given node specs in.
+To do so, provide a dictionary-valued argument as the `registry` parameter of either `Derived` or `End` node.
+Then the `make_graph` utility needs to be provided with *the same* registry as its *keyword* argument::
+
+    reg_1 = {}
+    end_1 = End(name="end_1", init_value=0.0, registry=reg_1)
+
+    reg_2 = {}
+    end_1_another = End(name="end_1", init_value=0.0, registry=reg_2)
+
+    der_1 = Derived(name="der_1", init_value=0.0, sources=(end_1,), registry=reg_1, derive=lambda x: x + 2.17)
+    accessors_1 = make_graph(der_1, registry=reg_1)
+    der_1_ = accessors_1.der_1
+    der_1_.calculate()
+    assert isclose(der_1_.data, 2.17)
+
+    der_1_another = Derived(
+        name="der_1", init_value=0.0, sources=(end_1_another,), registry=reg_2, derive=lambda x: x + 3.14
+    )
+    accessors_2 = make_graph(der_1_another, registry=reg_2)
+    der_1_another_ = accessors_2.der_1
+    der_1_another_.calculate()
+    assert isclose(der_1_another_.data, 3.14)
+
+In this example, there are two nodes named "end_1" and two nodes named "der_1", but they
+are defined in different registries, and the two corresponding graphs are built from the specs
+obtained from their respective registries.
 
 .. [#f1] For simplicity, this example illustrates nodes that contain scalar data (integers and floats). More complex types of data, like numpy arrays, strings, and aggregates (numba StructRef's, typed lists and dictionaries) are supported as well.
 .. [#f2] Behind the scenes, :func:`numbox.core.work.builder.make_graph` compiles (and optionally caches) a graph maker with low-level intrinsic constructors of the individual work nodes inlined into it. All the Python 'derive' functions defined for the `Derived` nodes are compiled for the signatures inferred from the types of the derived nodes and their sources.

@@ -137,7 +137,7 @@ def run_entity(total, loader_dict):
 @timer
 @njit(**default_jit_options)
 def run(total, data, loader_dict, num_of_entities=NUM_OF_ENTITIES_DEFAULT):
-    total_data = numpy.empty((num_of_entities,), dtype=float64)
+    total_data = numpy.empty((num_of_entities,), dtype=numpy.float64)
     for i in range(num_of_entities):
         load_array_row_into_dict(data, i, loader_dict)
         total_data[i] = run_entity(total, loader_dict)

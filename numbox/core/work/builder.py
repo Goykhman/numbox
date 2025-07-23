@@ -22,16 +22,18 @@ _specs_registry = dict()
 class _End(NamedTuple):
     name: str
     init_value: Any
+    registry: dict = None
     ty: Optional[type | Type] = None
 
 
 def _new(cls, super_proxy, *args, **kwargs):
     name = kwargs.get("name")
     assert name, "`name` key-word argument has not been provided"
-    if name in _specs_registry:
+    registry = kwargs.get("registry", _specs_registry)
+    if name in registry:
         raise ValueError(f"Node '{name}' has already been defined on this graph. Pick a different name.")
     spec_ = super_proxy.__new__(cls, *args, **kwargs)
-    _specs_registry[name] = spec_
+    registry[name] = spec_
     return spec_
 
 
@@ -47,6 +49,7 @@ class _Derived(NamedTuple):
     init_value: Any
     derive: Callable
     sources: Sequence[Union['Derived', End]]
+    registry: dict = None
     ty: Optional[type | Type] = None
 
 
@@ -118,29 +121,35 @@ def code_block_hash(code_txt: str):
     return sha256(code_txt.encode("utf-8")).hexdigest()
 
 
-def _infer_end_and_derived_nodes(spec: SpecTy, all_inputs_: Dict[str, Type], all_derived_: Dict[str, Type]):
+def _infer_end_and_derived_nodes(spec: SpecTy, all_inputs_: Dict[str, Type], all_derived_: Dict[str, Type], registry):
     if spec.name in all_inputs_ or spec.name in all_derived_:
         return
     if isinstance(spec, End):
         all_inputs_[spec.name] = get_ty(spec)
         return
     for source in spec.sources:
-        _infer_end_and_derived_nodes(source, all_inputs_, all_derived_)
+        _infer_end_and_derived_nodes(source, all_inputs_, all_derived_, registry)
     all_derived_[spec.name] = get_ty(spec)
 
 
-def infer_end_and_derived_nodes(access_nodes: SpecTy | Sequence[SpecTy]):
+def infer_end_and_derived_nodes(access_nodes: SpecTy | Sequence[SpecTy], registry):
     all_inputs_ = dict()
     all_derived_ = dict()
     for access_node in access_nodes:
-        _infer_end_and_derived_nodes(access_node, all_inputs_, all_derived_)
-    all_inputs_lst = [_specs_registry[name] for name in all_inputs_.keys()]
-    all_derived_lst = [_specs_registry[name] for name in all_derived_.keys()]
+        _infer_end_and_derived_nodes(access_node, all_inputs_, all_derived_, registry)
+    all_inputs_lst = [registry[name] for name in all_inputs_.keys()]
+    all_derived_lst = [registry[name] for name in all_derived_.keys()]
     return all_inputs_lst, all_derived_lst
 
 
-def make_graph(*access_nodes: SpecTy | Sequence[SpecTy], jit_options: Optional[dict] = None):
-    all_inputs_, all_derived_ = infer_end_and_derived_nodes(access_nodes)
+def make_graph(
+    *access_nodes: SpecTy | Sequence[SpecTy],
+    registry: Optional[dict] = None,
+    jit_options: Optional[dict] = None
+):
+    if registry is None:
+        registry = _specs_registry
+    all_inputs_, all_derived_ = infer_end_and_derived_nodes(access_nodes, registry)
     if jit_options is None:
         jit_options = {}
     jit_options = {**default_jit_options, **jit_options}
