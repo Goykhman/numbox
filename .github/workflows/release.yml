@@ -33,6 +33,7 @@ jobs:
       - name: Build release distributions
         run: |
           python -m pip install build==1.2.2.post1 wheel==0.45.0
+          git clean -Xfd
           python -m build --wheel
 
       - name: Upload distributions
