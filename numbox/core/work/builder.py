@@ -48,7 +48,7 @@ class _Derived(NamedTuple):
     name: str
     init_value: Any
     derive: Callable
-    sources: Sequence[Union['Derived', End]]
+    sources: Sequence[Union['Derived', End]] = ()
     registry: dict = None
     ty: Optional[type | Type] = None
 
@@ -102,7 +102,7 @@ def _derived_line(
     name_ = derived_.name
     init_ = derived_.init_value
     sources_ = ", ".join([s.name for s in derived_.sources])
-    sources_ = sources_ + ", " if "," not in sources_ else sources_
+    sources_ = sources_ + ", " if sources_ and "," not in sources_ else sources_
     ty_ = get_ty(derived_)
     derive_func = derived_.derive
     derive_hashes.append(sha256(getsource(derive_func).encode("utf-8")).hexdigest())

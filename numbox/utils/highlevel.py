@@ -196,6 +196,7 @@ def make_structref(
             "jit_options": jit_options,
             "new": new,
             "njit": njit,
+            "overload": overload,
             "overload_method": overload_method,
             "StructRefProxy": StructRefProxy,
             struct_type_class.__name__: struct_type_class

@@ -449,5 +449,18 @@ def test_8():
     assert not (_specs_registry.get("end_1") or _specs_registry.get("der_1"))
 
 
+def test_9():
+
+    def calc1():
+        return 3.14
+
+    d1_ = Derived(name="d1", init_value=0.0, derive=calc1)
+    access = make_graph(d1_)
+    d1 = access.d1
+    assert d1.data == 0.0
+    d1.calculate()
+    assert isclose(d1.data, 3.14)
+
+
 if __name__ == "__main__":
     collect_and_run_tests(__name__)
