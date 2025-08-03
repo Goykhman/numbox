@@ -281,6 +281,14 @@ obtained from their respective registries.
    :show-inheritance:
    :undoc-members:
 
+numbox.core.work.builder_utils
+------------------------------
+
+.. automodule:: numbox.core.work.builder_utils
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 numbox.core.work.combine_utils
 ------------------------------
 

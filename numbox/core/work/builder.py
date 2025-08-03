@@ -5,7 +5,7 @@ from io import StringIO
 from itertools import chain
 from numba import njit, typeof
 from numba.core.types import Type
-from typing import Any, Callable, Dict, NamedTuple, Optional, Sequence, Union
+from typing import Any, Callable, Dict, NamedTuple, Optional, Sequence, Tuple as PyTuple, Union
 
 from numbox.core.configurations import default_jit_options
 from numbox.core.work.lowlevel_work_utils import ll_make_work
@@ -132,7 +132,7 @@ def _infer_end_and_derived_nodes(spec: SpecTy, all_inputs_: Dict[str, Type], all
     all_derived_[spec.name] = get_ty(spec)
 
 
-def infer_end_and_derived_nodes(access_nodes: SpecTy | Sequence[SpecTy], registry):
+def infer_end_and_derived_nodes(access_nodes: PyTuple[SpecTy, ...], registry):
     all_inputs_ = dict()
     all_derived_ = dict()
     for access_node in access_nodes:
@@ -143,7 +143,7 @@ def infer_end_and_derived_nodes(access_nodes: SpecTy | Sequence[SpecTy], registr
 
 
 def make_graph(
-    *access_nodes: SpecTy | Sequence[SpecTy],
+    *access_nodes: SpecTy,
     registry: Optional[dict] = None,
     jit_options: Optional[dict] = None
 ):
@@ -170,8 +170,7 @@ def make_graph(
     hash_str = f"code_block = {code_txt.getvalue()} initializers = {list(initializers.values())} derive_hashes = {derive_hashes}"  # noqa: E501
     hash_ = code_block_hash(hash_str)
     access_nodes_names = [n.name for n in access_nodes]
-    tup_ = ", ".join(access_nodes_names)
-    tup_ = tup_ + ", " if ", " not in tup_ else tup_
+    tup_ = ", ".join(access_nodes_names) + ","
     code_txt.write(f"""\n\taccess_tuple = ({tup_})""")
     code_txt.write("\n\treturn access_tuple")
     code_txt = code_txt.getvalue()

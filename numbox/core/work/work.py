@@ -210,7 +210,6 @@ _calculate_registry = {}
 
 def ensure_presence_of_source_getters_in_ns(num_sources_, ns_):
     for source_i in range(num_sources_):
-        _source_getter = _source_getter_registry.get(source_i, None)
         source_getter_code_txt = _make_source_getter(source_i)
         source_getter_code = compile(source_getter_code_txt, getfile(_file_anchor), mode="exec")
         exec(source_getter_code, ns_)

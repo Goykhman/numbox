@@ -106,16 +106,16 @@ def ensure_work_boxing():
 @intrinsic(prefer_literal=False)
 def ll_make_work(typingctx, name_ty, data_ty, sources_ty, derive_ty, data_ty_ref: TypeRef = NoneType):
     """
-    Purely intrinsic work constructor, alternative to overloaded
-    `numbox.core.work.work.Work`.
+    Purely intrinsic work constructor.
 
     Substantially more efficient in memory use, cache disk space, and
     compilation time for inlining multiple `Work` instantiations inside
     jitted context (e.g., in large-graph applications).
 
-    (Alternatively, one can try `inline="always"` for the `make_work`
-    which might save memory and cache disk space demand but significantly
-    lengthens compilation time.)
+    Alternative `make_work`-like constructors with `inline="always"`
+    might save memory and cache disk space demand (when the inlining
+    directive is actually heeded by numba engine) but significantly
+    lengthen the compilation time.
     """
     if data_ty_ref != NoneType:
         data_ty = data_ty_ref.instance_type
