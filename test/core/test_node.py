@@ -1,6 +1,6 @@
 from numba.core.errors import NumbaError
 from numbox.core.work.node import make_node
-from test.auxiliary_utils import collect_and_run_tests
+from test.auxiliary_utils import ansi_escape, collect_and_run_tests
 
 
 def test():
@@ -14,7 +14,7 @@ def test():
     try:
         _ = n1.get_input(0)
     except NumbaError as e:
-        assert str(e) == "Requested input 0 while the node has 0 inputs"
+        assert ansi_escape.sub("", str(e)) == "Requested input 0 while the node has 0 inputs"
 
     assert n1.get_inputs_names() == []
     assert n4.get_inputs_names() == ["n2", "n3"]

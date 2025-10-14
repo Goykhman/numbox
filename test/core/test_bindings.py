@@ -1,6 +1,8 @@
-from ctypes import addressof, c_char_p, c_int64, c_void_p
 import numpy as np
+import pytest
+from ctypes import addressof, c_char_p, c_int64, c_void_p
 from numbox.core.bindings import *
+from numbox.core.bindings.utils import platform_
 from test.auxiliary_utils import collect_and_run_tests, str_from_p_as_int
 
 
@@ -25,6 +27,7 @@ def test_math():
     assert np.isclose(s_ / c_, t_)
 
 
+@pytest.mark.skipif(platform_ == "Windows", reason="Need to add windows support")
 def test_sqlite():
     version_ = sqlite3_libversion_number()
     version_ = str_from_p_as_int(version_)

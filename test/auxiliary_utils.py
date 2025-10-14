@@ -1,10 +1,15 @@
 import logging
+import re
 import sys
 from ctypes import addressof, c_char, c_char_p, c_int64, c_void_p
 from io import BytesIO
 from numba import njit
 from numba.core import types
 from numba.extending import intrinsic
+
+
+# https://stackoverflow.com/a/14693789
+ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 
 logger = logging.getLogger(__name__)
