@@ -19,7 +19,7 @@ def test_1():
     try:
         any1.get_as(float64)
     except NumbaError as e:
-        assert str(e) == "Any stored type int64, cannot decode as float64"
+        assert "Any stored type int64, cannot decode as float64" in str(e)
 
 
 def test_2():

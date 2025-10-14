@@ -14,7 +14,7 @@ def test():
     try:
         _ = n1.get_input(0)
     except NumbaError as e:
-        assert str(e) == "Requested input 0 while the node has 0 inputs"
+        assert "Requested input 0 while the node has 0 inputs" in str(e)
 
     assert n1.get_inputs_names() == []
     assert n4.get_inputs_names() == ["n2", "n3"]

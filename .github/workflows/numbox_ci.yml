@@ -12,10 +12,11 @@ permissions:
 jobs:
   build:
 
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: [ "3.10", "3.11", "3.12", "3.13", "3.14" ]
+        arch: [ "ubuntu-latest", "ubuntu-24.04-arm", "windows-latest" ]
+    runs-on: "${{ matrix.arch }}"
 
     steps:
     - uses: actions/checkout@v4
@@ -24,6 +25,7 @@ jobs:
       with:
         python-version: "${{ matrix.python-version }}"
     - name: Determine version
+      shell: bash
       id: version
       run: |
         if [ "${{ github.ref_type }}" == "tag" ]; then
@@ -33,6 +35,7 @@ jobs:
           echo "VERSION=${BUILD_VERSION}" >> $GITHUB_ENV
         fi
     - name: Write version to __init__.py
+      shell: bash
       run: echo "__version__ = '${{ env.VERSION }}'" > numbox/__init__.py
     - name: Install dependencies
       run: |
