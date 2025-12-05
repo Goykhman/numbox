@@ -9,14 +9,14 @@ include = ["numbox*"]
 [project]
 name = "numbox"
 dependencies = [
-    "llvmlite>=0.44.0,<0.46.0;python_version<'3.14'",
-    "llvmlite==0.46.0b1;python_version=='3.14'",
+    "llvmlite>=0.43.0,<0.46.0;python_version<'3.14'",
+    "llvmlite==0.46.0rc1;python_version=='3.14'",
     "numba>=0.60.0,<0.63.0;python_version<'3.14'",
-    "numba==0.63.0b1;python_version=='3.14'",
+    "numba==0.63.0rc1;python_version=='3.14'",
     "numpy>=2.1.0,<2.4.0"
 ]
 dynamic = ["version"]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {file = "LICENSE"}
 keywords = ["llvmlite", "numba", "numpy"]
 authors = [
