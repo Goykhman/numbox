@@ -8,10 +8,3 @@ def make_params_strings(func):
     )
     func_names_params_str = ', '.join(func_params.keys())
     return func_params_str, func_names_params_str
-
-
-if __name__ == "__main__":
-    def aux(x, y, z=1):
-        pass
-    print(make_params_strings(aux))
-
