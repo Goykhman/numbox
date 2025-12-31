@@ -9,8 +9,7 @@ include = ["numbox*"]
 [project]
 name = "numbox"
 dependencies = [
-    "numba>=0.60.0,<0.63.0;python_version<'3.14'",
-    "numba==0.63.1;python_version=='3.14'",
+    "numba>=0.60.0,<0.64.0"
 ]
 dynamic = ["version"]
 requires-python = ">=3.10"
