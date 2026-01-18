@@ -167,7 +167,7 @@ Graph nodes can be loaded from the access node as follows [#f3]_::
 
     from numba.core.types import int16, unicode_type
     from numba.typed.typeddict import Dict
-    from numbox.core.any.any_type import Any, make_any
+    from numbox.core.any.any_type import AnyType, make_any
 
     load_data = Dict.empty(key_type=unicode_type, value_type=AnyType)
     assert sheaf["w1"].get_as(int16) == 137

@@ -1,3 +1,4 @@
+from importlib.metadata import version
 from llvmlite import ir
 from llvmlite.ir.builder import IRBuilder
 from numba import carray, njit
@@ -15,6 +16,11 @@ from numba.extending import intrinsic
 from numbox.core.configurations import default_jit_options, MAX_STR_LENGTH
 from numbox.utils.void_type import VoidType
 from numbox.utils.highlevel import determine_field_index
+
+
+numba_version = int(version("numba").split(".")[1])
+assert numba_version >= 60, numba_version
+function_struct_size = 3 if numba_version >= 61 else 2  # See `FunctionModel` struct (c_addr, py_addr[, jit_addr])
 
 
 @intrinsic
@@ -114,13 +120,13 @@ def get_func_p_as_int_from_func_struct(func_):
 
 @intrinsic
 def _get_func_tuple(typingctx, func_ty):
-    return_tuple_type = UniTuple(intp, 3)
+    return_tuple_type = UniTuple(intp, function_struct_size)
     sig = return_tuple_type(func_ty)
 
     def codegen(context, builder, signature, args):
         func_struct = args[0]
         lst = []
-        for i in range(3):
+        for i in range(function_struct_size):
             lst.append(builder.ptrtoint(builder.extract_value(func_struct, i), intp_t))
         return context.make_tuple(builder, return_tuple_type, lst)
     return sig, codegen
