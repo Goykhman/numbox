@@ -238,7 +238,7 @@ class CompiledGraph:
             for var_name, variable in variables.items():
                 if var_name not in provided:
                     raise KeyError(
-                        f"Missing value for external variable '{source_name}.{var_name}'"
+                        f"Missing value for external variable '{_make_qual_name(source_name, var_name)}'"
                     )
                 values.get(variable).value = provided[var_name]
 
@@ -274,7 +274,9 @@ class CompiledGraph:
             if node.variable.formula is None:
                 continue
             args = tuple(values.get(input_).value for input_ in node.inputs)
-            # assert _null not in args, f"Uninitialized input for {node.variable}, args = {args}"
+            assert not any(
+                [arg is _null for arg in args]
+            ), f"Uninitialized input for {node.variable}, args = {args}"
             cache_key = (node.variable, args)
             if node.variable.cacheable:
                 if cache_key in values.cache:
@@ -348,6 +350,9 @@ class Graph:
         self.compiled_graphs = {}
 
     def compile(self, required: List[str] | str) -> CompiledGraph:
+        """
+        :required: list of qualified variables names that need to be calculated.
+        """
         if isinstance(required, str):
             required = [required]
         required_tup = tuple(sorted(required))

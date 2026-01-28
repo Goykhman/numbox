@@ -7,5 +7,6 @@ numbox
    numbox.core.any
    numbox.core.bindings
    numbox.core.proxy
+   numbox.core.variable
    numbox.core.work
    numbox.utils

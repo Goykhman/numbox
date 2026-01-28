@@ -1,4 +1,4 @@
-from numbox.core.variable.variable import Graph, Values
+from numbox.core.variable.variable import CompiledGraph, Graph, Values, Variables, Variable
 from test.auxiliary_utils import collect_and_run_tests
 
 
@@ -12,18 +12,23 @@ def test_basic():
             "variables1": [x, a],
             "variables2": [u],
         },
-        external_source_names=["basket"],
+        external_source_names=["basket"]
     )
 
     required = ["variables2.u"]
     compiled = graph.compile(required)
+    assert isinstance(compiled, CompiledGraph)
 
     registry = graph.registry
     variables1 = registry["variables1"]
     variables2 = registry["variables2"]
 
+    assert isinstance(variables1, Variables)
+
     assert list(variables1.variables.keys()) == ["x", "a"]
     assert list(variables2.variables.keys()) == ["u"]
+
+    assert isinstance(variables1.variables["x"], Variable)
 
     required_external_variables = compiled.required_external_variables
 
