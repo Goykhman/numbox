@@ -5,7 +5,8 @@ Overview
 ++++++++
 
 Framework for Directed Acyclic Graph (DAG) in pure Python.
-Computationally heavy parts can be put on this graph as JIT-compiled functions.
+Computationally heavy parts can be put on this graph as JIT-compiled functions
+via the `formula` key of the graph variables specifications (see below).
 
 Modules
 ++++++++
@@ -34,11 +35,43 @@ A graph can be defined as follows::
 
 Here we have the variable `y` sourced externally from the `basket`, and calculated variables
 `x` and `a` in the `variables1` namespace, and `u` in the `variables2` namespace. The dictionaries
-`x`, `a`, and `u` are called variable specifications. These specs are on their own agnostic about what
-namespace they can be put in. These namespaces however need to be defined in the `variables_lists`
-argument given to the `Graph` at initialization time.
+`x`, `a`, and `u` are called variable specifications. These specs on their own are agnostic about what
+namespace they can be put in. The namespaces however need to be specified via the `variables_lists`
+argument given to the `Graph` at the initialization time.
 
-Names of the 'external' sources (of data values) need to be supplied to the `Graph` as well.
+One of the variables specifications, designated with the key `formula`, refers to the
+function of the arguments that match the names of the input variables (this graph node's dependencies)
+assigned to the key `inputs`. The `formula` value is a Python function that in particular
+can be a wrapper around numba JIT-compiled function, i.e.,
+a proxy to the numba's `FunctionType` or `CPUDispatcher` objects [#f1]_.
+
+The variable specification `inputs` (if any) include both the names of the dependencies variables
+required to calculate the given variable via the function given by the `formula`,
+as well as the namespaces where these variables are going to be looked for in.
+
+Graph end nodes, located at the edge of the graph (a.k.a., leaf nodes) have neither `inputs`
+nor `formula` in their specifications.
+
+The variable can be specified as `cacheable` if its value calculated for the given tuple of
+arguments can be cached and later retrieved without re-calculation provided
+the arguments have not changed. The arguments types of the corresponding `formula` then need to be hashable -
+custom type sub-classing with its own `__hash__` might be needed in certain cases, thereby providing the definition
+of the identity of the arguments' values.
+When `cacheable=True` (by default it is `False`), the graph will avoid recalculation of the
+value provided the inputs haven't changed. It is not recommended to abuse the cache.
+
+Skipping ahead, it is worth noting here that the `cacheable` key is a rather brute force way
+to avoid identical re-computations.
+It is completely unrelated to the graph's dependency structure.
+On the other hand, the graph's `recompute`
+method, discussed below, only recomputes the values of variables that are dependent on the nodes
+that have been updated. That is, the strategy of the `recompute` method
+is determined by the graph's topology only
+and is independent from the `cacheable` specifications of the nodes'
+variables.
+
+Names of the 'external' sources (of data values) need to be given to the `Graph` as well,
+via the `external_source_names` argument.
 When the :class:`numbox.core.variable.variable.Graph` is compiled
 to the :class:`numbox.core.variable.variable.CompiledGraph`, it will automatically figure out which variables need to be sourced
 from each of the specified external sources (such as, '`basket`') in order to perform the
@@ -46,10 +79,14 @@ required calculation::
 
     from numbox.core.variable.variable import CompiledGraph
 
+    # What is required from this calculation, the names of qualified variables
     required = ["variables2.u"]
+
+    # Compile the graph for the required variables
     compiled = graph.compile(required)
     assert isinstance(compiled, CompiledGraph)
 
+    # The graph will figure out what external variables it needs to do the calculation
     required_external_variables = compiled.required_external_variables
     assert list(required_external_variables.keys()) == ["basket"]
     basket = required_external_variables["basket"]
@@ -71,28 +108,30 @@ Instances of `Variable` s are stored in the `Graph`'s instance's `registry`::
     from numbox.core.variable.variable import Variables, Variable
 
     registry = graph.registry
+
+    # Get the namespaces...
     variables1 = registry["variables1"]
     variables2 = registry["variables2"]
 
+    # ... and the variables defined in these namespaces
     assert list(variables1.variables.keys()) == ["x", "a"]
     assert list(variables2.variables.keys()) == ["u"]
 
     assert isinstance(variables1, Variables)
     assert isinstance(variables1.variables["x"], Variable)
 
-That is, users are not expected to create neither instances of `Variable` nor instances of `Variables`,
+That is, users are not expected to instantiate neither `Variable` s nor `Variables` s,
 although they are certainly allowed to do so if needed.
 Instead, users provide variable specifications, as the dictionaries `x`, `u`, `a`
 in the example above (and the variable name "`y`" that is referred to and implied to be 'external')
 that are given to the `Graph`. The `Graph` then creates instances of `Variables` (one per namespace)
-and instances of `External` (one per 'external' source). Finally, `Variables` and `External` create instances
-of `Variable` s and store them.
-
-As shown above, `External` auto-discovers which external variables from the corresponding source need to be present,
-and reports that information to the compiled graph.
+and instances of `External` (one per an 'external' source). Finally, `Variables` and `External` in turn
+create instances of `Variable` s and store them.
 
 To calculate the required variables, one first needs to instantiate the execution-scope instance
-of :class:`numbox.core.variable.variable.Values`. This will contain all calculated nodes
+of the storage :class:`numbox.core.variable.variable.Values` of the values of all variables,
+scoped both in `Variables` and `External` namespaces. This storage will get automatically populated
+with all calculated nodes
 as a mapping from the corresponding `Variable` to instances of :class:`numbox.core.variable.variable.Value`.
 The latter wraps the data. All the data of non-external variables is initialized to
 the instance `_null` of the :class:`numbox.core.variable.variable._Null`.
@@ -103,7 +142,10 @@ have been specified, one can calculate the graph as::
 
     from numbox.core.variable.variable import Values
 
+    # Instantiate the storage
     values = Values()
+
+    # Request the calculation by executing the graph
     compiled.execute(
         external_values={"basket": {"y": 137}},
         values=values,
@@ -127,6 +169,11 @@ Only the affected nodes will be re-evaluated::
     assert values.get(x_var).value == 2
     assert values.get(a_var).value == -72
     assert values.get(u_var).value == -144
+
+
+.. rubric:: References
+
+.. [#f1] It is straightforward to adapt the variables specifications given here in pure Python to build a fully-JIT'd graph of :class:`numbox.core.work.work.Work` nodes, by using the :class:`numbox.core.work.builder.Derived`.
 
 .. automodule:: numbox.core.variable.variable
    :members:

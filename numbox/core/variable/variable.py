@@ -278,10 +278,9 @@ class CompiledGraph:
                 [arg is _null for arg in args]
             ), f"Uninitialized input for {node.variable}, args = {args}"
             cache_key = (node.variable, args)
-            if node.variable.cacheable:
-                if cache_key in values.cache:
-                    values.get(node.variable).value = values.cache[cache_key]
-                    continue
+            if node.variable.cacheable and cache_key in values.cache:
+                values.get(node.variable).value = values.cache[cache_key]
+                continue
             result = node.variable.formula(*args)
             if node.variable.cacheable:
                 values.cache[cache_key] = result
