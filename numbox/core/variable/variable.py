@@ -92,6 +92,8 @@ class Variable:
     these variables.
     :param formula: (optional) function that calculates value
     of this `Variable` from its sources.
+    :param metadata: any possible metadata associated with
+    this variable.
     :param cacheable: (default `False`) when `True`, the
     corresponding `Value` (see below) will be cached during
     calculation by the `id` of the corresponding Python object
@@ -102,6 +104,7 @@ class Variable:
     source: str = field(default="")
     inputs: Mapping[str, str] = field(default_factory=lambda: {})
     formula: Callable = field(default=None)
+    metadata: str | None = field(default=None)
     cacheable: bool = field(default=False)
 
     def __hash__(self):
@@ -430,3 +433,37 @@ class Graph:
             variable_source = variable.source
             required_external_variables[variable_source][variable_name] = variable
         return required_external_variables
+
+    def explain(self, qual_name: str, direct: bool = True) -> str:
+        """
+        Follow the dependencies chain to explain how the given
+        variable is derived.
+        :param qual_name: qualified name of the `Variable`.
+        :param direct: when `True` (default), begin explanation
+        with `qual_name`.
+        """
+        derived = set()
+        derivation = []
+
+        def collect(qual_name_: str):
+            if qual_name_ in derived:
+                return
+            derived.add(qual_name_)
+            source_name, variable_name = qual_name_.split(QUAL_SEP)
+            variable_source = self.registry[source_name]
+            variable = variable_source[variable_name]
+            inputs_qual_names = []
+            for input_name, input_source in variable.inputs.items():
+                inputs_qual_names.append(_make_qual_name(input_source, input_name))
+                collect(_make_qual_name(input_source, input_name))
+            if isinstance(variable_source, External):
+                derivation.append(f"'{variable_name}' comes from external source '{source_name}'\n")
+            else:
+                derivation.append(
+                    f"""'{qual_name_}' depends on {tuple(sorted(inputs_qual_names))} via \n\n{variable.metadata}"""
+                )
+
+        collect(qual_name)
+        derivation = reversed(derivation) if direct else derivation
+        derivation_txt = "\n" + "\n".join(derivation)
+        return derivation_txt

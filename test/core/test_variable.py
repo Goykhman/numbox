@@ -1,16 +1,38 @@
+from textwrap import dedent
+
+from inspect import getsource
 from numbox.core.variable.variable import CompiledGraph, Graph, Values, Variables, Variable
 from test.auxiliary_utils import collect_and_run_tests
 
 
 def test_basic():
-    x = {"name": "x", "inputs": {"y": "basket"}, "formula": lambda y_: 2 * y_, "cacheable": True}
-    a = {"name": "a", "inputs": {"x": "variables1"}, "formula": lambda x_: x_ - 74, "cacheable": True}
-    u = {"name": "u", "inputs": {"a": "variables1"}, "formula": lambda a_: a_ * 2, "cacheable": True}
+
+    def derive_x(y_):
+        return 2 * y_
+
+    def derive_a(x_):
+        return x_ - 74
+
+    def derive_u(a_):
+        return 2 * a_
+
+    all_vars_ = {
+        "x": {"name": "x", "inputs": {"y": "basket"}, "formula": derive_x},
+        "a": {"name": "a", "inputs": {"x": "variables1"}, "formula": derive_a},
+        "u": {"name": "u", "inputs": {"a": "variables1"}, "formula": derive_u}
+    }
+
+    all_vars = {
+        name: {
+            **data,
+            "metadata": dedent(getsource(data["formula"])) if data["formula"] else None
+        } for name, data in all_vars_.items()
+    }
 
     graph = Graph(
         variables_lists={
-            "variables1": [x, a],
-            "variables2": [u],
+            "variables1": [all_vars["x"], all_vars["a"]],
+            "variables2": [all_vars["u"]],
         },
         external_source_names=["basket"]
     )
@@ -59,6 +81,25 @@ def test_basic():
     assert values.get(x_var).value == 2
     assert values.get(a_var).value == -72
     assert values.get(u_var).value == -144
+
+    assert graph.explain("variables2.u") == """
+'variables2.u' depends on ('variables1.a',) via 
+
+def derive_u(a_):
+    return 2 * a_
+
+'variables1.a' depends on ('variables1.x',) via 
+
+def derive_a(x_):
+    return x_ - 74
+
+'variables1.x' depends on ('basket.y',) via 
+
+def derive_x(y_):
+    return 2 * y_
+
+'y' comes from external source 'basket'
+"""
 
 
 if __name__ == "__main__":

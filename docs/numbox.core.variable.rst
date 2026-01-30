@@ -21,9 +21,18 @@ A graph can be defined as follows::
 
     from numbox.core.variable.variable import Graph
 
-    x = {"name": "x", "inputs": {"y": "basket"}, "formula": lambda y_: 2 * y_, "cacheable": True}
-    a = {"name": "a", "inputs": {"x": "variables1"}, "formula": lambda x_: x_ - 74, "cacheable": True}
-    u = {"name": "u", "inputs": {"a": "variables1"}, "formula": lambda a_: a_ * 2, "cacheable": True}
+    def derive_x(y_):
+        return 2 * y_
+
+    def derive_a(x_):
+        return x_ - 74
+
+    def derive_u(a_):
+        return 2 * a_
+
+    x = {"name": "x", "inputs": {"y": "basket"}, "formula": derive_x, "cacheable": True}
+    a = {"name": "a", "inputs": {"x": "variables1"}, "formula": derive_a, "cacheable": True}
+    u = {"name": "u", "inputs": {"a": "variables1"}, "formula": derive_u, "cacheable": True}
 
     graph = Graph(
         variables_lists={
