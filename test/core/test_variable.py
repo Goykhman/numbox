@@ -101,6 +101,8 @@ def derive_x(y_):
 'y' comes from external source 'basket'
 """
 
+    assert graph.dependents_of("basket.y") == {"variables1.x", "variables2.u", "basket.y", "variables1.a"}
+
 
 if __name__ == "__main__":
     collect_and_run_tests(__name__)

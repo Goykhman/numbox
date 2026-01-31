@@ -3,7 +3,7 @@ import warnings
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import (
-    Any, Callable, Dict, List, Mapping, Set, Tuple, TypeAlias, Union
+    Any, Callable, Dict, Iterator, List, Mapping, Set, Tuple, TypeAlias, Union
 )
 
 
@@ -23,7 +23,7 @@ _null = _Null()
 QUAL_SEP = "."
 
 
-def _make_qual_name(namespace_name: str, var_name: str) -> str:
+def make_qual_name(namespace_name: str, var_name: str) -> str:
     """ Each `Variable` instance is best contained in a
      mapping namespace, with the given `namespace_name`.
      This function thereby returns qualified name of the
@@ -54,6 +54,9 @@ class External:
             )
             self._vars[name] = variable
         return variable
+
+    def __iter__(self) -> Iterator['Variable']:
+        return iter(self._vars.values())
 
 
 @dataclass(frozen=True)
@@ -114,7 +117,7 @@ class Variable:
         return isinstance(other, Variable) and self.name == other.name and self.source == other.source
 
     def qual_name(self) -> str:
-        return _make_qual_name(self.source, self.name)
+        return make_qual_name(self.source, self.name)
 
 
 class Variables:
@@ -142,6 +145,9 @@ class Variables:
         `External` namespace, respectively.
         """
         return self.variables[variable_name]
+
+    def __iter__(self) -> Iterator[Variable]:
+        return iter(self.variables.values())
 
 
 @dataclass
@@ -172,8 +178,8 @@ class CompiledNode:
     inputs: List[Variable]
 
     def __post_init__(self):
-        if self.variable.formula is None and self.inputs:
-            raise RuntimeError(f"{self.variable} contains inputs but no formula, how come?")
+        if self.variable.formula and not self.inputs:
+            raise RuntimeError(f"{self.variable} contains formula but no inputs, how come?")
 
     def __hash__(self):
         return hash((self.variable.source, self.variable.name))
@@ -212,7 +218,6 @@ class CompiledGraph:
         source and then from the name of the variable within that
         source to the variable's actual value.
         :param values: runtime storage of all values, instance of `Values`.
-        :return:
         """
         self._assign_external_values(external_values, values)
         self._calculate(self.ordered_nodes, values)
@@ -241,7 +246,7 @@ class CompiledGraph:
             for var_name, variable in variables.items():
                 if var_name not in provided:
                     raise KeyError(
-                        f"Missing value for external variable '{_make_qual_name(source_name, var_name)}'"
+                        f"Missing value for external variable '{make_qual_name(source_name, var_name)}'"
                     )
                 values.get(variable).value = provided[var_name]
 
@@ -298,7 +303,7 @@ class CompiledGraph:
         for src, vals in changed.items():
             for name, val in vals.items():
                 variable = self.required_external_variables.get(src, {}).get(name)
-                qual = _make_qual_name(src, name)
+                qual = make_qual_name(src, name)
                 if variable is None:
                     try:
                         variable = next(n.variable for n in self.ordered_nodes if n.variable.qual_name() == qual)
@@ -412,7 +417,7 @@ class Graph:
             if isinstance(source, External):
                 used_external_vars.add(variable)
             for input_name, input_source in variable.inputs.items():
-                visit(_make_qual_name(input_source, input_name))
+                visit(make_qual_name(input_source, input_name))
             visiting.remove(qual_name)
             visited.add(qual_name)
             ordered_variables.append(variable)
@@ -434,6 +439,40 @@ class Graph:
             required_external_variables[variable_source][variable_name] = variable
         return required_external_variables
 
+    def _build_reverse_dependencies(self) -> Dict[str, set[str]]:
+        """
+        Utility to calculate set of qualified names of variables
+        impacted by each of the encountered inputs.
+        """
+        reverse = defaultdict(set)
+        for source_name, source in self.registry.items():
+            for variable in source:
+                var_qual = make_qual_name(source_name, variable.name)
+                for input_name, input_source in variable.inputs.items():
+                    input_qual = make_qual_name(input_source, input_name)
+                    reverse[input_qual].add(var_qual)
+        return reverse
+
+    def dependents_of(self, qual_names: List[str] | Set[str] | str) -> Set[str]:
+        """
+        Return qualified names of `Variable`s that directly or indirectly
+        depend on any of `qual_names`.
+        """
+        if isinstance(qual_names, str):
+            qual_names = {qual_names}
+        else:
+            qual_names = set(qual_names)
+        reverse = self._build_reverse_dependencies()
+        result = set(qual_names)
+        stack = list(qual_names)
+        while stack:
+            current = stack.pop()
+            for dep in reverse.get(current, ()):
+                if dep not in result:
+                    result.add(dep)
+                    stack.append(dep)
+        return result
+
     def explain(self, qual_name: str, direct: bool = True) -> str:
         """
         Follow the dependencies chain to explain how the given
@@ -454,8 +493,8 @@ class Graph:
             variable = variable_source[variable_name]
             inputs_qual_names = []
             for input_name, input_source in variable.inputs.items():
-                inputs_qual_names.append(_make_qual_name(input_source, input_name))
-                collect(_make_qual_name(input_source, input_name))
+                inputs_qual_names.append(make_qual_name(input_source, input_name))
+                collect(make_qual_name(input_source, input_name))
             if isinstance(variable_source, External):
                 derivation.append(f"'{variable_name}' comes from external source '{source_name}'\n")
             else:
