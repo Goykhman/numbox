@@ -9,6 +9,7 @@ Functionality for fully-jitted and light-weight calculation on a graph.
 Modules
 ++++++++
 
+.. _builder:
 numbox.core.work.builder
 ------------------------
 

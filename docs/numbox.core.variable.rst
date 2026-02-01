@@ -5,7 +5,9 @@ Overview
 ++++++++
 
 Framework for Directed Acyclic Graph (DAG) in pure Python.
-Computationally heavy parts can be put on this graph as JIT-compiled functions
+While this module does not contain any JIT-compiled
+bits in particular, or anything imported from numba in general,
+computationally heavy parts can be put on this graph as JIT-compiled functions
 via the `formula` key of the graph variables specifications (see below).
 
 Modules
@@ -30,9 +32,9 @@ A graph can be defined as follows::
     def derive_u(a_):
         return 2 * a_
 
-    x = {"name": "x", "inputs": {"y": "basket"}, "formula": derive_x, "cacheable": True}
-    a = {"name": "a", "inputs": {"x": "variables1"}, "formula": derive_a, "cacheable": True}
-    u = {"name": "u", "inputs": {"a": "variables1"}, "formula": derive_u, "cacheable": True}
+    x = {"name": "x", "inputs": {"y": "basket"}, "formula": derive_x}
+    a = {"name": "a", "inputs": {"x": "variables1"}, "formula": derive_a}
+    u = {"name": "u", "inputs": {"a": "variables1"}, "formula": derive_u}
 
     graph = Graph(
         variables_lists={
@@ -43,14 +45,27 @@ A graph can be defined as follows::
     )
 
 Here we have the variable `y` sourced externally from the `basket`, and calculated variables
-`x` and `a` in the `variables1` namespace, and `u` in the `variables2` namespace. The dictionaries
+`x` and `a` in the `variables1` namespace, and `u` in the `variables2` namespace.
+
+The dictionaries
 `x`, `a`, and `u` are called variable specifications. These specs on their own are agnostic about what
 namespace they can be put in. The namespaces however need to be specified via the `variables_lists`
 argument given to the `Graph` at the initialization time.
 
-One of the variables specifications, designated with the key `formula`, refers to the
-function of the arguments that match the names of the input variables (this graph node's dependencies)
-assigned to the key `inputs`. The `formula` value is a Python function that in particular
+The full and unambiguous way to denote the variables is via their qualified
+names, applicable both to externally sourced variables, `basket.y`, as well as
+the calculated ones, `variables1.x`,
+`variables1.y`, `variables2.u`.
+
+One of the variables specifications, designated with the key `formula`, specifies the
+function with the parameters that match the input variables (this graph node's dependencies)
+that are in turn
+designated with the key `inputs`. While the names of the parameters of the function assigned
+to the `formula` key do not have to match the names of the `inputs`, their order is
+expected to follow one-to-one correspondence. This way the graph is instructed
+which inputs to use to get the values to be assigned to the parameters of the `formula`.
+
+The Python function specified by the `formula`
 can be a wrapper around numba JIT-compiled function, i.e.,
 a proxy to the numba's `FunctionType` or `CPUDispatcher` objects [#f1]_.
 
@@ -59,7 +74,11 @@ required to calculate the given variable via the function given by the `formula`
 as well as the namespaces where these variables are going to be looked for in.
 
 Graph end nodes, located at the edge of the graph (a.k.a., leaf nodes) have neither `inputs`
-nor `formula` in their specifications.
+nor `formula` in their specifications. Specifying `formula` without `inputs`
+will result in an exception. It is possible, however, to specify `inputs`
+but no formula, which technically defines the placement of the node
+on the graph but leaves it up to the developer to defer the node's calculation
+logic until later in the runtime.
 
 The variable can be specified as `cacheable` if its value calculated for the given tuple of
 arguments can be cached and later retrieved without re-calculation provided
@@ -67,7 +86,8 @@ the arguments have not changed. The arguments types of the corresponding `formul
 custom type sub-classing with its own `__hash__` might be needed in certain cases, thereby providing the definition
 of the identity of the arguments' values.
 When `cacheable=True` (by default it is `False`), the graph will avoid recalculation of the
-value provided the inputs haven't changed. It is not recommended to abuse the cache.
+value provided the inputs haven't changed. It is not recommended to abuse the cache, especially
+for the continuous space of identities of the parameters of the node's `formula`.
 
 Skipping ahead, it is worth noting here that the `cacheable` key is a rather brute force way
 to avoid identical re-computations.
@@ -130,7 +150,9 @@ Instances of `Variable` s are stored in the `Graph`'s instance's `registry`::
     assert isinstance(variables1.variables["x"], Variable)
 
 That is, users are not expected to instantiate neither `Variable` s nor `Variables` s,
-although they are certainly allowed to do so if needed.
+although they are certainly allowed to do so if needed (it is recommended to design
+one's code so that `Variable` instances can be retrieved from the `registry` of the
+`Graph` instance instead).
 Instead, users provide variable specifications, as the dictionaries `x`, `u`, `a`
 in the example above (and the variable name "`y`" that is referred to and implied to be 'external')
 that are given to the `Graph`. The `Graph` then creates instances of `Variables` (one per namespace)
@@ -182,7 +204,7 @@ Only the affected nodes will be re-evaluated::
 
 .. rubric:: References
 
-.. [#f1] It is straightforward to adapt the variables specifications given here in pure Python to build a fully-JIT'd graph of :class:`numbox.core.work.work.Work` nodes, by using the :class:`numbox.core.work.builder.Derived`.
+.. [#f1] It is straightforward to adapt the variables specifications given here in pure Python to build a fully-JIT'ed graph of :class:`numbox.core.work.work.Work` nodes, by using the :class:`numbox.core.work.builder.Derived`. See :ref:`builder`.
 
 .. automodule:: numbox.core.variable.variable
    :members:
