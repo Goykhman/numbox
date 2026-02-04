@@ -47,10 +47,10 @@ def test_basic():
 
     assert isinstance(variables1, Variables)
 
-    assert list(variables1.variables.keys()) == ["x", "a"]
-    assert list(variables2.variables.keys()) == ["u"]
+    assert list(variables1.keys()) == ["x", "a"]
+    assert list(variables2.keys()) == ["u"]
 
-    assert isinstance(variables1.variables["x"], Variable)
+    assert isinstance(variables1["x"], Variable)
 
     required_external_variables = compiled.required_external_variables
 

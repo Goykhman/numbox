@@ -4,30 +4,44 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import (
-    Any, Callable, Dict, Iterator, List, Mapping, Protocol, Set, Tuple, TypeAlias, TypedDict
+    Any, Callable, Dict, Iterator, List, Mapping,
+    Protocol, Set, Tuple, TypeAlias, TypedDict
 )
 
 
 class Namespace(ABC):
     name: str
-    variables: Dict
+    _variables: Dict[str, 'Variable']
 
-    @abstractmethod
+    def keys(self):
+        return self._variables.keys()
+
+    def update(self, key: str, var: 'Variable') -> None:
+        """
+        Post-initialization update for dynamically generated
+        `Variable`s.
+        """
+        self._variables[key] = var
+
     def __contains__(self, key: str) -> bool:
-        pass
+        """
+        :param key: un-qualified name of the `Variable`
+        It is qualified with `self.name` - the name of this
+        `Namespace` namespace that the `Variable` belongs to.
+        """
+        return key in self._variables
 
     @abstractmethod
     def __getitem__(self, key: str) -> 'Variable':
         pass
 
-    @abstractmethod
-    def __iter__(self) -> Iterator['Variable']:
-        pass
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._variables.keys())
 
 
 class Storage(Protocol):
-    values: Dict['Variable', 'Value']
-    cache: Dict[tuple, 'VarValue']
+    _values: Dict['Variable', 'Value']
+    cache: Dict[Tuple['Variable', Tuple[Any, ...]], 'VarValue']
 
     def get(self, variable: 'Variable') -> 'Value':
         """
@@ -35,6 +49,9 @@ class Storage(Protocol):
         Instantiates the corresponding value when first
         invoked for the given variable.
         """
+
+    def __iter__(self) -> Iterator['Variable']:
+        pass
 
 
 class VarSpec(TypedDict, total=False):
@@ -75,26 +92,18 @@ class External(Namespace):
     An 'external' namespace that facilitates discovery
     of requested names.
 
-    When requested a `Variable` with the given name via a
+    When requesting a `Variable` with the given name via a
     typical `__getitem__` call, if the `Variable` is not
     found, it will be created and added to this dictionary.
-    This way the user will be able to infer which variables
+    This way the graph will be able to infer which variables
     are required from the external source abstracted by this
     namespace.
     """
     def __init__(self, name: str):
         self.name = name
-        self.variables = {}
+        self._variables: Dict[str, 'Variable'] = {}
 
-    def __contains__(self, name: str) -> bool:
-        """
-        :param name: un-qualified name of the `Variable`
-        It is qualified with `self.name` - the name of this
-        `External` namespace that the `Variable` belongs to.
-        """
-        return name in self.variables
-
-    def __getitem__(self, name):
+    def __getitem__(self, name) -> 'Variable':
         """
         :param name: un-qualified name of the `Variable`.
         Instances of `Variable` that are 'external' should
@@ -102,24 +111,21 @@ class External(Namespace):
         a call to this method. These `Variable`s will be
         qualified with the name `self.name` of this namespace.
         """
-        variable = self.variables.get(name)
+        variable = self._variables.get(name)
         if variable is None:
             variable = Variable(
                 name=name,
                 source=self.name
             )
-            self.variables[name] = variable
+            self._variables[name] = variable
         return variable
-
-    def __iter__(self) -> Iterator['Variable']:
-        return iter(self.variables.values())
 
 
 @dataclass(frozen=True)
 class Variable:
     """
     An instance of `Variable` is anything that can be calculated
-    from the values of the given input dependencies using the
+    from the values of the given `inputs` dependencies using the
     provided `formula` (i.e., a Python function).
 
     Calculated value can be `None`, that is why a non-calculated
@@ -139,17 +145,15 @@ class Variable:
     the namespace / source of this `Variable`.
     :param inputs: (optional) map from names of the `Variable`
     inputs (which are names of other `Variable` instances) to
-    the names of their `Namespace`s.
+    names of their `Namespace`s.
     :param formula: (optional) function that calculates the
     value of this `Variable` from its sources.
     :param metadata: any possible metadata associated with
     this variable.
     :param cacheable: (default `False`) when `True`, the
     corresponding `Value` (see below) will be cached during
-    calculation by the `id` of the corresponding Python object
-    containing that value. When attempted to recompute with
-    the same inputs, cached value will be returned instead.
-    Use sparingly.
+    calculation. When attempting to recompute with the same
+    inputs, cached value will be returned instead. Use sparingly!
     """
     name: str
     source: str = field(default="")
@@ -182,14 +186,12 @@ class Variables(Namespace):
         Namespace of `Variable` instances.
 
         :param name: name of the `Variables` instance namespace.
-        :param variables: initializer list of `VarSpec` specs that can be used
-        to create instances of `Variable` to be stored in this namespace.
+        :param variables: initializer list of `VarSpec` specs
+        used to create instances of `Variable` to be stored in
+        this namespace.
         """
         self.name = name
-        self.variables = {variable["name"]: Variable(source=self.name, **variable) for variable in variables}
-
-    def __contains__(self, name: str) -> bool:
-        return name in self.variables
+        self._variables = {variable["name"]: Variable(source=self.name, **variable) for variable in variables}
 
     def __getitem__(self, variable_name: str) -> Variable:
         """
@@ -197,10 +199,7 @@ class Variables(Namespace):
         This is un-qualified name, as it is already looked up in
         this namespace.
         """
-        return self.variables[variable_name]
-
-    def __iter__(self) -> Iterator[Variable]:
-        return iter(self.variables.values())
+        return self._variables[variable_name]
 
 
 @dataclass
@@ -218,13 +217,16 @@ class Values:
     """ Values of all `Variable`s, computed and external,
     will be held here. """
     def __init__(self):
-        self.values: Dict[Variable, Value] = {}
-        self.cache: Dict[tuple, VarValue] = {}
+        self._values: Dict[Variable, Value] = {}
+        self.cache: Dict[Tuple['Variable', Tuple[Any, ...]], VarValue] = {}
 
     def get(self, variable: Variable) -> Value:
-        if variable not in self.values:
-            self.values[variable] = Value(variable=variable)
-        return self.values[variable]
+        if variable not in self._values:
+            self._values[variable] = Value(variable=variable)
+        return self._values[variable]
+
+    def __iter__(self) -> Iterator[Variable]:
+        return iter(self._values.keys())
 
 
 @dataclass(frozen=True)
@@ -288,7 +290,7 @@ class CompiledGraph:
         populate their values into the `Values` storage.
 
         :param external_values: mapping from names of external sources
-        to a dictionary from names of external `Variable`s to their values
+        to dictionary from names of external `Variable`s to their values
         that are needed for the given calculation.
         :param values: an instance of `Values` storage of all calculated
         values.
@@ -298,22 +300,24 @@ class CompiledGraph:
             if provided is None:
                 raise KeyError(f"Missing external source '{source_name}'")
             for var_name, variable in variables.items():
-                if var_name not in provided:
+                var_value = provided.get(var_name)
+                if var_value is None:
                     raise KeyError(
                         f"Missing value for external variable '{make_qual_name(source_name, var_name)}'"
                     )
-                values.get(variable).value = provided[var_name]
+                values.get(variable).value = var_value
 
     def _collect_affected(self, changed_vars: Set[Variable]) -> List[CompiledNode]:
         """
         Return subset of `self.ordered_nodes` consisting of nodes
-        affected by `changed_vars`, in the same order as in the original.
+        affected by `changed_vars`, in the same order as in the
+        `self.ordered_nodes`.
         """
         affected = set()
         stack = list(changed_vars)
         while stack:
-            v = stack.pop()
-            for node in self.dependents.get(v, []):
+            var = stack.pop()
+            for node in self.dependents.get(var, []):
                 if node not in affected:
                     affected.add(node)
                     stack.append(node.variable)
@@ -327,10 +331,10 @@ class CompiledGraph:
         inputs.
 
         All inputs need to be calculated first (i.e., to be non-`_null`)
-        before the value of the given `Variable` can be `calculate`d.
-        This is possible because the `Variable`s in the list `nodes` can be
+        before the value of the given `Variable` can be `_calculate`d.
+        This is possible because the `Variable`s in the list `nodes` are
         supplied as a topologically ordered list `self.ordered_variables`,
-        or an ordered sub-set thereof (see, e.g., `recompute`).
+        or as an ordered sub-set thereof (see, e.g., `recompute`).
         """
         for node in nodes:
             if node.variable.formula is None:
@@ -381,8 +385,8 @@ class Graph:
     ):
         """
         :param variables_lists: mapping of names of `Variables`
-        namespace to the list of `Variable` instances to be added
-        to that namespace.
+        namespaces to the lists of `Variable` instances to be
+        added to those namespaces.
         :param external_source_names: list of names of possible
         `External` sources from which `Variable` inputs might
         be coming from.
@@ -505,7 +509,8 @@ class Graph:
             return self.reverse_dependencies
         reverse = defaultdict(set)
         for source_name, source in self.registry.items():
-            for variable in source:
+            for variable_name in source:
+                variable = source[variable_name]
                 qual_name = make_qual_name(source_name, variable.name)
                 for input_name, input_source in variable.inputs.items():
                     input_qual = make_qual_name(input_source, input_name)
