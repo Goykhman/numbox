@@ -1,7 +1,6 @@
 import warnings
 
 from abc import ABC, abstractmethod
-from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import (
     Any, Callable, Dict, Iterator, List, Mapping,
@@ -253,12 +252,12 @@ class CompiledNode:
 class CompiledGraph:
     ordered_nodes: List[CompiledNode]
     required_external_variables: Dict[str, Dict[str, Variable]]
-    dependents: Dict[Variable, List[CompiledNode]] = field(default_factory=lambda: defaultdict(list))
+    dependents: Dict[Variable, List[CompiledNode]] = field(default_factory=lambda: {})
 
     def __post_init__(self):
         for node in self.ordered_nodes:
             for inp in node.inputs:
-                self.dependents[inp].append(node)
+                self.dependents.setdefault(inp, []).append(node)
 
     def execute(
         self,
@@ -493,11 +492,11 @@ class Graph:
         For requested `External` sources, return the list of required
         external `Variable` instances.
         """
-        required_external_variables = defaultdict(dict)
+        required_external_variables = {}
         for variable in used_external_vars:
             variable_name = variable.name
             variable_source = variable.source
-            required_external_variables[variable_source][variable_name] = variable
+            required_external_variables.setdefault(variable_source, {})[variable_name] = variable
         return required_external_variables
 
     def _build_reverse_dependencies(self) -> Dict[str, set[str]]:
@@ -507,14 +506,14 @@ class Graph:
         """
         if self.reverse_dependencies is not None:
             return self.reverse_dependencies
-        reverse = defaultdict(set)
+        reverse = {}
         for source_name, source in self.registry.items():
             for variable_name in source:
                 variable = source[variable_name]
                 qual_name = make_qual_name(source_name, variable.name)
                 for input_name, input_source in variable.inputs.items():
                     input_qual = make_qual_name(input_source, input_name)
-                    reverse[input_qual].add(qual_name)
+                    reverse.setdefault(input_qual, set()).add(qual_name)
         self.reverse_dependencies = reverse
         return reverse
 
