@@ -55,7 +55,7 @@ argument given to the `Graph` at the initialization time.
 The full and unambiguous way to denote the variables is via their qualified
 names, applicable both to externally sourced variables, `basket.y`, as well as
 the calculated ones, `variables1.x`,
-`variables1.y`, `variables2.u`.
+`variables1.a`, `variables2.u`.
 
 One of the variables specifications, designated with the key `formula`, specifies the
 function with the parameters that match the input variables (this graph node's dependencies)
@@ -69,7 +69,7 @@ The Python function specified by the `formula`
 can be a wrapper around numba JIT-compiled function, i.e.,
 a proxy to the numba's `FunctionType` or `CPUDispatcher` objects [#f1]_.
 
-The variable specification `inputs` (if any) include both the names of the dependencies variables
+The variable specification for `inputs` (if any) includes both the names of the dependencies variables
 required to calculate the given variable via the function given by the `formula`,
 as well as the namespaces where these variables are going to be looked for in.
 
@@ -77,7 +77,7 @@ Graph end nodes, located at the edge of the graph (a.k.a., leaf nodes) have neit
 nor `formula` in their specifications. Specifying `formula` without `inputs`
 will result in an exception. It is possible, however, to specify `inputs`
 but no formula, which technically defines the placement of the node
-on the graph but leaves it up to the developer to defer the node's calculation
+on the graph but leaves it up to the developer to defer specifying the node's calculation
 logic until later in the runtime.
 
 The variable can be specified as `cacheable` if its value calculated for the given tuple of
@@ -87,16 +87,16 @@ custom type sub-classing with its own `__hash__` might be needed in certain case
 of the identity of the arguments' values.
 When `cacheable=True` (by default it is `False`), the graph will avoid recalculation of the
 value provided the inputs haven't changed. It is not recommended to abuse the cache, especially
-for the continuous space of identities of the parameters of the node's `formula`.
+for the continuous or large-cardinality spaces of identities of the parameters of the node's `formula`.
 
-Skipping ahead, it is worth noting here that the `cacheable` key is a rather brute force way
+It is worth noting here that the `cacheable` key is a rather brute force way
 to avoid identical re-computations.
 It is completely unrelated to the graph's dependency structure.
 On the other hand, the graph's `recompute`
 method, discussed below, only recomputes the values of variables that are dependent on the nodes
 that have been updated. That is, the strategy of the `recompute` method
 is determined by the graph's topology only
-and is independent from the `cacheable` specifications of the nodes'
+and is independent of the `cacheable` specifications of the nodes'
 variables.
 
 Names of the 'external' sources (of data values) need to be given to the `Graph` as well,
@@ -151,8 +151,8 @@ Instances of `Variable` s are stored in the `Graph`'s instance's `registry`::
 
 That is, users are not expected to instantiate neither `Variable` s nor `Variables` s,
 although they are certainly allowed to do so if needed (it is recommended to design
-one's code so that `Variable` instances can be retrieved from the `registry` of the
-`Graph` instance instead).
+one's code so that `Variable` instances when needed are simply retrieved from the `registry` of the
+`Graph` instance).
 Instead, users provide variable specifications, as the dictionaries `x`, `u`, `a`
 in the example above (and the variable name "`y`" that is referred to and implied to be 'external')
 that are given to the `Graph`. The `Graph` then creates instances of `Variables` (one per namespace)
@@ -160,16 +160,16 @@ and instances of `External` (one per an 'external' source). Finally, `Variables`
 create instances of `Variable` s and store them.
 
 To calculate the required variables, one first needs to instantiate the execution-scope instance
-of the storage :class:`numbox.core.variable.variable.Values` of the values of all variables,
-scoped both in `Variables` and `External` namespaces. This storage will get automatically populated
+of the storage :class:`numbox.core.variable.variable.Values` of the values of all variables
+scoped in `Variables` and `External` namespaces. This storage will get automatically populated
 with all calculated nodes
 as a mapping from the corresponding `Variable` to instances of :class:`numbox.core.variable.variable.Value`.
 The latter wraps the data. All the data of non-external variables is initialized to
 the instance `_null` of the :class:`numbox.core.variable.variable._Null`.
 
 Then, one needs to supply `external_values` of the leaf nodes that are needed for the calculation.
-As discussed above, these external variables are determined programmatically. Provided these
-have been specified, one can calculate the graph as::
+As discussed above, these required external variables are identified programmatically. Provided values for these
+have been provided, one can calculate the graph as::
 
     from numbox.core.variable.variable import Values
 
