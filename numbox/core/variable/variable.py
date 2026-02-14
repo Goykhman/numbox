@@ -396,22 +396,15 @@ class Graph:
             external_source_name: External(external_source_name) for external_source_name in external_source_names
         }
         for variables_name, variables_list in variables_lists.items():
-            assert variables_name not in self.registry, (
-                f"Variables instance {variables_name} has already been created in this registry"
-            )
             variables = Variables(
                 name=variables_name,
                 variables=variables_list
             )
             self.registry[variables_name] = variables
         for external_name, external_ in self.external.items():
-            registered_external = self.registry.get(external_name)
-            if registered_external is not None:
-                assert registered_external == external_, (
-                    f"{external_name} external already registered as {registered_external}"
-                )
-            else:
-                self.registry[external_name] = external_
+            if external_name in self.registry:
+                raise ValueError(f"Cannot use {external_name} for external, it's already used by variables_lists")
+            self.registry[external_name] = external_
         self.compiled_graphs = {}
         self.reverse_dependencies = None
 

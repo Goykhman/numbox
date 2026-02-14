@@ -132,7 +132,7 @@ name and its own name.
 
 In DAG terminology, `External` scopes contain variables with no inputs, that is, edge (or end / leaf) nodes.
 
-Instances of `Variable` s are stored in the `Graph`'s instance's `registry`::
+Instances of `Variable` s and `External` are stored in the `Graph`'s instance's `registry`::
 
     from numbox.core.variable.variable import Variables, Variable
 
@@ -148,6 +148,10 @@ Instances of `Variable` s are stored in the `Graph`'s instance's `registry`::
 
     assert isinstance(variables1, Variables)
     assert isinstance(variables1.variables["x"], Variable)
+
+    basket_ = registry["basket"]
+    ... # same `basket` as above
+    assert basket_["y"] is basket["y"]
 
 That is, users are not expected to instantiate neither `Variable` s nor `Variables` s,
 although they are certainly allowed to do so if needed (it is recommended to design

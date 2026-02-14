@@ -59,6 +59,9 @@ def test_basic():
     assert list(basket.keys()) == ["y"]
     assert basket["y"].name == "y"
 
+    basket_ = registry["basket"]
+    assert basket_["y"] is basket["y"]
+
     values = Values()
     compiled.execute(
         external_values={"basket": {"y": 137}},
