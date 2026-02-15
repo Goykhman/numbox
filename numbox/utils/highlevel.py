@@ -12,7 +12,7 @@ from numba.experimental.function_type import FunctionType
 from numba.experimental.structref import define_boxing, new, StructRefProxy
 from numba.extending import overload, overload_method
 from textwrap import dedent, indent
-from typing import Callable, Dict, Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 from numbox.core.configurations import default_jit_options
 from numbox.utils.standard import make_params_strings
@@ -51,10 +51,9 @@ def hash_type(ty: Type):
 
 def make_structref_code_txt(
     struct_name: str,
-    struct_fields: Iterable[str] | Dict[str, Type],
+    struct_fields: Iterable[str] | dict[str, Type],
     struct_type_class: type | Type,
-    struct_methods: Optional[Dict[str, Callable]] = None,
-    jit_options: Optional[dict] = None
+    struct_methods: Optional[dict[str, Callable]] = None
 ):
     if isinstance(struct_fields, dict):
         struct_fields, fields_types = list(struct_fields.keys()), list(struct_fields.values())
@@ -157,10 +156,10 @@ def {make_name}({struct_fields_str}):
 
 def make_structref(
     struct_name: str,
-    struct_fields: Iterable[str] | Dict[str, Type],
+    struct_fields: Iterable[str] | dict[str, Type],
     struct_type_class: type | Type,
     *,
-    struct_methods: Optional[Dict[str, Callable]] = None,
+    struct_methods: Optional[dict[str, Callable]] = None,
     jit_options: Optional[dict] = None
 ):
     """
@@ -183,7 +182,7 @@ def make_structref(
     this function and is equally true when the structref definition is coded explicitly.
     """
     code_txt, fields_types = make_structref_code_txt(
-        struct_name, struct_fields, struct_type_class, struct_methods, jit_options
+        struct_name, struct_fields, struct_type_class, struct_methods
     )
     if jit_options is None:
         jit_options = default_jit_options
