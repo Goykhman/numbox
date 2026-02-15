@@ -2,6 +2,8 @@ from textwrap import dedent
 
 from inspect import getsource
 from numbox.core.variable.variable import CompiledGraph, Graph, Values, Variables, Variable
+from numbox.core.variable.node import Node
+from numbox.core.work.print_tree import make_image
 from test.auxiliary_utils import collect_and_run_tests
 
 
@@ -105,6 +107,10 @@ def derive_x(y_):
 """
 
     assert graph.dependents_of("basket.y") == {"variables1.x", "variables2.u", "basket.y", "variables1.a"}
+
+    variables2_u_node = Node("u", "variables2", graph.registry)
+    assert make_image(variables2_u_node) == """
+variables2.u--variables1.a--variables1.x--basket.y"""
 
 
 if __name__ == "__main__":

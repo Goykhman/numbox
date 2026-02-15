@@ -3,14 +3,14 @@ import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import (
-    Any, Callable, Dict, Iterator, List, Mapping,
-    Protocol, Set, Tuple, TypeAlias, TypedDict
+    Any, Callable, Iterator, Mapping,
+    Protocol, TypeAlias, TypedDict
 )
 
 
 class Namespace(ABC):
     name: str
-    _variables: Dict[str, 'Variable']
+    _variables: dict[str, 'Variable']
 
     def keys(self):
         return self._variables.keys()
@@ -39,8 +39,8 @@ class Namespace(ABC):
 
 
 class Storage(Protocol):
-    _values: Dict['Variable', 'Value']
-    cache: Dict[Tuple['Variable', Tuple[Any, ...]], 'VarValue']
+    _values: dict['Variable', 'Value']
+    cache: dict[tuple['Variable', tuple[Any, ...]], 'VarValue']
 
     def get(self, variable: 'Variable') -> 'Value':
         """
@@ -55,7 +55,7 @@ class Storage(Protocol):
 
 class VarSpec(TypedDict, total=False):
     name: str
-    inputs: Dict[str, str]
+    inputs: dict[str, str]
     formula: Callable
     metadata: str
     cacheable: bool
@@ -100,7 +100,7 @@ class External(Namespace):
     """
     def __init__(self, name: str):
         self.name = name
-        self._variables: Dict[str, 'Variable'] = {}
+        self._variables: dict[str, 'Variable'] = {}
 
     def __getitem__(self, name) -> 'Variable':
         """
@@ -179,7 +179,7 @@ class Variables(Namespace):
     def __init__(
         self,
         name: str,
-        variables: List[VarSpec],
+        variables: list[VarSpec],
     ):
         """
         Namespace of `Variable` instances.
@@ -216,8 +216,8 @@ class Values:
     """ Values of all `Variable`s, computed and external,
     will be held here. """
     def __init__(self):
-        self._values: Dict[Variable, Value] = {}
-        self.cache: Dict[Tuple['Variable', Tuple[Any, ...]], VarValue] = {}
+        self._values: dict[Variable, Value] = {}
+        self.cache: dict[tuple['Variable', tuple[Any, ...]], VarValue] = {}
 
     def get(self, variable: Variable) -> Value:
         if variable not in self._values:
@@ -231,7 +231,7 @@ class Values:
 @dataclass(frozen=True)
 class CompiledNode:
     variable: Variable
-    inputs: List[Variable]
+    inputs: list[Variable]
 
     def __post_init__(self):
         if self.variable.formula and not self.variable.inputs:
@@ -250,9 +250,9 @@ class CompiledNode:
 
 @dataclass(frozen=True)
 class CompiledGraph:
-    ordered_nodes: List[CompiledNode]
-    required_external_variables: Dict[str, Dict[str, Variable]]
-    dependents: Dict[Variable, List[CompiledNode]] = field(default_factory=lambda: {})
+    ordered_nodes: list[CompiledNode]
+    required_external_variables: dict[str, dict[str, Variable]]
+    dependents: dict[Variable, list[CompiledNode]] = field(default_factory=lambda: {})
 
     def __post_init__(self):
         for node in self.ordered_nodes:
@@ -261,7 +261,7 @@ class CompiledGraph:
 
     def execute(
         self,
-        external_values: Dict[str, Dict[str, VarValue]],
+        external_values: dict[str, dict[str, VarValue]],
         values: Storage,
     ):
         """
@@ -281,7 +281,7 @@ class CompiledGraph:
 
     def _assign_external_values(
         self,
-        external_values: Dict[str, Dict[str, VarValue]],
+        external_values: dict[str, dict[str, VarValue]],
         values: Storage
     ):
         """
@@ -306,7 +306,7 @@ class CompiledGraph:
                     )
                 values.get(variable).value = var_value
 
-    def _collect_affected(self, changed_vars: Set[Variable]) -> List[CompiledNode]:
+    def _collect_affected(self, changed_vars: set[Variable]) -> list[CompiledNode]:
         """
         Return subset of `self.ordered_nodes` consisting of nodes
         affected by `changed_vars`, in the same order as in the
@@ -323,7 +323,7 @@ class CompiledGraph:
         return [node for node in self.ordered_nodes if node in affected]
 
     @staticmethod
-    def _calculate(nodes: List[CompiledNode], values: Storage):
+    def _calculate(nodes: list[CompiledNode], values: Storage):
         """
         Calculate the values of the `Variable`s using their own `formula`
         by evaluating them as functions of the values of the specified
@@ -351,7 +351,7 @@ class CompiledGraph:
                 values.cache[cache_key] = result
             values.get(node.variable).value = result
 
-    def recompute(self, changed: Dict[str, Dict[str, VarValue]], values: Storage):
+    def recompute(self, changed: dict[str, dict[str, VarValue]], values: Storage):
         """
         :param changed: dict of sources to names to new values of changed
         `Variable`s coming from either `External` or `Variables` source.
@@ -379,8 +379,8 @@ class CompiledGraph:
 class Graph:
     def __init__(
         self,
-        variables_lists: Dict[str, List[VarSpec]],
-        external_source_names: List[str]
+        variables_lists: dict[str, list[VarSpec]],
+        external_source_names: list[str]
     ):
         """
         :param variables_lists: mapping of names of `Variables`
@@ -390,9 +390,9 @@ class Graph:
         `External` sources from which `Variable` inputs might
         be coming from.
         """
-        self.external_source_names: List[str] = external_source_names
-        self.registry: Dict[str, Namespace] = {}
-        self.external: Dict[str, External] = {
+        self.external_source_names: list[str] = external_source_names
+        self.registry: dict[str, Namespace] = {}
+        self.external: dict[str, External] = {
             external_source_name: External(external_source_name) for external_source_name in external_source_names
         }
         for variables_name, variables_list in variables_lists.items():
@@ -408,7 +408,7 @@ class Graph:
         self.compiled_graphs = {}
         self.reverse_dependencies = None
 
-    def compile(self, required: List[str] | str) -> CompiledGraph:
+    def compile(self, required: list[str] | str) -> CompiledGraph:
         """
         :required: list of qualified variables names that need to be calculated.
         """
@@ -443,7 +443,7 @@ class Graph:
             return variables_source
         raise KeyError(f"Unknown source {source_name}")
 
-    def _topological_order(self, required: List[str] | Tuple[str] | str):
+    def _topological_order(self, required: list[str] | tuple[str] | str):
         """
         :param required: qualified name(s) of `Variable` instance(s)
         for which a topological ordering of a DAG is to be determined.
@@ -455,7 +455,7 @@ class Graph:
         visiting = set()
         ordered_variables = []
 
-        used_external_vars: Set[Variable] = set()
+        used_external_vars: set[Variable] = set()
 
         def visit(qual_name: str):
             """ DFS traversal of graph nodes. """
@@ -480,7 +480,7 @@ class Graph:
         return ordered_variables, used_external_vars
 
     @staticmethod
-    def _required_external_variables(used_external_vars: Set[Variable]) -> Dict[str, Dict[str, Variable]]:
+    def _required_external_variables(used_external_vars: set[Variable]) -> dict[str, dict[str, Variable]]:
         """
         For requested `External` sources, return the list of required
         external `Variable` instances.
@@ -492,7 +492,7 @@ class Graph:
             required_external_variables.setdefault(variable_source, {})[variable_name] = variable
         return required_external_variables
 
-    def _build_reverse_dependencies(self) -> Dict[str, set[str]]:
+    def _build_reverse_dependencies(self) -> dict[str, set[str]]:
         """
         Utility to calculate set of qualified names of variables
         impacted by each of the encountered inputs.
@@ -510,7 +510,7 @@ class Graph:
         self.reverse_dependencies = reverse
         return reverse
 
-    def dependents_of(self, qual_names: List[str] | Set[str] | str) -> Set[str]:
+    def dependents_of(self, qual_names: list[str] | set[str] | str) -> set[str]:
         """
         Return qualified names of `Variable`s that directly or indirectly
         depend on any of `qual_names`.
