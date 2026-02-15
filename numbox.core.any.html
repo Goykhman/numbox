@@ -1,0 +1,210 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.any &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/numbox.core.any.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="numbox.core.bindings" href="numbox.core.bindings.html" />
+    <link rel="prev" title="numbox" href="modules.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">numbox</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbox.core.any</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#modules">Modules</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#module-numbox.core.any.any_type">numbox.core.any.any_type</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#module-numbox.core.any.content_wrap">numbox.core.any.content_wrap</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#module-numbox.core.any.erased_type">numbox.core.any.erased_type</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.html">numbox.core.bindings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.proxy.html">numbox.core.proxy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.variable.html">numbox.core.variable</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.work.html">numbox.core.work</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.utils.html">numbox.utils</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">numbox</a></li>
+      <li class="breadcrumb-item active">numbox.core.any</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbox.core.any.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbox-core-any">
+<h1>numbox.core.any<a class="headerlink" href="#numbox-core-any" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>Implementation of <cite>Any</cite> type counterpart of C++
+<a class="reference external" href="https://en.cppreference.com/w/cpp/utility/any.html">std::any</a>
+leveraging the type-erasure technique.</p>
+</section>
+<section id="modules">
+<h2>Modules<a class="headerlink" href="#modules" title="Link to this heading"></a></h2>
+<section id="module-numbox.core.any.any_type">
+<span id="numbox-core-any-any-type"></span><h3>numbox.core.any.any_type<a class="headerlink" href="#module-numbox.core.any.any_type" title="Link to this heading"></a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.any.any_type.Any">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.any.any_type.</span></span><span class="sig-name descname"><span class="pre">Any</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/any/any_type.html#Any"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.any.any_type.Any" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">StructRefProxy</span></code></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.any.any_type.Any.get_as">
+<span class="sig-name descname"><span class="pre">get_as</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/any/any_type.html#Any.get_as"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.any.any_type.Any.get_as" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.any.any_type.Any.reset">
+<span class="sig-name descname"><span class="pre">reset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">val</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/any/any_type.html#Any.reset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.any.any_type.Any.reset" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="numbox.core.any.any_type.Any.type_info">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">type_info</span></span><a class="headerlink" href="#numbox.core.any.any_type.Any.type_info" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.any.any_type.AnyTypeClass">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.any.any_type.</span></span><span class="sig-name descname"><span class="pre">AnyTypeClass</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/any/any_type.html#AnyTypeClass"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.any.any_type.AnyTypeClass" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">StructRef</span></code></p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.any.any_type.make_any">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.any.any_type.</span></span><span class="sig-name descname"><span class="pre">make_any</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/any/any_type.html#make_any"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.any.any_type.make_any" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.any.any_type.ol_get_as">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.any.any_type.</span></span><span class="sig-name descname"><span class="pre">ol_get_as</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self_ty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ty_ref</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TypeRef</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/any/any_type.html#ol_get_as"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.any.any_type.ol_get_as" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.any.any_type.ol_make_any">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.any.any_type.</span></span><span class="sig-name descname"><span class="pre">ol_make_any</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x_ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/any/any_type.html#ol_make_any"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.any.any_type.ol_make_any" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.any.any_type.ol_reset">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.any.any_type.</span></span><span class="sig-name descname"><span class="pre">ol_reset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self_ty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x_ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/any/any_type.html#ol_reset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.any.any_type.ol_reset" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-numbox.core.any.content_wrap">
+<span id="numbox-core-any-content-wrap"></span><h3>numbox.core.any.content_wrap<a class="headerlink" href="#module-numbox.core.any.content_wrap" title="Link to this heading"></a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.any.content_wrap.ContentTypeClass">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.any.content_wrap.</span></span><span class="sig-name descname"><span class="pre">ContentTypeClass</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/any/content_wrap.html#ContentTypeClass"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.any.content_wrap.ContentTypeClass" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">StructRef</span></code></p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.any.content_wrap.ol_content">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.any.content_wrap.</span></span><span class="sig-name descname"><span class="pre">ol_content</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">x_ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/any/content_wrap.html#ol_content"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.any.content_wrap.ol_content" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-numbox.core.any.erased_type">
+<span id="numbox-core-any-erased-type"></span><h3>numbox.core.any.erased_type<a class="headerlink" href="#module-numbox.core.any.erased_type" title="Link to this heading"></a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.any.erased_type.ErasedTypeClass">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.any.erased_type.</span></span><span class="sig-name descname"><span class="pre">ErasedTypeClass</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/any/erased_type.html#ErasedTypeClass"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.any.erased_type.ErasedTypeClass" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">StructRef</span></code></p>
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="modules.html" class="btn btn-neutral float-left" title="numbox" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="numbox.core.bindings.html" class="btn btn-neutral float-right" title="numbox.core.bindings" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,328 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.utils &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/numbox.utils.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="numbox.core.work" href="numbox.core.work.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">numbox</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.any.html">numbox.core.any</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.html">numbox.core.bindings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.proxy.html">numbox.core.proxy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.variable.html">numbox.core.variable</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.work.html">numbox.core.work</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbox.utils</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#numbox-utils-highlevel">numbox.utils.highlevel</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#dynamically-defining-structref">Dynamically defining StructRef</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.utils.lowlevel">numbox.utils.lowlevel</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.cast"><code class="docutils literal notranslate"><span class="pre">cast()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.deref_payload"><code class="docutils literal notranslate"><span class="pre">deref_payload()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.extract_struct_member"><code class="docutils literal notranslate"><span class="pre">extract_struct_member()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.get_func_p_as_int_from_func_struct"><code class="docutils literal notranslate"><span class="pre">get_func_p_as_int_from_func_struct()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.get_func_p_from_func_struct"><code class="docutils literal notranslate"><span class="pre">get_func_p_from_func_struct()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.get_func_tuple"><code class="docutils literal notranslate"><span class="pre">get_func_tuple()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.get_ll_func_sig"><code class="docutils literal notranslate"><span class="pre">get_ll_func_sig()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.get_str_from_p_as_int"><code class="docutils literal notranslate"><span class="pre">get_str_from_p_as_int()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.get_unicode_data_p"><code class="docutils literal notranslate"><span class="pre">get_unicode_data_p()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.populate_structref"><code class="docutils literal notranslate"><span class="pre">populate_structref()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.tuple_of_struct_ptrs_as_int"><code class="docutils literal notranslate"><span class="pre">tuple_of_struct_ptrs_as_int()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.uniformize_tuple_of_structs"><code class="docutils literal notranslate"><span class="pre">uniformize_tuple_of_structs()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.utils.timer">numbox.utils.timer</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.timer.Timer"><code class="docutils literal notranslate"><span class="pre">Timer</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">numbox</a></li>
+      <li class="breadcrumb-item active">numbox.utils</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbox.utils.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbox-utils">
+<h1>numbox.utils<a class="headerlink" href="#numbox-utils" title="Link to this heading"></a></h1>
+<section id="numbox-utils-highlevel">
+<h2>numbox.utils.highlevel<a class="headerlink" href="#numbox-utils-highlevel" title="Link to this heading"></a></h2>
+<section id="dynamically-defining-structref">
+<h3>Dynamically defining StructRef<a class="headerlink" href="#dynamically-defining-structref" title="Link to this heading"></a></h3>
+<p>Defining numba <cite>StructRef</cite> requires writing a lot of boilerplate code.
+A utility for concise definition of <cite>StructRef</cite> types that supports caching
+is provided in <a class="reference internal" href="#numbox.utils.highlevel.make_structref" title="numbox.utils.highlevel.make_structref"><code class="xref py py-func docutils literal notranslate"><span class="pre">numbox.utils.highlevel.make_structref()</span></code></a>. To use it,
+define a <em>separate module</em> such as type_classes.py such as:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numba.experimental.structref</span><span class="w"> </span><span class="kn">import</span> <span class="n">register</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">StructRef</span>
+
+
+<span class="nd">@register</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">DataStructTypeClass</span><span class="p">(</span><span class="n">StructRef</span><span class="p">):</span>
+    <span class="k">pass</span>
+</pre></div>
+</div>
+<p>Then in a <em>different module</em> main.py define:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">float32</span><span class="p">,</span> <span class="n">unicode_type</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="kn">import</span> <span class="n">isclose</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.highlevel</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_structref</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">type_classes</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataStructTypeClass</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">derive_output</span><span class="p">(</span><span class="n">struct_</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">struct_</span><span class="o">.</span><span class="n">control</span> <span class="o">==</span> <span class="s2">&quot;double&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">struct_</span><span class="o">.</span><span class="n">value</span> <span class="o">*</span> <span class="mi">2</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">struct_</span><span class="o">.</span><span class="n">value</span>
+
+
+<span class="n">data_struct</span> <span class="o">=</span> <span class="n">make_structref</span><span class="p">(</span>
+    <span class="s2">&quot;DataStruct&quot;</span><span class="p">,</span>
+    <span class="p">{</span><span class="s2">&quot;value&quot;</span><span class="p">:</span> <span class="n">float32</span><span class="p">,</span> <span class="s2">&quot;control&quot;</span><span class="p">:</span> <span class="n">unicode_type</span><span class="p">},</span>
+    <span class="n">DataStructTypeClass</span><span class="p">,</span>
+    <span class="n">struct_methods</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">&quot;derive_output&quot;</span><span class="p">:</span> <span class="n">derive_output</span>
+    <span class="p">}</span>
+<span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">data_1</span> <span class="o">=</span> <span class="n">data_struct</span><span class="p">(</span><span class="mf">3.14</span><span class="p">,</span> <span class="s2">&quot;double&quot;</span><span class="p">)</span>
+    <span class="n">data_2</span> <span class="o">=</span> <span class="n">data_struct</span><span class="p">(</span><span class="mf">2.17</span><span class="p">,</span> <span class="s2">&quot;something else&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">isclose</span><span class="p">(</span><span class="n">data_1</span><span class="o">.</span><span class="n">derive_output</span><span class="p">(),</span> <span class="mf">6.28</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">isclose</span><span class="p">(</span><span class="n">data_2</span><span class="o">.</span><span class="n">derive_output</span><span class="p">(),</span> <span class="mf">2.17</span><span class="p">)</span>
+</pre></div>
+</div>
+<dl class="py function" id="module-numbox.utils.highlevel">
+<dt class="sig sig-object py" id="numbox.utils.highlevel.cres">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.highlevel.</span></span><span class="sig-name descname"><span class="pre">cres</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sig</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/highlevel.html#cres"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.highlevel.cres" title="Link to this definition"></a></dt>
+<dd><p>Returns Python proxy to <cite>FunctionType</cite> rather than <cite>CPUDispatcher</cite> returned by <cite>njit</cite></p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.highlevel.determine_field_index">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.highlevel.</span></span><span class="sig-name descname"><span class="pre">determine_field_index</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">struct_ty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">field_name</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/highlevel.html#determine_field_index"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.highlevel.determine_field_index" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.highlevel.hash_type">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.highlevel.</span></span><span class="sig-name descname"><span class="pre">hash_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ty</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Type</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/highlevel.html#hash_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.highlevel.hash_type" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.highlevel.make_structref">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.highlevel.</span></span><span class="sig-name descname"><span class="pre">make_structref</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">struct_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_fields</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Type</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_type_class</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">type</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Type</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_methods</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Callable</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">jit_options</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/highlevel.html#make_structref"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.highlevel.make_structref" title="Link to this definition"></a></dt>
+<dd><p>Makes structure type with <cite>struct_name</cite> and <cite>struct_fields</cite> from the StructRef type class.</p>
+<p>A unique <cite>struct_type_class</cite> for each structref needs to be provided.
+If caching of code that will be using the created struct type is desired,
+these type class(es) need/s to be defined in a python module that is <em>not</em> executed.
+(Same requirement is also to observed even when the full definition of StructRef
+is entirely hard-coded rather than created dynamically.)</p>
+<p>In particular, that’s why <cite>struct_type_class</cite> cannot be incorporated into
+the dynamic compile / exec routine here.</p>
+<p>Dictionary of methods to be bound to the created structref can be provided as well.
+Struct methods will get inlined into the caller if numba deems it to be optimal
+(even if <cite>jit_options</cite> says otherwise), therefore changing the methods code
+without poking the jitted caller can result in a stale cache - when the latter is
+cached. This is not an exclusive limitation of a dynamic structref creation via
+this function and is equally true when the structref definition is coded explicitly.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.highlevel.make_structref_code_txt">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.highlevel.</span></span><span class="sig-name descname"><span class="pre">make_structref_code_txt</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">struct_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_fields</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Type</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_type_class</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">type</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_methods</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Callable</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">jit_options</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/highlevel.html#make_structref_code_txt"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.highlevel.make_structref_code_txt" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.highlevel.prune_type">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.highlevel.</span></span><span class="sig-name descname"><span class="pre">prune_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/highlevel.html#prune_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.highlevel.prune_type" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+</section>
+<section id="module-numbox.utils.lowlevel">
+<span id="numbox-utils-lowlevel"></span><h2>numbox.utils.lowlevel<a class="headerlink" href="#module-numbox.utils.lowlevel" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.cast">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">cast</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">source</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dest_ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#cast"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.cast" title="Link to this definition"></a></dt>
+<dd><p>Cast <cite>source</cite> to the type <cite>dest_ty</cite></p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.deref_payload">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">deref_payload</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#deref_payload"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.deref_payload" title="Link to this definition"></a></dt>
+<dd><p>Dereference payload of structref <cite>p</cite> as type <cite>ty</cite></p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.extract_struct_member">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">extract_struct_member</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">context</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">BaseContext</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">builder</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">IRBuilder</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_fe_ty</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">StructRef</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_obj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">member_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">incref</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#extract_struct_member"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.extract_struct_member" title="Link to this definition"></a></dt>
+<dd><p>For the given struct object of the given numba (front-end) type extract
+member with the given name (must be literal, available at compile time)</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.get_func_p_as_int_from_func_struct">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">get_func_p_as_int_from_func_struct</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">func_</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#get_func_p_as_int_from_func_struct"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.get_func_p_as_int_from_func_struct" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.get_func_p_from_func_struct">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">get_func_p_from_func_struct</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">builder</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">IRBuilder</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">func_struct</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#get_func_p_from_func_struct"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.get_func_p_from_func_struct" title="Link to this definition"></a></dt>
+<dd><p>Extract void* function pointer from the low-level FunctionType structure</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.get_func_tuple">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">get_func_tuple</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">func</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#get_func_tuple"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.get_func_tuple" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.get_ll_func_sig">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">get_ll_func_sig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">context</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">BaseContext</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">func_ty</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">FunctionType</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#get_ll_func_sig"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.get_ll_func_sig" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.get_str_from_p_as_int">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">get_str_from_p_as_int</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#get_str_from_p_as_int"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.get_str_from_p_as_int" title="Link to this definition"></a></dt>
+<dd><p>Given pointer to null-terminated array of characters as an integer <cite>p</cite>,
+return unicode string object copying the original string’s data</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.get_unicode_data_p">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">get_unicode_data_p</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">s</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#get_unicode_data_p"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.get_unicode_data_p" title="Link to this definition"></a></dt>
+<dd><p>Given Python unicode string, return pointer to its data payload,
+array of null-terminated characters.
+See <a class="reference external" href="https://github.com/numba/numba/blob/release0.61/numba/cpython/unicode.py#L83">https://github.com/numba/numba/blob/release0.61/numba/cpython/unicode.py#L83</a></p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.populate_structref">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">populate_structref</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">context</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">builder</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signature</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">structref_type_</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">structref_</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ordered_args_names</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">decref_old</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#populate_structref"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.populate_structref" title="Link to this definition"></a></dt>
+<dd><p>Store <cite>args</cite> with the corresponding ordered names <cite>ordered_args_names</cite>
+in structref with type <cite>structref_type_</cite> and payload at <cite>data_pointer</cite>.</p>
+<p>Based on numba.experimental.structref::define_attributes::struct_setattr_impl</p>
+<p>Do not call <cite>decref_old</cite> when populating a newly-created structref, as there’s nothing to decref there.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.tuple_of_struct_ptrs_as_int">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">tuple_of_struct_ptrs_as_int</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tup</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#tuple_of_struct_ptrs_as_int"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.tuple_of_struct_ptrs_as_int" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.uniformize_tuple_of_structs">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">uniformize_tuple_of_structs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tup</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">uniform_ty</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">numba.VoidTypeClass()</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#uniformize_tuple_of_structs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.uniformize_tuple_of_structs" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-numbox.utils.timer">
+<span id="numbox-utils-timer"></span><h2>numbox.utils.timer<a class="headerlink" href="#module-numbox.utils.timer" title="Link to this heading"></a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.utils.timer.Timer">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.utils.timer.</span></span><span class="sig-name descname"><span class="pre">Timer</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">precision</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">3</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/timer.html#Timer"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.timer.Timer" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.utils.timer.Timer.times">
+<span class="sig-name descname"><span class="pre">times</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">{}</span></em><a class="headerlink" href="#numbox.utils.timer.Timer.times" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="numbox.core.work.html" class="btn btn-neutral float-left" title="numbox.core.work" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

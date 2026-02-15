@@ -1,0 +1,642 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.variable &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/numbox.core.variable.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="numbox.core.work" href="numbox.core.work.html" />
+    <link rel="prev" title="numbox.core.proxy" href="numbox.core.proxy.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">numbox</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.any.html">numbox.core.any</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.html">numbox.core.bindings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.proxy.html">numbox.core.proxy</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbox.core.variable</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#modules">Modules</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox-core-variable-variable">numbox.core.variable.variable</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.work.html">numbox.core.work</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.utils.html">numbox.utils</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">numbox</a></li>
+      <li class="breadcrumb-item active">numbox.core.variable</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbox.core.variable.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbox-core-variable">
+<h1>numbox.core.variable<a class="headerlink" href="#numbox-core-variable" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>Framework for Directed Acyclic Graph (DAG) in pure Python.
+While this module does not contain any JIT-compiled
+bits in particular, or anything imported from numba in general,
+computationally heavy parts can be put on this graph as JIT-compiled functions
+via the <cite>formula</cite> key of the graph variables specifications (see below).</p>
+</section>
+<section id="modules">
+<h2>Modules<a class="headerlink" href="#modules" title="Link to this heading"></a></h2>
+<section id="numbox-core-variable-variable">
+<h3>numbox.core.variable.variable<a class="headerlink" href="#numbox-core-variable-variable" title="Link to this heading"></a></h3>
+<section id="id1">
+<h4>Overview<a class="headerlink" href="#id1" title="Link to this heading"></a></h4>
+<p>A graph can be defined as follows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.variable.variable</span><span class="w"> </span><span class="kn">import</span> <span class="n">Graph</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">derive_x</span><span class="p">(</span><span class="n">y_</span><span class="p">):</span>
+    <span class="k">return</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">y_</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">derive_a</span><span class="p">(</span><span class="n">x_</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x_</span> <span class="o">-</span> <span class="mi">74</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">derive_u</span><span class="p">(</span><span class="n">a_</span><span class="p">):</span>
+    <span class="k">return</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">a_</span>
+
+<span class="n">x</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="s2">&quot;inputs&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="s2">&quot;basket&quot;</span><span class="p">},</span> <span class="s2">&quot;formula&quot;</span><span class="p">:</span> <span class="n">derive_x</span><span class="p">}</span>
+<span class="n">a</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;a&quot;</span><span class="p">,</span> <span class="s2">&quot;inputs&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="s2">&quot;variables1&quot;</span><span class="p">},</span> <span class="s2">&quot;formula&quot;</span><span class="p">:</span> <span class="n">derive_a</span><span class="p">}</span>
+<span class="n">u</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;u&quot;</span><span class="p">,</span> <span class="s2">&quot;inputs&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;a&quot;</span><span class="p">:</span> <span class="s2">&quot;variables1&quot;</span><span class="p">},</span> <span class="s2">&quot;formula&quot;</span><span class="p">:</span> <span class="n">derive_u</span><span class="p">}</span>
+
+<span class="n">graph</span> <span class="o">=</span> <span class="n">Graph</span><span class="p">(</span>
+    <span class="n">variables_lists</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">&quot;variables1&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">x</span><span class="p">,</span> <span class="n">a</span><span class="p">],</span>
+        <span class="s2">&quot;variables2&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">u</span><span class="p">],</span>
+    <span class="p">},</span>
+    <span class="n">external_source_names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;basket&quot;</span><span class="p">]</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>Here we have the variable <cite>y</cite> sourced externally from the <cite>basket</cite>, and calculated variables
+<cite>x</cite> and <cite>a</cite> in the <cite>variables1</cite> namespace, and <cite>u</cite> in the <cite>variables2</cite> namespace.</p>
+<p>The dictionaries
+<cite>x</cite>, <cite>a</cite>, and <cite>u</cite> are called variable specifications. These specs on their own are agnostic about what
+namespace they can be put in. The namespaces however need to be specified via the <cite>variables_lists</cite>
+argument given to the <cite>Graph</cite> at the initialization time.</p>
+<p>The full and unambiguous way to denote the variables is via their qualified
+names, applicable both to externally sourced variables, <cite>basket.y</cite>, as well as
+the calculated ones, <cite>variables1.x</cite>,
+<cite>variables1.a</cite>, <cite>variables2.u</cite>.</p>
+<p>One of the variables specifications, designated with the key <cite>formula</cite>, specifies the
+function with the parameters that match the input variables (this graph node’s dependencies)
+that are in turn
+designated with the key <cite>inputs</cite>. While the names of the parameters of the function assigned
+to the <cite>formula</cite> key do not have to match the names of the <cite>inputs</cite>, their order is
+expected to follow one-to-one correspondence. This way the graph is instructed
+which inputs to use to get the values to be assigned to the parameters of the <cite>formula</cite>.</p>
+<p>The Python function specified by the <cite>formula</cite>
+can be a wrapper around numba JIT-compiled function, i.e.,
+a proxy to the numba’s <cite>FunctionType</cite> or <cite>CPUDispatcher</cite> objects <a class="footnote-reference brackets" href="#f1" id="id2" role="doc-noteref"><span class="fn-bracket">[</span>1<span class="fn-bracket">]</span></a>.</p>
+<p>The variable specification for <cite>inputs</cite> (if any) includes both the names of the dependencies variables
+required to calculate the given variable via the function given by the <cite>formula</cite>,
+as well as the namespaces where these variables are going to be looked for in.</p>
+<p>Graph end nodes, located at the edge of the graph (a.k.a., leaf nodes) have neither <cite>inputs</cite>
+nor <cite>formula</cite> in their specifications. Specifying <cite>formula</cite> without <cite>inputs</cite>
+will result in an exception. It is possible, however, to specify <cite>inputs</cite>
+but no formula, which technically defines the placement of the node
+on the graph but leaves it up to the developer to defer specifying the node’s calculation
+logic until later in the runtime.</p>
+<p>The variable can be specified as <cite>cacheable</cite> if its value calculated for the given tuple of
+arguments can be cached and later retrieved without re-calculation provided
+the arguments have not changed. The arguments types of the corresponding <cite>formula</cite> then need to be hashable -
+custom type sub-classing with its own <cite>__hash__</cite> might be needed in certain cases, thereby providing the definition
+of the identity of the arguments’ values.
+When <cite>cacheable=True</cite> (by default it is <cite>False</cite>), the graph will avoid recalculation of the
+value provided the inputs haven’t changed. It is not recommended to abuse the cache, especially
+for the continuous or large-cardinality spaces of identities of the parameters of the node’s <cite>formula</cite>.</p>
+<p>It is worth noting here that the <cite>cacheable</cite> key is a rather brute force way
+to avoid identical re-computations.
+It is completely unrelated to the graph’s dependency structure.
+On the other hand, the graph’s <cite>recompute</cite>
+method, discussed below, only recomputes the values of variables that are dependent on the nodes
+that have been updated. That is, the strategy of the <cite>recompute</cite> method
+is determined by the graph’s topology only
+and is independent of the <cite>cacheable</cite> specifications of the nodes’
+variables.</p>
+<p>Names of the ‘external’ sources (of data values) need to be given to the <cite>Graph</cite> as well,
+via the <cite>external_source_names</cite> argument.
+When the <a class="reference internal" href="#numbox.core.variable.variable.Graph" title="numbox.core.variable.variable.Graph"><code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.variable.variable.Graph</span></code></a> is compiled
+to the <a class="reference internal" href="#numbox.core.variable.variable.CompiledGraph" title="numbox.core.variable.variable.CompiledGraph"><code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.variable.variable.CompiledGraph</span></code></a>, it will automatically figure out which variables need to be sourced
+from each of the specified external sources (such as, ‘<cite>basket</cite>’) in order to perform the
+required calculation:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.variable.variable</span><span class="w"> </span><span class="kn">import</span> <span class="n">CompiledGraph</span>
+
+<span class="c1"># What is required from this calculation, the names of qualified variables</span>
+<span class="n">required</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;variables2.u&quot;</span><span class="p">]</span>
+
+<span class="c1"># Compile the graph for the required variables</span>
+<span class="n">compiled</span> <span class="o">=</span> <span class="n">graph</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="n">required</span><span class="p">)</span>
+<span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">compiled</span><span class="p">,</span> <span class="n">CompiledGraph</span><span class="p">)</span>
+
+<span class="c1"># The graph will figure out what external variables it needs to do the calculation</span>
+<span class="n">required_external_variables</span> <span class="o">=</span> <span class="n">compiled</span><span class="o">.</span><span class="n">required_external_variables</span>
+<span class="k">assert</span> <span class="nb">list</span><span class="p">(</span><span class="n">required_external_variables</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span> <span class="o">==</span> <span class="p">[</span><span class="s2">&quot;basket&quot;</span><span class="p">]</span>
+<span class="n">basket</span> <span class="o">=</span> <span class="n">required_external_variables</span><span class="p">[</span><span class="s2">&quot;basket&quot;</span><span class="p">]</span>
+<span class="k">assert</span> <span class="nb">list</span><span class="p">(</span><span class="n">basket</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span> <span class="o">==</span> <span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">]</span>
+<span class="k">assert</span> <span class="n">basket</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s2">&quot;y&quot;</span>
+</pre></div>
+</div>
+<p><cite>Graph</cite> uses the variable specifications given to it to create instances of <a class="reference internal" href="#numbox.core.variable.variable.Variable" title="numbox.core.variable.variable.Variable"><code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.variable.variable.Variable</span></code></a>.
+Namespaces of calculated <cite>Variable</cite> s are <a class="reference internal" href="#numbox.core.variable.variable.Variables" title="numbox.core.variable.variable.Variables"><code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.variable.variable.Variables</span></code></a>.
+Namespaces of externally sourced <cite>Variable</cite> s are
+<a class="reference internal" href="#numbox.core.variable.variable.External" title="numbox.core.variable.variable.External"><code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.variable.variable.External</span></code></a> .</p>
+<p>Semantically, each <cite>Variable</cite> is defined by its scoped name, that is, a tuple of its namespace / source
+name and its own name.</p>
+<p>In DAG terminology, <cite>External</cite> scopes contain variables with no inputs, that is, edge (or end / leaf) nodes.</p>
+<p>Instances of <cite>Variable</cite> s and <cite>External</cite> are stored in the <cite>Graph</cite>’s instance’s <cite>registry</cite>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.variable.variable</span><span class="w"> </span><span class="kn">import</span> <span class="n">Variables</span><span class="p">,</span> <span class="n">Variable</span>
+
+<span class="n">registry</span> <span class="o">=</span> <span class="n">graph</span><span class="o">.</span><span class="n">registry</span>
+
+<span class="c1"># Get the namespaces...</span>
+<span class="n">variables1</span> <span class="o">=</span> <span class="n">registry</span><span class="p">[</span><span class="s2">&quot;variables1&quot;</span><span class="p">]</span>
+<span class="n">variables2</span> <span class="o">=</span> <span class="n">registry</span><span class="p">[</span><span class="s2">&quot;variables2&quot;</span><span class="p">]</span>
+
+<span class="c1"># ... and the variables defined in these namespaces</span>
+<span class="k">assert</span> <span class="nb">list</span><span class="p">(</span><span class="n">variables1</span><span class="o">.</span><span class="n">variables</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span> <span class="o">==</span> <span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="s2">&quot;a&quot;</span><span class="p">]</span>
+<span class="k">assert</span> <span class="nb">list</span><span class="p">(</span><span class="n">variables2</span><span class="o">.</span><span class="n">variables</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span> <span class="o">==</span> <span class="p">[</span><span class="s2">&quot;u&quot;</span><span class="p">]</span>
+
+<span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">variables1</span><span class="p">,</span> <span class="n">Variables</span><span class="p">)</span>
+<span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">variables1</span><span class="o">.</span><span class="n">variables</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">],</span> <span class="n">Variable</span><span class="p">)</span>
+
+<span class="n">basket_</span> <span class="o">=</span> <span class="n">registry</span><span class="p">[</span><span class="s2">&quot;basket&quot;</span><span class="p">]</span>
+<span class="o">...</span> <span class="c1"># same `basket` as above</span>
+<span class="k">assert</span> <span class="n">basket_</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">]</span> <span class="ow">is</span> <span class="n">basket</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">]</span>
+</pre></div>
+</div>
+<p>That is, users are not expected to instantiate neither <cite>Variable</cite> s nor <cite>Variables</cite> s,
+although they are certainly allowed to do so if needed (it is recommended to design
+one’s code so that <cite>Variable</cite> instances when needed are simply retrieved from the <cite>registry</cite> of the
+<cite>Graph</cite> instance).
+Instead, users provide variable specifications, as the dictionaries <cite>x</cite>, <cite>u</cite>, <cite>a</cite>
+in the example above (and the variable name “<cite>y</cite>” that is referred to and implied to be ‘external’)
+that are given to the <cite>Graph</cite>. The <cite>Graph</cite> then creates instances of <cite>Variables</cite> (one per namespace)
+and instances of <cite>External</cite> (one per an ‘external’ source). Finally, <cite>Variables</cite> and <cite>External</cite> in turn
+create instances of <cite>Variable</cite> s and store them.</p>
+<p>To calculate the required variables, one first needs to instantiate the execution-scope instance
+of the storage <a class="reference internal" href="#numbox.core.variable.variable.Values" title="numbox.core.variable.variable.Values"><code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.variable.variable.Values</span></code></a> of the values of all variables
+scoped in <cite>Variables</cite> and <cite>External</cite> namespaces. This storage will get automatically populated
+with all calculated nodes
+as a mapping from the corresponding <cite>Variable</cite> to instances of <a class="reference internal" href="#numbox.core.variable.variable.Value" title="numbox.core.variable.variable.Value"><code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.variable.variable.Value</span></code></a>.
+The latter wraps the data. All the data of non-external variables is initialized to
+the instance <cite>_null</cite> of the <code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.variable.variable._Null</span></code>.</p>
+<p>Then, one needs to supply <cite>external_values</cite> of the leaf nodes that are needed for the calculation.
+As discussed above, these required external variables are identified programmatically. Provided values for these
+have been provided, one can calculate the graph as:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.variable.variable</span><span class="w"> </span><span class="kn">import</span> <span class="n">Values</span>
+
+<span class="c1"># Instantiate the storage</span>
+<span class="n">values</span> <span class="o">=</span> <span class="n">Values</span><span class="p">()</span>
+
+<span class="c1"># Request the calculation by executing the graph</span>
+<span class="n">compiled</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
+    <span class="n">external_values</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;basket&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="mi">137</span><span class="p">}},</span>
+    <span class="n">values</span><span class="o">=</span><span class="n">values</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>This populates the <cite>values</cite> with the correct data:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">x_var</span> <span class="o">=</span> <span class="n">variables1</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">]</span>
+<span class="n">a_var</span> <span class="o">=</span> <span class="n">variables1</span><span class="p">[</span><span class="s2">&quot;a&quot;</span><span class="p">]</span>
+<span class="n">u_var</span> <span class="o">=</span> <span class="n">variables2</span><span class="p">[</span><span class="s2">&quot;u&quot;</span><span class="p">]</span>
+
+<span class="k">assert</span> <span class="n">values</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">x_var</span><span class="p">)</span><span class="o">.</span><span class="n">value</span> <span class="o">==</span> <span class="mi">274</span>
+<span class="k">assert</span> <span class="n">values</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">a_var</span><span class="p">)</span><span class="o">.</span><span class="n">value</span> <span class="o">==</span> <span class="mi">200</span>
+<span class="k">assert</span> <span class="n">values</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">u_var</span><span class="p">)</span><span class="o">.</span><span class="n">value</span> <span class="o">==</span> <span class="mi">400</span>
+</pre></div>
+</div>
+<p>The graph can be recomputed if some of its nodes have been changed.
+Only the affected nodes will be re-evaluated:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">compiled</span><span class="o">.</span><span class="n">recompute</span><span class="p">({</span><span class="s2">&quot;basket&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;y&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">}},</span> <span class="n">values</span><span class="p">)</span>
+<span class="k">assert</span> <span class="n">values</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">basket</span><span class="p">[</span><span class="s2">&quot;y&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">value</span> <span class="o">==</span> <span class="mi">1</span>
+<span class="k">assert</span> <span class="n">values</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">x_var</span><span class="p">)</span><span class="o">.</span><span class="n">value</span> <span class="o">==</span> <span class="mi">2</span>
+<span class="k">assert</span> <span class="n">values</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">a_var</span><span class="p">)</span><span class="o">.</span><span class="n">value</span> <span class="o">==</span> <span class="o">-</span><span class="mi">72</span>
+<span class="k">assert</span> <span class="n">values</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">u_var</span><span class="p">)</span><span class="o">.</span><span class="n">value</span> <span class="o">==</span> <span class="o">-</span><span class="mi">144</span>
+</pre></div>
+</div>
+<p class="rubric">References</p>
+<aside class="footnote-list brackets">
+<aside class="footnote brackets" id="f1" role="doc-footnote">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id2">1</a><span class="fn-bracket">]</span></span>
+<p>It is straightforward to adapt the variables specifications given here in pure Python to build a fully-JIT’ed graph of <a class="reference internal" href="numbox.core.work.html#numbox.core.work.work.Work" title="numbox.core.work.work.Work"><code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.work.work.Work</span></code></a> nodes, by using the <a class="reference internal" href="numbox.core.work.html#numbox.core.work.builder.Derived" title="numbox.core.work.builder.Derived"><code class="xref py py-class docutils literal notranslate"><span class="pre">numbox.core.work.builder.Derived</span></code></a>. See <a class="reference internal" href="numbox.core.work.html#builder"><span class="std std-ref">numbox.core.work.builder</span></a>.</p>
+</aside>
+</aside>
+<dl class="py class" id="module-numbox.core.variable.variable">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.CompiledGraph">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.variable.variable.</span></span><span class="sig-name descname"><span class="pre">CompiledGraph</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="pre">ordered_nodes:</span> <span class="pre">list[numbox.core.variable.variable.CompiledNode],</span> <span class="pre">required_external_variables:</span> <span class="pre">dict[str,</span> <span class="pre">dict[str,</span> <span class="pre">numbox.core.variable.variable.Variable]],</span> <span class="pre">dependents:</span> <span class="pre">dict[numbox.core.variable.variable.Variable,</span> <span class="pre">list[numbox.core.variable.variable.CompiledNode]]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#CompiledGraph"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.CompiledGraph" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.CompiledGraph.dependents">
+<span class="sig-name descname"><span class="pre">dependents</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#numbox.core.variable.variable.Variable" title="numbox.core.variable.variable.Variable"><span class="pre">Variable</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#numbox.core.variable.variable.CompiledNode" title="numbox.core.variable.variable.CompiledNode"><span class="pre">CompiledNode</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#numbox.core.variable.variable.CompiledGraph.dependents" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.CompiledGraph.execute">
+<span class="sig-name descname"><span class="pre">execute</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">external_values</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">values</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#numbox.core.variable.variable.Storage" title="numbox.core.variable.variable.Storage"><span class="pre">Storage</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#CompiledGraph.execute"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.CompiledGraph.execute" title="Link to this definition"></a></dt>
+<dd><p>Main entry point to calculate values of nodes of the compiled
+graph. Calculation requires the following inputs:</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>external_values</strong> – actual values of all required external</p>
+</dd>
+</dl>
+<p>variables, this can be a superset of what is really needed for
+the calculation. The map is first from the name of the external
+namespace and then from the name of the variable within that
+source to the variable’s actual value.
+:param values: runtime storage of all values, e.g., an instance
+of <cite>Values</cite>.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.CompiledGraph.ordered_nodes">
+<span class="sig-name descname"><span class="pre">ordered_nodes</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#numbox.core.variable.variable.CompiledNode" title="numbox.core.variable.variable.CompiledNode"><span class="pre">CompiledNode</span></a><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#numbox.core.variable.variable.CompiledGraph.ordered_nodes" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.CompiledGraph.recompute">
+<span class="sig-name descname"><span class="pre">recompute</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">changed</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">values</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#numbox.core.variable.variable.Storage" title="numbox.core.variable.variable.Storage"><span class="pre">Storage</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#CompiledGraph.recompute"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.CompiledGraph.recompute" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>changed</strong> – dict of sources to names to new values of changed</p>
+</dd>
+</dl>
+<p><cite>Variable`s coming from either `External</cite> or <cite>Variables</cite> source.
+:param values: storage of all the <cite>Variable</cite> values.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.CompiledGraph.required_external_variables">
+<span class="sig-name descname"><span class="pre">required_external_variables</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference internal" href="#numbox.core.variable.variable.Variable" title="numbox.core.variable.variable.Variable"><span class="pre">Variable</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#numbox.core.variable.variable.CompiledGraph.required_external_variables" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.CompiledNode">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.variable.variable.</span></span><span class="sig-name descname"><span class="pre">CompiledNode</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">variable</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#numbox.core.variable.variable.Variable" title="numbox.core.variable.variable.Variable"><span class="pre">numbox.core.variable.variable.Variable</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#numbox.core.variable.variable.Variable" title="numbox.core.variable.variable.Variable"><span class="pre">numbox.core.variable.variable.Variable</span></a><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#CompiledNode"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.CompiledNode" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.CompiledNode.inputs">
+<span class="sig-name descname"><span class="pre">inputs</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#numbox.core.variable.variable.Variable" title="numbox.core.variable.variable.Variable"><span class="pre">Variable</span></a><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#numbox.core.variable.variable.CompiledNode.inputs" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.CompiledNode.variable">
+<span class="sig-name descname"><span class="pre">variable</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#numbox.core.variable.variable.Variable" title="numbox.core.variable.variable.Variable"><span class="pre">Variable</span></a></em><a class="headerlink" href="#numbox.core.variable.variable.CompiledNode.variable" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.External">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.variable.variable.</span></span><span class="sig-name descname"><span class="pre">External</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#External"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.External" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#numbox.core.variable.variable.Namespace" title="numbox.core.variable.variable.Namespace"><code class="xref py py-class docutils literal notranslate"><span class="pre">Namespace</span></code></a></p>
+<p>An ‘external’ namespace that facilitates discovery
+of requested names.</p>
+<p>When requesting a <cite>Variable</cite> with the given name via a
+typical <cite>__getitem__</cite> call, if the <cite>Variable</cite> is not
+found, it will be created and added to this dictionary.
+This way the graph will be able to infer which variables
+are required from the external source abstracted by this
+namespace.</p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Graph">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.variable.variable.</span></span><span class="sig-name descname"><span class="pre">Graph</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">variables_lists</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#numbox.core.variable.variable.VarSpec" title="numbox.core.variable.variable.VarSpec"><span class="pre">VarSpec</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">external_source_names</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#Graph"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.Graph" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Graph.compile">
+<span class="sig-name descname"><span class="pre">compile</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">required</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#numbox.core.variable.variable.CompiledGraph" title="numbox.core.variable.variable.CompiledGraph"><span class="pre">CompiledGraph</span></a></span></span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#Graph.compile"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.Graph.compile" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Required<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list of qualified variables names that need to be calculated.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Graph.dependents_of">
+<span class="sig-name descname"><span class="pre">dependents_of</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">qual_names</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">set</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">set</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#Graph.dependents_of"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.Graph.dependents_of" title="Link to this definition"></a></dt>
+<dd><p>Return qualified names of <cite>Variable`s that directly or indirectly
+depend on any of `qual_names</cite>.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Graph.explain">
+<span class="sig-name descname"><span class="pre">explain</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">qual_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">right_to_left</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#Graph.explain"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.Graph.explain" title="Link to this definition"></a></dt>
+<dd><p>Follow the dependencies chain to explain how the given
+variable is derived.</p>
+<p>Uses <cite>metadata</cite> of the <cite>Variable</cite> instances.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>qual_name</strong> – qualified name of the <cite>Variable</cite>.</p></li>
+<li><p><strong>right_to_left</strong> – when <cite>True</cite> (default), begin explanation</p></li>
+</ul>
+</dd>
+</dl>
+<p>with <cite>qual_name</cite>. That is, move towards the ends of the
+graph.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Namespace">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.variable.variable.</span></span><span class="sig-name descname"><span class="pre">Namespace</span></span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#Namespace"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.Namespace" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ABC</span></code></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Namespace.keys">
+<span class="sig-name descname"><span class="pre">keys</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#Namespace.keys"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.Namespace.keys" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Namespace.name">
+<span class="sig-name descname"><span class="pre">name</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#numbox.core.variable.variable.Namespace.name" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Namespace.update">
+<span class="sig-name descname"><span class="pre">update</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">var</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#numbox.core.variable.variable.Variable" title="numbox.core.variable.variable.Variable"><span class="pre">Variable</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#Namespace.update"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.Namespace.update" title="Link to this definition"></a></dt>
+<dd><p>Post-initialization update for dynamically generated
+<a href="#id3"><span class="problematic" id="id4">`</span></a>Variable`s.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Storage">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.variable.variable.</span></span><span class="sig-name descname"><span class="pre">Storage</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#Storage"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.Storage" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Protocol</span></code></p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Storage.cache">
+<span class="sig-name descname"><span class="pre">cache</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#numbox.core.variable.variable.Variable" title="numbox.core.variable.variable.Variable"><span class="pre">Variable</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#numbox.core.variable.variable.Storage.cache" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Storage.get">
+<span class="sig-name descname"><span class="pre">get</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">variable</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#numbox.core.variable.variable.Variable" title="numbox.core.variable.variable.Variable"><span class="pre">Variable</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#numbox.core.variable.variable.Value" title="numbox.core.variable.variable.Value"><span class="pre">Value</span></a></span></span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#Storage.get"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.Storage.get" title="Link to this definition"></a></dt>
+<dd><p>Principal access point to the requested variable.
+Instantiates the corresponding value when first
+invoked for the given variable.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Value">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.variable.variable.</span></span><span class="sig-name descname"><span class="pre">Value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">variable:</span> <span class="pre">~numbox.core.variable.variable.Variable</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value:</span> <span class="pre">~typing.Any</span> <span class="pre">|</span> <span class="pre">~numbox.core.variable.variable._Null</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#Value"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.Value" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Value of the corresponding <cite>Variable</cite>.
+Best used when created indirectly by the
+<cite>Values</cite> storage.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Value.value">
+<span class="sig-name descname"><span class="pre">value</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Any</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">_Null</span></em><a class="headerlink" href="#numbox.core.variable.variable.Value.value" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Value.variable">
+<span class="sig-name descname"><span class="pre">variable</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#numbox.core.variable.variable.Variable" title="numbox.core.variable.variable.Variable"><span class="pre">Variable</span></a></em><a class="headerlink" href="#numbox.core.variable.variable.Value.variable" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Values">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.variable.variable.</span></span><span class="sig-name descname"><span class="pre">Values</span></span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#Values"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.Values" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Values of all <a href="#id5"><span class="problematic" id="id6">`</span></a>Variable`s, computed and external,
+will be held here.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Values.get">
+<span class="sig-name descname"><span class="pre">get</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">variable</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#numbox.core.variable.variable.Variable" title="numbox.core.variable.variable.Variable"><span class="pre">Variable</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#numbox.core.variable.variable.Value" title="numbox.core.variable.variable.Value"><span class="pre">Value</span></a></span></span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#Values.get"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.Values.get" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.VarSpec">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.variable.variable.</span></span><span class="sig-name descname"><span class="pre">VarSpec</span></span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#VarSpec"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.VarSpec" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">TypedDict</span></code></p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.VarSpec.cacheable">
+<span class="sig-name descname"><span class="pre">cacheable</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><a class="headerlink" href="#numbox.core.variable.variable.VarSpec.cacheable" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.VarSpec.formula">
+<span class="sig-name descname"><span class="pre">formula</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Callable</span></em><a class="headerlink" href="#numbox.core.variable.variable.VarSpec.formula" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.VarSpec.inputs">
+<span class="sig-name descname"><span class="pre">inputs</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#numbox.core.variable.variable.VarSpec.inputs" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.VarSpec.metadata">
+<span class="sig-name descname"><span class="pre">metadata</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#numbox.core.variable.variable.VarSpec.metadata" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.VarSpec.name">
+<span class="sig-name descname"><span class="pre">name</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#numbox.core.variable.variable.VarSpec.name" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Variable">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.variable.variable.</span></span><span class="sig-name descname"><span class="pre">Variable</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name:</span> <span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">source:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">''</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inputs:</span> <span class="pre">~typing.Mapping[str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">str]</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">formula:</span> <span class="pre">~typing.Callable</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">metadata:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cacheable:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#Variable"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.Variable" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>An instance of <cite>Variable</cite> is anything that can be calculated
+from the values of the given <cite>inputs</cite> dependencies using the
+provided <cite>formula</cite> (i.e., a Python function).</p>
+<p>Calculated value can be <cite>None</cite>, that is why a non-calculated
+value is designated with <cite>_null</cite>.</p>
+<p>An instance of <cite>Variable</cite> is best created within the given
+<cite>Namespace</cite>. For example, when the <cite>Variables</cite> subtype of
+the <cite>Namespace</cite> is instantiated, it gets populated with
+the freshly created <cite>Variable</cite> instances per the <cite>VarSpec</cite>
+specifications passed to it. Or, when the <cite>External</cite> subtype
+of the <cite>Namespace</cite> is queried for the given variable name,
+if a <cite>Variable</cite> with such a name is not already present in
+that external namespace, it will be created and stored there.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> – name of the <cite>Variable</cite> instance.</p></li>
+<li><p><strong>source</strong> – name of the <cite>Namespace</cite> instance  which is</p></li>
+</ul>
+</dd>
+</dl>
+<p>the namespace / source of this <cite>Variable</cite>.
+:param inputs: (optional) map from names of the <cite>Variable</cite>
+inputs (which are names of other <cite>Variable</cite> instances) to
+names of their <cite>Namespace`s.
+:param formula: (optional) function that calculates the
+value of this `Variable</cite> from its sources.
+:param metadata: any possible metadata associated with
+this variable.
+:param cacheable: (default <cite>False</cite>) when <cite>True</cite>, the
+corresponding <cite>Value</cite> (see below) will be cached during
+calculation. When attempting to recompute with the same
+inputs, cached value will be returned instead. Use sparingly!</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Variable.cacheable">
+<span class="sig-name descname"><span class="pre">cacheable</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">False</span></em><a class="headerlink" href="#numbox.core.variable.variable.Variable.cacheable" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Variable.formula">
+<span class="sig-name descname"><span class="pre">formula</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Callable</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#numbox.core.variable.variable.Variable.formula" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Variable.inputs">
+<span class="sig-name descname"><span class="pre">inputs</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Mapping</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#numbox.core.variable.variable.Variable.inputs" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Variable.metadata">
+<span class="sig-name descname"><span class="pre">metadata</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#numbox.core.variable.variable.Variable.metadata" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Variable.name">
+<span class="sig-name descname"><span class="pre">name</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><a class="headerlink" href="#numbox.core.variable.variable.Variable.name" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Variable.qual_name">
+<span class="sig-name descname"><span class="pre">qual_name</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#Variable.qual_name"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.Variable.qual_name" title="Link to this definition"></a></dt>
+<dd><p>Qualified name of <cite>Variable</cite> incorporates both the name
+of the <cite>Variable</cite> and the name of its source / namespace.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Variable.source">
+<span class="sig-name descname"><span class="pre">source</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">str</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></em><a class="headerlink" href="#numbox.core.variable.variable.Variable.source" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.Variables">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.variable.variable.</span></span><span class="sig-name descname"><span class="pre">Variables</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">variables</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">list</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#numbox.core.variable.variable.VarSpec" title="numbox.core.variable.variable.VarSpec"><span class="pre">VarSpec</span></a><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#Variables"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.Variables" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#numbox.core.variable.variable.Namespace" title="numbox.core.variable.variable.Namespace"><code class="xref py py-class docutils literal notranslate"><span class="pre">Namespace</span></code></a></p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.variable.variable.make_qual_name">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.variable.variable.</span></span><span class="sig-name descname"><span class="pre">make_qual_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">namespace_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">var_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="_modules/numbox/core/variable/variable.html#make_qual_name"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.variable.variable.make_qual_name" title="Link to this definition"></a></dt>
+<dd><p>Each <cite>Variable</cite> instance is best initialized in
+and owned by a <cite>Namespace</cite> object (such as, instances
+of <cite>External</cite> and <cite>Variables</cite>), with the given
+<cite>namespace_name</cite>.</p>
+<p>This function thereby returns qualified name of the
+<cite>Variable</cite> instance.</p>
+</dd></dl>
+
+</section>
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="numbox.core.proxy.html" class="btn btn-neutral float-left" title="numbox.core.proxy" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="numbox.core.work.html" class="btn btn-neutral float-right" title="numbox.core.work" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
