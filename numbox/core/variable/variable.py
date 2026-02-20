@@ -198,7 +198,10 @@ class Variables(Namespace):
         This is un-qualified name, as it is already looked up in
         this namespace.
         """
-        return self._variables[variable_name]
+        try:
+            return self._variables[variable_name]
+        except KeyError as e:
+            raise KeyError(f"{variable_name} is not stored in {self.name}.") from e
 
 
 @dataclass
