@@ -53,8 +53,11 @@ class Storage(Protocol):
         pass
 
 
-class VarSpec(TypedDict, total=False):
+class VarSpecBase(TypedDict):
     name: str
+
+
+class VarSpec(VarSpecBase, total=False):
     inputs: dict[str, str]
     formula: Callable
     metadata: str
@@ -302,11 +305,11 @@ class CompiledGraph:
             if provided is None:
                 raise KeyError(f"Missing external source '{source_name}'")
             for var_name, variable in variables.items():
-                var_value = provided.get(var_name)
-                if var_value is None:
+                if var_name not in provided:
                     raise KeyError(
                         f"Missing value for external variable '{make_qual_name(source_name, var_name)}'"
                     )
+                var_value = provided[var_name]
                 values.get(variable).value = var_value
 
     def _collect_affected(self, changed_vars: set[Variable]) -> list[CompiledNode]:
@@ -342,9 +345,8 @@ class CompiledGraph:
             if node.variable.formula is None:
                 continue
             args = tuple(values.get(input_).value for input_ in node.inputs)
-            assert not any(
-                [arg is _null for arg in args]
-            ), f"Uninitialized input for {node.variable}, args = {args}"
+            if any(arg is _null for arg in args):
+                raise RuntimeError(f"Uninitialized input for {node.variable}, args = {args}")
             cache_key = (node.variable, args)
             if node.variable.cacheable and cache_key in values.cache:
                 values.get(node.variable).value = values.cache[cache_key]
@@ -552,7 +554,7 @@ class Graph:
             if qual_name_ in derived:
                 return
             derived.add(qual_name_)
-            source_name, variable_name = qual_name_.split(QUAL_SEP)
+            source_name, variable_name = qual_name_.rsplit(QUAL_SEP, 1)
             variable_source = self.registry[source_name]
             variable = variable_source[variable_name]
             inputs_qual_names = []
