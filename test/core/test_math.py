@@ -377,6 +377,10 @@ class TestRint:
         assert rint(2.7) == 3.0
         assert rint(0.0) == 0.0
 
+    def test_halfway(self):
+        assert rint(2.5) == 2.0  # ties to even
+        assert rint(3.5) == 4.0  # ties to even
+
     def test_inf(self):
         assert rint(INF) == INF
         assert rint(-INF) == -INF
@@ -390,6 +394,10 @@ class TestNearbyint:
         assert nearbyint(2.3) == 2.0
         assert nearbyint(2.7) == 3.0
         assert nearbyint(0.0) == 0.0
+
+    def test_halfway(self):
+        assert nearbyint(2.5) == 2.0  # ties to even
+        assert nearbyint(3.5) == 4.0  # ties to even
 
     def test_inf(self):
         assert nearbyint(INF) == INF

@@ -3,6 +3,16 @@ from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
 from numbox.core.bindings.utils import load_lib
 
+__all__ = [
+    "cos", "sin", "tan",
+    "acos", "asin", "atan",
+    "cosh", "sinh", "tanh", "acosh", "asinh", "atanh",
+    "exp", "exp2", "expm1", "log", "log2", "log10", "log1p", "logb",
+    "sqrt", "cbrt",
+    "ceil", "floor", "trunc", "round", "rint", "nearbyint",
+    "erf", "erfc", "lgamma", "tgamma",
+    "fabs",
+]
 
 load_lib("m")
 
