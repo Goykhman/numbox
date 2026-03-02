@@ -12,6 +12,11 @@ from numbox.core.bindings._math import (
     ceil, floor, trunc, round, rint, nearbyint,
     erf, erfc, lgamma, tgamma,
     fabs,
+    atan2,
+    pow, fmod, remainder,
+    hypot,
+    fmax, fmin, fdim,
+    copysign,
 )
 
 
@@ -500,3 +505,178 @@ class TestFabs:
 
     def test_nan(self):
         assert np.isnan(fabs(NAN))
+
+
+# --- Two-argument: trig ---
+
+class TestAtan2:
+    def test_typical(self):
+        for y, x in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0), (0.0, 1.0), (1.0, 0.0)]:
+            assert_close(atan2(y, x), math.atan2(y, x))
+
+    def test_zero(self):
+        assert_close(atan2(0.0, 0.0), math.atan2(0.0, 0.0))
+        assert_close(atan2(-0.0, 0.0), math.atan2(-0.0, 0.0))
+
+    def test_inf(self):
+        assert_close(atan2(1.0, INF), 0.0)
+        assert_close(atan2(INF, 1.0), math.pi / 2)
+
+    def test_nan(self):
+        assert np.isnan(atan2(NAN, 1.0))
+        assert np.isnan(atan2(1.0, NAN))
+
+
+# --- Two-argument: power ---
+
+class TestPow:
+    def test_typical(self):
+        for x, y in [(2.0, 3.0), (2.0, 0.5), (10.0, 2.0), (2.0, -1.0)]:
+            assert_close(pow(x, y), math.pow(x, y))
+
+    def test_zero_exponent(self):
+        assert_close(pow(5.0, 0.0), 1.0)
+        assert_close(pow(0.0, 0.0), 1.0)
+
+    def test_one_base(self):
+        assert_close(pow(1.0, 1e300), 1.0)
+
+    def test_inf(self):
+        assert pow(2.0, INF) == INF
+        assert pow(2.0, -INF) == 0.0
+
+    def test_nan(self):
+        assert np.isnan(pow(NAN, 2.0))
+
+    def test_negative_base_noninteger(self):
+        assert np.isnan(pow(-1.0, 0.5))
+
+    def test_zero_base_negative_exponent(self):
+        assert pow(0.0, -1.0) == INF
+
+
+# --- Two-argument: modular ---
+
+class TestFmod:
+    def test_typical(self):
+        for x, y in [(5.0, 3.0), (-5.0, 3.0), (5.0, -3.0), (10.0, 2.5)]:
+            assert_close(fmod(x, y), math.fmod(x, y))
+
+    def test_zero_dividend(self):
+        assert_close(fmod(0.0, 1.0), 0.0)
+
+    def test_inf_dividend(self):
+        assert np.isnan(fmod(INF, 1.0))
+
+    def test_nan(self):
+        assert np.isnan(fmod(NAN, 1.0))
+        assert np.isnan(fmod(1.0, NAN))
+        assert np.isnan(fmod(1.0, 0.0))
+
+
+class TestRemainder:
+    def test_typical(self):
+        for x, y in [(5.0, 3.0), (-5.0, 3.0), (5.0, -3.0), (10.0, 3.0)]:
+            assert_close(remainder(x, y), math.remainder(x, y))
+
+    def test_zero_dividend(self):
+        assert_close(remainder(0.0, 1.0), 0.0)
+
+    def test_nan(self):
+        assert np.isnan(remainder(NAN, 1.0))
+        assert np.isnan(remainder(1.0, NAN))
+        assert np.isnan(remainder(1.0, 0.0))
+
+
+# --- Two-argument: geometry ---
+
+class TestHypot:
+    def test_typical(self):
+        for x, y in [(3.0, 4.0), (1.0, 1.0), (0.0, 5.0), (5.0, 0.0)]:
+            assert_close(hypot(x, y), math.hypot(x, y))
+
+    def test_negative(self):
+        assert_close(hypot(-3.0, -4.0), 5.0)
+
+    def test_inf(self):
+        assert hypot(INF, 1.0) == INF
+        assert hypot(1.0, INF) == INF
+        assert hypot(INF, NAN) == INF
+
+    def test_nan(self):
+        assert np.isnan(hypot(NAN, 1.0))
+        assert np.isnan(hypot(1.0, NAN))
+
+
+# --- Two-argument: comparison ---
+
+class TestFmax:
+    def test_typical(self):
+        assert_close(fmax(2.0, 3.0), 3.0)
+        assert_close(fmax(-1.0, -2.0), -1.0)
+        assert_close(fmax(0.0, -0.0), 0.0)
+
+    def test_nan_ignored(self):
+        assert_close(fmax(NAN, 1.0), 1.0)
+        assert_close(fmax(1.0, NAN), 1.0)
+
+    def test_both_nan(self):
+        assert np.isnan(fmax(NAN, NAN))
+
+    def test_inf(self):
+        assert fmax(INF, 1.0) == INF
+        assert fmax(-INF, 1.0) == 1.0
+
+
+class TestFmin:
+    def test_typical(self):
+        assert_close(fmin(2.0, 3.0), 2.0)
+        assert_close(fmin(-1.0, -2.0), -2.0)
+
+    def test_nan_ignored(self):
+        assert_close(fmin(NAN, 1.0), 1.0)
+        assert_close(fmin(1.0, NAN), 1.0)
+
+    def test_both_nan(self):
+        assert np.isnan(fmin(NAN, NAN))
+
+    def test_inf(self):
+        assert fmin(-INF, 1.0) == -INF
+        assert fmin(INF, 1.0) == 1.0
+
+
+class TestFdim:
+    def test_typical(self):
+        assert_close(fdim(5.0, 3.0), 2.0)
+        assert_close(fdim(3.0, 5.0), 0.0)
+        assert_close(fdim(0.0, 0.0), 0.0)
+        assert_close(fdim(-1.0, -5.0), 4.0)
+
+    def test_inf(self):
+        assert fdim(INF, 1.0) == INF
+        assert fdim(1.0, INF) == 0.0
+
+    def test_nan(self):
+        assert np.isnan(fdim(NAN, 1.0))
+        assert np.isnan(fdim(1.0, NAN))
+
+
+# --- Two-argument: utility ---
+
+class TestCopysign:
+    def test_typical(self):
+        assert_close(copysign(1.0, -1.0), -1.0)
+        assert_close(copysign(-1.0, 1.0), 1.0)
+        assert_close(copysign(5.0, -0.0), -5.0)
+        assert_close(copysign(-5.0, 0.0), 5.0)
+
+    def test_zero_sign(self):
+        assert math.copysign(1.0, copysign(0.0, -1.0)) == -1.0  # result is -0.0
+
+    def test_inf(self):
+        assert copysign(INF, -1.0) == -INF
+        assert copysign(-INF, 1.0) == INF
+
+    def test_nan(self):
+        assert np.isnan(copysign(NAN, 1.0))
+        assert np.isnan(copysign(NAN, -1.0))

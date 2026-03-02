@@ -12,6 +12,11 @@ __all__ = [
     "ceil", "floor", "trunc", "round", "rint", "nearbyint",
     "erf", "erfc", "lgamma", "tgamma",
     "fabs",
+    "atan2",
+    "pow", "fmod", "remainder",
+    "hypot",
+    "fmax", "fmin", "fdim",
+    "copysign",
 ]
 
 load_lib("m")
@@ -180,3 +185,48 @@ def tgamma(x):
 @cres(signatures.get("fabs"), cache=True)
 def fabs(x):
     return _call_lib_func("fabs", (x,))
+
+
+@cres(signatures.get("atan2"), cache=True)
+def atan2(y, x):
+    return _call_lib_func("atan2", (y, x))
+
+
+@cres(signatures.get("pow"), cache=True)
+def pow(x, y):
+    return _call_lib_func("pow", (x, y))
+
+
+@cres(signatures.get("fmod"), cache=True)
+def fmod(x, y):
+    return _call_lib_func("fmod", (x, y))
+
+
+@cres(signatures.get("remainder"), cache=True)
+def remainder(x, y):
+    return _call_lib_func("remainder", (x, y))
+
+
+@cres(signatures.get("hypot"), cache=True)
+def hypot(x, y):
+    return _call_lib_func("hypot", (x, y))
+
+
+@cres(signatures.get("fmax"), cache=True)
+def fmax(x, y):
+    return _call_lib_func("fmax", (x, y))
+
+
+@cres(signatures.get("fmin"), cache=True)
+def fmin(x, y):
+    return _call_lib_func("fmin", (x, y))
+
+
+@cres(signatures.get("fdim"), cache=True)
+def fdim(x, y):
+    return _call_lib_func("fdim", (x, y))
+
+
+@cres(signatures.get("copysign"), cache=True)
+def copysign(x, y):
+    return _call_lib_func("copysign", (x, y))

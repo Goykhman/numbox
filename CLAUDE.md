@@ -59,7 +59,7 @@ def func_name(x):
 ## Key Paths
 
 - `numbox/core/bindings/signatures.py` — all native function type signatures
-- `numbox/core/bindings/_math.py` — libm wrappers (34 float64→float64 functions)
+- `numbox/core/bindings/_math.py` — libm wrappers (34 single-arg + 9 two-arg float64 functions)
 - `numbox/core/bindings/_c.py` — libc wrappers
 - `numbox/core/bindings/_sqlite.py` — libsqlite3 wrappers
 - `test/core/` — tests for all core modules
