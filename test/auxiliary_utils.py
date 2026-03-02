@@ -1,3 +1,4 @@
+from inspect import isclass, isfunction
 import logging
 import re
 import sys
@@ -19,9 +20,14 @@ logging.basicConfig(level=logging.INFO)
 def collect_and_run_tests(module_name):
     module = sys.modules[module_name]
     for name, item in module.__dict__.items():
-        if name.startswith("test_") and callable(item):
+        if isfunction(item) and name.startswith("test_"):
             logger.info(f" Running {name}")
             item()
+        elif isclass(item) and name.startswith("Test"):
+            for attr, val in item.__dict__.items():
+                if isinstance(val, staticmethod) and attr.startswith("test_"):
+                    logger.info(f" Running {val.__qualname__}")
+                    val()
 
 
 @intrinsic
