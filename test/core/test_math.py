@@ -3,6 +3,7 @@ import math
 import numpy as np
 
 from numbox.core.bindings._math import (
+    cos, sin, tan,
     acos, asin, atan,
     cosh, sinh, tanh, acosh, asinh, atanh,
     exp, exp2, expm1,
@@ -25,6 +26,26 @@ def assert_close(actual, expected):
         assert actual == expected, f"expected {expected}, got {actual}"
     else:
         assert np.isclose(actual, expected), f"expected {expected}, got {actual}"
+
+
+# --- Trig ---
+
+class TestTrig:
+    def test_sin_cos_tan_identity(self):
+        x = 3.1415
+        assert np.isclose(sin(x) / cos(x), tan(x))
+
+    def test_cos(self):
+        for x in [0.0, 1.0, -1.0, math.pi, math.pi / 2]:
+            assert_close(cos(x), math.cos(x))
+
+    def test_sin(self):
+        for x in [0.0, 1.0, -1.0, math.pi, math.pi / 2]:
+            assert_close(sin(x), math.sin(x))
+
+    def test_tan(self):
+        for x in [0.0, 1.0, -1.0, math.pi / 4]:
+            assert_close(tan(x), math.tan(x))
 
 
 # --- Inverse trig ---
