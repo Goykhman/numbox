@@ -59,6 +59,21 @@ class TestTrig:
             assert_close(tan(x), math.tan(x))
 
     @staticmethod
+    def test_nan():
+        assert np.isnan(cos(NAN))
+        assert np.isnan(sin(NAN))
+        assert np.isnan(tan(NAN))
+
+    @staticmethod
+    def test_inf():
+        assert np.isnan(cos(INF))
+        assert np.isnan(cos(-INF))
+        assert np.isnan(sin(INF))
+        assert np.isnan(sin(-INF))
+        assert np.isnan(tan(INF))
+        assert np.isnan(tan(-INF))
+
+    @staticmethod
     def test_jit():
         @njit
         def _cos(x):
@@ -80,6 +95,12 @@ class TestTrig:
             assert_close(_sin(x), math.sin(x))
         for x in [0.0, 1.0, -1.0, math.pi / 4]:
             assert_close(_tan(x), math.tan(x))
+        assert np.isnan(_cos(NAN))
+        assert np.isnan(_sin(NAN))
+        assert np.isnan(_tan(NAN))
+        assert np.isnan(_cos(INF))
+        assert np.isnan(_sin(INF))
+        assert np.isnan(_tan(INF))
 
 
 # --- Inverse trig ---
@@ -125,6 +146,7 @@ class TestAsin:
     @staticmethod
     def test_out_of_domain():
         assert np.isnan(asin(2.0))
+        assert np.isnan(asin(-2.0))
 
     @staticmethod
     def test_jit():
@@ -136,6 +158,7 @@ class TestAsin:
             assert_close(_jit(x), math.asin(x))
         assert np.isnan(_jit(NAN))
         assert np.isnan(_jit(2.0))
+        assert np.isnan(_jit(-2.0))
 
 
 class TestAtan:
@@ -482,6 +505,10 @@ class TestLog2:
         assert log2(0.0) == -INF
 
     @staticmethod
+    def test_negative():
+        assert np.isnan(log2(-1.0))
+
+    @staticmethod
     def test_inf():
         assert log2(INF) == INF
 
@@ -499,6 +526,7 @@ class TestLog2:
         assert_close(_jit(2.0), 1.0)
         assert_close(_jit(1024.0), 10.0)
         assert _jit(0.0) == -INF
+        assert np.isnan(_jit(-1.0))
         assert _jit(INF) == INF
         assert np.isnan(_jit(NAN))
 
@@ -513,6 +541,10 @@ class TestLog10:
     @staticmethod
     def test_zero():
         assert log10(0.0) == -INF
+
+    @staticmethod
+    def test_negative():
+        assert np.isnan(log10(-1.0))
 
     @staticmethod
     def test_inf():
@@ -532,6 +564,7 @@ class TestLog10:
         assert_close(_jit(10.0), 1.0)
         assert_close(_jit(1000.0), 3.0)
         assert _jit(0.0) == -INF
+        assert np.isnan(_jit(-1.0))
         assert _jit(INF) == INF
         assert np.isnan(_jit(NAN))
 
@@ -576,6 +609,11 @@ class TestLogb:
         assert_close(logb(0.5), -1.0)
 
     @staticmethod
+    def test_negative():
+        assert_close(logb(-2.0), 1.0)
+        assert_close(logb(-8.0), 3.0)
+
+    @staticmethod
     def test_zero():
         assert logb(0.0) == -INF
 
@@ -597,6 +635,8 @@ class TestLogb:
         assert_close(_jit(2.0), 1.0)
         assert_close(_jit(8.0), 3.0)
         assert_close(_jit(0.5), -1.0)
+        assert_close(_jit(-2.0), 1.0)
+        assert_close(_jit(-8.0), 3.0)
         assert _jit(0.0) == -INF
         assert _jit(INF) == INF
         assert np.isnan(_jit(NAN))
@@ -1167,6 +1207,10 @@ class TestRemainder:
         assert_close(remainder(0.0, 1.0), 0.0)
 
     @staticmethod
+    def test_inf_dividend():
+        assert np.isnan(remainder(INF, 1.0))
+
+    @staticmethod
     def test_nan():
         assert np.isnan(remainder(NAN, 1.0))
         assert np.isnan(remainder(1.0, NAN))
@@ -1181,6 +1225,7 @@ class TestRemainder:
         for x, y in [(5.0, 3.0), (-5.0, 3.0), (5.0, -3.0), (10.0, 3.0)]:
             assert_close(_jit(x, y), math.remainder(x, y))
         assert_close(_jit(0.0, 1.0), 0.0)
+        assert np.isnan(_jit(INF, 1.0))
         assert np.isnan(_jit(NAN, 1.0))
         assert np.isnan(_jit(1.0, NAN))
         assert np.isnan(_jit(1.0, 0.0))
