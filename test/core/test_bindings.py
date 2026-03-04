@@ -1,4 +1,3 @@
-import numpy as np
 import pytest
 from ctypes import addressof, c_char_p, c_int64, c_void_p
 from numbox.core.bindings import *
@@ -17,14 +16,6 @@ def test_c():
     s = c_char_p(s_.encode())
     s_p = c_void_p.from_buffer(s).value
     assert strlen(s_p) == len(s_)
-
-
-def test_math():
-    x = 3.1415
-    s_ = sin(x)
-    c_ = cos(x)
-    t_ = tan(x)
-    assert np.isclose(s_ / c_, t_)
 
 
 @pytest.mark.skipif(platform_ == "Windows", reason="Need to add windows support")

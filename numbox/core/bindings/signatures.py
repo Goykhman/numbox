@@ -51,6 +51,21 @@ signatures_m = {
     "tgamma": float64(float64),
     # Absolute value
     "fabs": float64(float64),
+    # Two-argument: trig
+    "atan2": float64(float64, float64),
+    # Two-argument: power
+    "pow": float64(float64, float64),
+    # Two-argument: modular
+    "fmod": float64(float64, float64),
+    "remainder": float64(float64, float64),
+    # Two-argument: geometry
+    "hypot": float64(float64, float64),
+    # Two-argument: comparison
+    "fmax": float64(float64, float64),
+    "fmin": float64(float64, float64),
+    "fdim": float64(float64, float64),
+    # Two-argument: utility
+    "copysign": float64(float64, float64),
 }
 
 signatures_sqlite = {
