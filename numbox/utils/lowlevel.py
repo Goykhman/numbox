@@ -163,10 +163,10 @@ def get_str_from_p_as_int(p):
 def _get_unicode_data_p(typingctx, str_ty):
     def codegen(context, builder, signature, arguments):
         str_ = arguments[0]
-        meminfo = context.nrt.get_meminfos(builder, unicode_type, str_)[0]
-        _, meminfo_p = meminfo
-        payload_p = context.nrt.meminfo_data(builder, meminfo_p)
-        return builder.ptrtoint(payload_p, context.get_data_type(intp))
+        # https://github.com/numba/numba/blob/0.64.0/numba/cpython/unicode.py#L86
+        data_p_ind = 0
+        data_p = builder.extract_value(str_, data_p_ind)
+        return builder.ptrtoint(data_p, context.get_data_type(intp))
     assert isinstance(str_ty, UnicodeType)
     return intp(str_ty), codegen
 

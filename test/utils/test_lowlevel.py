@@ -1,7 +1,7 @@
 import numba
 import numpy
 from ctypes import c_char_p, c_void_p
-from numba import float64
+from numba import float64, njit
 from numba.experimental.function_type import _get_jit_address, _get_wrapper_address
 from numba.extending import intrinsic
 
@@ -141,6 +141,20 @@ def test_get_unicode_data_p():
     s1_ = "a random string"
     s1_a = get_unicode_data_p(s1_)
     assert str_from_p_as_int(s1_a) == s1_
+
+
+def test_get_unicode_data_p_in_jit():
+    """ UnicodeType string created in JIT context does not
+     (necessarily) get MemInfo. Test that data payload
+     pointer is still working. """
+    @njit
+    def aux():
+        s1_ = "a random string"
+        s1_a = get_unicode_data_p(s1_)
+        return s1_, s1_a
+
+    s1_original, s1_p = aux()
+    assert str_from_p_as_int(s1_p) == s1_original
 
 
 def test_get_str_from_p_as_int():
