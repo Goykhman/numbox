@@ -1,0 +1,188 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.proxy.proxy &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/proxy/proxy.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.proxy.proxy</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.proxy.proxy</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">inspect</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llvmlite</span><span class="w"> </span><span class="kn">import</span> <span class="n">ir</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">njit</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">cgutils</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.typing.templates</span><span class="w"> </span><span class="kn">import</span> <span class="n">Signature</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">intrinsic</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">types</span><span class="w"> </span><span class="kn">import</span> <span class="n">FunctionType</span> <span class="k">as</span> <span class="n">PyFunctionType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.standard</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_params_strings</span>
+
+
+<div class="viewcode-block" id="make_proxy_name">
+<a class="viewcode-back" href="../../../../numbox.core.proxy.html#numbox.core.proxy.proxy.make_proxy_name">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">make_proxy_name</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s1">&#39;__</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s1">&#39;</span></div>
+
+
+
+<div class="viewcode-block" id="proxy">
+<a class="viewcode-back" href="../../../../numbox.core.proxy.html#numbox.core.proxy.proxy.proxy">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">proxy</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot; Create a proxy for the decorated function `func` with the given signature(s) `sig`.</span>
+
+<span class="sd">    The original function `func` will be eagerly JIT-compiled with the given signature(s).</span>
+<span class="sd">    A proxy with the name `func_proxy_name` will be created to call `func` in the LLVM scope.</span>
+<span class="sd">    The original function&#39;s variable will be bound to the proxy, i.e., calling the decorated</span>
+<span class="sd">    function will call the proxy.</span>
+
+<span class="sd">    The proxy is a JIT-compiled wrap that invokes the intrinsic that *declares* the `func`</span>
+<span class="sd">    and calls it with the original arguments. Declaration instructions are relatively cheap</span>
+<span class="sd">    to statically link into (potential) caller&#39;s LLVM code, which is the main motivation behind</span>
+<span class="sd">    this decorator.</span>
+
+<span class="sd">    Machine code for `func` can be cached when so specified in `jit_options`, in which case its</span>
+<span class="sd">    JIT-compilation will load the `func` into the LLVM scope. Caching option is the other major</span>
+<span class="sd">    motivation for this decorator, without the need to cache one can avoid static linking</span>
+<span class="sd">    of the callee&#39;s LLVM code into the caller&#39;s by simply ignoring the former.</span>
+
+<span class="sd">    In case when more than one signature is provided as the `sig` parameter, it is assumed</span>
+<span class="sd">    that the first signature is the &#39;main&#39; one while the other ones are supplied to</span>
+<span class="sd">    allow for the `Omitted` types with default values for (some of) the parameters.</span>
+
+<span class="sd">    See tests for some examples of the use cases.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">main_sig</span> <span class="o">=</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="n">Signature</span><span class="p">)</span> <span class="ow">and</span> <span class="n">sig</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="p">(</span><span class="n">List</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">))</span> <span class="ow">and</span> <span class="n">sig</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">jit_options</span> <span class="o">=</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">jit_options</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="ow">and</span> <span class="n">jit_options</span> <span class="ow">or</span> <span class="p">{}</span>
+    <span class="n">jit_opts</span> <span class="o">=</span> <span class="n">jit_options</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">jit_opts</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">jit_opts</span><span class="p">,</span> <span class="n">inline</span><span class="o">=</span><span class="s1">&#39;always&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">wrap</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">PyFunctionType</span><span class="p">)</span>
+        <span class="n">func_jit</span> <span class="o">=</span> <span class="n">njit</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="o">**</span><span class="n">jit_options</span><span class="p">)(</span><span class="n">func</span><span class="p">)</span>
+        <span class="n">llvm_cfunc_wrapper_name</span> <span class="o">=</span> <span class="n">func_jit</span><span class="o">.</span><span class="n">get_compile_result</span><span class="p">(</span><span class="n">main_sig</span><span class="p">)</span><span class="o">.</span><span class="n">fndesc</span><span class="o">.</span><span class="n">llvm_cfunc_wrapper_name</span>
+        <span class="n">func_args_str</span><span class="p">,</span> <span class="n">func_names_args_str</span> <span class="o">=</span> <span class="n">make_params_strings</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+        <span class="n">func_proxy_name</span> <span class="o">=</span> <span class="n">make_proxy_name</span><span class="p">(</span><span class="n">func</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
+        <span class="n">code_txt</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">@intrinsic</span>
+<span class="s2">def _</span><span class="si">{</span><span class="n">func_proxy_name</span><span class="si">}</span><span class="s2">(typingctx, </span><span class="si">{</span><span class="n">func_names_args_str</span><span class="si">}</span><span class="s2">):</span>
+<span class="s2">    def codegen(context, builder, signature, args):</span>
+<span class="s2">        func_ty_ll = ir.FunctionType(</span>
+<span class="s2">            context.get_data_type(main_sig.return_type),</span>
+<span class="s2">            [context.get_data_type(arg) for arg in main_sig.args]</span>
+<span class="s2">        )</span>
+<span class="s2">        f = cgutils.get_or_insert_function(builder.module, func_ty_ll, &quot;</span><span class="si">{</span><span class="n">llvm_cfunc_wrapper_name</span><span class="si">}</span><span class="s2">&quot;)</span>
+<span class="s2">        return builder.call(f, args)</span>
+<span class="s2">    return main_sig, codegen</span>
+
+<span class="s2">@njit(sig, **jit_opts)</span>
+<span class="s2">def </span><span class="si">{</span><span class="n">func_proxy_name</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">func_args_str</span><span class="si">}</span><span class="s2">):</span>
+<span class="s2">    return _</span><span class="si">{</span><span class="n">func_proxy_name</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">func_names_args_str</span><span class="si">}</span><span class="s2">)</span>
+<span class="s2">&quot;&quot;&quot;</span>
+        <span class="n">ns</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="o">**</span><span class="n">inspect</span><span class="o">.</span><span class="n">getmodule</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="o">.</span><span class="vm">__dict__</span><span class="p">,</span>
+            <span class="o">**</span><span class="p">{</span>
+                <span class="s1">&#39;cgutils&#39;</span><span class="p">:</span> <span class="n">cgutils</span><span class="p">,</span> <span class="s1">&#39;intrinsic&#39;</span><span class="p">:</span> <span class="n">intrinsic</span><span class="p">,</span> <span class="s1">&#39;ir&#39;</span><span class="p">:</span> <span class="n">ir</span><span class="p">,</span> <span class="s1">&#39;jit_opts&#39;</span><span class="p">:</span> <span class="n">jit_opts</span><span class="p">,</span> <span class="s1">&#39;njit&#39;</span><span class="p">:</span> <span class="n">njit</span><span class="p">,</span>
+                <span class="s1">&#39;sig&#39;</span><span class="p">:</span> <span class="n">sig</span><span class="p">,</span> <span class="s1">&#39;main_sig&#39;</span><span class="p">:</span> <span class="n">main_sig</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="n">ns</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">func_proxy_name</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Name </span><span class="si">{</span><span class="n">func_proxy_name</span><span class="si">}</span><span class="s2"> in module </span><span class="si">{</span><span class="n">inspect</span><span class="o">.</span><span class="n">getmodule</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s2"> is reserved&quot;</span><span class="p">)</span>
+        <span class="n">code</span> <span class="o">=</span> <span class="nb">compile</span><span class="p">(</span><span class="n">code_txt</span><span class="p">,</span> <span class="n">inspect</span><span class="o">.</span><span class="n">getfile</span><span class="p">(</span><span class="n">func</span><span class="p">),</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;exec&#39;</span><span class="p">)</span>
+        <span class="n">exec</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">ns</span><span class="p">[</span><span class="n">func_proxy_name</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">wrap</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
