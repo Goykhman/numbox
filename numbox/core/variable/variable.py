@@ -1,3 +1,4 @@
+import sys
 import warnings
 
 from abc import ABC, abstractmethod
@@ -239,10 +240,6 @@ class CompiledNode:
     variable: Variable
     inputs: list[Variable]
 
-    def __post_init__(self):
-        if self.variable.formula and not self.variable.inputs:
-            raise RuntimeError(f"{self.variable} contains formula but no inputs, how come?")
-
     def __hash__(self):
         return hash((self.variable.source, self.variable.name))
 
@@ -258,6 +255,7 @@ class CompiledNode:
 class CompiledGraph:
     ordered_nodes: list[CompiledNode]
     required_external_variables: dict[str, dict[str, Variable]]
+    debug: bool = False
     dependents: dict[Variable, list[CompiledNode]] = field(default_factory=lambda: {})
 
     def __post_init__(self):
@@ -328,8 +326,7 @@ class CompiledGraph:
                     stack.append(node.variable)
         return [node for node in self.ordered_nodes if node in affected]
 
-    @staticmethod
-    def _calculate(nodes: list[CompiledNode], values: Storage):
+    def _calculate(self, nodes: list[CompiledNode], values: Storage):
         """
         Calculate the values of the `Variable`s using their own `formula`
         by evaluating them as functions of the values of the specified
@@ -351,6 +348,8 @@ class CompiledGraph:
             if node.variable.cacheable and cache_key in values.cache:
                 values.get(node.variable).value = values.cache[cache_key]
                 continue
+            if self.debug:
+                print(f"Calculating {node}\nwith metadata\n{node.variable.metadata}", file=sys.stderr)
             result = node.variable.formula(*args)
             if node.variable.cacheable:
                 values.cache[cache_key] = result
@@ -413,7 +412,7 @@ class Graph:
         self.compiled_graphs = {}
         self.reverse_dependencies = None
 
-    def compile(self, required: list[str] | str) -> CompiledGraph:
+    def compile(self, required: list[str] | str, debug: bool = False) -> CompiledGraph:
         """
         :required: list of qualified variables names that need to be calculated.
         """
@@ -434,6 +433,7 @@ class Graph:
         compiled = CompiledGraph(
             ordered_nodes=ordered_nodes,
             required_external_variables=required_external_variables,
+            debug=debug
         )
         self.compiled_graphs[required_tup] = compiled
         return compiled
