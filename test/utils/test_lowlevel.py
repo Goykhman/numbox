@@ -1,8 +1,13 @@
 import numba
 import numpy
+import pytest
 from ctypes import c_char_p, c_void_p
 from numba import float64, njit
-from numba.experimental.function_type import _get_jit_address, _get_wrapper_address
+try:
+    from numba.experimental.function_type import _get_jit_address, _get_wrapper_address
+    _has_func_type_internals = True
+except ImportError:
+    _has_func_type_internals = False
 from numba.extending import intrinsic
 
 from numbox.utils.meminfo import get_nrt_refcount, structref_meminfo
@@ -109,6 +114,8 @@ def test_extract_data_member():
     assert abs(get_x3(s1) - x3) < 1e-15
 
 
+@pytest.mark.skipif(not _has_func_type_internals,
+                    reason="numba removed _get_wrapper_address")
 def test_get_func_p_from_func_struct():
     func_sig = float64(float64, float64)
 
@@ -120,6 +127,8 @@ def test_get_func_p_from_func_struct():
     assert get_func_p_as_int_from_func_struct(func) == func.address
 
 
+@pytest.mark.skipif(not _has_func_type_internals,
+                    reason="numba removed _get_jit_address/_get_wrapper_address")
 def test_get_func_tuple():
     func_sig = float64(float64, float64)
 
