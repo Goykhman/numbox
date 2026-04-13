@@ -68,6 +68,7 @@ if _SYSTEM == "Windows":
         """
         def codegen(context, builder, signature, arguments):
             counter_ptr = builder.alloca(_i64)
+            builder.store(ir.Constant(_i64, 0), counter_ptr)
             fn_ty = ir.FunctionType(_i32, [_i64.as_pointer()])
             fn = get_or_insert_function(
                 builder.module, fn_ty, "QueryPerformanceCounter")
@@ -91,6 +92,9 @@ else:
         """Stack-only monotonic clock via clock_gettime."""
         def codegen(context, builder, signature, arguments):
             ts_ptr = builder.alloca(_timespec_ty)
+            zero_ts = ir.Constant(
+                _timespec_ty, [ir.Constant(_i64, 0), ir.Constant(_i64, 0)])
+            builder.store(zero_ts, ts_ptr)
             fn_ty = ir.FunctionType(_i32, [_i32, _timespec_ty.as_pointer()])
             fn = get_or_insert_function(
                 builder.module, fn_ty, "clock_gettime")
