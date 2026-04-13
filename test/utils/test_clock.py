@@ -76,9 +76,11 @@ def test_wall_clock_consistency():
     If the JIT clock were being optimized away or silently reordered, the
     accumulated JIT total would diverge from the Python wall-clock time that
     wraps the same call.  We use time.perf_counter_ns() for the wall clock
-    because it uses QPC on Windows (matching our JIT clock's source),
-    whereas time.monotonic_ns() on Windows has ~1ms resolution and can
-    return zero for fast loops.
+    because it uses QueryPerformanceCounter on all CPython versions.
+    On CPython 3.10-3.12, time.monotonic_ns() uses GetTickCount64
+    (~15 ms resolution) and can return zero for fast loops; CPython 3.13+
+    switched to QPC, but perf_counter_ns() works consistently across
+    all versions.
 
     We assert jit_total / wall_total is in [0.1, 10.0].  The ratio can
     legitimately differ from 1.0 because the wall clock also captures Python
