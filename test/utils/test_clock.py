@@ -37,10 +37,11 @@ def test_linear_scaling():
     real pair of clock reads around a math.sin() operation that itself cannot
     be eliminated (its result is accumulated and returned).
 
-    We measure time(2n) / time(n) and assert it falls in [0.5, 5.0].  The
-    wide tolerance accommodates noisy CI environments while still catching
-    gross mis-behaviour (e.g. the loop being compiled away entirely, which
-    would produce a ratio near 1.0 regardless of n).
+    We measure time(2n) / time(n) averaged over multiple runs and assert
+    it falls in [1.5, 3.0] (expected value 2.0).  Averaging reduces noise
+    from CI VMs enough to use tight bounds while still catching gross
+    mis-behaviour (e.g. the loop being compiled away entirely, which would
+    produce a ratio near 1.0 regardless of n).
     """
     @njit
     def timed_loop(n):
@@ -58,15 +59,19 @@ def test_linear_scaling():
 
     n_small = 10_000
     n_large = 20_000
-    t_small, _ = timed_loop(n_small)
-    t_large, _ = timed_loop(n_large)
+    runs = 5
+    ratio_sum = 0.0
+    for _ in range(runs):
+        t_small, _ = timed_loop(n_small)
+        t_large, _ = timed_loop(n_large)
+        assert t_small > 0, f"expected positive time, got t_small={t_small}"
+        assert t_large > 0, f"expected positive time, got t_large={t_large}"
+        ratio_sum += t_large / t_small
 
-    assert t_small > 0, f"expected positive time, got t_small={t_small}"
-    assert t_large > 0, f"expected positive time, got t_large={t_large}"
-    ratio = t_large / t_small
-    assert 0.5 <= ratio <= 5.0, (
-        f"Linear scaling ratio {ratio:.3f} out of expected range [0.5, 5.0]; "
-        f"t_small={t_small}, t_large={t_large}"
+    ratio = ratio_sum / runs
+    assert 1.5 <= ratio <= 3.0, (
+        f"Linear scaling ratio {ratio:.3f} out of expected range [1.5, 3.0]; "
+        f"averaged over {runs} runs"
     )
 
 
@@ -82,10 +87,10 @@ def test_wall_clock_consistency():
     switched to QPC, but perf_counter_ns() works consistently across
     all versions.
 
-    We assert jit_total / wall_total is in [0.1, 10.0].  The ratio can
-    legitimately differ from 1.0 because the wall clock also captures Python
-    call overhead and Numba dispatch overhead, but gross mismatches (ratio
-    near 0 or extremely large) indicate a timing defect.
+    We assert jit_total / wall_total is in [0.1, 1.0].  The JIT total
+    cannot exceed the wall total since the wall clock wraps the entire
+    call.  A ratio near 0 would indicate the JIT clock is being optimized
+    away.
     """
     @njit
     def timed_loop(n):
@@ -108,7 +113,7 @@ def test_wall_clock_consistency():
 
     assert wall_total > 0, "wall clock elapsed is zero — loop too fast for timer resolution"
     ratio = jit_total / wall_total
-    assert 0.1 <= ratio <= 10.0, (
-        f"JIT/wall ratio {ratio:.3f} out of expected range [0.1, 10.0]; "
+    assert 0.1 <= ratio <= 1.0, (
+        f"JIT/wall ratio {ratio:.3f} out of expected range [0.1, 1.0]; "
         f"jit_total={jit_total}, wall_total={wall_total}"
     )

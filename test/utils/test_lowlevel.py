@@ -115,7 +115,7 @@ def test_extract_data_member():
 
 
 @pytest.mark.skipif(not _has_func_type_internals,
-                    reason="numba removed _get_wrapper_address")
+                    reason="_get_jit_address not available (added in numba 0.61)")
 def test_get_func_p_from_func_struct():
     func_sig = float64(float64, float64)
 
@@ -128,7 +128,7 @@ def test_get_func_p_from_func_struct():
 
 
 @pytest.mark.skipif(not _has_func_type_internals,
-                    reason="numba removed _get_jit_address/_get_wrapper_address")
+                    reason="_get_jit_address not available (added in numba 0.61)")
 def test_get_func_tuple():
     func_sig = float64(float64, float64)
 
