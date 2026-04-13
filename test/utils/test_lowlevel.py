@@ -3,19 +3,15 @@ import numpy
 import pytest
 from ctypes import c_char_p, c_void_p
 from numba import float64, njit
-try:
-    from numba.experimental.function_type import _get_jit_address, _get_wrapper_address
-    _has_func_type_internals = True
-except ImportError:
-    _has_func_type_internals = False
+from numba.experimental.function_type import _get_wrapper_address
 from numba.extending import intrinsic
 
 from numbox.utils.meminfo import get_nrt_refcount, structref_meminfo
 from numbox.utils.highlevel import cres
 from numbox.utils.lowlevel import (
     cast, deref_payload, extract_struct_member, get_func_p_as_int_from_func_struct,
-    get_func_tuple, get_str_from_p_as_int, get_unicode_data_p, tuple_of_struct_ptrs_as_int,
-    uniformize_tuple_of_structs
+    get_func_tuple, get_str_from_p_as_int, get_unicode_data_p, numba_version,
+    tuple_of_struct_ptrs_as_int, uniformize_tuple_of_structs
 )
 from test.auxiliary_utils import collect_and_run_tests, deref_int64_intp, str_from_p_as_int
 from test.common_structrefs import ll_make_s4, S1, S1Type, S12, S12Type, S2
@@ -114,8 +110,6 @@ def test_extract_data_member():
     assert abs(get_x3(s1) - x3) < 1e-15
 
 
-@pytest.mark.skipif(not _has_func_type_internals,
-                    reason="_get_jit_address not available (added in numba 0.61)")
 def test_get_func_p_from_func_struct():
     func_sig = float64(float64, float64)
 
@@ -127,9 +121,11 @@ def test_get_func_p_from_func_struct():
     assert get_func_p_as_int_from_func_struct(func) == func.address
 
 
-@pytest.mark.skipif(not _has_func_type_internals,
-                    reason="_get_jit_address not available (added in numba 0.61)")
+@pytest.mark.skipif(numba_version < 61,
+                    reason="_get_jit_address added in numba 0.61")
 def test_get_func_tuple():
+    from numba.experimental.function_type import _get_jit_address
+
     func_sig = float64(float64, float64)
 
     @cres(func_sig, cache=True)
