@@ -36,9 +36,9 @@ def structref_meminfo(s):
     return _structref_meminfo(s)
 
 
-def get_nrt_refcount(meminfo_p):
+def get_nrt_refcount(s):
     """
-    :param meminfo_p: meminfo pointer
+    :param s: instance of an object with payload wrapped in a meminfo
     :return: NRT reference count, the one which is controllable by nrt context's incref/decref
 
     Leverages meminfo memory layout::
@@ -54,5 +54,5 @@ def get_nrt_refcount(meminfo_p):
 
     see `nrt <https://github.com/numba/numba/blob/main/numba/core/runtime/nrt.cpp#L17>`_.
     """
-    meminfo_p, data_p = structref_meminfo(meminfo_p)
+    meminfo_p, data_p = structref_meminfo(s)
     return ctypes.c_int64.from_address(meminfo_p).value
