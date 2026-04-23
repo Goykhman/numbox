@@ -5,6 +5,7 @@ import numba
 from llvmlite import ir as llir
 from numba import types
 from numba.core import cgutils
+from numba.core.errors import TypingError
 from numba.core.extending import intrinsic
 
 
@@ -63,9 +64,20 @@ def get_nrt_refcount(s):
 _MI_TY = types.MemInfoPointer(types.voidptr)
 
 
+def _require_intp(p_ty, fn_name):
+    """Reject anything other than ``types.intp`` for pointer-as-int args.
+
+    Accepting an arbitrary integer type would emit an ``inttoptr`` of the
+    wrong width on 64-bit hosts (e.g., int32 → i32 → ptr truncates).
+    """
+    if p_ty != types.intp:
+        raise TypingError(f"{fn_name} expects types.intp, got {p_ty}")
+
+
 @intrinsic
 def _incref_meminfo(typingctx, p_ty):
     """Incref a MemInfo at ``intp`` via NRT."""
+    _require_intp(p_ty, "_incref_meminfo")
     sig = types.void(p_ty)
 
     def codegen(context, builder, signature, args):
@@ -85,6 +97,7 @@ def _release_meminfo(typingctx, p_ty):
     causes ``_legalize()`` to bail out of the rewrite, protecting the
     whole function.
     """
+    _require_intp(p_ty, "_release_meminfo")
     sig = types.void(p_ty)
 
     def codegen(context, builder, signature, args):
@@ -100,6 +113,7 @@ def _release_meminfo(typingctx, p_ty):
 @intrinsic
 def _deref_structref_raw_ptr(typingctx, struct_type_ref, p_ty):
     """Reconstruct a structref value from an ``intp`` MemInfo pointer."""
+    _require_intp(p_ty, "_deref_structref_raw_ptr")
     inst_type = struct_type_ref.instance_type
     sig = inst_type(struct_type_ref, p_ty)
 

@@ -90,5 +90,20 @@ def test_bridge_round_trip_recovers_fields():
     assert read_all(p) == (42, 43, 3.14)
 
 
+def test_bridge_intrinsics_reject_non_intp():
+    """Wrong-width integer args should raise at typing time, not corrupt at runtime."""
+    import pytest
+    from numba import int32, njit
+    from numba.core.errors import TypingError
+    from numbox.utils.meminfo import _incref_meminfo
+
+    def caller(x):
+        _incref_meminfo(x)
+        return x
+
+    with pytest.raises(TypingError, match=r"_incref_meminfo expects"):
+        njit(int32(int32))(caller)
+
+
 if __name__ == "__main__":
     collect_and_run_tests(__name__)
