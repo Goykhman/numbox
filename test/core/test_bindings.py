@@ -41,12 +41,17 @@ def test_sqlite():
 
 
 def test_load_lib_path_returns_handle_with_known_symbol():
-    from ctypes.util import find_library
     from numbox.core.bindings.utils import load_lib_path
 
-    libm_path = find_library("m")
-    assert libm_path is not None, "libm not discoverable on this platform"
-    lib = load_lib_path(libm_path)
+    if platform_ == "Windows":
+        from ctypes.util import find_msvcrt
+        lib_path = find_msvcrt()
+    else:
+        from ctypes.util import find_library
+        lib_path = find_library("m")
+    if lib_path is None:
+        pytest.skip("No suitable math/C runtime library discoverable")
+    lib = load_lib_path(lib_path)
     assert hasattr(lib, "cos")
 
 
