@@ -233,5 +233,25 @@ def test_uniformize_tuple_of_structs():
     assert s12_.x1 == s12.x1
 
 
+def test_array_data_p_python():
+    import numpy
+    from numbox.utils.lowlevel import array_data_p
+    arr = numpy.arange(4, dtype=numpy.float64)
+    assert array_data_p(arr) == arr.ctypes.data
+
+
+def test_array_data_p_njit():
+    import numpy
+    from numba import njit
+    from numbox.utils.lowlevel import array_data_p
+
+    @njit
+    def wrap(a):
+        return array_data_p(a)
+
+    arr = numpy.arange(4, dtype=numpy.int32)
+    assert wrap(arr) == arr.ctypes.data
+
+
 if __name__ == '__main__':
     collect_and_run_tests(__name__)
