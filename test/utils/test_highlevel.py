@@ -242,5 +242,44 @@ def test_make_structref_5():
     assert str(s5_1) == "S5()"
 
 
+def test_cres_if_available_present_symbol_returns_real_wrapper():
+    from ctypes.util import find_library
+    from numba import float64
+    from numba.core.types.function_type import CompileResultWAP
+    from numbox.core.bindings.call import _call_lib_func
+    from numbox.core.bindings.signatures import signatures
+    from numbox.core.bindings.utils import load_lib_path
+    from numbox.utils.highlevel import cres_if_available
+
+    signatures["cos"] = float64(float64)
+    libm = load_lib_path(find_library("m"))
+
+    @cres_if_available(libm, signatures["cos"])
+    def cos(x):
+        return _call_lib_func("cos", (x,))
+
+    assert isinstance(cos, CompileResultWAP)
+
+
+def test_cres_if_available_missing_symbol_returns_stub():
+    from numba import float64
+    from numbox.core.bindings.signatures import signatures
+    from numbox.core.bindings.utils import load_lib_path
+    from numbox.utils.highlevel import cres_if_available
+    from ctypes.util import find_library
+    import pytest
+
+    signatures["nonexistent_fn"] = float64(float64)
+    libm = load_lib_path(find_library("m"))
+
+    @cres_if_available(libm, signatures["nonexistent_fn"])
+    def nonexistent_fn(x):
+        return x
+
+    assert nonexistent_fn.__name__ == "nonexistent_fn"
+    with pytest.raises(NotImplementedError, match="nonexistent_fn is not available"):
+        nonexistent_fn(1.0)
+
+
 if __name__ == '__main__':
     collect_and_run_tests(__name__)

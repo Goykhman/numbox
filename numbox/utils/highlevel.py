@@ -37,6 +37,26 @@ def cres(sig, **kwargs):
     return _
 
 
+def cres_if_available(lib, sig, **kwargs):
+    """Like ``cres(sig, **kwargs)``, but stubs out the wrapper if the C
+    symbol matching ``func.__name__`` is absent from ``lib``.
+
+    Use for binding sets that target multiple library versions where some
+    symbols may only exist in newer releases. Callers get a stub that
+    raises ``NotImplementedError`` instead of a confusing LLVM link error
+    at call time.
+    """
+    def _(func):
+        if hasattr(lib, func.__name__):
+            return cres(sig, **kwargs)(func)
+
+        def stub(*args, **_kwargs):
+            raise NotImplementedError(f"{func.__name__} is not available")
+        stub.__name__ = func.__name__
+        return stub
+    return _
+
+
 def determine_field_index(struct_ty, field_name):
     for i_, field_pair in enumerate(struct_ty._fields):
         if field_pair[0] == field_name:
