@@ -1,0 +1,120 @@
+"""Struct-by-value ABI codegen helpers for numba bindings.
+
+LLVM's JIT treats ABI lowering as a frontend responsibility — it won't
+insert the right calling convention for struct args/returns by itself.
+These helpers generate the appropriate IR for SysV x86-64 and Windows.
+
+References:
+    https://github.com/numba/llvmlite/issues/300#issuecomment-327235846
+    https://github.com/llvm/llvm-project/issues/85417
+"""
+import platform
+import sys
+
+from llvmlite import ir
+from llvmlite.ir import FunctionType
+from numba.core.cgutils import get_or_insert_function
+from numba.extending import intrinsic
+
+from numbox.core.bindings.signatures import signatures
+
+
+_is_win = sys.platform == "win32"
+_is_sysv_x86_64 = platform.machine() == "x86_64" and not _is_win
+
+
+def _resolve_sig(func_name):
+    func_sig = signatures.get(func_name, None)
+    if func_sig is None:
+        raise ValueError(f"Undefined signature for {func_name}")
+    return func_sig
+
+
+def _emit_byval_call(builder, context, arg, arg_ll_ty, ret_type, func_name):
+    """Emit IR to pass a struct by pointer: alloca, store, call via pointer."""
+    stack_p = builder.alloca(arg_ll_ty)
+    builder.store(arg, stack_p)
+    func_ty_ll = FunctionType(ret_type, [arg_ll_ty.as_pointer()])
+    func_p = get_or_insert_function(builder.module, func_ty_ll, func_name)
+    return builder.call(func_p, [stack_p])
+
+
+@intrinsic(prefer_literal=True)
+def _call_lib_func_byval(typingctx, func_name_ty, arg_ty):
+    """Pass ``arg`` to a C function by pointer on all platforms.
+
+    Used when the C signature takes a pointer to a struct and the caller
+    holds the struct as a value (e.g. ``duckdb_result *``).
+    """
+    func_name = func_name_ty.literal_value
+    func_sig = _resolve_sig(func_name)
+
+    def codegen(context, builder, signature, arguments):
+        _, arg = arguments
+        arg_ll_ty = context.get_value_type(arg_ty)
+        ret_type = context.get_value_type(signature.return_type)
+        return _emit_byval_call(
+            builder, context, arg, arg_ll_ty, ret_type, func_name)
+
+    sig = func_sig.return_type(func_name_ty, arg_ty)
+    return sig, codegen
+
+
+@intrinsic(prefer_literal=True)
+def _call_lib_func_struct_in(typingctx, func_name_ty, arg_ty):
+    """Pass a ≤16-byte struct by value (SysV x86-64) or by pointer (Windows)."""
+    func_name = func_name_ty.literal_value
+    func_sig = _resolve_sig(func_name)
+    struct_bytes = sum(t.bitwidth for t in arg_ty) / 8
+    assert struct_bytes <= 16, (
+        f"struct too large for by-value passing ({struct_bytes} bytes > 16)"
+    )
+
+    def codegen(context, builder, signature, arguments):
+        _, arg = arguments
+        arg_ll_ty = context.get_value_type(arg_ty)
+        ret_type = context.get_value_type(signature.return_type)
+        if _is_win:
+            return _emit_byval_call(
+                builder, context, arg, arg_ll_ty, ret_type, func_name)
+        func_ty_ll = FunctionType(ret_type, [arg_ll_ty])
+        func_p = get_or_insert_function(
+            builder.module, func_ty_ll, func_name)
+        return builder.call(func_p, [arg])
+
+    sig = func_sig.return_type(func_name_ty, arg_ty)
+    return sig, codegen
+
+
+@intrinsic(prefer_literal=True)
+def _call_lib_func_struct_out(typingctx, func_name_ty, arg_ty):
+    """Return a ≤16-byte struct by value (SysV x86-64) or via sret (Windows)."""
+    func_name = func_name_ty.literal_value
+    func_sig = _resolve_sig(func_name)
+    ret_ty = func_sig.return_type
+    struct_bytes = sum(t.bitwidth for t in ret_ty) / 8
+    assert struct_bytes <= 16, (
+        f"return struct too large for by-value return ({struct_bytes} bytes > 16)"
+    )
+
+    def codegen(context, builder, signature, arguments):
+        _, arg = arguments
+        ret_ll_ty = context.get_value_type(signature.return_type)
+        if _is_win:
+            sret_p = builder.alloca(ret_ll_ty)
+            func_ty_ll = FunctionType(
+                ir.VoidType(),
+                [ret_ll_ty.as_pointer(), arg.type]
+            )
+            func_p = get_or_insert_function(
+                builder.module, func_ty_ll, func_name)
+            func_p.args[0].add_attribute("sret")
+            builder.call(func_p, [sret_p, arg])
+            return builder.load(sret_p)
+        func_ty_ll = FunctionType(ret_ll_ty, [arg.type])
+        func_p = get_or_insert_function(
+            builder.module, func_ty_ll, func_name)
+        return builder.call(func_p, [arg])
+
+    sig = func_sig.return_type(func_name_ty, arg_ty)
+    return sig, codegen
