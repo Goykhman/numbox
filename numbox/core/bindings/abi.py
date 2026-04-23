@@ -62,10 +62,16 @@ def _call_lib_func_byval(typingctx, func_name_ty, arg_ty):
 
 @intrinsic(prefer_literal=True)
 def _call_lib_func_struct_in(typingctx, func_name_ty, arg_ty):
-    """Pass a ≤16-byte struct by value (SysV x86-64) or by pointer (Windows)."""
+    """Pass a ≤16-byte struct: by value on SysV x86-64, by pointer elsewhere.
+
+    Only SysV x86-64 has been validated for direct register passing of small
+    structs through LLVM's JIT path. On Windows and any other platform
+    (including aarch64), fall back to the always-correct by-pointer path
+    via ``_emit_byval_call``.
+    """
     func_name = func_name_ty.literal_value
     func_sig = _resolve_sig(func_name)
-    struct_bytes = sum(t.bitwidth for t in arg_ty) / 8
+    struct_bytes = sum(t.bitwidth for t in arg_ty) // 8
     assert struct_bytes <= 16, (
         f"struct too large for by-value passing ({struct_bytes} bytes > 16)"
     )
@@ -74,7 +80,7 @@ def _call_lib_func_struct_in(typingctx, func_name_ty, arg_ty):
         _, arg = arguments
         arg_ll_ty = context.get_value_type(arg_ty)
         ret_type = context.get_value_type(signature.return_type)
-        if _is_win:
+        if not _is_sysv_x86_64:
             return _emit_byval_call(
                 builder, context, arg, arg_ll_ty, ret_type, func_name)
         func_ty_ll = FunctionType(ret_type, [arg_ll_ty])
@@ -88,11 +94,16 @@ def _call_lib_func_struct_in(typingctx, func_name_ty, arg_ty):
 
 @intrinsic(prefer_literal=True)
 def _call_lib_func_struct_out(typingctx, func_name_ty, arg_ty):
-    """Return a ≤16-byte struct by value (SysV x86-64) or via sret (Windows)."""
+    """Return a ≤16-byte struct: by value on SysV x86-64, via sret elsewhere.
+
+    Only SysV x86-64 has been validated for direct register-returning of small
+    structs through LLVM's JIT path. On Windows and any other platform, fall
+    back to the always-correct sret pattern (hidden first pointer arg).
+    """
     func_name = func_name_ty.literal_value
     func_sig = _resolve_sig(func_name)
     ret_ty = func_sig.return_type
-    struct_bytes = sum(t.bitwidth for t in ret_ty) / 8
+    struct_bytes = sum(t.bitwidth for t in ret_ty) // 8
     assert struct_bytes <= 16, (
         f"return struct too large for by-value return ({struct_bytes} bytes > 16)"
     )
@@ -100,7 +111,7 @@ def _call_lib_func_struct_out(typingctx, func_name_ty, arg_ty):
     def codegen(context, builder, signature, arguments):
         _, arg = arguments
         ret_ll_ty = context.get_value_type(signature.return_type)
-        if _is_win:
+        if not _is_sysv_x86_64:
             sret_p = builder.alloca(ret_ll_ty)
             func_ty_ll = FunctionType(
                 ir.VoidType(),
