@@ -1,4 +1,5 @@
 import ctypes
+import numba
 import numpy
 
 from numbox.utils.meminfo import structref_meminfo, get_nrt_refcount
@@ -51,6 +52,47 @@ def test_s2():
     x1_data_p = ctypes.c_int64.from_address(x1_data_pp).value
     assert x1_data_p == x1.ctypes.data
     assert x1.ctypes.data != s2_meminfo_p_as_int + size_of_meminfo * 6
+
+
+def test_bridge_refcount_ladder():
+    from numbox.utils.meminfo import (
+        _release_meminfo, borrow_structref, export_meminfo, get_nrt_refcount,
+    )
+    from test.common_structrefs import S1, S1Type
+
+    s = S1(1, 2, 3.0)
+    assert get_nrt_refcount(s) == 1
+    p = export_meminfo(s)
+    assert get_nrt_refcount(s) == 2
+
+    @numba.njit
+    def bounce(p_):
+        t = borrow_structref(S1Type, p_)
+        return t.x1
+
+    assert bounce(p) == 1
+
+    @numba.njit
+    def release(p_):
+        _release_meminfo(p_)
+
+    release(p)
+    assert get_nrt_refcount(s) == 1
+
+
+def test_bridge_round_trip_recovers_fields():
+    from numbox.utils.meminfo import borrow_structref, export_meminfo
+    from test.common_structrefs import S1, S1Type
+
+    s = S1(42, 43, 3.14)
+    p = export_meminfo(s)
+
+    @numba.njit
+    def read_all(p_):
+        t = borrow_structref(S1Type, p_)
+        return (t.x1, t.x2, t.x3)
+
+    assert read_all(p) == (42, 43, 3.14)
 
 
 if __name__ == "__main__":
