@@ -40,5 +40,15 @@ def test_sqlite():
     assert rc == 0, "could not close db connection"
 
 
+def test_load_lib_path_returns_handle_with_known_symbol():
+    from ctypes.util import find_library
+    from numbox.core.bindings.utils import load_lib_path
+
+    libm_path = find_library("m")
+    assert libm_path is not None, "libm not discoverable on this platform"
+    lib = load_lib_path(libm_path)
+    assert hasattr(lib, "cos")
+
+
 if __name__ == "__main__":
     collect_and_run_tests(__name__)

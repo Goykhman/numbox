@@ -33,3 +33,18 @@ def load_lib(name):
             _ = CDLL(lib_path, winmode=0)
     else:
         raise RuntimeError(f"Platform {platform_} is not supported, yet.")
+
+
+def load_lib_path(path):
+    """Load a shared library by absolute path and return the handle.
+
+    Linux/Darwin: ``RTLD_GLOBAL`` so symbols reach LLVM's JIT. Windows:
+    ``winmode=0``. Unlike ``load_lib(name)``, the handle is returned so
+    callers can check symbol presence with ``hasattr``.
+    """
+    if platform_ in ("Darwin", "Linux"):
+        from os import RTLD_GLOBAL
+        return CDLL(path, mode=RTLD_GLOBAL)
+    if platform_ == "Windows":
+        return CDLL(path, winmode=0)
+    raise RuntimeError(f"Platform {platform_} is not supported, yet.")
