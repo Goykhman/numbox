@@ -30,26 +30,32 @@ def test_sysv_platform_flags():
 # symbol resolution at @njit compile time aborts on fake symbols.
 
 
-def test_tuple_struct_bytes_accepts_tuple_and_unituple():
-    """The struct-size helper used by the ABI intrinsics computes bytes
-    from Tuple/UniTuple via the .bitwidth of each field."""
+def test_struct_bytes_supports_all_struct_types():
+    """The struct-size helper used by the ABI intrinsics handles every
+    numba struct-shaped type: Tuple, UniTuple, NamedTuple (via .types),
+    and Record (via .size)."""
+    import collections
     from numba.core import types
-    from numbox.core.bindings.abi import _tuple_struct_bytes
+    from numbox.core.bindings.abi import _struct_bytes
 
-    assert _tuple_struct_bytes(
+    assert _struct_bytes(
         types.Tuple([types.int32, types.int32, types.int64]), "t") == 16
-    assert _tuple_struct_bytes(
+    assert _struct_bytes(
         types.UniTuple(types.int32, 4), "t") == 16
 
+    MyNT = collections.namedtuple("MyNT", ["a", "b"])
+    assert _struct_bytes(
+        types.NamedTuple([types.int32, types.int64], MyNT), "t") == 12
 
-def test_tuple_struct_bytes_rejects_record_and_namedtuple():
-    """types.Record and types.NamedTuple iterate differently; the guard
-    must produce a clean TypingError instead of a cryptic
-    AttributeError/KeyError from the size calculation."""
+    rec = types.Record.make_c_struct([("a", types.int32), ("b", types.int64)])
+    assert _struct_bytes(rec, "t") == 16  # 4 + 4 pad + 8
+
+
+def test_struct_bytes_rejects_non_struct_type():
+    """Scalar or otherwise non-struct types raise a clean TypingError."""
     from numba.core import types
     from numba.core.errors import TypingError
-    from numbox.core.bindings.abi import _tuple_struct_bytes
+    from numbox.core.bindings.abi import _struct_bytes
 
-    rec = types.Record.make_c_struct([("a", types.int32), ("b", types.int32)])
-    with pytest.raises(TypingError, match="expected types.Tuple"):
-        _tuple_struct_bytes(rec, "_call_lib_func_struct_in")
+    with pytest.raises(TypingError, match="struct-shaped type"):
+        _struct_bytes(types.int32, "_call_lib_func_struct_in")

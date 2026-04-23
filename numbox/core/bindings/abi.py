@@ -32,20 +32,24 @@ def _resolve_sig(func_name):
     return func_sig
 
 
-def _tuple_struct_bytes(ty, fn_name):
-    """Compute struct size in bytes from a numba ``Tuple``/``UniTuple``.
+def _struct_bytes(ty, fn_name):
+    """Compute struct size in bytes for a numba struct-shaped type.
 
-    ``types.Record`` and ``types.NamedTuple`` aren't supported — their
-    iteration semantics don't yield scalar types with ``.bitwidth``.
-    Raise a clean ``TypingError`` with the caller's name so a misuse
-    doesn't surface as a cryptic ``AttributeError``/``KeyError``.
+    Supports ``types.Record`` (via ``.size``) and ``types.BaseTuple``
+    subclasses — ``types.Tuple``, ``types.UniTuple``, and
+    ``types.NamedTuple`` — via ``.types`` (a tuple of scalar field
+    types with ``.bitwidth``). Anything else raises a clean
+    ``TypingError`` naming the caller so a misuse doesn't surface as a
+    cryptic ``AttributeError`` / ``KeyError``.
     """
-    if not isinstance(ty, (nb_types.Tuple, nb_types.UniTuple)):
-        raise TypingError(
-            f"{fn_name}: expected types.Tuple or types.UniTuple of scalars, "
-            f"got {ty!r}. types.Record and types.NamedTuple are not supported."
-        )
-    return sum(t.bitwidth for t in ty) // 8
+    if isinstance(ty, nb_types.Record):
+        return ty.size
+    if isinstance(ty, nb_types.BaseTuple):
+        return sum(t.bitwidth for t in ty.types) // 8
+    raise TypingError(
+        f"{fn_name}: expected a struct-shaped type (Record, Tuple, "
+        f"UniTuple, or NamedTuple), got {ty!r}."
+    )
 
 
 def _emit_byval_call(builder, context, arg, arg_ll_ty, ret_type, func_name):
@@ -89,7 +93,7 @@ def _call_lib_func_struct_in(typingctx, func_name_ty, arg_ty):
     """
     func_name = func_name_ty.literal_value
     func_sig = _resolve_sig(func_name)
-    struct_bytes = _tuple_struct_bytes(arg_ty, "_call_lib_func_struct_in")
+    struct_bytes = _struct_bytes(arg_ty, "_call_lib_func_struct_in")
     if struct_bytes > 16:
         raise TypingError(
             f"_call_lib_func_struct_in: struct too large for by-value "
@@ -123,7 +127,7 @@ def _call_lib_func_struct_out(typingctx, func_name_ty, arg_ty):
     func_name = func_name_ty.literal_value
     func_sig = _resolve_sig(func_name)
     ret_ty = func_sig.return_type
-    struct_bytes = _tuple_struct_bytes(ret_ty, "_call_lib_func_struct_out")
+    struct_bytes = _struct_bytes(ret_ty, "_call_lib_func_struct_out")
     if struct_bytes > 16:
         raise TypingError(
             f"_call_lib_func_struct_out: return struct too large for "
