@@ -284,3 +284,18 @@ def test_cache_survives_across_processes(tmp_path):
         [sys.executable, "-c", probe], env=env, capture_output=True, text=True,
     )
     assert r2.returncode == 0, f"run2 (warm) failed:\n{r2.stderr}"
+
+
+def test_vector_ctor_raises_numbaerror_in_njit():
+    """Vector(...) from nopython context should raise NumbaError with the
+    make_vector redirect, not a generic typing failure."""
+    import pytest
+    from numba import njit
+    from numba.core.errors import NumbaError, TypingError
+    from numbox.core.vector import Vector
+
+    def caller():
+        return Vector(5)
+
+    with pytest.raises((NumbaError, TypingError), match="make_vector"):
+        njit()(caller)()

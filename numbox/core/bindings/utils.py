@@ -36,9 +36,12 @@ def load_lib(name):
 
 
 def load_lib_path(path):
-    """Load a shared library by absolute path and return the handle.
+    """Load a shared library by ``ctypes.CDLL``-acceptable identifier.
 
-    Linux/Darwin: ``RTLD_GLOBAL`` so symbols reach LLVM's JIT. Windows:
+    Accepts any string ``CDLL`` accepts — an absolute path, a soname
+    (e.g. ``libm.so.6`` as returned by ``ctypes.util.find_library``), or
+    a bare filename resolvable by the loader. Linux/Darwin use
+    ``RTLD_GLOBAL`` so symbols reach LLVM's JIT; Windows uses
     ``winmode=0``. Unlike ``load_lib(name)``, the handle is returned so
     callers can check symbol presence with ``hasattr``.
     """

@@ -2,6 +2,7 @@ import operator
 
 import numpy
 from numba import njit, types as nb_types
+from numba.core.errors import NumbaError
 from numba.experimental import structref
 from numba.experimental.structref import StructRefProxy, define_boxing, new
 from numba.extending import overload
@@ -17,11 +18,12 @@ class VectorType(nb_types.StructRef):
         return tuple((n, nb_types.unliteral(t)) for n, t in fields)
 
 
+deleted_vector_ctor_error = "Use the factory returned by make_vector(elem_type)"
+
+
 class Vector(StructRefProxy):
     def __new__(cls, *args, **kwargs):
-        raise NotImplementedError(
-            "Use the factory returned by make_vector(elem_type)"
-        )
+        raise NotImplementedError(deleted_vector_ctor_error)
 
     @property
     @njit(cache=True)
@@ -34,6 +36,11 @@ class Vector(StructRefProxy):
         return self.buf
 
 
+def _vector_deleted_ctor(*args):
+    raise NumbaError(deleted_vector_ctor_error)
+
+
+overload(Vector)(_vector_deleted_ctor)
 define_boxing(VectorType, Vector)
 
 

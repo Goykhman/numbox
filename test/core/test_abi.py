@@ -28,3 +28,28 @@ def test_sysv_platform_flags():
 # A standalone codegen smoke test here would need a controlled C library
 # with ≤16-byte struct-by-value entry points; without one, numba's eager
 # symbol resolution at @njit compile time aborts on fake symbols.
+
+
+def test_tuple_struct_bytes_accepts_tuple_and_unituple():
+    """The struct-size helper used by the ABI intrinsics computes bytes
+    from Tuple/UniTuple via the .bitwidth of each field."""
+    from numba.core import types
+    from numbox.core.bindings.abi import _tuple_struct_bytes
+
+    assert _tuple_struct_bytes(
+        types.Tuple([types.int32, types.int32, types.int64]), "t") == 16
+    assert _tuple_struct_bytes(
+        types.UniTuple(types.int32, 4), "t") == 16
+
+
+def test_tuple_struct_bytes_rejects_record_and_namedtuple():
+    """types.Record and types.NamedTuple iterate differently; the guard
+    must produce a clean TypingError instead of a cryptic
+    AttributeError/KeyError from the size calculation."""
+    from numba.core import types
+    from numba.core.errors import TypingError
+    from numbox.core.bindings.abi import _tuple_struct_bytes
+
+    rec = types.Record.make_c_struct([("a", types.int32), ("b", types.int32)])
+    with pytest.raises(TypingError, match="expected types.Tuple"):
+        _tuple_struct_bytes(rec, "_call_lib_func_struct_in")

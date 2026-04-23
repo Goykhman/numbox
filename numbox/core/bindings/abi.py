@@ -13,7 +13,9 @@ import sys
 
 from llvmlite import ir
 from llvmlite.ir import FunctionType
+from numba.core import types as nb_types
 from numba.core.cgutils import get_or_insert_function
+from numba.core.errors import TypingError
 from numba.extending import intrinsic
 
 from numbox.core.bindings.signatures import signatures
@@ -28,6 +30,22 @@ def _resolve_sig(func_name):
     if func_sig is None:
         raise ValueError(f"Undefined signature for {func_name}")
     return func_sig
+
+
+def _tuple_struct_bytes(ty, fn_name):
+    """Compute struct size in bytes from a numba ``Tuple``/``UniTuple``.
+
+    ``types.Record`` and ``types.NamedTuple`` aren't supported — their
+    iteration semantics don't yield scalar types with ``.bitwidth``.
+    Raise a clean ``TypingError`` with the caller's name so a misuse
+    doesn't surface as a cryptic ``AttributeError``/``KeyError``.
+    """
+    if not isinstance(ty, (nb_types.Tuple, nb_types.UniTuple)):
+        raise TypingError(
+            f"{fn_name}: expected types.Tuple or types.UniTuple of scalars, "
+            f"got {ty!r}. types.Record and types.NamedTuple are not supported."
+        )
+    return sum(t.bitwidth for t in ty) // 8
 
 
 def _emit_byval_call(builder, context, arg, arg_ll_ty, ret_type, func_name):
@@ -71,10 +89,12 @@ def _call_lib_func_struct_in(typingctx, func_name_ty, arg_ty):
     """
     func_name = func_name_ty.literal_value
     func_sig = _resolve_sig(func_name)
-    struct_bytes = sum(t.bitwidth for t in arg_ty) // 8
-    assert struct_bytes <= 16, (
-        f"struct too large for by-value passing ({struct_bytes} bytes > 16)"
-    )
+    struct_bytes = _tuple_struct_bytes(arg_ty, "_call_lib_func_struct_in")
+    if struct_bytes > 16:
+        raise TypingError(
+            f"_call_lib_func_struct_in: struct too large for by-value "
+            f"passing ({struct_bytes} bytes > 16)"
+        )
 
     def codegen(context, builder, signature, arguments):
         _, arg = arguments
@@ -103,10 +123,12 @@ def _call_lib_func_struct_out(typingctx, func_name_ty, arg_ty):
     func_name = func_name_ty.literal_value
     func_sig = _resolve_sig(func_name)
     ret_ty = func_sig.return_type
-    struct_bytes = sum(t.bitwidth for t in ret_ty) // 8
-    assert struct_bytes <= 16, (
-        f"return struct too large for by-value return ({struct_bytes} bytes > 16)"
-    )
+    struct_bytes = _tuple_struct_bytes(ret_ty, "_call_lib_func_struct_out")
+    if struct_bytes > 16:
+        raise TypingError(
+            f"_call_lib_func_struct_out: return struct too large for "
+            f"by-value return ({struct_bytes} bytes > 16)"
+        )
 
     def codegen(context, builder, signature, arguments):
         _, arg = arguments
