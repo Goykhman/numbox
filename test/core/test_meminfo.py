@@ -56,7 +56,7 @@ def test_s2():
 
 def test_bridge_refcount_ladder():
     from numbox.utils.meminfo import (
-        _release_meminfo, borrow_structref, export_meminfo, get_nrt_refcount,
+        borrow_structref, export_meminfo, get_nrt_refcount, release_meminfo,
     )
     from test.common_structrefs import S1, S1Type
 
@@ -71,12 +71,7 @@ def test_bridge_refcount_ladder():
         return t.x1
 
     assert bounce(p) == 1
-
-    @numba.njit
-    def release(p_):
-        _release_meminfo(p_)
-
-    release(p)
+    release_meminfo(p)
     assert get_nrt_refcount(s) == 1
 
 

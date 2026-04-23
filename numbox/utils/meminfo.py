@@ -130,8 +130,18 @@ def export_meminfo(s):
     """Export a structref as an ``intp`` MemInfo pointer with a +1 incref.
 
     The returned ``intp`` keeps the allocation alive until the caller
-    balances it with ``_release_meminfo``.
+    balances it with ``release_meminfo``.
     """
     meminfo_p, _ = structref_meminfo(s)
     _incref_meminfo(meminfo_p)
     return meminfo_p
+
+
+@numba.njit
+def release_meminfo(p):
+    """Decref a MemInfo at ``intp`` via NRT_MemInfo_release.
+
+    Public njit wrapper over ``_release_meminfo``. Callable from Python
+    and ``@njit`` contexts.
+    """
+    _release_meminfo(p)
