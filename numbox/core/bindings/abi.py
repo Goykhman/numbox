@@ -2,13 +2,18 @@
 
 LLVM's JIT treats ABI lowering as a frontend responsibility — it won't
 insert the right calling convention for struct args/returns by itself.
-These helpers generate the appropriate IR for SysV x86-64 and Windows.
+These helpers generate the appropriate IR for the two ABI families that
+matter for numba bindings: the Windows x64 ABI, which passes aggregates
+>8 bytes via caller-allocated pointers and returns them via ``sret``;
+and the register-passing ABIs (SysV x86-64 and AAPCS64), which pass and
+return ≤16-byte aggregates directly in GP registers.
 
 References:
     https://github.com/numba/llvmlite/issues/300#issuecomment-327235846
     https://github.com/llvm/llvm-project/issues/85417
+    https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention
+    https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst
 """
-import platform
 import sys
 
 from llvmlite import ir
@@ -22,7 +27,6 @@ from numbox.core.bindings.signatures import signatures
 
 
 _is_win = sys.platform == "win32"
-_is_sysv_x86_64 = platform.machine() == "x86_64" and not _is_win
 
 
 def _resolve_sig(func_name):
@@ -85,12 +89,13 @@ def _call_lib_func_byval(typingctx, func_name_ty, arg_ty):
 
 @intrinsic(prefer_literal=True)
 def _call_lib_func_struct_in(typingctx, func_name_ty, arg_ty):
-    """Pass a ≤16-byte struct: by value on SysV x86-64, by pointer elsewhere.
+    """Pass a ≤16-byte struct: by pointer on Windows x64, by value elsewhere.
 
-    Only SysV x86-64 has been validated for direct register passing of small
-    structs through LLVM's JIT path. On Windows and any other platform
-    (including aarch64), fall back to the always-correct by-pointer path
-    via ``_emit_byval_call``.
+    Windows x64 passes aggregates >8 bytes via a caller-allocated pointer.
+    SysV x86-64 and AAPCS64 both pass ≤16-byte composites directly in GP
+    registers; LLVM's JIT lowers a struct-typed argument to the correct
+    register assignment per target. So only Windows takes the by-pointer
+    path via ``_emit_byval_call``; every other platform passes directly.
     """
     func_name = func_name_ty.literal_value
     func_sig = _resolve_sig(func_name)
@@ -105,7 +110,7 @@ def _call_lib_func_struct_in(typingctx, func_name_ty, arg_ty):
         _, arg = arguments
         arg_ll_ty = context.get_value_type(arg_ty)
         ret_type = context.get_value_type(signature.return_type)
-        if not _is_sysv_x86_64:
+        if _is_win:
             return _emit_byval_call(
                 builder, context, arg, arg_ll_ty, ret_type, func_name)
         func_ty_ll = FunctionType(ret_type, [arg_ll_ty])
@@ -119,11 +124,12 @@ def _call_lib_func_struct_in(typingctx, func_name_ty, arg_ty):
 
 @intrinsic(prefer_literal=True)
 def _call_lib_func_struct_out(typingctx, func_name_ty, arg_ty):
-    """Return a ≤16-byte struct: by value on SysV x86-64, via sret elsewhere.
+    """Return a ≤16-byte struct: via sret on Windows x64, by value elsewhere.
 
-    Only SysV x86-64 has been validated for direct register-returning of small
-    structs through LLVM's JIT path. On Windows and any other platform, fall
-    back to the always-correct sret pattern (hidden first pointer arg).
+    Windows x64 returns aggregates >8 bytes via ``sret`` (hidden first
+    pointer arg, void return). SysV x86-64 and AAPCS64 both return
+    ≤16-byte composites directly in GP registers. So only Windows takes
+    the sret path; every other platform returns the struct directly.
     """
     func_name = func_name_ty.literal_value
     func_sig = _resolve_sig(func_name)
@@ -138,7 +144,7 @@ def _call_lib_func_struct_out(typingctx, func_name_ty, arg_ty):
     def codegen(context, builder, signature, arguments):
         _, arg = arguments
         ret_ll_ty = context.get_value_type(signature.return_type)
-        if not _is_sysv_x86_64:
+        if _is_win:
             sret_p = builder.alloca(ret_ll_ty)
             func_ty_ll = FunctionType(
                 ir.VoidType(),
