@@ -1,12 +1,16 @@
 from numba.core.types import (
-    float64, int32, intp, void
+    Tuple, float64, int32, int64, intp, void
 )
+
+
+lldiv_t = Tuple((int64, int64))
 
 
 signatures_c = {
     "rand": int32(),
     "srand": void(int32),
     "strlen": intp(intp),
+    "lldiv": lldiv_t(int64, int64),
 }
 
 signatures_m = {

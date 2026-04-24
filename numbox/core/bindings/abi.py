@@ -162,3 +162,50 @@ def _call_lib_func_struct_out(typingctx, func_name_ty, arg_ty):
 
     sig = func_sig.return_type(func_name_ty, arg_ty)
     return sig, codegen
+
+
+@intrinsic(prefer_literal=True)
+def _call_lib_func_args_struct_out(typingctx, func_name_ty, args_ty):
+    """Call ``ret_struct func(scalars...)`` returning a ≤16-byte struct.
+
+    Mirrors ``_call_lib_func_struct_out`` return-side ABI gating (sret on
+    Windows x64, by value elsewhere) but takes a tuple of scalar args
+    instead of a single struct arg — for libc/libm functions like
+    ``lldiv(long long, long long) -> lldiv_t`` that exercise return-side
+    ABI gating without needing a library with struct-by-value entry points.
+    """
+    func_name = func_name_ty.literal_value
+    func_sig = _resolve_sig(func_name)
+    ret_ty = func_sig.return_type
+    struct_bytes = _struct_bytes(ret_ty, "_call_lib_func_args_struct_out")
+    if struct_bytes > 16:
+        raise TypingError(
+            f"_call_lib_func_args_struct_out: return struct too large for "
+            f"by-value return ({struct_bytes} bytes > 16)"
+        )
+
+    def codegen(context, builder, signature, arguments):
+        _, args_tuple = arguments
+        ret_ll_ty = context.get_value_type(signature.return_type)
+        args_ll = []
+        for arg_ind, _ in enumerate(args_ty):
+            args_ll.append(builder.extract_value(args_tuple, arg_ind))
+        arg_ll_tys = [a.type for a in args_ll]
+        if _is_win:
+            sret_p = builder.alloca(ret_ll_ty)
+            func_ty_ll = FunctionType(
+                ir.VoidType(),
+                [ret_ll_ty.as_pointer()] + arg_ll_tys
+            )
+            func_p = get_or_insert_function(
+                builder.module, func_ty_ll, func_name)
+            func_p.args[0].add_attribute("sret")
+            builder.call(func_p, [sret_p] + args_ll)
+            return builder.load(sret_p)
+        func_ty_ll = FunctionType(ret_ll_ty, arg_ll_tys)
+        func_p = get_or_insert_function(
+            builder.module, func_ty_ll, func_name)
+        return builder.call(func_p, args_ll)
+
+    sig = func_sig.return_type(func_name_ty, args_ty)
+    return sig, codegen

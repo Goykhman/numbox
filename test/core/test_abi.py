@@ -8,6 +8,7 @@ def test_abi_imports():
     assert hasattr(abi, "_call_lib_func_byval")
     assert hasattr(abi, "_call_lib_func_struct_in")
     assert hasattr(abi, "_call_lib_func_struct_out")
+    assert hasattr(abi, "_call_lib_func_args_struct_out")
     assert hasattr(abi, "_is_win")
 
 
@@ -16,13 +17,20 @@ def test_is_win_flag():
     assert abi._is_win == (sys.platform == "win32")
 
 
-# NOTE: Codegen correctness for the three @intrinsic helpers
-# (_call_lib_func_byval, _call_lib_func_struct_in, _call_lib_func_struct_out)
-# is exercised end-to-end by numbduck's test_ducklib.py — that suite calls
-# real DuckDB C-API functions whose signatures take and return small structs.
-# A standalone codegen smoke test here would need a controlled C library
-# with ≤16-byte struct-by-value entry points; without one, numba's eager
-# symbol resolution at @njit compile time aborts on fake symbols.
+# NOTE on ABI coverage:
+#   - struct-IN codegen (_call_lib_func_byval, _call_lib_func_struct_in) is
+#     exercised end-to-end by numbduck's test_ducklib.py — that suite calls
+#     real DuckDB C-API functions whose signatures take structs by value.
+#     A standalone struct-in test here would need a controlled C library
+#     with ≤16-byte struct-by-value entry points, which libc doesn't provide.
+#   - struct-OUT codegen (_call_lib_func_struct_out,
+#     _call_lib_func_args_struct_out) is exercised below via libc's lldiv,
+#     which returns a 16-byte lldiv_t on every supported platform. This
+#     catches return-side ABI regressions (sret on Windows x64 vs direct
+#     register return on SysV x86-64 and AAPCS64) without needing a
+#     bespoke test library. Gate regressions in _call_lib_func_struct_in
+#     would symmetrically manifest here because both intrinsics share the
+#     same `if _is_win:` gate.
 
 
 def test_struct_bytes_supports_all_struct_types():
@@ -54,3 +62,28 @@ def test_struct_bytes_rejects_non_struct_type():
 
     with pytest.raises(TypingError, match="struct-shaped type"):
         _struct_bytes(types.int32, "_call_lib_func_struct_in")
+
+
+def test_call_lib_func_args_struct_out_lldiv():
+    """End-to-end: call libc ``lldiv(10, 3)`` via the struct-out intrinsic
+    and validate the 16-byte ``lldiv_t`` return value.
+
+    Exercises the return-side ABI gate on whatever platform the test runs
+    on: SysV x86-64 and AAPCS64 read ``lldiv_t`` back from GP registers;
+    Windows x64 reads it from a caller-allocated ``sret`` slot. A gate
+    regression on any of those three ABIs would surface as a wrong quot
+    or rem here. ``lldiv`` is in the C standard library (glibc, macOS
+    libSystem, Windows UCRT/MSVCRT) and ``long long`` is 64 bits on all
+    three, so the signature is stable.
+    """
+    from numba import njit
+    from numbox.core.bindings import _c  # ensures libc is loaded  # noqa: F401
+    from numbox.core.bindings.abi import _call_lib_func_args_struct_out
+
+    @njit
+    def run():
+        return _call_lib_func_args_struct_out("lldiv", (10, 3))
+
+    quot, rem = run()
+    assert quot == 3
+    assert rem == 1
