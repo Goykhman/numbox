@@ -6,20 +6,25 @@ import textwrap
 import numpy
 from numba import njit, types as nb_types
 
-from numbox.core.vector import make_vector
-from numbox.core.vector import _vector_cache
-from numbox.core.vector import vector_push, vector_extend  # noqa: E402
+from numbox.core.vector import (
+    _vector_cache,
+    make_vector,
+    vector_extend,
+    vector_push,
+)
+
+
+Float64Vec, _Float64VecType = make_vector(nb_types.float64)
+
+
+@njit(cache=True)
+def _construction_and_len_probe():
+    v = Float64Vec(8)
+    return len(v), v.buf.shape[0]
 
 
 def test_construction_and_len():
-    Float64Vec, _ = make_vector(nb_types.float64)
-
-    @njit
-    def go():
-        v = Float64Vec(8)
-        return len(v), v.buf.shape[0]
-
-    size, cap = go()
+    size, cap = _construction_and_len_probe()
     assert size == 0
     assert cap == 8
 

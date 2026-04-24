@@ -91,11 +91,12 @@ def _incref_meminfo(typingctx, p_ty):
 def _release_meminfo(typingctx, p_ty):
     """Decref a MemInfo at ``intp`` via ``NRT_MemInfo_release``.
 
-    Can't use ``context.nrt.decref()`` here -- ``removerefctpass`` strips
-    ``NRT_decref`` when the function signature has no NRT-tracked types.
-    ``NRT_MemInfo_release`` does the same atomic decref + dtor call AND
-    causes ``_legalize()`` to bail out of the rewrite, protecting the
-    whole function.
+    Uses ``NRT_MemInfo_release`` directly rather than ``context.nrt.decref``
+    because this intrinsic's signature (``void(intp)``) contains no
+    NRT-tracked types, which lets numba's ``removerefctpass`` rewrite strip
+    a plain ``NRT_decref`` as dead code. Calling ``NRT_MemInfo_release``
+    (not in the pass's accepted-nrtfns allowlist) keeps ``_legalize()``
+    from enabling the rewrite at all.
     """
     _require_intp(p_ty, "_release_meminfo")
     sig = types.void(p_ty)

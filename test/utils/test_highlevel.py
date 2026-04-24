@@ -1,10 +1,20 @@
+import pytest
 from numba import njit, typeof
 from numba.core.types import float64, int8, unicode_type
-from numba.core.types.function_type import FunctionType
+from numba.core.types.function_type import CompileResultWAP, FunctionType
 from numba.core.types.functions import Dispatcher
 from numpy import isclose
 
-from numbox.utils.highlevel import cres, determine_field_index, make_structref, make_structref_code_txt
+from numbox.core.bindings.call import _call_lib_func
+from numbox.core.bindings.signatures import signatures
+from numbox.core.bindings.utils import load_lib_path
+from numbox.utils.highlevel import (
+    cres,
+    cres_if_available,
+    determine_field_index,
+    make_structref,
+    make_structref_code_txt,
+)
 from test.auxiliary_utils import collect_and_run_tests
 from test.common_structrefs import S1Type
 from test.utils.auxiliaries import aux_1
@@ -252,14 +262,6 @@ def _locate_cos_lib():
 
 
 def test_cres_if_available_present_symbol_returns_real_wrapper():
-    import pytest
-    from numba import float64
-    from numba.core.types.function_type import CompileResultWAP
-    from numbox.core.bindings.call import _call_lib_func
-    from numbox.core.bindings.signatures import signatures
-    from numbox.core.bindings.utils import load_lib_path
-    from numbox.utils.highlevel import cres_if_available
-
     lib_path = _locate_cos_lib()
     if lib_path is None:
         pytest.skip("No suitable math/C runtime library discoverable")
@@ -282,12 +284,6 @@ def test_cres_if_available_present_symbol_returns_real_wrapper():
 
 
 def test_cres_if_available_missing_symbol_returns_stub():
-    import pytest
-    from numba import float64
-    from numbox.core.bindings.signatures import signatures
-    from numbox.core.bindings.utils import load_lib_path
-    from numbox.utils.highlevel import cres_if_available
-
     lib_path = _locate_cos_lib()
     if lib_path is None:
         pytest.skip("No suitable math/C runtime library discoverable")

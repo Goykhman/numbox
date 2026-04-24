@@ -66,7 +66,8 @@ def _call_lib_func_byval(typingctx, func_name_ty, arg_ty):
     """Pass ``arg`` to a C function by pointer on all platforms.
 
     Used when the C signature takes a pointer to a struct and the caller
-    holds the struct as a value (e.g. ``duckdb_result *``).
+    holds the struct as a value; the intrinsic allocates a stack slot,
+    stores the value, and passes the slot's address.
     """
     func_name = func_name_ty.literal_value
     func_sig = _resolve_sig(func_name)
