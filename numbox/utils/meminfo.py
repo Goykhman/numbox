@@ -2,7 +2,10 @@ import ctypes
 
 import numba
 
+from llvmlite import ir as llir
 from numba import types
+from numba.core import cgutils
+from numba.core.errors import TypingError
 from numba.core.extending import intrinsic
 
 
@@ -56,3 +59,104 @@ def get_nrt_refcount(s):
     """
     meminfo_p, data_p = structref_meminfo(s)
     return ctypes.c_int64.from_address(meminfo_p).value
+
+
+_MI_TY = types.MemInfoPointer(types.voidptr)
+
+
+def _require_intp(p_ty, fn_name):
+    """Reject anything other than ``types.intp`` for pointer-as-int args.
+
+    Accepting an arbitrary integer type would emit an ``inttoptr`` of the
+    wrong width on 64-bit hosts (e.g., int32 → i32 → ptr truncates).
+    """
+    if p_ty != types.intp:
+        raise TypingError(f"{fn_name} expects types.intp, got {p_ty}")
+
+
+@intrinsic
+def _incref_meminfo(typingctx, p_ty):
+    """Incref a MemInfo at ``intp`` via NRT."""
+    _require_intp(p_ty, "_incref_meminfo")
+    sig = types.void(p_ty)
+
+    def codegen(context, builder, signature, args):
+        mi_ll_ty = context.get_value_type(_MI_TY)
+        meminfo = builder.inttoptr(args[0], mi_ll_ty)
+        context.nrt.incref(builder, _MI_TY, meminfo)
+    return sig, codegen
+
+
+@intrinsic
+def _release_meminfo(typingctx, p_ty):
+    """Decref a MemInfo at ``intp`` via ``NRT_MemInfo_release``.
+
+    Uses ``NRT_MemInfo_release`` directly rather than ``context.nrt.decref``
+    because this intrinsic's signature (``void(intp)``) contains no
+    NRT-tracked types, which lets numba's ``removerefctpass`` rewrite strip
+    a plain ``NRT_decref`` as dead code. Calling ``NRT_MemInfo_release``
+    (not in the pass's accepted-nrtfns allowlist) keeps ``_legalize()``
+    from enabling the rewrite at all.
+    """
+    _require_intp(p_ty, "_release_meminfo")
+    sig = types.void(p_ty)
+
+    def codegen(context, builder, signature, args):
+        ptr_ty = llir.IntType(8).as_pointer()
+        fnty = llir.FunctionType(llir.VoidType(), [ptr_ty])
+        fn = cgutils.get_or_insert_function(
+            builder.module, fnty, "NRT_MemInfo_release")
+        meminfo = builder.inttoptr(args[0], ptr_ty)
+        builder.call(fn, [meminfo])
+    return sig, codegen
+
+
+@intrinsic
+def _deref_structref_raw_ptr(typingctx, struct_type_ref, p_ty):
+    """Reconstruct a structref value from an ``intp`` MemInfo pointer."""
+    _require_intp(p_ty, "_deref_structref_raw_ptr")
+    inst_type = struct_type_ref.instance_type
+    sig = inst_type(struct_type_ref, p_ty)
+
+    def codegen(context, builder, signature, args):
+        p_val = args[1]
+        mi_ll_ty = context.get_value_type(_MI_TY)
+        meminfo = builder.inttoptr(p_val, mi_ll_ty)
+        st = cgutils.create_struct_proxy(inst_type)(context, builder)
+        st.meminfo = meminfo
+        return st._getvalue()
+    return sig, codegen
+
+
+@numba.njit
+def borrow_structref(struct_type, p):
+    """Incref + reconstruct a structref from an ``intp`` MemInfo pointer.
+
+    The caller receives a live structref that participates in normal NRT
+    refcount. Net-zero for the external owner if the caller's scope exits
+    without additional actions (local decref on drop balances the incref).
+    """
+    _incref_meminfo(p)
+    return _deref_structref_raw_ptr(struct_type, p)
+
+
+@numba.njit
+def export_meminfo(s):
+    """Export a structref as an ``intp`` MemInfo pointer with a +1 incref.
+
+    The returned ``intp`` keeps the allocation alive until the caller
+    balances it with ``release_meminfo``.
+    """
+    meminfo_p, _ = structref_meminfo(s)
+    _incref_meminfo(meminfo_p)
+    return meminfo_p
+
+
+@numba.njit
+def release_meminfo(p):
+    """Decref a MemInfo at ``intp`` via NRT_MemInfo_release.
+
+    Public njit wrapper over ``_release_meminfo``. Callable from Python
+    and ``@njit`` contexts.
+    """
+    _release_meminfo(p)

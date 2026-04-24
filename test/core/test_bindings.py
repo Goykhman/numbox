@@ -40,5 +40,20 @@ def test_sqlite():
     assert rc == 0, "could not close db connection"
 
 
+def test_load_lib_path_returns_handle_with_known_symbol():
+    from numbox.core.bindings.utils import load_lib_path
+
+    if platform_ == "Windows":
+        from ctypes.util import find_msvcrt
+        lib_path = find_msvcrt()
+    else:
+        from ctypes.util import find_library
+        lib_path = find_library("m")
+    if lib_path is None:
+        pytest.skip("No suitable math/C runtime library discoverable")
+    lib = load_lib_path(lib_path)
+    assert hasattr(lib, "cos")
+
+
 if __name__ == "__main__":
     collect_and_run_tests(__name__)

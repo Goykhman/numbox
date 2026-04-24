@@ -292,3 +292,14 @@ def _uniformize_tuple_of_structs(typingctx: Context, tup_ty: Tuple, uniform_ty_r
 @njit(**default_jit_options)
 def uniformize_tuple_of_structs(tup, uniform_ty=VoidType):
     return _uniformize_tuple_of_structs(tup, uniform_ty)
+
+
+@njit
+def array_data_p(arr):
+    """Return the data pointer of a numpy array as signed intp.
+
+    ``arr.ctypes.data`` is ``uint64`` under numba; the cast aligns with the
+    signed-pointer convention used by numbox binding signatures. Callable
+    from Python and ``@njit`` contexts.
+    """
+    return intp(arr.ctypes.data)

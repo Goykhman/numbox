@@ -1,10 +1,20 @@
+import pytest
 from numba import njit, typeof
 from numba.core.types import float64, int8, unicode_type
-from numba.core.types.function_type import FunctionType
+from numba.core.types.function_type import CompileResultWAP, FunctionType
 from numba.core.types.functions import Dispatcher
 from numpy import isclose
 
-from numbox.utils.highlevel import cres, determine_field_index, make_structref, make_structref_code_txt
+from numbox.core.bindings.call import _call_lib_func
+from numbox.core.bindings.signatures import signatures
+from numbox.core.bindings.utils import load_lib_path
+from numbox.utils.highlevel import (
+    cres,
+    cres_if_available,
+    determine_field_index,
+    make_structref,
+    make_structref_code_txt,
+)
 from test.auxiliary_utils import collect_and_run_tests
 from test.common_structrefs import S1Type
 from test.utils.auxiliaries import aux_1
@@ -240,6 +250,61 @@ def test_make_structref_5():
     make_s5 = make_structref("S5", (), S5TypeClass)
     s5_1 = make_s5()
     assert str(s5_1) == "S5()"
+
+
+def _locate_cos_lib():
+    from numbox.core.bindings.utils import platform_
+    if platform_ == "Windows":
+        from ctypes.util import find_msvcrt
+        return find_msvcrt()
+    from ctypes.util import find_library
+    return find_library("m")
+
+
+def test_cres_if_available_present_symbol_returns_real_wrapper():
+    lib_path = _locate_cos_lib()
+    if lib_path is None:
+        pytest.skip("No suitable math/C runtime library discoverable")
+
+    prior = signatures.get("cos")
+    try:
+        signatures["cos"] = float64(float64)
+        lib = load_lib_path(lib_path)
+
+        @cres_if_available(lib, signatures["cos"])
+        def cos(x):
+            return _call_lib_func("cos", (x,))
+
+        assert isinstance(cos, CompileResultWAP)
+    finally:
+        if prior is None:
+            signatures.pop("cos", None)
+        else:
+            signatures["cos"] = prior
+
+
+def test_cres_if_available_missing_symbol_returns_stub():
+    lib_path = _locate_cos_lib()
+    if lib_path is None:
+        pytest.skip("No suitable math/C runtime library discoverable")
+
+    prior = signatures.get("nonexistent_fn")
+    try:
+        signatures["nonexistent_fn"] = float64(float64)
+        lib = load_lib_path(lib_path)
+
+        @cres_if_available(lib, signatures["nonexistent_fn"])
+        def nonexistent_fn(x):
+            return x
+
+        assert nonexistent_fn.__name__ == "nonexistent_fn"
+        with pytest.raises(NotImplementedError, match="nonexistent_fn is not available"):
+            nonexistent_fn(1.0)
+    finally:
+        if prior is None:
+            signatures.pop("nonexistent_fn", None)
+        else:
+            signatures["nonexistent_fn"] = prior
 
 
 if __name__ == '__main__':
