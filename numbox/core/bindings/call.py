@@ -65,7 +65,11 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
         arg_types = ()
         arg_classes = ()
     else:
-        assert isinstance(args_ty, BaseTuple)
+        if not isinstance(args_ty, BaseTuple):
+            raise TypingError(
+                f"_call_lib_func: args_ty must be a tuple type "
+                f"(Tuple, UniTuple, or NamedTuple), got {args_ty!r}"
+            )
         arg_types = tuple(args_ty)
         arg_classes = tuple(_classify(at) for at in arg_types)
 

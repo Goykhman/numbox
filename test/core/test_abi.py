@@ -142,7 +142,10 @@ def patch_signature():
 
 def _platform_str():
     from numbox.core.bindings.abi import _current_platform
-    return _current_platform()
+    try:
+        return _current_platform()
+    except RuntimeError:
+        return "unknown"
 
 
 @pytest.mark.skipif(
