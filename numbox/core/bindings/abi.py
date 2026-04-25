@@ -44,11 +44,20 @@ def _current_platform():
     Returns one of ``_PLATFORM_WIN_X64``, ``_PLATFORM_SYSV_X86_64``,
     ``_PLATFORM_AAPCS64``. Used by the ABI-aware codegen in
     ``numbox.core.bindings.call._call_lib_func`` to pick the right
-    struct-passing convention.
+    struct-passing convention. Raises ``RuntimeError`` on unsupported
+    ``(sys.platform, platform.machine())`` combinations rather than
+    silently misclassifying — Windows ARM64 (`platform.machine() ==
+    "ARM64"`) is unsupported and would otherwise default to the wrong
+    ABI dispatch.
     """
-    if sys.platform == "win32":
-        return _PLATFORM_WIN_X64
     machine = platform.machine().lower()
+    if sys.platform == "win32":
+        if machine in ("x86_64", "amd64"):
+            return _PLATFORM_WIN_X64
+        raise RuntimeError(
+            f"Unsupported Windows architecture for ABI dispatch: "
+            f"{platform.machine()} (only x86_64 / AMD64 supported)"
+        )
     if machine in ("x86_64", "amd64"):
         return _PLATFORM_SYSV_X86_64
     if machine in ("arm64", "aarch64"):
@@ -79,10 +88,7 @@ def _classify(ty):
     """
     if not isinstance(ty, (nb_types.Record, nb_types.BaseTuple)):
         return _CLASS_SCALAR
-    if isinstance(ty, nb_types.Record):
-        size = ty.size
-    else:
-        size = sum(t.bitwidth for t in ty.types) // 8
+    size = _struct_bytes(ty, "_classify")
     return _CLASS_STRUCT_SMALL if size <= 16 else _CLASS_STRUCT_LARGE
 
 

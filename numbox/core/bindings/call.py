@@ -3,7 +3,7 @@ from llvmlite import ir as llir
 
 from numba.core.cgutils import get_or_insert_function
 from numba.core.errors import TypingError
-from numba.core.types import NoneType, Tuple, UniTuple
+from numba.core.types import BaseTuple, NoneType
 from numba.extending import intrinsic
 
 from numbox.core.bindings.abi import (
@@ -65,7 +65,7 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
         arg_types = ()
         arg_classes = ()
     else:
-        assert isinstance(args_ty, (Tuple, UniTuple))
+        assert isinstance(args_ty, BaseTuple)
         arg_types = tuple(args_ty)
         arg_classes = tuple(_classify(at) for at in arg_types)
 
