@@ -14,6 +14,7 @@ References:
     https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention
     https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst
 """
+import platform
 import sys
 
 from llvmlite import ir
@@ -27,6 +28,59 @@ from numbox.core.bindings.signatures import signatures
 
 
 _is_win = sys.platform == "win32"
+
+
+_PLATFORM_WIN_X64 = "win_x64"
+_PLATFORM_SYSV_X86_64 = "sysv_x86_64"
+_PLATFORM_AAPCS64 = "aapcs64"
+
+
+def _current_platform():
+    """Identify the C calling convention for the current host.
+
+    Returns one of ``_PLATFORM_WIN_X64``, ``_PLATFORM_SYSV_X86_64``,
+    ``_PLATFORM_AAPCS64``. Used by the ABI-aware codegen in
+    ``numbox.core.bindings.call._call_lib_func`` to pick the right
+    struct-passing convention.
+    """
+    if sys.platform == "win32":
+        return _PLATFORM_WIN_X64
+    machine = platform.machine()
+    if machine in ("x86_64", "AMD64"):
+        return _PLATFORM_SYSV_X86_64
+    if machine in ("arm64", "aarch64", "AARCH64"):
+        return _PLATFORM_AAPCS64
+    raise RuntimeError(
+        f"Unsupported platform for ABI dispatch: "
+        f"{sys.platform}/{machine}"
+    )
+
+
+_CLASS_SCALAR = "scalar"
+_CLASS_STRUCT_SMALL = "struct_small"
+_CLASS_STRUCT_LARGE = "struct_large"
+
+
+def _classify(ty):
+    """Classify a numba type for ABI dispatch.
+
+    Returns one of:
+
+    - ``_CLASS_SCALAR`` — any non-struct numba type (e.g. ``int32``,
+      ``float64``, pointers represented as ``intp``).
+    - ``_CLASS_STRUCT_SMALL`` — ``Record`` / ``BaseTuple`` of size
+      <= 16 bytes; passed by value on register-passing ABIs.
+    - ``_CLASS_STRUCT_LARGE`` — ``Record`` / ``BaseTuple`` of size
+      > 16 bytes; passed by pointer with ``byval`` on SysV x86-64,
+      by pointer (no special attribute) on other ABIs.
+    """
+    if not isinstance(ty, (nb_types.Record, nb_types.BaseTuple)):
+        return _CLASS_SCALAR
+    if isinstance(ty, nb_types.Record):
+        size = ty.size
+    else:
+        size = sum(t.bitwidth for t in ty.types) // 8
+    return _CLASS_STRUCT_SMALL if size <= 16 else _CLASS_STRUCT_LARGE
 
 
 def _resolve_sig(func_name):
