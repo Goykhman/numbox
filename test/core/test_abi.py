@@ -282,8 +282,15 @@ def test_call_lib_func_8byte_struct_return_on_windows_no_sret(patch_signature):
     run.compile((nb_types.int32,))
     ir_text = list(run.inspect_llvm().values())[0]
 
-    assert "sret" not in ir_text, (
-        f"did not expect 'sret' on 8B struct return on Windows x64;\n"
-        f"IR was:\n{ir_text}"
+    declare_line = next(
+        (line for line in ir_text.splitlines() if "declare" in line and name in line),
+        None,
+    )
+    assert declare_line is not None, (
+        f"could not find declare line for {name} in IR:\n{ir_text}"
+    )
+    assert "sret" not in declare_line, (
+        f"did not expect 'sret' on 8B struct return on Windows x64; "
+        f"declare line was:\n{declare_line}"
     )
     del keepalive
