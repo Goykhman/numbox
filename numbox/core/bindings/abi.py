@@ -27,9 +27,6 @@ from numba.extending import intrinsic
 from numbox.core.bindings.signatures import signatures
 
 
-_is_win = sys.platform == "win32"
-
-
 _PLATFORM_WIN_X64 = "win_x64"
 _PLATFORM_SYSV_X86_64 = "sysv_x86_64"
 _PLATFORM_AAPCS64 = "aapcs64"
@@ -45,14 +42,14 @@ def _current_platform():
     """
     if sys.platform == "win32":
         return _PLATFORM_WIN_X64
-    machine = platform.machine()
-    if machine in ("x86_64", "AMD64"):
+    machine = platform.machine().lower()
+    if machine in ("x86_64", "amd64"):
         return _PLATFORM_SYSV_X86_64
-    if machine in ("arm64", "aarch64", "AARCH64"):
+    if machine in ("arm64", "aarch64"):
         return _PLATFORM_AAPCS64
     raise RuntimeError(
         f"Unsupported platform for ABI dispatch: "
-        f"{sys.platform}/{machine}"
+        f"{sys.platform}/{platform.machine()}"
     )
 
 
@@ -138,128 +135,4 @@ def _call_lib_func_byval(typingctx, func_name_ty, arg_ty):
             builder, context, arg, arg_ll_ty, ret_type, func_name)
 
     sig = func_sig.return_type(func_name_ty, arg_ty)
-    return sig, codegen
-
-
-@intrinsic(prefer_literal=True)
-def _call_lib_func_struct_in(typingctx, func_name_ty, arg_ty):
-    """Pass a ≤16-byte struct: by pointer on Windows x64, by value elsewhere.
-
-    Windows x64 passes aggregates >8 bytes via a caller-allocated pointer.
-    SysV x86-64 and AAPCS64 both pass ≤16-byte composites directly in GP
-    registers; LLVM's JIT lowers a struct-typed argument to the correct
-    register assignment per target. So only Windows takes the by-pointer
-    path via ``_emit_byval_call``; every other platform passes directly.
-    """
-    func_name = func_name_ty.literal_value
-    func_sig = _resolve_sig(func_name)
-    struct_bytes = _struct_bytes(arg_ty, "_call_lib_func_struct_in")
-    if struct_bytes > 16:
-        raise TypingError(
-            f"_call_lib_func_struct_in: struct too large for by-value "
-            f"passing ({struct_bytes} bytes > 16)"
-        )
-
-    def codegen(context, builder, signature, arguments):
-        _, arg = arguments
-        arg_ll_ty = context.get_value_type(arg_ty)
-        ret_type = context.get_value_type(signature.return_type)
-        if _is_win:
-            return _emit_byval_call(
-                builder, context, arg, arg_ll_ty, ret_type, func_name)
-        func_ty_ll = FunctionType(ret_type, [arg_ll_ty])
-        func_p = get_or_insert_function(
-            builder.module, func_ty_ll, func_name)
-        return builder.call(func_p, [arg])
-
-    sig = func_sig.return_type(func_name_ty, arg_ty)
-    return sig, codegen
-
-
-@intrinsic(prefer_literal=True)
-def _call_lib_func_struct_out(typingctx, func_name_ty, arg_ty):
-    """Return a ≤16-byte struct: via sret on Windows x64, by value elsewhere.
-
-    Windows x64 returns aggregates >8 bytes via ``sret`` (hidden first
-    pointer arg, void return). SysV x86-64 and AAPCS64 both return
-    ≤16-byte composites directly in GP registers. So only Windows takes
-    the sret path; every other platform returns the struct directly.
-    """
-    func_name = func_name_ty.literal_value
-    func_sig = _resolve_sig(func_name)
-    ret_ty = func_sig.return_type
-    struct_bytes = _struct_bytes(ret_ty, "_call_lib_func_struct_out")
-    if struct_bytes > 16:
-        raise TypingError(
-            f"_call_lib_func_struct_out: return struct too large for "
-            f"by-value return ({struct_bytes} bytes > 16)"
-        )
-
-    def codegen(context, builder, signature, arguments):
-        _, arg = arguments
-        ret_ll_ty = context.get_value_type(signature.return_type)
-        if _is_win:
-            sret_p = builder.alloca(ret_ll_ty)
-            func_ty_ll = FunctionType(
-                ir.VoidType(),
-                [ret_ll_ty.as_pointer(), arg.type]
-            )
-            func_p = get_or_insert_function(
-                builder.module, func_ty_ll, func_name)
-            func_p.args[0].add_attribute("sret")
-            builder.call(func_p, [sret_p, arg])
-            return builder.load(sret_p)
-        func_ty_ll = FunctionType(ret_ll_ty, [arg.type])
-        func_p = get_or_insert_function(
-            builder.module, func_ty_ll, func_name)
-        return builder.call(func_p, [arg])
-
-    sig = func_sig.return_type(func_name_ty, arg_ty)
-    return sig, codegen
-
-
-@intrinsic(prefer_literal=True)
-def _call_lib_func_args_struct_out(typingctx, func_name_ty, args_ty):
-    """Call ``ret_struct func(scalars...)`` returning a ≤16-byte struct.
-
-    Mirrors ``_call_lib_func_struct_out`` return-side ABI gating (sret on
-    Windows x64, by value elsewhere) but takes a tuple of scalar args
-    instead of a single struct arg — for libc/libm functions like
-    ``lldiv(long long, long long) -> lldiv_t`` that exercise return-side
-    ABI gating without needing a library with struct-by-value entry points.
-    """
-    func_name = func_name_ty.literal_value
-    func_sig = _resolve_sig(func_name)
-    ret_ty = func_sig.return_type
-    struct_bytes = _struct_bytes(ret_ty, "_call_lib_func_args_struct_out")
-    if struct_bytes > 16:
-        raise TypingError(
-            f"_call_lib_func_args_struct_out: return struct too large for "
-            f"by-value return ({struct_bytes} bytes > 16)"
-        )
-
-    def codegen(context, builder, signature, arguments):
-        _, args_tuple = arguments
-        ret_ll_ty = context.get_value_type(signature.return_type)
-        args_ll = []
-        for arg_ind, _ in enumerate(args_ty):
-            args_ll.append(builder.extract_value(args_tuple, arg_ind))
-        arg_ll_tys = [a.type for a in args_ll]
-        if _is_win:
-            sret_p = builder.alloca(ret_ll_ty)
-            func_ty_ll = FunctionType(
-                ir.VoidType(),
-                [ret_ll_ty.as_pointer()] + arg_ll_tys
-            )
-            func_p = get_or_insert_function(
-                builder.module, func_ty_ll, func_name)
-            func_p.args[0].add_attribute("sret")
-            builder.call(func_p, [sret_p] + args_ll)
-            return builder.load(sret_p)
-        func_ty_ll = FunctionType(ret_ll_ty, arg_ll_tys)
-        func_p = get_or_insert_function(
-            builder.module, func_ty_ll, func_name)
-        return builder.call(func_p, args_ll)
-
-    sig = func_sig.return_type(func_name_ty, args_ty)
     return sig, codegen
