@@ -1,41 +1,21 @@
-"""Generic growable numba vector backed by a numpy array.
-
-Compared to ``numba.typed.List``:
-
-- ``List`` supports arbitrary element types (including other structrefs)
-  and exposes a richer API (``append``, ``pop``, ``insert``, ``remove``,
-  slicing). Its type object is constructed dynamically per instance, so
-  disk-cached ``@njit`` code that references a List type is fragile across
-  process restarts -- the loader sees a different type identity on the
-  second run.
-- ``Vector`` is restricted to scalar element types where ``str(elem_type)``
-  matches a numpy dtype (``float64``, ``int64``, etc.). In exchange, the
-  ``VectorType`` structref class lives at module scope (see the
-  ``preprocess_fields`` note below) and ``make_vector`` memoises instances
-  by ``elem_type.key``, so cached code keeps the same type identity across
-  processes. Storage is a single ``numpy.ndarray``, so per-element overhead
-  is the scalar itself plus amortised geometric growth.
-
-Pick ``Vector`` when the element type is scalar and the container must
-round-trip cleanly through numba's on-disk cache; pick ``List`` when you
-need non-scalar elements or the richer sequence API.
-"""
+import numpy
 import operator
 
-import numpy
 from numba import njit, types as nb_types
 from numba.core.errors import NumbaError
 from numba.experimental import structref
 from numba.experimental.structref import StructRefProxy, define_boxing, new
 from numba.extending import overload
 
+from numbox.core.configurations import default_jit_options
+
 
 @structref.register
-class VectorType(nb_types.StructRef):
-    # Single module-level class, parameterized per elem_type via field-tuple
-    # instances (same pattern as numbox WorkTypeClass / AnyTypeClass). Dynamic
-    # subclasses lack stable identity across processes and break numba's disk
-    # cache of any code that references the type.
+class VectorTypeClass(nb_types.StructRef):
+    """
+    Single module-level class, parameterized per elem_type via field-tuple
+    instances.
+    """
     def preprocess_fields(self, fields):
         return tuple((n, nb_types.unliteral(t)) for n, t in fields)
 
@@ -48,12 +28,12 @@ class Vector(StructRefProxy):
         raise NotImplementedError(deleted_vector_ctor_error)
 
     @property
-    @njit(cache=True)
+    @njit(**default_jit_options)
     def size(self):
         return self.size
 
     @property
-    @njit(cache=True)
+    @njit(**default_jit_options)
     def buf(self):
         return self.buf
 
@@ -63,7 +43,7 @@ def _vector_deleted_ctor(*args):
 
 
 overload(Vector)(_vector_deleted_ctor)
-define_boxing(VectorType, Vector)
+define_boxing(VectorTypeClass, Vector)
 
 
 _vector_cache = {}
@@ -75,8 +55,7 @@ def make_vector(elem_type):
     - ``create``: an ``@njit`` factory taking a single ``capacity`` argument.
       Dtype is locked by the type — callers cannot pass a mismatched buffer.
     - ``type_instance``: the ``VectorType`` instance with resolved field
-      types. Use as a field type in other structrefs and as the first arg
-      to ``borrow_structref``.
+      types.
 
     Results are memoized in ``_vector_cache`` keyed by ``elem_type.key``.
 
@@ -94,7 +73,7 @@ def make_vector(elem_type):
     if key in _vector_cache:
         return _vector_cache[key]
 
-    type_inst = VectorType([
+    type_inst = VectorTypeClass([
         ("buf", nb_types.Array(elem_type, 1, 'C')),
         ("size", nb_types.int64),
     ])
@@ -114,31 +93,31 @@ def make_vector(elem_type):
     return result
 
 
-@overload(len)
+@overload(len, jit_options=default_jit_options)
 def _vector_len(v):
-    if isinstance(v, VectorType):
+    if isinstance(v, VectorTypeClass):
         def impl(v):
             return v.size
         return impl
 
 
-@overload(operator.getitem)
+@overload(operator.getitem, jit_options=default_jit_options)
 def _vector_getitem(v, i):
-    if isinstance(v, VectorType):
+    if isinstance(v, VectorTypeClass):
         def impl(v, i):
             return v.buf[i]
         return impl
 
 
-@overload(operator.setitem)
+@overload(operator.setitem, jit_options=default_jit_options)
 def _vector_setitem(v, i, val):
-    if isinstance(v, VectorType):
+    if isinstance(v, VectorTypeClass):
         def impl(v, i, val):
             v.buf[i] = val
         return impl
 
 
-@njit
+@njit(**default_jit_options)
 def vector_push(v, val):
     if v.size == v.buf.shape[0]:
         new_buf = numpy.empty(v.buf.shape[0] * 2, v.buf.dtype)
@@ -148,7 +127,7 @@ def vector_push(v, val):
     v.size += 1
 
 
-@njit
+@njit(**default_jit_options)
 def vector_extend(dst, src):
     needed = dst.size + src.size
     cap = dst.buf.shape[0]

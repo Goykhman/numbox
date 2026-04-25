@@ -8,5 +8,6 @@ numbox
    numbox.core.bindings
    numbox.core.proxy
    numbox.core.variable
+   numbox.core.vector
    numbox.core.work
    numbox.utils

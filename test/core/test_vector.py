@@ -1,17 +1,14 @@
+import numpy
 import os
+import pytest
 import subprocess
 import sys
 import textwrap
 
-import numpy
 from numba import njit, types as nb_types
+from numba.core.errors import NumbaError, TypingError
 
-from numbox.core.vector import (
-    _vector_cache,
-    make_vector,
-    vector_extend,
-    vector_push,
-)
+from numbox.core.vector.vector import _vector_cache, make_vector, Vector, vector_extend, vector_push
 
 
 Float64Vec, _Float64VecType = make_vector(nb_types.float64)
@@ -255,7 +252,6 @@ def test_multi_dtype_int64():
 
 
 def test_zero_capacity_rejected():
-    import pytest
     Float64Vec, _ = make_vector(nb_types.float64)
 
     @njit
@@ -273,7 +269,7 @@ def test_cache_survives_across_processes(tmp_path):
     # the run-1 class object and fails with "No conversion from X to X".
     probe = textwrap.dedent("""
         from numba import types as nb_types
-        from numbox.core.vector import make_vector
+        from numbox.core.vector.vector import make_vector
         create, _ = make_vector(nb_types.float64)
         v = create(8)
         print(v.size)
@@ -294,11 +290,6 @@ def test_cache_survives_across_processes(tmp_path):
 def test_vector_ctor_raises_numbaerror_in_njit():
     """Vector(...) from nopython context should raise NumbaError with the
     make_vector redirect, not a generic typing failure."""
-    import pytest
-    from numba import njit
-    from numba.core.errors import NumbaError, TypingError
-    from numbox.core.vector import Vector
-
     def caller():
         return Vector(5)
 
