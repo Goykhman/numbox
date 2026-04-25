@@ -50,7 +50,7 @@ def test_struct_bytes_rejects_non_struct_type():
     from numbox.core.bindings.abi import _struct_bytes
 
     with pytest.raises(TypingError, match="struct-shaped type"):
-        _struct_bytes(types.int32, "_call_lib_func_struct_in")
+        _struct_bytes(types.int32, "_call_lib_func_byval")
 
 
 def test_call_lib_func_lldiv_via_unified():

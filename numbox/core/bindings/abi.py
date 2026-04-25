@@ -1,12 +1,18 @@
-"""Struct-by-value ABI codegen helpers for numba bindings.
+"""ABI codegen primitives shared by numba bindings.
 
-LLVM's JIT treats ABI lowering as a frontend responsibility — it won't
-insert the right calling convention for struct args/returns by itself.
-These helpers generate the appropriate IR for the two ABI families that
-matter for numba bindings: the Windows x64 ABI, which passes aggregates
->8 bytes via caller-allocated pointers and returns them via ``sret``;
-and the register-passing ABIs (SysV x86-64 and AAPCS64), which pass and
-return ≤16-byte aggregates directly in GP registers.
+Platform identification (``_current_platform``), struct-shape
+classification (``_classify``), struct-size measurement
+(``_struct_bytes``), and the unconditional ``func(T*)`` byval helper
+(``_call_lib_func_byval``) — used by ``numbox.core.bindings.call.
+_call_lib_func`` to dispatch C-function calls per platform and per
+struct shape.
+
+The per-platform ABI dispatch table — Windows x64 (which passes >8B
+aggregates via caller-allocated pointers and returns them via
+``sret``) vs SysV x86-64 / AAPCS64 (which pass and return ≤16B
+aggregates directly in GP registers, with a ``byval`` + ``optnone``
++ ``noinline`` idiom for >16B by-value args on SysV x86-64) — lives
+in ``call.py`` itself.
 
 References:
     https://github.com/numba/llvmlite/issues/300#issuecomment-327235846
@@ -80,13 +86,6 @@ def _classify(ty):
     return _CLASS_STRUCT_SMALL if size <= 16 else _CLASS_STRUCT_LARGE
 
 
-def _resolve_sig(func_name):
-    func_sig = signatures.get(func_name, None)
-    if func_sig is None:
-        raise ValueError(f"Undefined signature for {func_name}")
-    return func_sig
-
-
 def _struct_bytes(ty, fn_name):
     """Compute struct size in bytes for a numba struct-shaped type.
 
@@ -125,7 +124,9 @@ def _call_lib_func_byval(typingctx, func_name_ty, arg_ty):
     stores the value, and passes the slot's address.
     """
     func_name = func_name_ty.literal_value
-    func_sig = _resolve_sig(func_name)
+    func_sig = signatures.get(func_name, None)
+    if func_sig is None:
+        raise ValueError(f"Undefined signature for {func_name}")
 
     def codegen(context, builder, signature, arguments):
         _, arg = arguments
