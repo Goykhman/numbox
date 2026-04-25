@@ -9,7 +9,8 @@ from numba.extending import intrinsic
 from numbox.core.bindings.abi import (
     _CLASS_SCALAR, _CLASS_STRUCT_SMALL, _CLASS_STRUCT_LARGE,
     _PLATFORM_AAPCS64, _PLATFORM_SYSV_X86_64, _PLATFORM_WIN_X64,
-    _classify, _current_platform,
+    _classify, _current_platform, _is_windows_register_passable,
+    _struct_bytes,
 )
 from numbox.core.bindings.signatures import signatures
 
@@ -25,8 +26,10 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
 
     - **Scalar args / returns** -- passed and returned directly.
     - **<=16-byte struct args** -- by value on SysV x86-64 and AAPCS64
-      (LLVM's frontend lowers to register passing); by pointer (alloca
-      + store + pass-pointer) on Windows x64.
+      (LLVM's frontend lowers to register passing); on Windows x64,
+      sizes 1/2/4/8 are passed by value in registers (per the Windows
+      x64 ABI) and other sizes go by pointer (alloca + store + pass-
+      pointer).
     - **>16-byte struct args** -- by pointer on every platform; on SysV
       x86-64 the ``byval`` attribute is added to the LLVM arg and the
       enclosing function gets ``optnone`` + ``noinline`` so the LLVM
@@ -34,8 +37,9 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
       callee reads it. See:
       https://github.com/numba/llvmlite/issues/300#issuecomment-327235846
     - **<=16-byte struct returns** -- direct on SysV x86-64 and AAPCS64;
-      via ``sret`` (caller-allocated hidden first arg, void return) on
-      Windows x64.
+      on Windows x64, sizes 1/2/4/8 return in RAX (direct) and other
+      sizes use ``sret`` (caller-allocated hidden first arg, void
+      return).
     - **>16-byte struct returns** -- raise ``TypingError``. No consumer
       currently needs this; add it when one does.
 
@@ -74,7 +78,11 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
         arg_classes = tuple(_classify(at) for at in arg_types)
 
     plat = _current_platform()
-    use_sret = (ret_class == _CLASS_STRUCT_SMALL and plat == _PLATFORM_WIN_X64)
+    use_sret = (
+        ret_class == _CLASS_STRUCT_SMALL
+        and plat == _PLATFORM_WIN_X64
+        and not _is_windows_register_passable(_struct_bytes(ret_ty, "_call_lib_func"))
+    )
 
     def codegen(context, builder, signature, arguments):
         if args_ty == NoneType:
@@ -105,9 +113,14 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
                 ll_arg_tys.append(arg_ll_ty)
                 ll_arg_vals.append(val)
                 continue
-            pass_by_value = (
-                arg_cls == _CLASS_STRUCT_SMALL
-                and plat in (_PLATFORM_SYSV_X86_64, _PLATFORM_AAPCS64)
+            pass_by_value = arg_cls == _CLASS_STRUCT_SMALL and (
+                plat in (_PLATFORM_SYSV_X86_64, _PLATFORM_AAPCS64)
+                or (
+                    plat == _PLATFORM_WIN_X64
+                    and _is_windows_register_passable(
+                        _struct_bytes(arg_ty, "_call_lib_func")
+                    )
+                )
             )
             if pass_by_value:
                 ll_arg_tys.append(arg_ll_ty)

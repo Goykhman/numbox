@@ -73,6 +73,21 @@ _CLASS_STRUCT_SMALL = "struct_small"
 _CLASS_STRUCT_LARGE = "struct_large"
 
 
+_WIN_REGISTER_PASSABLE_SIZES = (1, 2, 4, 8)
+
+
+def _is_windows_register_passable(struct_bytes):
+    """Whether a struct of size ``struct_bytes`` is passed/returned in
+    registers on the Windows x64 ABI.
+
+    Windows x64 passes aggregates of size 1, 2, 4, or 8 bytes directly
+    (in integer registers) and returns them in RAX. Other sizes (3, 5,
+    6, 7, or anything > 8) go via caller-allocated pointer for args and
+    via ``sret`` for returns.
+    """
+    return struct_bytes in _WIN_REGISTER_PASSABLE_SIZES
+
+
 def _classify(ty):
     """Classify a numba type for ABI dispatch.
 

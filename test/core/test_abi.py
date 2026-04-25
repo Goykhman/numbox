@@ -218,3 +218,72 @@ def test_call_lib_func_no_byval_attribute_for_small_struct(patch_signature):
         "did not expect 'optnone' on enclosing function for ≤16B struct"
     )
     del keepalive
+
+
+@pytest.mark.skipif(
+    _platform_str() != "win_x64",
+    reason="Windows-x64-specific 1/2/4/8-byte register-passing rule",
+)
+def test_call_lib_func_8byte_struct_arg_on_windows_passes_by_value(patch_signature):
+    """On Windows x64, an 8-byte struct arg is passed by value in
+    registers (1/2/4/8-byte aggregates take the register-passing path).
+    The LLVM IR should NOT alloca + pass-by-pointer this case.
+    """
+    from numba import njit, types as nb_types
+    from numbox.core.bindings.call import _call_lib_func
+
+    name = "numbox_test_win_pass_8b"
+    keepalive = _register_test_symbol(name)
+    eight_byte_struct = nb_types.UniTuple(nb_types.int32, 2)
+    patch_signature(name, nb_types.int32(eight_byte_struct))
+
+    @njit
+    def run(x):
+        return _call_lib_func(name, (x,))
+
+    run.compile((nb_types.UniTuple(nb_types.int32, 2),))
+    ir_text = list(run.inspect_llvm().values())[0]
+
+    declare_line = next(
+        (line for line in ir_text.splitlines() if name in line and "declare" in line),
+        None,
+    )
+    assert declare_line is not None, (
+        f"could not find declare line for {name} in IR:\n{ir_text}"
+    )
+    assert "*" not in declare_line.split("(")[1], (
+        f"expected struct-by-value (no pointer) on Windows for 8B arg; "
+        f"declare line was:\n{declare_line}"
+    )
+    del keepalive
+
+
+@pytest.mark.skipif(
+    _platform_str() != "win_x64",
+    reason="Windows-x64-specific 1/2/4/8-byte register-return rule",
+)
+def test_call_lib_func_8byte_struct_return_on_windows_no_sret(patch_signature):
+    """On Windows x64, an 8-byte struct return goes directly in RAX —
+    no ``sret`` slot, no void return. Sizes outside {1, 2, 4, 8} use
+    sret; this test pins the small-size special case.
+    """
+    from numba import njit, types as nb_types
+    from numbox.core.bindings.call import _call_lib_func
+
+    name = "numbox_test_win_ret_8b"
+    keepalive = _register_test_symbol(name)
+    eight_byte_struct = nb_types.UniTuple(nb_types.int32, 2)
+    patch_signature(name, eight_byte_struct(nb_types.int32))
+
+    @njit
+    def run(x):
+        return _call_lib_func(name, (x,))
+
+    run.compile((nb_types.int32,))
+    ir_text = list(run.inspect_llvm().values())[0]
+
+    assert "sret" not in ir_text, (
+        f"did not expect 'sret' on 8B struct return on Windows x64;\n"
+        f"IR was:\n{ir_text}"
+    )
+    del keepalive
