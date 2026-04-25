@@ -127,7 +127,7 @@ def _struct_bytes(ty, fn_name):
     )
 
 
-def _emit_byval_call(builder, context, arg, arg_ll_ty, ret_type, func_name):
+def _emit_byval_call(builder, arg, arg_ll_ty, ret_type, func_name):
     """Emit IR to pass a struct by pointer: alloca, store, call via pointer."""
     stack_p = builder.alloca(arg_ll_ty)
     builder.store(arg, stack_p)
@@ -154,7 +154,7 @@ def _call_lib_func_byval(typingctx, func_name_ty, arg_ty):
         arg_ll_ty = context.get_value_type(arg_ty)
         ret_type = context.get_value_type(signature.return_type)
         return _emit_byval_call(
-            builder, context, arg, arg_ll_ty, ret_type, func_name)
+            builder, arg, arg_ll_ty, ret_type, func_name)
 
     sig = func_sig.return_type(func_name_ty, arg_ty)
     return sig, codegen
