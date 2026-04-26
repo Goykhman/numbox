@@ -68,14 +68,12 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
     if args_ty == NoneType:
         arg_types = ()
         arg_classes = ()
-    else:
-        if not isinstance(args_ty, BaseTuple):
-            raise TypingError(
-                f"_call_lib_func: args_ty must be a tuple type "
-                f"(Tuple, UniTuple, or NamedTuple), got {args_ty!r}"
-            )
+    elif isinstance(args_ty, BaseTuple):
         arg_types = tuple(args_ty)
         arg_classes = tuple(_classify(at) for at in arg_types)
+    else:
+        arg_types = (args_ty,)
+        arg_classes = (_classify(args_ty),)
 
     plat = _current_platform()
     use_sret = (
@@ -87,12 +85,15 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
     def codegen(context, builder, signature, arguments):
         if args_ty == NoneType:
             arg_vals = ()
-        else:
+        elif isinstance(args_ty, BaseTuple):
             _, args_pack = arguments
             arg_vals = tuple(
                 builder.extract_value(args_pack, i)
                 for i in range(len(arg_types))
             )
+        else:
+            _, scalar_arg = arguments
+            arg_vals = (scalar_arg,)
 
         ret_ll_ty = context.get_value_type(ret_ty)
 

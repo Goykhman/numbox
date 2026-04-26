@@ -83,6 +83,21 @@ def test_call_lib_func_scalar_args_unchanged():
     assert run() == 1.0
 
 
+def test_call_lib_func_scalar_arg_auto_wrapped():
+    """A single non-tuple arg is auto-wrapped into a 1-tuple at the
+    intrinsic boundary, so `_call_lib_func("cos", 0.0)` is equivalent
+    to `_call_lib_func("cos", (0.0,))`.
+    """
+    from numba import njit
+    from numbox.core.bindings.call import _call_lib_func
+
+    @njit
+    def run():
+        return _call_lib_func("cos", 0.0)
+
+    assert run() == 1.0
+
+
 def _register_test_symbol(name):
     """Register a no-op address under ``name`` so ``ll.address_of_symbol``
     finds something for the IR-inspection tests. The body is never
