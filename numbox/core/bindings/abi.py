@@ -1,36 +1,9 @@
-"""ABI codegen primitives shared by numba bindings.
-
-Platform identification (``_current_platform``), struct-shape
-classification (``_classify``), struct-size measurement
-(``_struct_bytes``), and the unconditional ``func(T*)`` byval helper
-(``_call_lib_func_byval``) — used by ``numbox.core.bindings.call.
-_call_lib_func`` to dispatch C-function calls per platform and per
-struct shape.
-
-The per-platform ABI dispatch table — Windows x64 (which passes >8B
-aggregates via caller-allocated pointers and returns them via
-``sret``) vs SysV x86-64 / AAPCS64 (which pass and return ≤16B
-aggregates directly in GP registers, with a ``byval`` + ``optnone``
-+ ``noinline`` idiom for >16B by-value args on SysV x86-64) — lives
-in ``call.py`` itself.
-
-References:
-    https://github.com/numba/llvmlite/issues/300#issuecomment-327235846
-    https://github.com/llvm/llvm-project/issues/85417
-    https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention
-    https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst
-"""
+"""ABI primitives for numba bindings: platform / struct classification."""
 import platform
 import sys
 
-from llvmlite import ir
-from llvmlite.ir import FunctionType
 from numba.core import types as nb_types
-from numba.core.cgutils import get_or_insert_function
 from numba.core.errors import TypingError
-from numba.extending import intrinsic
-
-from numbox.core.bindings.signatures import signatures
 
 
 _PLATFORM_WIN_X64 = "win_x64"
@@ -125,36 +98,3 @@ def _struct_bytes(ty, fn_name):
         f"{fn_name}: expected a struct-shaped type (Record, Tuple, "
         f"UniTuple, or NamedTuple), got {ty!r}."
     )
-
-
-def _emit_byval_call(builder, arg, arg_ll_ty, ret_type, func_name):
-    """Emit IR to pass a struct by pointer: alloca, store, call via pointer."""
-    stack_p = builder.alloca(arg_ll_ty)
-    builder.store(arg, stack_p)
-    func_ty_ll = FunctionType(ret_type, [arg_ll_ty.as_pointer()])
-    func_p = get_or_insert_function(builder.module, func_ty_ll, func_name)
-    return builder.call(func_p, [stack_p])
-
-
-@intrinsic(prefer_literal=True)
-def _call_lib_func_byval(typingctx, func_name_ty, arg_ty):
-    """Pass ``arg`` to a C function by pointer on all platforms.
-
-    Used when the C signature takes a pointer to a struct and the caller
-    holds the struct as a value; the intrinsic allocates a stack slot,
-    stores the value, and passes the slot's address.
-    """
-    func_name = func_name_ty.literal_value
-    func_sig = signatures.get(func_name, None)
-    if func_sig is None:
-        raise ValueError(f"Undefined signature for {func_name}")
-
-    def codegen(context, builder, signature, arguments):
-        _, arg = arguments
-        arg_ll_ty = context.get_value_type(arg_ty)
-        ret_type = context.get_value_type(signature.return_type)
-        return _emit_byval_call(
-            builder, arg, arg_ll_ty, ret_type, func_name)
-
-    sig = func_sig.return_type(func_name_ty, arg_ty)
-    return sig, codegen

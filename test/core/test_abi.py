@@ -2,24 +2,14 @@ import pytest
 
 
 def test_abi_imports():
-    """The surviving symbols are present and the retired ones are gone."""
-    from numbox.core.bindings import abi
+    """Public helper symbols are exported by their respective modules."""
+    from numbox.core.bindings import abi, call
 
-    assert hasattr(abi, "_emit_byval_call")
-    assert hasattr(abi, "_call_lib_func_byval")
     assert hasattr(abi, "_struct_bytes")
     assert hasattr(abi, "_classify")
     assert hasattr(abi, "_current_platform")
-
-    for retired in (
-        "_call_lib_func_struct_in",
-        "_call_lib_func_struct_out",
-        "_call_lib_func_args_struct_out",
-        "_is_win",
-    ):
-        assert not hasattr(abi, retired), (
-            f"{retired} should have been removed"
-        )
+    assert hasattr(call, "_call_lib_func")
+    assert hasattr(call, "_call_lib_func_byval")
 
 
 def test_struct_bytes_supports_all_struct_types():
@@ -64,7 +54,6 @@ def test_call_lib_func_lldiv_via_unified():
     quot or rem here.
     """
     from numba import njit
-    from numbox.core.bindings import _c  # ensures libc is loaded  # noqa: F401
     from numbox.core.bindings.call import _call_lib_func
 
     @njit
@@ -85,7 +74,6 @@ def test_call_lib_func_scalar_args_unchanged():
     this fails with an LLVM IR error or a wrong return value.
     """
     from numba import njit
-    from numbox.core.bindings import _math  # ensures libm is loaded  # noqa: F401
     from numbox.core.bindings.call import _call_lib_func
 
     @njit

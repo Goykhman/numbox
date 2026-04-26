@@ -44,8 +44,8 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
       currently needs this; add it when one does.
 
     For C signatures of form ``func(T*)`` (pointer to struct) rather
-    than ``func(T)`` lowered to a byval pointer by the ABI, use
-    ``_call_lib_func_byval`` from ``numbox.core.bindings.abi`` instead.
+    than ``func(T)`` lowered to a byval pointer by the ABI, use the
+    sibling ``_call_lib_func_byval`` intrinsic in this module instead.
     The numba type system can't disambiguate ``T`` from ``T*``; the
     caller picks the intrinsic based on what the C header declares.
     """
@@ -153,4 +153,37 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
         return builder.call(func_p, ll_arg_vals)
 
     sig = ret_ty(func_name_ty, args_ty)
+    return sig, codegen
+
+
+def _emit_byval_call(builder, arg, arg_ll_ty, ret_type, func_name):
+    """Emit IR to pass a struct by pointer: alloca, store, call via pointer."""
+    stack_p = builder.alloca(arg_ll_ty)
+    builder.store(arg, stack_p)
+    func_ty_ll = llir.FunctionType(ret_type, [arg_ll_ty.as_pointer()])
+    func_p = get_or_insert_function(builder.module, func_ty_ll, func_name)
+    return builder.call(func_p, [stack_p])
+
+
+@intrinsic(prefer_literal=True)
+def _call_lib_func_byval(typingctx, func_name_ty, arg_ty):
+    """Pass ``arg`` to a C function by pointer on all platforms.
+
+    Used when the C signature takes a pointer to a struct and the caller
+    holds the struct as a value; the intrinsic allocates a stack slot,
+    stores the value, and passes the slot's address.
+    """
+    func_name = func_name_ty.literal_value
+    func_sig = signatures.get(func_name, None)
+    if func_sig is None:
+        raise ValueError(f"Undefined signature for {func_name}")
+
+    def codegen(context, builder, signature, arguments):
+        _, arg = arguments
+        arg_ll_ty = context.get_value_type(arg_ty)
+        ret_type = context.get_value_type(signature.return_type)
+        return _emit_byval_call(
+            builder, arg, arg_ll_ty, ret_type, func_name)
+
+    sig = func_sig.return_type(func_name_ty, arg_ty)
     return sig, codegen
