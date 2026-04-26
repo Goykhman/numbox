@@ -49,6 +49,11 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
     The numba type system can't disambiguate ``T`` from ``T*``; the
     caller picks the intrinsic based on what the C header declares.
     """
+    if not hasattr(func_name_ty, "literal_value"):
+        raise TypingError(
+            f"_call_lib_func: func_name must be a literal string, "
+            f"got {func_name_ty!r}"
+        )
     func_name = func_name_ty.literal_value
     func_p_as_int = ll.address_of_symbol(func_name)
     if func_p_as_int is None:
@@ -174,6 +179,11 @@ def _call_lib_func_byval(typingctx, func_name_ty, arg_ty):
     holds the struct as a value; the intrinsic allocates a stack slot,
     stores the value, and passes the slot's address.
     """
+    if not hasattr(func_name_ty, "literal_value"):
+        raise TypingError(
+            f"_call_lib_func_byval: func_name must be a literal string, "
+            f"got {func_name_ty!r}"
+        )
     func_name = func_name_ty.literal_value
     func_sig = signatures.get(func_name, None)
     if func_sig is None:

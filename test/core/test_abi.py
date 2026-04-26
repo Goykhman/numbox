@@ -297,3 +297,85 @@ def test_call_lib_func_8byte_struct_return_on_windows_no_sret(patch_signature):
         f"declare line was:\n{declare_line}"
     )
     del keepalive
+
+
+def test_call_lib_func_undefined_signature_raises():
+    """`_call_lib_func` raises when the function name has an LLVM symbol
+    but is missing from the `signatures` dict.
+    """
+    from numba import njit
+    from numba.core.errors import TypingError
+    from numbox.core.bindings.call import _call_lib_func
+
+    name = "numbox_test_no_sig_unified"
+    keepalive = _register_test_symbol(name)
+
+    @njit
+    def run():
+        return _call_lib_func(name, (0.0,))
+
+    with pytest.raises((ValueError, TypingError), match="Undefined signature"):
+        run()
+    del keepalive
+
+
+def test_call_lib_func_byval_undefined_signature_raises():
+    """`_call_lib_func_byval` raises when the function name is missing
+    from the `signatures` dict.
+    """
+    from numba import njit, types as nb_types
+    from numba.core.errors import TypingError
+    from numbox.core.bindings.call import _call_lib_func_byval
+
+    name = "numbox_test_no_sig_byval"
+    keepalive = _register_test_symbol(name)
+    arg_struct = nb_types.UniTuple(nb_types.int64, 2)
+
+    @njit
+    def run(x):
+        return _call_lib_func_byval(name, x)
+
+    with pytest.raises((ValueError, TypingError), match="Undefined signature"):
+        run.compile((arg_struct,))
+    del keepalive
+
+
+def test_call_lib_func_missing_llvm_symbol_raises(patch_signature):
+    """`_call_lib_func` raises when the function name is in the
+    `signatures` dict but has no LLVM symbol registered.
+    """
+    from numba import njit, types as nb_types
+    from numba.core.errors import TypingError
+    from numbox.core.bindings.call import _call_lib_func
+
+    name = "numbox_test_no_llvm_symbol"
+    patch_signature(name, nb_types.float64(nb_types.float64))
+
+    @njit
+    def run():
+        return _call_lib_func(name, (0.0,))
+
+    with pytest.raises((RuntimeError, TypingError), match="unavailable in the LLVM context"):
+        run()
+
+
+def test_call_lib_func_large_return_struct_raises(patch_signature):
+    """`_call_lib_func` raises when the C function returns a struct >16
+    bytes — that path is unsupported.
+    """
+    from numba import njit, types as nb_types
+    from numba.core.errors import TypingError
+    from numbox.core.bindings.call import _call_lib_func
+
+    name = "numbox_test_large_ret"
+    keepalive = _register_test_symbol(name)
+    big_ret = nb_types.UniTuple(nb_types.int64, 3)
+    patch_signature(name, big_ret(nb_types.int32))
+
+    @njit
+    def run(x):
+        return _call_lib_func(name, (x,))
+
+    with pytest.raises(TypingError, match="return struct >16 bytes"):
+        run.compile((nb_types.int32,))
+    del keepalive
