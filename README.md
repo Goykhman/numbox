@@ -11,6 +11,7 @@ Documentation is available at [numbox](https://goykhman.github.io/numbox).
 - **Node**: A lightweight JIT-compatible graph node with type-erased dependencies in a uniform dynamically-sized vector (numba List). 
 - **Proxy**: Create a proxy for a decorated function with specified signatures, enabling efficient JIT compilation and caching.
 - **Variable**: Pure Python framework of a graph calculation. JIT-compiled dispatchers can be invoked by it.  
+- **Vector**: Dynamically sized JIT-friendly container of scalars backed by numpy array.
 - **Work**: JIT-compatible unit of calculation work with dependencies, inner states, and custom calculation.
 
 ## Installation

@@ -16,7 +16,7 @@ requires-python = ">=3.10"
 license = {file = "LICENSE"}
 keywords = ["llvmlite", "numba", "numpy"]
 authors = [
-  {name = "Mikhail Goykhman"}
+  {name = "NumbOx GitHub Repository Contributors"}
 ]
 readme = "README.md"
 
