@@ -139,15 +139,18 @@ def _iter_struct_fields(ty, fn_name):
 
 
 def _classify_eightbytes(ty):
-    """Classify the two eightbytes of a 16-byte struct for SysV x86-64.
+    """Classify the two eightbytes of a 16-byte struct.
 
     Returns ``(class_lo, class_hi)`` where each is
     ``_EIGHTBYTE_CLASS_INTEGER`` (ints / pointers) or
-    ``_EIGHTBYTE_CLASS_SSE`` (float / double). SysV's per-eightbyte
-    rule: if any field in an eightbyte is SSE, the whole eightbyte is
-    SSE; otherwise INTEGER. (The full ABI has X87 / NO_CLASS / etc.;
-    our scope is fixed-size 16-byte aggregates of scalar integer-or-
-    float fields, which is what numbox bindings consume.)
+    ``_EIGHTBYTE_CLASS_SSE`` (float / double). The SysV-flavoured
+    per-eightbyte rule applies: if any field in an eightbyte is SSE
+    (float / double), the whole eightbyte is SSE; otherwise INTEGER.
+    The class names are SysV-flavoured but the helper drives the
+    repack path on both SysV x86-64 and AAPCS64. (The full SysV ABI
+    has X87 / NO_CLASS / etc.; our scope is fixed-size 16-byte
+    aggregates of scalar integer-or-float fields, which is what
+    numbox bindings consume.)
 
     Used by ``_call_lib_func`` together with
     ``_is_canonical_int64_pair_layout`` to decide when a 16-byte by-

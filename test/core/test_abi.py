@@ -527,11 +527,9 @@ def test_call_lib_func_int_int_struct_arg_round_trip(patch_signature):
     set so the call goes via alloca + pointer-pass. On AAPCS64 the
     by-value path passes the struct in ``X0`` / ``X1`` directly.
 
-    If this test fails on AAPCS64 (ubuntu-arm or macOS-ARM64),
-    llvmlite has the same eightbyte-packing gap there too — extend
-    ``_needs_int_int_eightbyte_repack`` in
-    [`call.py`](../../numbox/core/bindings/call.py) to include
-    ``_PLATFORM_AAPCS64``.
+    If this test fails on AAPCS64 (ubuntu-arm or macOS-ARM64), that
+    indicates a remaining ABI/lowering issue despite the existing
+    INT/INT eightbyte repack handling for that platform.
     """
     import ctypes
     import llvmlite.binding as ll
