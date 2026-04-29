@@ -8,8 +8,10 @@ from numba.extending import intrinsic
 
 from numbox.core.bindings.abi import (
     _CLASS_SCALAR, _CLASS_STRUCT_SMALL, _CLASS_STRUCT_LARGE,
+    _EIGHTBYTE_CLASS_INTEGER,
     _PLATFORM_AAPCS64, _PLATFORM_SYSV_X86_64, _PLATFORM_WIN_X64,
-    _classify, _current_platform, _is_windows_register_passable,
+    _classify, _classify_eightbytes, _current_platform,
+    _is_canonical_int64_pair_layout, _is_windows_register_passable,
     _struct_bytes,
 )
 from numbox.core.bindings.signatures import signatures
@@ -29,7 +31,12 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
       (LLVM's frontend lowers to register passing); on Windows x64,
       sizes 1/2/4/8 are passed by value in registers (per the Windows
       x64 ABI) and other sizes go by pointer (alloca + store + pass-
-      pointer).
+      pointer). On SysV x86-64 and AAPCS64, 16-byte aggregates whose
+      eightbytes are pure-INTEGER but whose LLVM type isn't already
+      ``{i64, i64}`` (e.g. ``{i32, i32, i64}`` -- duckdb_interval) are
+      repacked via memory bitcast before the call -- working around
+      llvmlite not modelling the eightbyte-packing rule, which
+      otherwise drops fields.
     - **>16-byte struct args** -- by pointer on every platform; on SysV
       x86-64 the ``byval`` attribute is added to the LLVM arg and the
       enclosing function gets ``optnone`` + ``noinline`` so the LLVM
@@ -39,7 +46,10 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
     - **<=16-byte struct returns** -- direct on SysV x86-64 and AAPCS64;
       on Windows x64, sizes 1/2/4/8 return in RAX (direct) and other
       sizes use ``sret`` (caller-allocated hidden first arg, void
-      return).
+      return). 16-byte non-canonical INT/INT returns get the same
+      eightbyte repack on SysV / AAPCS64: the LLVM call is declared
+      to return ``{i64, i64}`` and the result is unpacked back to
+      the original LLVM type via memory bitcast.
     - **>16-byte struct returns** -- raise ``TypingError``. No consumer
       currently needs this; add it when one does.
 
@@ -86,6 +96,11 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
         and plat == _PLATFORM_WIN_X64
         and not _is_windows_register_passable(_struct_bytes(ret_ty, "_call_lib_func"))
     )
+    needs_ret_repack = (
+        ret_class == _CLASS_STRUCT_SMALL
+        and not use_sret
+        and _needs_int_int_eightbyte_repack(ret_ty, plat)
+    )
 
     def codegen(context, builder, signature, arguments):
         if args_ty == NoneType:
@@ -129,6 +144,9 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
                 )
             )
             if pass_by_value:
+                if _needs_int_int_eightbyte_repack(arg_ty, plat):
+                    val, arg_ll_ty = _repack_to_i64_pair(
+                        builder, val, arg_ll_ty)
                 ll_arg_tys.append(arg_ll_ty)
                 ll_arg_vals.append(val)
                 continue
@@ -141,6 +159,10 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
 
         if use_sret:
             func_ll_ty = llir.FunctionType(llir.VoidType(), ll_arg_tys)
+        elif needs_ret_repack:
+            i64x2_ll_ty = llir.LiteralStructType(
+                [llir.IntType(64), llir.IntType(64)])
+            func_ll_ty = llir.FunctionType(i64x2_ll_ty, ll_arg_tys)
         else:
             func_ll_ty = llir.FunctionType(ret_ll_ty, ll_arg_tys)
         func_p = get_or_insert_function(builder.module, func_ll_ty, func_name)
@@ -156,7 +178,10 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
         if use_sret:
             builder.call(func_p, ll_arg_vals)
             return builder.load(sret_ptr)
-        return builder.call(func_p, ll_arg_vals)
+        result = builder.call(func_p, ll_arg_vals)
+        if needs_ret_repack:
+            return _repack_from_i64_pair(builder, result, ret_ll_ty)
+        return result
 
     sig = ret_ty(func_name_ty, args_ty)
     return sig, codegen
@@ -169,6 +194,74 @@ def _emit_byval_call(builder, arg, arg_ll_ty, ret_type, func_name):
     func_ty_ll = llir.FunctionType(ret_type, [arg_ll_ty.as_pointer()])
     func_p = get_or_insert_function(builder.module, func_ty_ll, func_name)
     return builder.call(func_p, [stack_p])
+
+
+def _needs_int_int_eightbyte_repack(ty, plat):
+    """Whether a 16-byte by-value struct (arg or return) needs repack
+    to ``{i64, i64}`` before the call on the host's ABI.
+
+    Both SysV x86-64 and AAPCS64 are affected: llvmlite's small-struct
+    register lowering drops fields when both eightbytes are pure-
+    INTEGER but the LLVM type isn't already the canonical
+    ``{i64, i64}`` shape (e.g. ``{i32, i32, i64}`` — the duckdb_interval
+    layout — loses fields). Windows x64 is unaffected because 16-byte
+    aggregates fall outside the ``{1, 2, 4, 8}`` register-passable
+    set, so the call goes via alloca + pointer-pass and avoids the
+    register-coercion path entirely.
+    """
+    if plat not in (_PLATFORM_SYSV_X86_64, _PLATFORM_AAPCS64):
+        return False
+    if _struct_bytes(ty, "_call_lib_func") != 16:
+        return False
+    if _is_canonical_int64_pair_layout(ty):
+        return False
+    return _classify_eightbytes(ty) == (
+        _EIGHTBYTE_CLASS_INTEGER, _EIGHTBYTE_CLASS_INTEGER,
+    )
+
+
+def _repack_to_i64_pair(builder, val, orig_ll_ty):
+    """Repack a 16-byte struct value to ``{i64, i64}`` via memory bitcast.
+
+    Allocates a well-aligned ``{i64, i64}`` slot (8-byte alignment),
+    bitcasts it to ``orig_ll_ty*`` for the store, then loads the same
+    bytes back as ``{i64, i64}``. Storing into the bitcast pointer is
+    safe because the slot is over-aligned relative to ``orig_ll_ty``;
+    the subsequent ``{i64, i64}`` load is well-aligned, avoiding the
+    UB that an ``alloca(orig_ll_ty)`` slot (e.g. 4-byte aligned for
+    ``[4 x i32]``) would expose. Both eightbytes must already be
+    pure-INTEGER (caller checks via ``_needs_int_int_eightbyte_repack``);
+    the bitcast is a pure byte reinterpretation, no zext/shift
+    gymnastics required. Returns ``(repacked_val, repacked_ll_ty)``
+    for the caller to substitute into the call site.
+    See: https://github.com/numba/llvmlite/issues/300#issuecomment-327235846
+    """
+    i64x2_ll_ty = llir.LiteralStructType(
+        [llir.IntType(64), llir.IntType(64)])
+    slot = builder.alloca(i64x2_ll_ty)
+    slot_as_orig = builder.bitcast(slot, orig_ll_ty.as_pointer())
+    builder.store(val, slot_as_orig)
+    return builder.load(slot), i64x2_ll_ty
+
+
+def _repack_from_i64_pair(builder, i64_pair_val, target_ll_ty):
+    """Inverse of ``_repack_to_i64_pair``: convert a ``{i64, i64}``
+    return value back into ``target_ll_ty``.
+
+    Allocates a well-aligned ``{i64, i64}`` slot, stores the call
+    result, bitcasts the slot to ``target_ll_ty*``, and loads. Used
+    for the return-side eightbyte repack: when the C function returns
+    a 16-byte INT/INT struct that isn't canonical ``{i64, i64}``,
+    llvmlite has the same field-dropping issue on the return as on
+    the arg side -- so we declare the LLVM call returning
+    ``{i64, i64}`` and unpack it here.
+    """
+    i64x2_ll_ty = llir.LiteralStructType(
+        [llir.IntType(64), llir.IntType(64)])
+    slot = builder.alloca(i64x2_ll_ty)
+    builder.store(i64_pair_val, slot)
+    slot_as_target = builder.bitcast(slot, target_ll_ty.as_pointer())
+    return builder.load(slot_as_target)
 
 
 @intrinsic(prefer_literal=True)
