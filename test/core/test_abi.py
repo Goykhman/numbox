@@ -816,15 +816,17 @@ def test_call_lib_func_missing_llvm_symbol_raises(patch_signature):
         run()
 
 
-def test_call_lib_func_large_return_struct_raises(patch_signature):
-    """`_call_lib_func` raises when the C function returns a struct >16
-    bytes — that path is unsupported.
+def test_call_lib_func_large_return_uses_sret_in_ir(patch_signature):
+    """A >16-byte struct return is lowered as ``sret``: the LLVM declare
+    line for the C symbol must be ``void`` returning, with the hidden
+    first arg flagged ``sret`` (caller-allocated buffer pointer). Same
+    pattern on every platform — SysV x86-64, AAPCS64, and Windows x64
+    all use indirect-result-location for >16-byte aggregates.
     """
     from numba import njit, types as nb_types
-    from numba.core.errors import TypingError
     from numbox.core.bindings.call import _call_lib_func
 
-    name = "numbox_test_large_ret"
+    name = "numbox_test_large_ret_sret_ir"
     keepalive = _register_test_symbol(name)
     big_ret = nb_types.UniTuple(nb_types.int64, 3)
     patch_signature(name, big_ret(nb_types.int32))
@@ -833,6 +835,212 @@ def test_call_lib_func_large_return_struct_raises(patch_signature):
     def run(x):
         return _call_lib_func(name, (x,))
 
-    with pytest.raises(TypingError, match="return struct >16 bytes"):
+    run.compile((nb_types.int32,))
+    ir_text = list(run.inspect_llvm().values())[0]
+    declare_line = next(
+        (line for line in ir_text.splitlines()
+         if "declare" in line and name in line),
+        None,
+    )
+    assert declare_line is not None, (
+        f"could not find declare line for {name} in IR:\n{ir_text}"
+    )
+    assert "declare void" in declare_line, (
+        f"expected 'declare void' for sret return; got:\n{declare_line}"
+    )
+    assert "sret(" in declare_line, (
+        f"expected 'sret(' attribute on hidden first arg; got:\n{declare_line}"
+    )
+    del keepalive
+
+
+@pytest.mark.skipif(
+    _platform_str() not in ("sysv_x86_64", "win_x64"),
+    reason=(
+        "Round-trip relies on a Python ctypes callback receiving the "
+        "sret hidden first arg in the same register as a normal first "
+        "arg. True on SysV x86-64 (RDI) and Windows x64 (RCX). On "
+        "AAPCS64 the sret pointer goes in x8 (indirect-result-location "
+        "register), separate from x0 — ctypes thunks read args in "
+        "x0/x1 order, so the buffer pointer never reaches the callback "
+        "and the test segfaults. The IR-only tests still pin sret "
+        "lowering on every platform; numbduck's real C consumers "
+        "(duckdb_get_decimal/_varint) follow the AAPCS64 ABI directly "
+        "and exercise this path on AAPCS64 in their own CI."
+    ),
+)
+def test_call_lib_func_large_return_round_trip_unituple_24b(patch_signature):
+    """Round-trip a 24-byte ``UniTuple(int64, 3)`` return through
+    ``_call_lib_func``. The test C callback is declared as
+    ``void(_BigC*, int64)`` -- exactly the sret-lowered shape -- and
+    writes three i64 fields into the caller-allocated buffer. Verifies
+    the full sret round-trip on SysV x86-64 and Windows x64: alloca,
+    hidden first arg, callee write-through-pointer, caller load.
+    """
+    import ctypes
+    import llvmlite.binding as ll
+    from numba import njit, types as nb_types
+    from numbox.core.bindings.call import _call_lib_func
+
+    class _BigC(ctypes.Structure):
+        _fields_ = [
+            ("a", ctypes.c_int64),
+            ("b", ctypes.c_int64),
+            ("c", ctypes.c_int64),
+        ]
+
+    received = {}
+
+    @ctypes.CFUNCTYPE(None, ctypes.POINTER(_BigC), ctypes.c_int64)
+    def echo(out_p, x):
+        out_p[0].a = x
+        out_p[0].b = x + 1
+        out_p[0].c = x + 2
+        received["x"] = x
+
+    name = "numbox_test_large_ret_unituple_3xi64"
+    addr = ctypes.cast(echo, ctypes.c_void_p).value
+    ll.add_symbol(name, addr)
+    ret_struct = nb_types.UniTuple(nb_types.int64, 3)
+    patch_signature(name, ret_struct(nb_types.int64))
+
+    @njit
+    def run(x):
+        return _call_lib_func(name, (x,))
+
+    a, b, c = run(100)
+    assert received == {"x": 100}
+    assert (a, b, c) == (100, 101, 102)
+    del echo  # keepalive
+
+
+def test_call_lib_func_large_return_record_rejected(patch_signature):
+    """A >16-byte ``Record`` return is explicitly rejected with
+    ``TypingError``. Numba's ``RecordModel`` represents values as raw
+    ``[N x i8]*`` pointers, so the natural stack-alloca sret slot
+    would dangle after the ``@njit`` function returns and Python-side
+    boxing would dereference freed memory. Safe support needs NRT-
+    allocated storage hooked into numba's record-ownership model -- a
+    larger lift than this PR takes on, with no current consumer to
+    validate against (numbduck uses ``Tuple``, not ``Record``).
+    Tuple/UniTuple returns with the same byte layout work end-to-end
+    via the round-trip and ``uses_sret_in_ir`` tests above.
+    """
+    from numba import njit, types as nb_types
+    from numba.core.errors import TypingError
+    from numbox.core.bindings.call import _call_lib_func
+
+    name = "numbox_test_large_ret_record_rejected"
+    keepalive = _register_test_symbol(name)
+    rec_ty = nb_types.Record.make_c_struct([
+        ("a", nb_types.int32),
+        ("b", nb_types.int64),
+        ("c", nb_types.int64),
+    ])
+    patch_signature(name, rec_ty(nb_types.int32))
+
+    @njit
+    def run(x):
+        return _call_lib_func(name, (x,))
+
+    with pytest.raises(TypingError, match="Record returns >16 bytes"):
         run.compile((nb_types.int32,))
+    del keepalive
+
+
+@pytest.mark.skipif(
+    _platform_str() not in ("sysv_x86_64", "win_x64"),
+    reason=(
+        "Same AAPCS64 sret/x8 ctypes-callback mismatch documented on "
+        "the UniTuple round-trip. IR-only coverage of the LARGE-return "
+        "path on AAPCS64 lives in the *_uses_sret_in_ir tests."
+    ),
+)
+def test_call_lib_func_large_return_round_trip_varint_shaped(patch_signature):
+    """Round-trip a 17-byte varint-shaped ``Tuple([intp, uint64, int8])``
+    return -- the layout numbduck uses for ``duckdb_get_varint``. Numba
+    ``BaseTuple`` is bit-packed (8+8+1=17B no padding), so the matching
+    ctypes side uses ``_pack_=1`` to suppress the trailing alignment
+    padding a default C struct would add (which would round to 24B).
+    Pins the LARGE-return path on a non-uniform struct ending in a
+    1-byte field.
+    """
+    import ctypes
+    import llvmlite.binding as ll
+    from numba import njit, types as nb_types
+    from numbox.core.bindings.call import _call_lib_func
+
+    class _VarintC(ctypes.Structure):
+        _pack_ = 1
+        _fields_ = [
+            ("a", ctypes.c_int64),
+            ("b", ctypes.c_uint64),
+            ("c", ctypes.c_int8),
+        ]
+    assert ctypes.sizeof(_VarintC) == 17
+
+    received = {}
+
+    @ctypes.CFUNCTYPE(None, ctypes.POINTER(_VarintC), ctypes.c_int32)
+    def echo(out_p, x):
+        out_p[0].a = -x
+        out_p[0].b = x * 7
+        out_p[0].c = x % 128
+        received["x"] = x
+
+    name = "numbox_test_large_ret_varint_shaped"
+    addr = ctypes.cast(echo, ctypes.c_void_p).value
+    ll.add_symbol(name, addr)
+    ret_struct = nb_types.Tuple([nb_types.intp, nb_types.uint64, nb_types.int8])
+    patch_signature(name, ret_struct(nb_types.int32))
+
+    @njit
+    def run(x):
+        return _call_lib_func(name, (x,))
+
+    a, b, c = run(13)
+    assert received == {"x": 13}
+    assert (a, b, c) == (-13, 91, 13)
+    del echo  # keepalive
+
+
+def test_call_lib_func_large_return_decimal_shaped_uses_sret_in_ir(patch_signature):
+    """An 18-byte decimal-shaped ``Tuple([uint8, uint8, uint64, int64])``
+    return -- the layout numbduck uses for ``duckdb_get_decimal`` -- is
+    classified as ``_CLASS_STRUCT_LARGE`` (size > 16) and lowered via
+    sret. IR-only check; numbduck's bit-packed tuple layout doesn't
+    match any standard C struct alignment for this shape, so a real
+    round-trip would require ``_pack_=1``. The varint test already
+    exercises the value-path; this test just pins the codegen for the
+    decimal shape numbduck specifically depends on.
+    """
+    from numba import njit, types as nb_types
+    from numbox.core.bindings.call import _call_lib_func
+
+    name = "numbox_test_large_ret_decimal_shape_ir"
+    keepalive = _register_test_symbol(name)
+    decimal_ret = nb_types.Tuple([
+        nb_types.uint8, nb_types.uint8, nb_types.uint64, nb_types.int64])
+    patch_signature(name, decimal_ret(nb_types.int32))
+
+    @njit
+    def run(x):
+        return _call_lib_func(name, (x,))
+
+    run.compile((nb_types.int32,))
+    ir_text = list(run.inspect_llvm().values())[0]
+    declare_line = next(
+        (line for line in ir_text.splitlines()
+         if "declare" in line and name in line),
+        None,
+    )
+    assert declare_line is not None, (
+        f"could not find declare line for {name} in IR:\n{ir_text}"
+    )
+    assert "declare void" in declare_line, (
+        f"expected 'declare void' for sret return; got:\n{declare_line}"
+    )
+    assert "sret(" in declare_line, (
+        f"expected 'sret(' on hidden first arg; got:\n{declare_line}"
+    )
     del keepalive

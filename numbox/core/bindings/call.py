@@ -3,7 +3,7 @@ from llvmlite import ir as llir
 
 from numba.core.cgutils import get_or_insert_function
 from numba.core.errors import TypingError
-from numba.core.types import BaseTuple, NoneType
+from numba.core.types import BaseTuple, NoneType, Record
 from numba.extending import intrinsic
 
 from numbox.core.bindings.abi import (
@@ -50,8 +50,16 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
       eightbyte repack on SysV / AAPCS64: the LLVM call is declared
       to return ``{i64, i64}`` and the result is unpacked back to
       the original LLVM type via memory bitcast.
-    - **>16-byte struct returns** -- raise ``TypingError``. No consumer
-      currently needs this; add it when one does.
+    - **>16-byte struct returns** -- ``sret`` (caller-allocated hidden
+      first arg, void return) on every platform. SysV x86-64 / AAPCS64
+      / Windows x64 all use indirect-result-location for this size
+      class; the codegen path is shared with the Windows ``<=16-byte``
+      non-register-passable case. ``Record`` returns are explicitly
+      rejected (``TypingError``): numba's ``RecordModel`` represents
+      values as raw pointers, so a stack-alloca sret slot would dangle
+      after the ``@njit`` function returns; safe support needs an NRT-
+      allocated buffer + integration with numba's record-ownership
+      model. Add when a consumer needs it.
 
     For C signatures of form ``func(T*)`` (pointer to struct) rather
     than ``func(T)`` lowered to a byval pointer by the ABI, use the
@@ -74,10 +82,15 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
 
     ret_ty = func_sig.return_type
     ret_class = _classify(ret_ty)
-    if ret_class == _CLASS_STRUCT_LARGE:
+    if ret_class == _CLASS_STRUCT_LARGE and isinstance(ret_ty, Record):
         raise TypingError(
-            f"_call_lib_func: return struct >16 bytes is unsupported "
-            f"({func_name})"
+            f"_call_lib_func: Record returns >16 bytes are not yet "
+            f"supported ({func_name}). Numba's RecordModel represents "
+            f"values as raw pointers, so the natural stack-alloca sret "
+            f"slot would dangle after the @njit function returns. Safe "
+            f"support needs an NRT-allocated buffer hooked into numba's "
+            f"record-ownership model. Use a Tuple/UniTuple return shape "
+            f"instead, or open an issue if you need Record."
         )
 
     if args_ty == NoneType:
@@ -92,9 +105,13 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
 
     plat = _current_platform()
     use_sret = (
-        ret_class == _CLASS_STRUCT_SMALL
-        and plat == _PLATFORM_WIN_X64
-        and not _is_windows_register_passable(_struct_bytes(ret_ty, "_call_lib_func"))
+        ret_class == _CLASS_STRUCT_LARGE
+        or (
+            ret_class == _CLASS_STRUCT_SMALL
+            and plat == _PLATFORM_WIN_X64
+            and not _is_windows_register_passable(
+                _struct_bytes(ret_ty, "_call_lib_func"))
+        )
     )
     needs_ret_repack = (
         ret_class == _CLASS_STRUCT_SMALL
