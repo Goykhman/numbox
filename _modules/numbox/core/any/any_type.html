@@ -1,0 +1,213 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.any.any_type &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/any/any_type.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.any.any_type</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.any.any_type</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">njit</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">NumbaError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">StructRef</span><span class="p">,</span> <span class="n">TypeRef</span><span class="p">,</span> <span class="n">unicode_type</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.experimental.structref</span><span class="w"> </span><span class="kn">import</span> <span class="n">define_boxing</span><span class="p">,</span> <span class="n">new</span><span class="p">,</span> <span class="n">register</span><span class="p">,</span> <span class="n">StructRefProxy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">overload</span><span class="p">,</span> <span class="n">overload_method</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">default_jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.any.content_wrap</span><span class="w"> </span><span class="kn">import</span> <span class="n">_Content</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.any.erased_type</span><span class="w"> </span><span class="kn">import</span> <span class="n">ErasedType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.lowlevel</span><span class="w"> </span><span class="kn">import</span> <span class="n">_cast</span><span class="p">,</span> <span class="n">_deref_payload</span>
+
+
+<div class="viewcode-block" id="AnyTypeClass">
+<a class="viewcode-back" href="../../../../numbox.core.any.html#numbox.core.any.any_type.AnyTypeClass">[docs]</a>
+<span class="nd">@register</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">AnyTypeClass</span><span class="p">(</span><span class="n">StructRef</span><span class="p">):</span>
+    <span class="k">pass</span></div>
+
+
+
+<span class="n">deleted_any_ctor_error</span> <span class="o">=</span> <span class="s1">&#39;Use `make_any` instead&#39;</span>
+
+
+<div class="viewcode-block" id="Any">
+<a class="viewcode-back" href="../../../../numbox.core.any.html#numbox.core.any.any_type.Any">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Any</span><span class="p">(</span><span class="n">StructRefProxy</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="n">deleted_any_ctor_error</span><span class="p">)</span>
+
+<div class="viewcode-block" id="Any.get_as">
+<a class="viewcode-back" href="../../../../numbox.core.any.html#numbox.core.any.any_type.Any.get_as">[docs]</a>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_as</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ty</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_as</span><span class="p">(</span><span class="n">ty</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Any.reset">
+<a class="viewcode-back" href="../../../../numbox.core.any.html#numbox.core.any.any_type.Any.reset">[docs]</a>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">reset</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="n">val</span><span class="p">)</span></div>
+
+
+    <span class="nd">@property</span>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">type_info</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">t</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_any_deleted_ctor</span><span class="p">(</span><span class="n">p</span><span class="p">):</span>
+    <span class="k">raise</span> <span class="n">NumbaError</span><span class="p">(</span><span class="n">deleted_any_ctor_error</span><span class="p">)</span>
+
+
+<span class="n">overload</span><span class="p">(</span><span class="n">Any</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">default_jit_options</span><span class="p">)(</span><span class="n">_any_deleted_ctor</span><span class="p">)</span>
+<span class="n">define_boxing</span><span class="p">(</span><span class="n">AnyTypeClass</span><span class="p">,</span> <span class="n">Any</span><span class="p">)</span>
+<span class="n">AnyType</span> <span class="o">=</span> <span class="n">AnyTypeClass</span><span class="p">([(</span><span class="s2">&quot;p&quot;</span><span class="p">,</span> <span class="n">ErasedType</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;t&quot;</span><span class="p">,</span> <span class="n">unicode_type</span><span class="p">)])</span>
+
+
+<div class="viewcode-block" id="ol_get_as">
+<a class="viewcode-back" href="../../../../numbox.core.any.html#numbox.core.any.any_type.ol_get_as">[docs]</a>
+<span class="nd">@overload_method</span><span class="p">(</span><span class="n">AnyTypeClass</span><span class="p">,</span> <span class="s2">&quot;get_as&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ol_get_as</span><span class="p">(</span><span class="n">self_ty</span><span class="p">,</span> <span class="n">ty_ref</span><span class="p">:</span> <span class="n">TypeRef</span><span class="p">):</span>
+    <span class="n">ty_code</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">ty_ref</span><span class="o">.</span><span class="n">instance_type</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ty</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">ty_code</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">t</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">NumbaError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Any stored type </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">t</span><span class="si">}</span><span class="s2">, cannot decode as </span><span class="si">{</span><span class="n">ty_code</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">_deref_payload</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">p</span><span class="p">,</span> <span class="n">ty</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_</span></div>
+
+
+
+<div class="viewcode-block" id="ol_reset">
+<a class="viewcode-back" href="../../../../numbox.core.any.html#numbox.core.any.any_type.ol_reset">[docs]</a>
+<span class="nd">@overload_method</span><span class="p">(</span><span class="n">AnyTypeClass</span><span class="p">,</span> <span class="s2">&quot;reset&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ol_reset</span><span class="p">(</span><span class="n">self_ty</span><span class="p">,</span> <span class="n">x_ty</span><span class="p">):</span>
+    <span class="n">ty_code</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">x_ty</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">p</span> <span class="o">=</span> <span class="n">_cast</span><span class="p">(</span><span class="n">_Content</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="n">ErasedType</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">t</span> <span class="o">=</span> <span class="n">ty_code</span>
+    <span class="k">return</span> <span class="n">_</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_make_any</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;Not callable from Python&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="ol_make_any">
+<a class="viewcode-back" href="../../../../numbox.core.any.html#numbox.core.any.any_type.ol_make_any">[docs]</a>
+<span class="nd">@overload</span><span class="p">(</span><span class="n">_make_any</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ol_make_any</span><span class="p">(</span><span class="n">x_ty</span><span class="p">):</span>
+    <span class="n">ty_code</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">x_ty</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+        <span class="nb">any</span> <span class="o">=</span> <span class="n">new</span><span class="p">(</span><span class="n">AnyType</span><span class="p">)</span>
+        <span class="nb">any</span><span class="o">.</span><span class="n">p</span> <span class="o">=</span> <span class="n">_cast</span><span class="p">(</span><span class="n">_Content</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="n">ErasedType</span><span class="p">)</span>
+        <span class="nb">any</span><span class="o">.</span><span class="n">t</span> <span class="o">=</span> <span class="n">ty_code</span>
+        <span class="k">return</span> <span class="nb">any</span>
+    <span class="k">return</span> <span class="n">_</span></div>
+
+
+
+<div class="viewcode-block" id="make_any">
+<a class="viewcode-back" href="../../../../numbox.core.any.html#numbox.core.any.any_type.make_any">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">make_any</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_make_any</span><span class="p">(</span><span class="n">x</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

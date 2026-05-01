@@ -1,0 +1,636 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.work.work &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/work/work.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.work.work</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.work.work</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span><span class="w"> </span><span class="nn">inspect</span><span class="w"> </span><span class="kn">import</span> <span class="n">getfile</span><span class="p">,</span> <span class="n">getmodule</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">io</span><span class="w"> </span><span class="kn">import</span> <span class="n">StringIO</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">njit</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">NumbaError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">boolean</span><span class="p">,</span> <span class="n">DictType</span><span class="p">,</span> <span class="n">FunctionType</span><span class="p">,</span> <span class="n">Literal</span><span class="p">,</span> <span class="n">NoneType</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">unicode_type</span><span class="p">,</span> <span class="n">UnicodeType</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.typing.context</span><span class="w"> </span><span class="kn">import</span> <span class="n">Context</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.experimental.structref</span><span class="w"> </span><span class="kn">import</span> <span class="n">define_boxing</span><span class="p">,</span> <span class="n">new</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">intrinsic</span><span class="p">,</span> <span class="n">overload</span><span class="p">,</span> <span class="n">overload_method</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.typed.typeddict</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.typed.typedlist</span><span class="w"> </span><span class="kn">import</span> <span class="n">List</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.any.erased_type</span><span class="w"> </span><span class="kn">import</span> <span class="n">ErasedType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">default_jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.work.lowlevel_work_utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">ll_make_work</span><span class="p">,</span> <span class="n">WorkTypeClass</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.work.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">NodeType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.work.node_base</span><span class="w"> </span><span class="kn">import</span> <span class="n">NodeBase</span><span class="p">,</span> <span class="n">NodeBaseType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.lowlevel</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">extract_struct_member</span><span class="p">,</span> <span class="n">_cast</span><span class="p">,</span> <span class="n">_get_func_tuple</span><span class="p">,</span> <span class="n">is_not_null</span><span class="p">,</span> <span class="n">get_func_p_from_func_struct</span><span class="p">,</span> <span class="n">get_ll_func_sig</span>
+<span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_file_anchor</span><span class="p">():</span>
+    <span class="k">raise</span> <span class="ne">NotImplementedError</span>
+
+
+<span class="n">deleted_work_ctor_error</span> <span class="o">=</span> <span class="s2">&quot;Use `make_work` instead&quot;</span>
+
+
+<div class="viewcode-block" id="Work">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.Work">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Work</span><span class="p">(</span><span class="n">NodeBase</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Structure describing a unit of work.</span>
+
+<span class="sd">    Instances of this class can be connected in a graph with other `Work` instances.</span>
+
+<span class="sd">    Attributes</span>
+<span class="sd">    ----------</span>
+<span class="sd">    name : str</span>
+<span class="sd">        Name of the structure instance.</span>
+<span class="sd">    inputs : UniTuple[NodeBaseType]</span>
+<span class="sd">        Uniform tuple of `Work.sources`, cast as `NodeBaseType`.</span>
+<span class="sd">    data : Any</span>
+<span class="sd">        Scalar or array data payload contained in (and calculated by) this structure.</span>
+<span class="sd">    sources : Tuple[Work, ...]</span>
+<span class="sd">        Heterogeneous tuple of `Work` instances that this `Work` instance depends on.</span>
+<span class="sd">    derive : FunctionType</span>
+<span class="sd">        Function of the signature determined by the data types of `sources` and `data`.</span>
+<span class="sd">    derived : int8</span>
+<span class="sd">        Flag indicating whether the `data` has already been calculated.</span>
+<span class="sd">    node : NodeType</span>
+<span class="sd">        Work as Node, with its sources in a List.</span>
+
+<span class="sd">    (`name`, ) attributes of the `Work` structure payload are</span>
+<span class="sd">    homogeneously typed across all instances of `Work` and accommodate</span>
+<span class="sd">    cast-ability to the :obj:`numbox.core.node_base.NodeBase` base of `NodeBaseType`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kws</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="n">deleted_work_ctor_error</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">inputs</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">inputs</span>
+
+    <span class="nd">@property</span>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">data</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">data</span>
+
+    <span class="nd">@property</span>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">sources</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">sources</span>
+
+    <span class="nd">@property</span>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">derive</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_get_func_tuple</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">derive</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">derived</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">derived</span>
+
+<div class="viewcode-block" id="Work.as_node">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.Work.as_node">[docs]</a>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">as_node</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">as_node</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="Work.calculate">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.Work.calculate">[docs]</a>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">calculate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">calculate</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="Work.load">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.Work.load">[docs]</a>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">load</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">data</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Work.combine">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.Work.combine">[docs]</a>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">combine</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">combine</span><span class="p">(</span><span class="n">data</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Work.get_input">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.Work.get_input">[docs]</a>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_input</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">i</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_input</span><span class="p">(</span><span class="n">i</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="Work.get_inputs_names">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.Work.get_inputs_names">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_inputs_names</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_inputs_names</span><span class="p">())</span></div>
+
+
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_get_inputs_names</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_inputs_names</span><span class="p">()</span>
+
+<div class="viewcode-block" id="Work.make_inputs_vector">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.Work.make_inputs_vector">[docs]</a>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">make_inputs_vector</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">make_inputs_vector</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="Work.all_inputs_names">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.Work.all_inputs_names">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">all_inputs_names</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_all_inputs_names</span><span class="p">())</span></div>
+
+
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_all_inputs_names</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">all_inputs_names</span><span class="p">()</span>
+
+<div class="viewcode-block" id="Work.all_end_nodes">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.Work.all_end_nodes">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">all_end_nodes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_all_end_nodes</span><span class="p">())</span></div>
+
+
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_all_end_nodes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">all_end_nodes</span><span class="p">()</span>
+
+<div class="viewcode-block" id="Work.depends_on">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.Work.depends_on">[docs]</a>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">depends_on</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj_</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">depends_on</span><span class="p">(</span><span class="n">obj_</span><span class="p">)</span></div>
+</div>
+
+
+
+<span class="n">define_boxing</span><span class="p">(</span><span class="n">WorkTypeClass</span><span class="p">,</span> <span class="n">Work</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_deleted_work_ctor</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="k">raise</span> <span class="n">NumbaError</span><span class="p">(</span><span class="n">deleted_work_ctor_error</span><span class="p">)</span>
+
+
+<span class="n">overload</span><span class="p">(</span><span class="n">Work</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">default_jit_options</span><span class="p">)(</span><span class="n">_deleted_work_ctor</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="make_work">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.make_work">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">make_work</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">sources</span><span class="o">=</span><span class="p">(),</span> <span class="n">derive</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">ll_make_work</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">sources</span><span class="p">,</span> <span class="n">derive</span><span class="p">)</span></div>
+
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_call_derive</span><span class="p">(</span><span class="n">typingctx</span><span class="p">:</span> <span class="n">Context</span><span class="p">,</span> <span class="n">derive_ty</span><span class="p">:</span> <span class="n">FunctionType</span><span class="p">,</span> <span class="n">sources_ty</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">arguments</span><span class="p">):</span>
+        <span class="n">derive_struct</span><span class="p">,</span> <span class="n">sources</span> <span class="o">=</span> <span class="n">arguments</span>
+        <span class="n">derive_args</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">source_ind</span><span class="p">,</span> <span class="n">source_ty</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">sources_ty</span><span class="p">):</span>
+            <span class="n">source</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">extract_value</span><span class="p">(</span><span class="n">sources</span><span class="p">,</span> <span class="n">source_ind</span><span class="p">)</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="n">extract_struct_member</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">source_ty</span><span class="p">,</span> <span class="n">source</span><span class="p">,</span> <span class="s2">&quot;data&quot;</span><span class="p">)</span>
+            <span class="n">derive_args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+        <span class="n">derive_p_raw</span> <span class="o">=</span> <span class="n">get_func_p_from_func_struct</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">derive_struct</span><span class="p">)</span>
+        <span class="n">derive_ty_ll</span> <span class="o">=</span> <span class="n">get_ll_func_sig</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">derive_ty</span><span class="p">)</span>
+        <span class="n">derive_p</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">bitcast</span><span class="p">(</span><span class="n">derive_p_raw</span><span class="p">,</span> <span class="n">derive_ty_ll</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">())</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">derive_p</span><span class="p">,</span> <span class="n">derive_args</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">res</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">derive_ty</span><span class="o">.</span><span class="n">signature</span><span class="o">.</span><span class="n">return_type</span><span class="p">(</span><span class="n">derive_ty</span><span class="p">,</span> <span class="n">sources_ty</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span>
+
+
+<span class="n">_source_getter_registry</span> <span class="o">=</span> <span class="p">{}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_make_source_getter</span><span class="p">(</span><span class="n">source_ind</span><span class="p">):</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">@intrinsic</span>
+<span class="s2">def _get_source_</span><span class="si">{</span><span class="n">source_ind</span><span class="si">}</span><span class="s2">(typingctx: Context, sources_ty: Tuple):</span>
+<span class="s2">    def codegen(context, builder, signature, arguments):</span>
+<span class="s2">        sources = arguments[0]</span>
+<span class="s2">        val = builder.extract_value(sources, </span><span class="si">{</span><span class="n">source_ind</span><span class="si">}</span><span class="s2">)</span>
+<span class="s2">        context.nrt.incref(builder, sources_ty[</span><span class="si">{</span><span class="n">source_ind</span><span class="si">}</span><span class="s2">], val)</span>
+<span class="s2">        return val</span>
+<span class="s2">    sig = sources_ty[</span><span class="si">{</span><span class="n">source_ind</span><span class="si">}</span><span class="s2">](sources_ty)</span>
+<span class="s2">    return sig, codegen</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_make_calculate_code</span><span class="p">(</span><span class="n">num_sources</span><span class="p">):</span>
+    <span class="n">code_txt</span> <span class="o">=</span> <span class="n">StringIO</span><span class="p">()</span>
+    <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">def _calculate_(work_):</span>
+<span class="s2">    if work_.derived:</span>
+<span class="s2">        return&quot;&quot;&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">num_sources</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    sources = work_.sources&quot;&quot;&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">source_ind_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_sources</span><span class="p">):</span>
+            <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    source_</span><span class="si">{</span><span class="n">source_ind_</span><span class="si">}</span><span class="s2"> = _get_source_</span><span class="si">{</span><span class="n">source_ind_</span><span class="si">}</span><span class="s2">(sources)</span>
+<span class="s2">    if not source_</span><span class="si">{</span><span class="n">source_ind_</span><span class="si">}</span><span class="s2">.derived:</span>
+<span class="s2">        source_</span><span class="si">{</span><span class="n">source_ind_</span><span class="si">}</span><span class="s2">.calculate()&quot;&quot;&quot;</span><span class="p">)</span>
+    <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    v = _call_derive(work_.derive, work_.sources)</span>
+<span class="s2">    work_.derived = True</span>
+<span class="s2">    work_.data = v</span>
+<span class="s2">&quot;&quot;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">code_txt</span><span class="o">.</span><span class="n">getvalue</span><span class="p">()</span>
+
+
+<span class="n">_calculate_registry</span> <span class="o">=</span> <span class="p">{}</span>
+
+
+<div class="viewcode-block" id="ensure_presence_of_source_getters_in_ns">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.ensure_presence_of_source_getters_in_ns">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">ensure_presence_of_source_getters_in_ns</span><span class="p">(</span><span class="n">num_sources_</span><span class="p">,</span> <span class="n">ns_</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">source_i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_sources_</span><span class="p">):</span>
+        <span class="n">source_getter_code_txt</span> <span class="o">=</span> <span class="n">_make_source_getter</span><span class="p">(</span><span class="n">source_i</span><span class="p">)</span>
+        <span class="n">source_getter_code</span> <span class="o">=</span> <span class="nb">compile</span><span class="p">(</span><span class="n">source_getter_code_txt</span><span class="p">,</span> <span class="n">getfile</span><span class="p">(</span><span class="n">_file_anchor</span><span class="p">),</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;exec&quot;</span><span class="p">)</span>
+        <span class="n">exec</span><span class="p">(</span><span class="n">source_getter_code</span><span class="p">,</span> <span class="n">ns_</span><span class="p">)</span>
+        <span class="n">_source_getter_registry</span><span class="p">[</span><span class="n">source_i</span><span class="p">]</span> <span class="o">=</span> <span class="kc">True</span></div>
+
+
+
+<div class="viewcode-block" id="ol_calculate">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.ol_calculate">[docs]</a>
+<span class="nd">@overload_method</span><span class="p">(</span><span class="n">WorkTypeClass</span><span class="p">,</span> <span class="s2">&quot;calculate&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ol_calculate</span><span class="p">(</span><span class="n">self_ty</span><span class="p">):</span>
+    <span class="n">derive_ty</span> <span class="o">=</span> <span class="n">self_ty</span><span class="o">.</span><span class="n">field_dict</span><span class="p">[</span><span class="s2">&quot;derive&quot;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">derive_ty</span><span class="p">,</span> <span class="n">NoneType</span><span class="p">):</span>
+        <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">derived</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">return</span> <span class="n">_</span>
+
+    <span class="n">sources_ty</span> <span class="o">=</span> <span class="n">self_ty</span><span class="o">.</span><span class="n">field_dict</span><span class="p">[</span><span class="s2">&quot;sources&quot;</span><span class="p">]</span>
+    <span class="n">num_sources</span> <span class="o">=</span> <span class="n">sources_ty</span><span class="o">.</span><span class="n">count</span>
+    <span class="n">_calculate</span> <span class="o">=</span> <span class="n">_calculate_registry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">num_sources</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">_calculate</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_calculate</span>
+    <span class="n">ns</span> <span class="o">=</span> <span class="n">getmodule</span><span class="p">(</span><span class="n">_file_anchor</span><span class="p">)</span><span class="o">.</span><span class="vm">__dict__</span>
+    <span class="n">ensure_presence_of_source_getters_in_ns</span><span class="p">(</span><span class="n">num_sources</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>
+    <span class="n">code_txt</span> <span class="o">=</span> <span class="n">_make_calculate_code</span><span class="p">(</span><span class="n">num_sources</span><span class="p">)</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="nb">compile</span><span class="p">(</span><span class="n">code_txt</span><span class="p">,</span> <span class="n">getfile</span><span class="p">(</span><span class="n">_file_anchor</span><span class="p">),</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;exec&quot;</span><span class="p">)</span>
+    <span class="n">exec</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>
+    <span class="n">_calculate</span> <span class="o">=</span> <span class="n">ns</span><span class="p">[</span><span class="s2">&quot;_calculate_&quot;</span><span class="p">]</span>
+    <span class="n">_calculate_registry</span><span class="p">[</span><span class="n">num_sources</span><span class="p">]</span> <span class="o">=</span> <span class="n">_calculate</span>
+    <span class="k">return</span> <span class="n">_calculate</span></div>
+
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_cast_to_work_data</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">work_ty</span><span class="p">,</span> <span class="n">data_as_erased_ty</span><span class="p">:</span> <span class="n">ErasedType</span><span class="p">):</span>
+    <span class="n">data_ty</span> <span class="o">=</span> <span class="n">work_ty</span><span class="o">.</span><span class="n">field_dict</span><span class="p">[</span><span class="s2">&quot;data&quot;</span><span class="p">]</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">data_ty</span><span class="p">(</span><span class="n">work_ty</span><span class="p">,</span> <span class="n">data_as_erased_ty</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">arguments</span><span class="p">):</span>
+        <span class="n">data_as_erased</span> <span class="o">=</span> <span class="n">arguments</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">data_ty_ll</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">data_ty</span><span class="p">)</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">meminfo_p</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">get_meminfos</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">data_as_erased_ty</span><span class="p">,</span> <span class="n">data_as_erased</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">payload_p</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">meminfo_data</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">meminfo_p</span><span class="p">)</span>
+        <span class="n">x_as_ty_p</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">bitcast</span><span class="p">(</span><span class="n">payload_p</span><span class="p">,</span> <span class="n">data_ty_ll</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">())</span>
+        <span class="n">val</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">x_as_ty_p</span><span class="p">)</span>
+        <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">incref</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">data_ty</span><span class="p">,</span> <span class="n">val</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">val</span>
+    <span class="k">return</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_make_loader_code</span><span class="p">(</span><span class="n">num_sources</span><span class="p">):</span>
+    <span class="n">code_txt</span> <span class="o">=</span> <span class="n">StringIO</span><span class="p">()</span>
+    <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">def _loader_(work_, data_):</span>
+<span class="s2">    reset = False</span>
+<span class="s2">    work_name = work_.name</span>
+<span class="s2">    if work_name in data_:</span>
+<span class="s2">        work_.data = _cast_to_work_data(work_, data_[work_name].p)</span>
+<span class="s2">        reset = True&quot;&quot;&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">num_sources</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    sources = work_.sources&quot;&quot;&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">source_ind_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_sources</span><span class="p">):</span>
+            <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    source_</span><span class="si">{</span><span class="n">source_ind_</span><span class="si">}</span><span class="s2"> = _get_source_</span><span class="si">{</span><span class="n">source_ind_</span><span class="si">}</span><span class="s2">(sources)</span>
+<span class="s2">    reset_source = source_</span><span class="si">{</span><span class="n">source_ind_</span><span class="si">}</span><span class="s2">.load(data_)</span>
+<span class="s2">    reset = reset or reset_source</span>
+<span class="s2">&quot;&quot;&quot;</span><span class="p">)</span>
+    <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    work_.derived = work_.derived and not reset</span>
+<span class="s2">    return reset</span>
+<span class="s2">&quot;&quot;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">code_txt</span><span class="o">.</span><span class="n">getvalue</span><span class="p">()</span>
+
+
+<span class="n">_loader_registry</span> <span class="o">=</span> <span class="p">{}</span>
+
+
+<div class="viewcode-block" id="ol_load">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.ol_load">[docs]</a>
+<span class="nd">@overload_method</span><span class="p">(</span><span class="n">WorkTypeClass</span><span class="p">,</span> <span class="s2">&quot;load&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ol_load</span><span class="p">(</span><span class="n">work_ty</span><span class="p">,</span> <span class="n">data_ty</span><span class="p">:</span> <span class="n">DictType</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot; Load `data` into the graph with the root node `work`.</span>
+<span class="sd">     Data is provided as dictionary mapping node name to `Any` type</span>
+<span class="sd">     containing erased payload `p` of the `work.data` type. &quot;&quot;&quot;</span>
+    <span class="n">sources_ty</span> <span class="o">=</span> <span class="n">work_ty</span><span class="o">.</span><span class="n">field_dict</span><span class="p">[</span><span class="s2">&quot;sources&quot;</span><span class="p">]</span>
+    <span class="n">num_sources</span> <span class="o">=</span> <span class="n">sources_ty</span><span class="o">.</span><span class="n">count</span>
+    <span class="n">_loader</span> <span class="o">=</span> <span class="n">_loader_registry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">num_sources</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">_loader</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_loader</span>
+    <span class="n">ns</span> <span class="o">=</span> <span class="n">getmodule</span><span class="p">(</span><span class="n">_file_anchor</span><span class="p">)</span><span class="o">.</span><span class="vm">__dict__</span>
+    <span class="n">ensure_presence_of_source_getters_in_ns</span><span class="p">(</span><span class="n">num_sources</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>
+    <span class="n">code_txt</span> <span class="o">=</span> <span class="n">_make_loader_code</span><span class="p">(</span><span class="n">num_sources</span><span class="p">)</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="nb">compile</span><span class="p">(</span><span class="n">code_txt</span><span class="p">,</span> <span class="n">getfile</span><span class="p">(</span><span class="n">_file_anchor</span><span class="p">),</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;exec&quot;</span><span class="p">)</span>
+    <span class="n">exec</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>
+    <span class="n">_loader</span> <span class="o">=</span> <span class="n">ns</span><span class="p">[</span><span class="s2">&quot;_loader_&quot;</span><span class="p">]</span>
+    <span class="n">_loader_registry</span><span class="p">[</span><span class="n">num_sources</span><span class="p">]</span> <span class="o">=</span> <span class="n">_loader</span>
+    <span class="k">return</span> <span class="n">_loader</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_make_combine_code</span><span class="p">(</span><span class="n">num_sources</span><span class="p">):</span>
+    <span class="n">code_txt</span> <span class="o">=</span> <span class="n">StringIO</span><span class="p">()</span>
+    <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">def _combine_(work_, data_, harvested_=None):</span>
+<span class="s2">    if harvested_ is None:</span>
+<span class="s2">        harvested_ = Dict.empty(key_type=unicode_type, value_type=boolean)</span>
+<span class="s2">    if len(harvested_) == len(data_):</span>
+<span class="s2">        return</span>
+<span class="s2">    work_name = work_.name</span>
+<span class="s2">    if work_name in data_:</span>
+<span class="s2">        harvested_[work_name] = True</span>
+<span class="s2">        data_[work_name].reset(work_.data)&quot;&quot;&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">num_sources</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    sources = work_.sources&quot;&quot;&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">source_ind_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_sources</span><span class="p">):</span>
+            <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    source_</span><span class="si">{</span><span class="n">source_ind_</span><span class="si">}</span><span class="s2"> = _get_source_</span><span class="si">{</span><span class="n">source_ind_</span><span class="si">}</span><span class="s2">(sources)</span>
+<span class="s2">    source_</span><span class="si">{</span><span class="n">source_ind_</span><span class="si">}</span><span class="s2">.combine(data_, harvested_)</span>
+<span class="s2">&quot;&quot;&quot;</span><span class="p">)</span>
+    <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    return</span>
+<span class="s2">&quot;&quot;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">code_txt</span><span class="o">.</span><span class="n">getvalue</span><span class="p">()</span>
+
+
+<span class="n">_combine_registry</span> <span class="o">=</span> <span class="p">{}</span>
+
+
+<div class="viewcode-block" id="ol_combine">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.ol_combine">[docs]</a>
+<span class="nd">@overload_method</span><span class="p">(</span><span class="n">WorkTypeClass</span><span class="p">,</span> <span class="s2">&quot;combine&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ol_combine</span><span class="p">(</span><span class="n">work_ty</span><span class="p">,</span> <span class="n">data_ty</span><span class="p">:</span> <span class="n">DictType</span><span class="p">,</span> <span class="n">harvested_ty</span><span class="o">=</span><span class="n">NoneType</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot; Harvest nodes data from the graph with the root node `work`.</span>
+<span class="sd">     `data` is provided as dictionary mapping node name to `Any` type</span>
+<span class="sd">     containing erased payload `p` to be reset to `data`. &quot;&quot;&quot;</span>
+    <span class="n">sources_ty</span> <span class="o">=</span> <span class="n">work_ty</span><span class="o">.</span><span class="n">field_dict</span><span class="p">[</span><span class="s2">&quot;sources&quot;</span><span class="p">]</span>
+    <span class="n">num_sources</span> <span class="o">=</span> <span class="n">sources_ty</span><span class="o">.</span><span class="n">count</span>
+    <span class="n">_combine</span> <span class="o">=</span> <span class="n">_combine_registry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">num_sources</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">_combine</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_combine</span>
+    <span class="n">ns</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">getmodule</span><span class="p">(</span><span class="n">_file_anchor</span><span class="p">)</span><span class="o">.</span><span class="vm">__dict__</span><span class="p">,</span> <span class="o">**</span><span class="p">{</span><span class="s2">&quot;boolean&quot;</span><span class="p">:</span> <span class="n">boolean</span><span class="p">,</span> <span class="s2">&quot;Dict&quot;</span><span class="p">:</span> <span class="n">Dict</span><span class="p">}}</span>
+    <span class="n">ensure_presence_of_source_getters_in_ns</span><span class="p">(</span><span class="n">num_sources</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>
+    <span class="n">code_txt</span> <span class="o">=</span> <span class="n">_make_combine_code</span><span class="p">(</span><span class="n">num_sources</span><span class="p">)</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="nb">compile</span><span class="p">(</span><span class="n">code_txt</span><span class="p">,</span> <span class="n">getfile</span><span class="p">(</span><span class="n">_file_anchor</span><span class="p">),</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;exec&quot;</span><span class="p">)</span>
+    <span class="n">exec</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>
+    <span class="n">_combine</span> <span class="o">=</span> <span class="n">ns</span><span class="p">[</span><span class="s2">&quot;_combine_&quot;</span><span class="p">]</span>
+    <span class="n">_combine_registry</span><span class="p">[</span><span class="n">num_sources</span><span class="p">]</span> <span class="o">=</span> <span class="n">_combine</span>
+    <span class="k">return</span> <span class="n">_combine</span></div>
+
+
+
+<div class="viewcode-block" id="ol_get_input">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.ol_get_input">[docs]</a>
+<span class="nd">@overload_method</span><span class="p">(</span><span class="n">WorkTypeClass</span><span class="p">,</span> <span class="s2">&quot;get_input&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ol_get_input</span><span class="p">(</span><span class="n">self_ty</span><span class="p">,</span> <span class="n">i_ty</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">i</span><span class="p">):</span>
+        <span class="n">num_inputs</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">inputs</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">i</span> <span class="o">&gt;=</span> <span class="n">num_inputs</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">NumbaError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Requested input </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2"> while the node has </span><span class="si">{</span><span class="n">num_inputs</span><span class="si">}</span><span class="s2"> inputs&quot;</span><span class="p">)</span>
+        <span class="n">inputs_vector</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">make_inputs_vector</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">_cast</span><span class="p">(</span><span class="n">inputs_vector</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">NodeType</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_</span></div>
+
+
+
+<div class="viewcode-block" id="ol_get_inputs_names">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.ol_get_inputs_names">[docs]</a>
+<span class="nd">@overload_method</span><span class="p">(</span><span class="n">WorkTypeClass</span><span class="p">,</span> <span class="s2">&quot;get_inputs_names&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ol_get_inputs_names</span><span class="p">(</span><span class="n">self_ty</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">names_</span> <span class="o">=</span> <span class="n">List</span><span class="o">.</span><span class="n">empty_list</span><span class="p">(</span><span class="n">unicode_type</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">inputs</span><span class="p">:</span>
+            <span class="n">names_</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">names_</span>
+    <span class="k">return</span> <span class="n">_</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_make_inputs_vector_code</span><span class="p">(</span><span class="n">num_sources</span><span class="p">):</span>
+    <span class="n">code_txt</span> <span class="o">=</span> <span class="n">StringIO</span><span class="p">()</span>
+    <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">def _inputs_vector_(work_):</span>
+<span class="s2">    node = work_.node</span>
+<span class="s2">    if is_not_null(node):</span>
+<span class="s2">        return node.inputs</span>
+<span class="s2">    inputs_vector = List.empty_list(NodeBaseType)&quot;&quot;&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">num_sources</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    sources = work_.sources&quot;&quot;&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">source_ind_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_sources</span><span class="p">):</span>
+            <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    source_</span><span class="si">{</span><span class="n">source_ind_</span><span class="si">}</span><span class="s2"> = _get_source_</span><span class="si">{</span><span class="n">source_ind_</span><span class="si">}</span><span class="s2">(sources)</span>
+<span class="s2">    node = source_</span><span class="si">{</span><span class="n">source_ind_</span><span class="si">}</span><span class="s2">.as_node()</span>
+<span class="s2">    inputs_vector.append(_cast(node, NodeBaseType))</span>
+<span class="s2">&quot;&quot;&quot;</span><span class="p">)</span>
+    <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    return inputs_vector&quot;&quot;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">code_txt</span><span class="o">.</span><span class="n">getvalue</span><span class="p">()</span>
+
+
+<span class="n">_inputs_vector_registry</span> <span class="o">=</span> <span class="p">{}</span>
+
+
+<div class="viewcode-block" id="ol_make_inputs_vector">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.ol_make_inputs_vector">[docs]</a>
+<span class="nd">@overload_method</span><span class="p">(</span><span class="n">WorkTypeClass</span><span class="p">,</span> <span class="s2">&quot;make_inputs_vector&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ol_make_inputs_vector</span><span class="p">(</span><span class="n">self_ty</span><span class="p">):</span>
+    <span class="n">sources_ty</span> <span class="o">=</span> <span class="n">self_ty</span><span class="o">.</span><span class="n">field_dict</span><span class="p">[</span><span class="s2">&quot;sources&quot;</span><span class="p">]</span>
+    <span class="n">num_sources</span> <span class="o">=</span> <span class="n">sources_ty</span><span class="o">.</span><span class="n">count</span>
+    <span class="k">if</span> <span class="n">num_sources</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="n">inputs_vector</span> <span class="o">=</span> <span class="n">List</span><span class="o">.</span><span class="n">empty_list</span><span class="p">(</span><span class="n">NodeBaseType</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">inputs_vector</span>
+        <span class="k">return</span> <span class="n">_</span>
+    <span class="n">_inputs_vector</span> <span class="o">=</span> <span class="n">_inputs_vector_registry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">num_sources</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">_inputs_vector</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_inputs_vector</span>
+    <span class="n">ns</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">getmodule</span><span class="p">(</span><span class="n">_file_anchor</span><span class="p">)</span><span class="o">.</span><span class="vm">__dict__</span><span class="p">,</span> <span class="o">**</span><span class="p">{</span><span class="s2">&quot;new&quot;</span><span class="p">:</span> <span class="n">new</span><span class="p">}}</span>
+    <span class="n">ensure_presence_of_source_getters_in_ns</span><span class="p">(</span><span class="n">num_sources</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>
+    <span class="n">code_txt</span> <span class="o">=</span> <span class="n">_make_inputs_vector_code</span><span class="p">(</span><span class="n">num_sources</span><span class="p">)</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="nb">compile</span><span class="p">(</span><span class="n">code_txt</span><span class="p">,</span> <span class="n">getfile</span><span class="p">(</span><span class="n">_file_anchor</span><span class="p">),</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;exec&quot;</span><span class="p">)</span>
+    <span class="n">exec</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>
+    <span class="n">_inputs_vector</span> <span class="o">=</span> <span class="n">ns</span><span class="p">[</span><span class="s2">&quot;_inputs_vector_&quot;</span><span class="p">]</span>
+    <span class="n">_inputs_vector_registry</span><span class="p">[</span><span class="n">num_sources</span><span class="p">]</span> <span class="o">=</span> <span class="n">_inputs_vector</span>
+    <span class="k">return</span> <span class="n">_inputs_vector</span></div>
+
+
+
+<div class="viewcode-block" id="ol_as_node">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.ol_as_node">[docs]</a>
+<span class="nd">@overload_method</span><span class="p">(</span><span class="n">WorkTypeClass</span><span class="p">,</span> <span class="s2">&quot;as_node&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ol_as_node</span><span class="p">(</span><span class="n">self_ty</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">node</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">node</span>
+        <span class="k">if</span> <span class="n">is_not_null</span><span class="p">(</span><span class="n">node</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">node</span>
+        <span class="n">node</span> <span class="o">=</span> <span class="n">new</span><span class="p">(</span><span class="n">NodeType</span><span class="p">)</span>
+        <span class="n">node</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span>
+        <span class="n">node</span><span class="o">.</span><span class="n">inputs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">make_inputs_vector</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">node</span> <span class="o">=</span> <span class="n">node</span>
+        <span class="k">return</span> <span class="n">node</span>
+    <span class="k">return</span> <span class="n">_</span></div>
+
+
+
+<div class="viewcode-block" id="ol_all_inputs_names">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.ol_all_inputs_names">[docs]</a>
+<span class="nd">@overload_method</span><span class="p">(</span><span class="n">WorkTypeClass</span><span class="p">,</span> <span class="s2">&quot;all_inputs_names&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ol_all_inputs_names</span><span class="p">(</span><span class="n">self_ty</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">node</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">as_node</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">node</span><span class="o">.</span><span class="n">all_inputs_names</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">_</span></div>
+
+
+
+<div class="viewcode-block" id="ol_all_end_nodes">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.ol_all_end_nodes">[docs]</a>
+<span class="nd">@overload_method</span><span class="p">(</span><span class="n">WorkTypeClass</span><span class="p">,</span> <span class="s2">&quot;all_end_nodes&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ol_all_end_nodes</span><span class="p">(</span><span class="n">self_ty</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">node</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">as_node</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">node</span><span class="o">.</span><span class="n">all_end_nodes</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">_</span></div>
+
+
+
+<div class="viewcode-block" id="ol_depends_on">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.work.ol_depends_on">[docs]</a>
+<span class="nd">@overload_method</span><span class="p">(</span><span class="n">WorkTypeClass</span><span class="p">,</span> <span class="s2">&quot;depends_on&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">default_jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ol_depends_on</span><span class="p">(</span><span class="n">self_ty</span><span class="p">,</span> <span class="n">obj_ty</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj_ty</span><span class="p">,</span> <span class="p">(</span><span class="n">Literal</span><span class="p">,</span> <span class="n">UnicodeType</span><span class="p">,)):</span>
+        <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name_</span><span class="p">):</span>
+            <span class="n">node</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">as_node</span><span class="p">()</span>
+            <span class="k">return</span> <span class="n">name_</span> <span class="ow">in</span> <span class="n">node</span><span class="o">.</span><span class="n">all_inputs_names</span><span class="p">()</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">obj_</span><span class="p">):</span>
+            <span class="n">node</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">as_node</span><span class="p">()</span>
+            <span class="k">return</span> <span class="n">obj_</span><span class="o">.</span><span class="n">name</span> <span class="ow">in</span> <span class="n">node</span><span class="o">.</span><span class="n">all_inputs_names</span><span class="p">()</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj_ty</span><span class="p">,</span> <span class="n">WorkTypeClass</span><span class="p">),</span> <span class="sa">f</span><span class="s2">&quot;Cannot handle </span><span class="si">{</span><span class="n">obj_ty</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="n">_</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
