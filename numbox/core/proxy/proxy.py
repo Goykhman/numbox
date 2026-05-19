@@ -2,12 +2,17 @@ import inspect
 from llvmlite import ir  # noqa: F401
 from numba import njit
 from numba.core import cgutils  # noqa: F401
+from numba.core.types.function_type import CompileResultWAP
 from numba.core.typing.templates import Signature
 from numba.extending import intrinsic  # noqa: F401
 from types import FunctionType as PyFunctionType
 from typing import List, Optional, Tuple
 
+from numbox.utils.highlevel import _anchor_path, _materialize_anchor, _orphan_anchor_sweep
 from numbox.utils.standard import make_params_strings
+
+
+_orphan_anchor_sweep("numbox-proxy")
 
 
 def make_proxy_name(name):
@@ -35,6 +40,15 @@ def proxy(sig, jit_options: Optional[dict] = None):
     In case when more than one signature is provided as the `sig` parameter, it is assumed
     that the first signature is the 'main' one while the other ones are supplied to
     allow for the `Omitted` types with default values for (some of) the parameters.
+
+    The returned dispatcher also exposes ``.as_func``: a ``CompileResultWAP``
+    (numba ``FunctionType`` value) for the main signature. Use it when a binding
+    must be passed as a callback argument or stored in a struct field — the
+    dispatcher itself is the call-site form. Referencing ``.as_func`` as a
+    Python global from ``@njit(cache=True)`` triggers
+    ``lower_constant_function_type`` → ``add_dynamic_addr`` and disables that
+    caller's cache, same as plain ``@cres``; call the dispatcher directly for
+    cacheable usage.
 
     See tests for some examples of the use cases.
     """
@@ -74,7 +88,19 @@ def {func_proxy_name}({func_args_str}):
         }
         if ns.get(func_proxy_name) is not None:
             raise ValueError(f"Name {func_proxy_name} in module {inspect.getmodule(func)} is reserved")
-        code = compile(code_txt, inspect.getfile(func), mode='exec')
+        # Anchor at a content-addressed real file rather than ``inspect.getfile(func)``.
+        # numba's cache-save path calls ``str(self.type_annotation)`` →
+        # ``inspect.getsourcelines(wrapper)``; on Python 3.13 a co_filename pointing
+        # at the user's source file with co_firstlineno landing inside that file's
+        # docstring (or any multi-line string / comment with apostrophes) raises
+        # tokenize.TokenError per CPython #122981. A content-addressed anchor whose
+        # contents match the exec'd code line-for-line makes getsourcelines return
+        # the actual generated source.
+        anchor = _anchor_path("numbox-proxy", f"{func.__module__}.{func.__name__}", code_txt)
+        _materialize_anchor(anchor, code_txt)
+        code = compile(code_txt, str(anchor), mode='exec')
         exec(code, ns)
-        return ns[func_proxy_name]
+        dispatcher = ns[func_proxy_name]
+        dispatcher.as_func = CompileResultWAP(func_jit.get_compile_result(main_sig))
+        return dispatcher
     return wrap

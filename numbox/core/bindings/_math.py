@@ -1,4 +1,4 @@
-from numbox.utils.highlevel import cres
+from numbox.core.proxy.proxy import proxy
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
 from numbox.core.bindings.utils import load_lib
@@ -22,211 +22,211 @@ __all__ = [
 load_lib("m")
 
 
-@cres(signatures.get("cos"), cache=True)
+@proxy(signatures.get("cos"), jit_options={"cache": True})
 def cos(x):
     return _call_lib_func("cos", (x,))
 
 
-@cres(signatures.get("sin"), cache=True)
+@proxy(signatures.get("sin"), jit_options={"cache": True})
 def sin(x):
     return _call_lib_func("sin", (x,))
 
 
-@cres(signatures.get("tan"), cache=True)
+@proxy(signatures.get("tan"), jit_options={"cache": True})
 def tan(x):
     return _call_lib_func("tan", (x,))
 
 
-@cres(signatures.get("acos"), cache=True)
+@proxy(signatures.get("acos"), jit_options={"cache": True})
 def acos(x):
     return _call_lib_func("acos", (x,))
 
 
-@cres(signatures.get("asin"), cache=True)
+@proxy(signatures.get("asin"), jit_options={"cache": True})
 def asin(x):
     return _call_lib_func("asin", (x,))
 
 
-@cres(signatures.get("atan"), cache=True)
+@proxy(signatures.get("atan"), jit_options={"cache": True})
 def atan(x):
     return _call_lib_func("atan", (x,))
 
 
-@cres(signatures.get("cosh"), cache=True)
+@proxy(signatures.get("cosh"), jit_options={"cache": True})
 def cosh(x):
     return _call_lib_func("cosh", (x,))
 
 
-@cres(signatures.get("sinh"), cache=True)
+@proxy(signatures.get("sinh"), jit_options={"cache": True})
 def sinh(x):
     return _call_lib_func("sinh", (x,))
 
 
-@cres(signatures.get("tanh"), cache=True)
+@proxy(signatures.get("tanh"), jit_options={"cache": True})
 def tanh(x):
     return _call_lib_func("tanh", (x,))
 
 
-@cres(signatures.get("acosh"), cache=True)
+@proxy(signatures.get("acosh"), jit_options={"cache": True})
 def acosh(x):
     return _call_lib_func("acosh", (x,))
 
 
-@cres(signatures.get("asinh"), cache=True)
+@proxy(signatures.get("asinh"), jit_options={"cache": True})
 def asinh(x):
     return _call_lib_func("asinh", (x,))
 
 
-@cres(signatures.get("atanh"), cache=True)
+@proxy(signatures.get("atanh"), jit_options={"cache": True})
 def atanh(x):
     return _call_lib_func("atanh", (x,))
 
 
-@cres(signatures.get("exp"), cache=True)
+@proxy(signatures.get("exp"), jit_options={"cache": True})
 def exp(x):
     return _call_lib_func("exp", (x,))
 
 
-@cres(signatures.get("exp2"), cache=True)
+@proxy(signatures.get("exp2"), jit_options={"cache": True})
 def exp2(x):
     return _call_lib_func("exp2", (x,))
 
 
-@cres(signatures.get("expm1"), cache=True)
+@proxy(signatures.get("expm1"), jit_options={"cache": True})
 def expm1(x):
     return _call_lib_func("expm1", (x,))
 
 
-@cres(signatures.get("log"), cache=True)
+@proxy(signatures.get("log"), jit_options={"cache": True})
 def log(x):
     return _call_lib_func("log", (x,))
 
 
-@cres(signatures.get("log2"), cache=True)
+@proxy(signatures.get("log2"), jit_options={"cache": True})
 def log2(x):
     return _call_lib_func("log2", (x,))
 
 
-@cres(signatures.get("log10"), cache=True)
+@proxy(signatures.get("log10"), jit_options={"cache": True})
 def log10(x):
     return _call_lib_func("log10", (x,))
 
 
-@cres(signatures.get("log1p"), cache=True)
+@proxy(signatures.get("log1p"), jit_options={"cache": True})
 def log1p(x):
     return _call_lib_func("log1p", (x,))
 
 
-@cres(signatures.get("logb"), cache=True)
+@proxy(signatures.get("logb"), jit_options={"cache": True})
 def logb(x):
     return _call_lib_func("logb", (x,))
 
 
-@cres(signatures.get("sqrt"), cache=True)
+@proxy(signatures.get("sqrt"), jit_options={"cache": True})
 def sqrt(x):
     return _call_lib_func("sqrt", (x,))
 
 
-@cres(signatures.get("cbrt"), cache=True)
+@proxy(signatures.get("cbrt"), jit_options={"cache": True})
 def cbrt(x):
     return _call_lib_func("cbrt", (x,))
 
 
-@cres(signatures.get("ceil"), cache=True)
+@proxy(signatures.get("ceil"), jit_options={"cache": True})
 def ceil(x):
     return _call_lib_func("ceil", (x,))
 
 
-@cres(signatures.get("floor"), cache=True)
+@proxy(signatures.get("floor"), jit_options={"cache": True})
 def floor(x):
     return _call_lib_func("floor", (x,))
 
 
-@cres(signatures.get("trunc"), cache=True)
+@proxy(signatures.get("trunc"), jit_options={"cache": True})
 def trunc(x):
     return _call_lib_func("trunc", (x,))
 
 
-@cres(signatures.get("round"), cache=True)
+@proxy(signatures.get("round"), jit_options={"cache": True})
 def round(x):
     return _call_lib_func("round", (x,))
 
 
-@cres(signatures.get("rint"), cache=True)
+@proxy(signatures.get("rint"), jit_options={"cache": True})
 def rint(x):
     return _call_lib_func("rint", (x,))
 
 
-@cres(signatures.get("nearbyint"), cache=True)
+@proxy(signatures.get("nearbyint"), jit_options={"cache": True})
 def nearbyint(x):
     return _call_lib_func("nearbyint", (x,))
 
 
-@cres(signatures.get("erf"), cache=True)
+@proxy(signatures.get("erf"), jit_options={"cache": True})
 def erf(x):
     return _call_lib_func("erf", (x,))
 
 
-@cres(signatures.get("erfc"), cache=True)
+@proxy(signatures.get("erfc"), jit_options={"cache": True})
 def erfc(x):
     return _call_lib_func("erfc", (x,))
 
 
-@cres(signatures.get("lgamma"), cache=True)
+@proxy(signatures.get("lgamma"), jit_options={"cache": True})
 def lgamma(x):
     return _call_lib_func("lgamma", (x,))
 
 
-@cres(signatures.get("tgamma"), cache=True)
+@proxy(signatures.get("tgamma"), jit_options={"cache": True})
 def tgamma(x):
     return _call_lib_func("tgamma", (x,))
 
 
-@cres(signatures.get("fabs"), cache=True)
+@proxy(signatures.get("fabs"), jit_options={"cache": True})
 def fabs(x):
     return _call_lib_func("fabs", (x,))
 
 
-@cres(signatures.get("atan2"), cache=True)
+@proxy(signatures.get("atan2"), jit_options={"cache": True})
 def atan2(y, x):
     return _call_lib_func("atan2", (y, x))
 
 
-@cres(signatures.get("pow"), cache=True)
+@proxy(signatures.get("pow"), jit_options={"cache": True})
 def pow(x, y):
     return _call_lib_func("pow", (x, y))
 
 
-@cres(signatures.get("fmod"), cache=True)
+@proxy(signatures.get("fmod"), jit_options={"cache": True})
 def fmod(x, y):
     return _call_lib_func("fmod", (x, y))
 
 
-@cres(signatures.get("remainder"), cache=True)
+@proxy(signatures.get("remainder"), jit_options={"cache": True})
 def remainder(x, y):
     return _call_lib_func("remainder", (x, y))
 
 
-@cres(signatures.get("hypot"), cache=True)
+@proxy(signatures.get("hypot"), jit_options={"cache": True})
 def hypot(x, y):
     return _call_lib_func("hypot", (x, y))
 
 
-@cres(signatures.get("fmax"), cache=True)
+@proxy(signatures.get("fmax"), jit_options={"cache": True})
 def fmax(x, y):
     return _call_lib_func("fmax", (x, y))
 
 
-@cres(signatures.get("fmin"), cache=True)
+@proxy(signatures.get("fmin"), jit_options={"cache": True})
 def fmin(x, y):
     return _call_lib_func("fmin", (x, y))
 
 
-@cres(signatures.get("fdim"), cache=True)
+@proxy(signatures.get("fdim"), jit_options={"cache": True})
 def fdim(x, y):
     return _call_lib_func("fdim", (x, y))
 
 
-@cres(signatures.get("copysign"), cache=True)
+@proxy(signatures.get("copysign"), jit_options={"cache": True})
 def copysign(x, y):
     return _call_lib_func("copysign", (x, y))

@@ -1,3 +1,7 @@
+import os
+import time
+
+import numpy as np
 import pytest
 from numba import njit, typeof
 from numba.core.types import float64, int8, unicode_type
@@ -5,17 +9,25 @@ from numba.core.types.function_type import CompileResultWAP, FunctionType
 from numba.core.types.functions import Dispatcher
 from numpy import isclose
 
+from numbox.core.bindings import errno_get, getenv, memcpy
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
 from numbox.core.bindings.utils import load_lib_path
 from numbox.utils.highlevel import (
+    _ORPHAN_AGE_SECONDS,
+    _anchor_root,
+    _orphan_anchor_sweep,
     cres,
     cres_if_available,
     determine_field_index,
     make_structref,
     make_structref_code_txt,
 )
-from test.auxiliary_utils import collect_and_run_tests
+from numbox.utils.lowlevel import array_data_p, get_unicode_data_p
+from test.auxiliary_utils import (
+    assert_njit_cache_survives_subprocess_roundtrip,
+    collect_and_run_tests,
+)
 from test.common_structrefs import S1Type
 from test.utils.auxiliaries import aux_1
 from test.utils.common_struct_type_classes import S1TypeClass, S2TypeClass, S3TypeClass, S4TypeClass, S5TypeClass
@@ -305,6 +317,98 @@ def test_cres_if_available_missing_symbol_returns_stub():
             signatures.pop("nonexistent_fn", None)
         else:
             signatures["nonexistent_fn"] = prior
+
+
+def _sole_compile_result(dispatcher):
+    """Return the single compiled result on a numba dispatcher."""
+    sigs = dispatcher.nopython_signatures
+    assert len(sigs) == 1, sigs
+    return dispatcher.get_compile_result(sigs[0])
+
+
+def test_proxy_zero_arg_caller_is_cacheable():
+    @njit(cache=True)
+    def caller():
+        return errno_get()
+    caller()
+    assert not _sole_compile_result(caller).library.has_dynamic_globals
+
+
+def test_proxy_single_arg_caller_is_cacheable():
+    @njit(cache=True)
+    def caller(name_p):
+        return getenv(name_p)
+    caller(get_unicode_data_p("NUMBOX_NONEXISTENT_XYZZY"))
+    assert not _sole_compile_result(caller).library.has_dynamic_globals
+
+
+def test_proxy_multi_arg_caller_is_cacheable():
+    @njit(cache=True)
+    def caller(dst, src):
+        memcpy(array_data_p(dst), array_data_p(src), src.nbytes)
+    caller(np.zeros(4, dtype=np.uint8), np.arange(4, dtype=np.uint8))
+    assert not _sole_compile_result(caller).library.has_dynamic_globals
+
+
+def test_proxy_caller_survives_subprocess_round_trip(tmp_path):
+    """Real cross-process cache survival test for @proxy-decorated bindings.
+
+    The heuristic tests above (``has_dynamic_globals is False``) only prove
+    cache *eligibility*. This test proves cache *correctness*: a caller
+    compiled with ``@njit(cache=True)`` against an ``@proxy`` binding
+    actually round-trips through the on-disk cache (.nbi/.nbc files), with
+    the second process loading the cached IR and producing identical output
+    to the cold-cache first process — and neither file is rewritten on the
+    warm run (mtimes preserved).
+
+    ``proxy`` declares the callee's ``llvm_cfunc_wrapper_name`` as an extern
+    in the caller's IR module; llvmlite's JIT linker resolves the symbol per
+    process at cache reload, so cached IR survives ASLR across processes
+    without baking in any runtime address. See the
+    ``assert_njit_cache_survives_subprocess_roundtrip`` helper in
+    ``test/auxiliary_utils.py`` for the full assertion contract.
+    """
+    assert_njit_cache_survives_subprocess_roundtrip(
+        tmp_path,
+        probe_source="""
+            from numba import njit
+            from numbox.core.bindings import errno_get, errno_set
+
+            @njit(cache=True)
+            def caller():
+                errno_set(42)
+                return errno_get()
+
+            v = caller()
+            assert v == 42, f"got {v!r}"
+            print(v)
+        """,
+        expected_stdout_lines=["42"],
+    )
+
+
+def test_orphan_anchor_sweep_spares_fresh_tmp_files():
+    """Concurrent-import race protection: ``_orphan_anchor_sweep`` must not
+    unlink ``.tmp-*`` files that another process just created via
+    ``_materialize_anchor``'s ``mkstemp`` and is about to ``replace`` into
+    place. The age filter (``_ORPHAN_AGE_SECONDS``) ensures only stale
+    files get unlinked.
+    """
+    root = _anchor_root("numbox-structref")
+    root.mkdir(parents=True, exist_ok=True)
+    fresh = root / "test_sweep_race.py.tmp-FRESH"
+    aged = root / "test_sweep_race.py.tmp-AGED"
+    fresh.write_text("fresh content")
+    aged.write_text("aged content")
+    aged_mtime = time.time() - _ORPHAN_AGE_SECONDS - 5
+    os.utime(aged, (aged_mtime, aged_mtime))
+    try:
+        _orphan_anchor_sweep("numbox-structref")
+        assert fresh.exists(), "fresh .tmp-* file was unlinked — race with concurrent writer"
+        assert not aged.exists(), "aged .tmp-* file was NOT unlinked — sweep is broken"
+    finally:
+        fresh.unlink(missing_ok=True)
+        aged.unlink(missing_ok=True)
 
 
 if __name__ == '__main__':
