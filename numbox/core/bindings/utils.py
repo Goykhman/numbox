@@ -2,8 +2,27 @@ from ctypes import CDLL
 from ctypes.util import find_library
 from platform import system
 
+from llvmlite import ir as llir
+from numba.core.types import intp
+
 
 platform_ = system()
+
+
+def intp_ll_type(context=None):
+    """LLVM integer type matching numba's ``intp`` on the current platform.
+
+    Pass the numba codegen ``context`` when available so the type is
+    derived via ``context.get_value_type(intp)`` — the canonical pattern
+    for platform-dependent widths (size_t, ssize_t, ptrdiff_t) in
+    intrinsics. When called outside codegen (test helpers, IR-rendering
+    probes), pass ``None`` for the locked-in fallback
+    ``llir.IntType(intp.bitwidth)``; numba's intp lowering is locked to
+    the same bitwidth, so the two paths produce identical LLVM types.
+    """
+    if context is not None:
+        return context.get_value_type(intp)
+    return llir.IntType(intp.bitwidth)
 
 
 def load_lib(name):

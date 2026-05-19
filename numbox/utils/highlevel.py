@@ -1,7 +1,11 @@
 import hashlib
+import os
 import re
-from inspect import getfile, getmodule, getsource
+import tempfile
+import time
+from inspect import getmodule, getsource
 from io import StringIO
+from pathlib import Path
 from numba import njit
 from numba.core.itanium_mangler import mangle_type_or_value
 from numba.core.types import Type
@@ -174,6 +178,85 @@ def {make_name}({struct_fields_str}):
     return code_txt, fields_types
 
 
+def _anchor_root(subdir: str = "numbox-structref") -> Path:
+    from numba import config
+    from numba.misc.appdirs import AppDirs
+    if config.CACHE_DIR:
+        return Path(config.CACHE_DIR) / subdir
+    return Path(AppDirs(appname="numba", appauthor=False).user_cache_dir) / subdir
+
+
+def _anchor_path(subdir: str, stem: str, code_txt: str) -> Path:
+    """Stable on-disk source anchor for dynamically-exec'd code.
+
+    Content-addressed so identical generated text always resolves to the
+    same path; numba's source-mtime cache key then hits across runs and
+    processes. The anchor is a real file whose contents match the exec'd
+    code line-for-line, so `inspect.getsource` returns the right source.
+    This sidesteps `CPython #122981
+    <https://github.com/python/cpython/issues/122981>`_: on Python 3.13,
+    ``inspect.getsource`` on an exec'd function whose ``co_filename``
+    anchors at an unrelated real file returns whatever happens to live in
+    that file at the recorded ``co_firstlineno`` — typically text that
+    has nothing to do with the actual generated source.
+    """
+    root = _anchor_root(subdir)
+    root.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(code_txt.encode("utf-8")).hexdigest()[:16]
+    return root / f"{stem}_{digest}.py"
+
+
+def _structref_anchor_path(struct_name: str, code_txt: str) -> Path:
+    return _anchor_path("numbox-structref", struct_name, code_txt)
+
+
+def _materialize_anchor(path: Path, code_txt: str) -> None:
+    if path.exists():
+        return
+    fd, tmp_str = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".tmp-")
+    tmp = Path(tmp_str)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(code_txt)
+        tmp.replace(path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+_ORPHAN_AGE_SECONDS = 60
+
+
+def _orphan_anchor_sweep(subdir: str) -> None:
+    """Best-effort cleanup of orphaned ``.tmp-*`` anchor files from SIGKILL'd
+    writers. Called at module import; failures are silent (the orphan is at
+    worst harmless disk usage).
+
+    Only sweeps files whose ``mtime`` is older than ``_ORPHAN_AGE_SECONDS``
+    so a concurrent ``_materialize_anchor`` call in another process —
+    which has the same ``.tmp-*`` shape between ``mkstemp`` and
+    ``replace`` — isn't unlinked mid-flight (the resulting
+    ``FileNotFoundError`` on the in-progress writer's ``replace`` would
+    abort its caller's import).
+    """
+    try:
+        root = _anchor_root(subdir)
+        if not root.exists():
+            return
+        cutoff = time.time() - _ORPHAN_AGE_SECONDS
+        for orphan in root.glob("*.tmp-*"):
+            try:
+                if orphan.stat().st_mtime < cutoff:
+                    orphan.unlink()
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
+_orphan_anchor_sweep("numbox-structref")
+
+
 def make_structref(
     struct_name: str,
     struct_fields: Iterable[str] | dict[str, Type],
@@ -200,6 +283,23 @@ def make_structref(
     without poking the jitted caller can result in a stale cache - when the latter is
     cached. This is not an exclusive limitation of a dynamic structref creation via
     this function and is equally true when the structref definition is coded explicitly.
+
+    Anchor file (Python 3.13 / numba interaction — important)
+    --------------------------------------------------------
+    The generated ``code_txt`` is written to a content-addressed file under
+    numba's cache directory and that file — not ``highlevel.py`` — is used as
+    the ``compile()`` anchor. Without this, numba's cache-save path calls
+    ``inspect.getsourcelines`` on the generated functions, and on Python
+    3.13 the readback returns whatever line of ``highlevel.py`` happens to
+    sit at the recorded ``co_firstlineno`` — unrelated content rather than
+    the actual exec'd source (`CPython #122981
+    <https://github.com/python/cpython/issues/122981>`_). The cache-save
+    path then chokes on the unrelated content (or, worse, silently
+    fingerprints a hash that drifts with every unrelated edit to
+    ``highlevel.py``). The structural fix isn't about *cache invalidation*
+    correctness — that would work fine if ``getsource`` returned the right
+    text — it's about ensuring ``getsource`` returns the *generated* text
+    in the first place. See ``_structref_anchor_path`` for the path scheme.
     """
     code_txt, fields_types = make_structref_code_txt(
         struct_name, struct_fields, struct_type_class, struct_methods
@@ -221,7 +321,9 @@ def make_structref(
             struct_type_class.__name__: struct_type_class
         }
     }
-    code = compile(code_txt, getfile(_file_anchor), mode="exec")
+    anchor = _structref_anchor_path(struct_name, code_txt)
+    _materialize_anchor(anchor, code_txt)
+    code = compile(code_txt, str(anchor), mode="exec")
     exec(code, ns)
     return ns[struct_name]
 
