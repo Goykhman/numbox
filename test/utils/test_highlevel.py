@@ -1,3 +1,6 @@
+import os
+import time
+
 import pytest
 from numba import njit, typeof
 from numba.core.types import float64, int8, unicode_type
@@ -14,6 +17,11 @@ from numbox.utils.highlevel import (
     determine_field_index,
     make_structref,
     make_structref_code_txt,
+)
+from numbox.utils.preprocessing import (
+    _ORPHAN_AGE_SECONDS,
+    _anchor_root,
+    _orphan_anchor_sweep,
 )
 from test.auxiliary_utils import collect_and_run_tests
 from test.common_structrefs import S1Type
@@ -305,6 +313,30 @@ def test_cres_if_available_missing_symbol_returns_stub():
             signatures.pop("nonexistent_fn", None)
         else:
             signatures["nonexistent_fn"] = prior
+
+
+def test_orphan_anchor_sweep_spares_fresh_tmp_files():
+    """Concurrent-import race protection: ``_orphan_anchor_sweep`` must not
+    unlink ``.tmp-*`` files that another process just created via
+    ``_materialize_anchor``'s ``mkstemp`` and is about to ``replace`` into
+    place. The age filter (``_ORPHAN_AGE_SECONDS``) ensures only stale
+    files get unlinked.
+    """
+    root = _anchor_root("numbox-structref")
+    root.mkdir(parents=True, exist_ok=True)
+    fresh = root / "test_sweep_race.py.tmp-FRESH"
+    aged = root / "test_sweep_race.py.tmp-AGED"
+    fresh.write_text("fresh content")
+    aged.write_text("aged content")
+    aged_mtime = time.time() - _ORPHAN_AGE_SECONDS - 5
+    os.utime(aged, (aged_mtime, aged_mtime))
+    try:
+        _orphan_anchor_sweep("numbox-structref")
+        assert fresh.exists(), "fresh .tmp-* file was unlinked — race with concurrent writer"
+        assert not aged.exists(), "aged .tmp-* file was NOT unlinked — sweep is broken"
+    finally:
+        fresh.unlink(missing_ok=True)
+        aged.unlink(missing_ok=True)
 
 
 if __name__ == '__main__':

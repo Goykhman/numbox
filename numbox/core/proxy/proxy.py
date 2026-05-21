@@ -2,6 +2,7 @@ import inspect
 from llvmlite import ir  # noqa: F401
 from numba import njit
 from numba.core import cgutils  # noqa: F401
+from numba.core.types.function_type import CompileResultWAP
 from numba.core.typing.templates import Signature
 from numba.extending import intrinsic  # noqa: F401
 from types import FunctionType as PyFunctionType
@@ -35,6 +36,10 @@ def proxy(sig, jit_options: Optional[dict] = None):
     In case when more than one signature is provided as the `sig` parameter, it is assumed
     that the first signature is the 'main' one while the other ones are supplied to
     allow for the `Omitted` types with default values for (some of) the parameters.
+
+    The returned dispatcher also exposes ``.as_func``: a ``CompileResultWAP``
+    for the main signature. Cacheable as a called jitted function (via the
+    dispatcher); passable as a function-type argument (via ``.as_func``).
 
     See tests for some examples of the use cases.
     """
@@ -74,7 +79,20 @@ def {func_proxy_name}({func_args_str}):
         }
         if ns.get(func_proxy_name) is not None:
             raise ValueError(f"Name {func_proxy_name} in module {inspect.getmodule(func)} is reserved")
-        code = compile(code_txt, inspect.getfile(func), mode='exec')
+        # Anchor the wrapper at func's source file: prepend blank lines so the
+        # wrapper's @njit decorator lands at func.__code__.co_firstlineno (the
+        # user's @proxy decorator line). See docs/numbox.core.proxy.rst —
+        # section "Cache-anchor mechanism" — for the design rationale + the
+        # findsource-finds-@-in-docstring hazard this avoids.
+        code_lines = code_txt.split('\n')
+        njit_lineno_in_txt = next(
+            i + 1 for i, line in enumerate(code_lines) if line.startswith('@njit(')
+        )
+        prepend = max(0, func.__code__.co_firstlineno - njit_lineno_in_txt)
+        prefixed = '\n' * prepend + code_txt
+        code = compile(prefixed, inspect.getfile(func), mode='exec')
         exec(code, ns)
-        return ns[func_proxy_name]
+        dispatcher = ns[func_proxy_name]
+        dispatcher.as_func = CompileResultWAP(func_jit.get_compile_result(main_sig))
+        return dispatcher
     return wrap
