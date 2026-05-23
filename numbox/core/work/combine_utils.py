@@ -9,7 +9,7 @@ from numba.typed.typeddict import Dict
 from typing import Collection
 
 from numbox.core.any.any_type import AnyType, make_any
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import jit_options
 from numbox.core.work.node import Node
 from numbox.core.work.work import Work
 
@@ -54,7 +54,7 @@ def _load_to_array_(array_, sheaf_):""")
     return code_txt.getvalue()
 
 
-@overload(_load_dict_into_array, strict=False, jit_options=default_jit_options)
+@overload(_load_dict_into_array, strict=False, jit_options=jit_options)
 def ol_load_array_row_into_dict(array_ty, sheaf_ty):
     record_ty: Record = array_ty.dtype
     record_fields = record_ty.fields
@@ -66,7 +66,7 @@ def ol_load_array_row_into_dict(array_ty, sheaf_ty):
     return _load_to_array
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def load_dict_into_array(array, sheaf):
     return _load_dict_into_array(array, sheaf)
 

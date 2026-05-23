@@ -8,7 +8,7 @@ from numba.typed import Dict
 from numpy.random import randint, seed
 
 from numbox.core.any.any_type import AnyType
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import jit_options
 from numbox.core.work.loader_utils import load_array_row_into_dict
 from numbox.core.work.lowlevel_work_utils import ll_make_work
 from numbox.utils.highlevel import cres
@@ -34,17 +34,17 @@ def create_pure_inputs(num_of_pure_inputs: int = NUM_OF_PURE_INPUTS_DEFAULT):
     return num_of_pure_inputs, lines
 
 
-@cres(float64(float64), **default_jit_options)
+@cres(float64(float64), **jit_options)
 def calc_1(x):
     return (3.14 + x) / 1.41
 
 
-@cres(float64(float64, float64), **default_jit_options)
+@cres(float64(float64, float64), **jit_options)
 def calc_2(x, y):
     return x * (y - 1.41) + 3.14
 
 
-@cres(float64(float64, float64, float64), **default_jit_options)
+@cres(float64(float64, float64, float64), **jit_options)
 def calc_3(x, y, z):
     return x + y * z if z >= 1 else z * 3 if z >= 0 else x + 2.17 * y + 3.14 * z
 
@@ -101,7 +101,7 @@ def create_nodes(calc_1_, calc_2_, calc_3_):
 
 @timer
 def do_create_nodes(create_nodes_):
-    create_nodes = njit(**default_jit_options)(create_nodes_)
+    create_nodes = njit(**jit_options)(create_nodes_)
     w = create_nodes(calc_1, calc_2, calc_3)
     return w
 
@@ -127,7 +127,7 @@ def prepare_input_data(num_of_sources=NUM_OF_PURE_INPUTS_DEFAULT, num_of_entitie
     return data_
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def run_entity(total, loader_dict):
     total.load(loader_dict)
     total.calculate()
@@ -135,7 +135,7 @@ def run_entity(total, loader_dict):
 
 
 @timer
-@njit(**default_jit_options)
+@njit(**jit_options)
 def run(total, data, loader_dict, num_of_entities=NUM_OF_ENTITIES_DEFAULT):
     total_data = numpy.empty((num_of_entities,), dtype=numpy.float64)
     for i in range(num_of_entities):

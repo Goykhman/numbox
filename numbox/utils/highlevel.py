@@ -14,7 +14,7 @@ from numba.extending import overload, overload_method
 from textwrap import dedent, indent
 from typing import Callable, Iterable, Optional
 
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import jit_options as jit_options_
 from numbox.utils.preprocessing import _materialize_anchor, _structref_anchor_path
 from numbox.utils.standard import make_params_strings
 
@@ -213,7 +213,7 @@ def make_structref(
         struct_name, struct_fields, struct_type_class, struct_methods
     )
     if jit_options is None:
-        jit_options = default_jit_options
+        jit_options = jit_options_
     ns = {
         **getmodule(_file_anchor).__dict__,
         **{

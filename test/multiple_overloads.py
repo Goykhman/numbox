@@ -5,7 +5,7 @@ from numba.core import types
 from numba.experimental import structref
 from numba.extending import overload, overload_method
 
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import jit_options
 
 
 def _file_anchor():
@@ -21,7 +21,7 @@ class Entity(structref.StructRefProxy):
     def __new__(cls, x1):
         return make_entity(x1)
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def calculate(self):
         return self.calculate()
 
@@ -40,7 +40,7 @@ def ol_entity(x1_ty):
     return _
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def make_entity(x1):
     return Entity(x1)
 
@@ -55,7 +55,7 @@ def _make_calculate_code():
     return code_txt.getvalue()
 
 
-@overload_method(EntityTypeClass, "calculate", strict=False, jit_options=default_jit_options)
+@overload_method(EntityTypeClass, "calculate", strict=False, jit_options=jit_options)
 def ol_calculate(entity_ty):
     _calculate = _calculate_registry.get(0, None)
     if _calculate is None:

@@ -2,7 +2,7 @@ import os
 import json
 
 
-def get_default_jit_options():
+def get_jit_options():
     """
     E.g., export NUMBOX_JIT_OPTIONS='{"cache": false}'
     """
@@ -16,7 +16,7 @@ def get_default_jit_options():
         raise ValueError("NUMBOX_JIT_OPTIONS must be valid JSON")
 
 
-default_jit_options = get_default_jit_options()
+jit_options = get_jit_options()
 
 
 MAX_STR_LENGTH = 2 ** 31 - 1

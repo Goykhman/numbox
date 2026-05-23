@@ -7,7 +7,7 @@ from numba.experimental import structref
 from numba.experimental.structref import StructRefProxy, define_boxing, new
 from numba.extending import overload
 
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import jit_options
 
 
 @structref.register
@@ -28,12 +28,12 @@ class Vector(StructRefProxy):
         raise NotImplementedError(deleted_vector_ctor_error)
 
     @property
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def size(self):
         return self.size
 
     @property
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def buf(self):
         return self.buf
 
@@ -93,7 +93,7 @@ def make_vector(elem_type):
     return result
 
 
-@overload(len, jit_options=default_jit_options)
+@overload(len, jit_options=jit_options)
 def _vector_len(v):
     if isinstance(v, VectorTypeClass):
         def impl(v):
@@ -101,7 +101,7 @@ def _vector_len(v):
         return impl
 
 
-@overload(operator.getitem, jit_options=default_jit_options)
+@overload(operator.getitem, jit_options=jit_options)
 def _vector_getitem(v, i):
     if isinstance(v, VectorTypeClass):
         def impl(v, i):
@@ -109,7 +109,7 @@ def _vector_getitem(v, i):
         return impl
 
 
-@overload(operator.setitem, jit_options=default_jit_options)
+@overload(operator.setitem, jit_options=jit_options)
 def _vector_setitem(v, i, val):
     if isinstance(v, VectorTypeClass):
         def impl(v, i, val):
@@ -117,7 +117,7 @@ def _vector_setitem(v, i, val):
         return impl
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def vector_push(v, val):
     if v.size == v.buf.shape[0]:
         new_buf = numpy.empty(v.buf.shape[0] * 2, v.buf.dtype)
@@ -127,7 +127,7 @@ def vector_push(v, val):
     v.size += 1
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def vector_extend(dst, src):
     needed = dst.size + src.size
     cap = dst.buf.shape[0]

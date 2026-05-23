@@ -7,7 +7,7 @@ from numba import njit, typeof
 from numba.core.types import Type
 from typing import Any, Callable, Dict, NamedTuple, Optional, Sequence, Tuple as PyTuple, Union
 
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import jit_options as jit_options_
 from numbox.core.work.lowlevel_work_utils import ll_make_work
 from numbox.utils.highlevel import cres
 
@@ -152,7 +152,7 @@ def make_graph(
     all_inputs_, all_derived_ = infer_end_and_derived_nodes(access_nodes, registry)
     if jit_options is None:
         jit_options = {}
-    jit_options = {**default_jit_options, **jit_options}
+    jit_options = {**jit_options_, **jit_options}
     ns = {
         **getmodule(_file_anchor).__dict__,
         **{"jit_options": jit_options, "ll_make_work": ll_make_work, "njit": njit}

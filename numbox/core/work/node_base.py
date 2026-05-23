@@ -4,7 +4,7 @@ from numba.core.types import StructRef, unicode_type
 from numba.experimental.structref import define_boxing, register, StructRefProxy
 from numba.extending import overload
 
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import jit_options
 
 
 deleted_node_base_ctor_error = "Intended for inheritance."
@@ -15,7 +15,7 @@ class NodeBase(StructRefProxy):
         raise NotImplementedError(deleted_node_base_ctor_error)
 
     @property
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def name(self):
         return self.name
 
@@ -39,4 +39,4 @@ def _node_base_deleted_ctor():
     raise NumbaError(deleted_node_base_ctor_error)
 
 
-overload(NodeBase, jit_options=default_jit_options)(_node_base_deleted_ctor)
+overload(NodeBase, jit_options=jit_options)(_node_base_deleted_ctor)

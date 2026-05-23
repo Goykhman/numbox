@@ -4,7 +4,7 @@ from numba.core.types import Array, DictType, float64, int16, int64, unicode_typ
 from numba.typed.typeddict import Dict
 
 from numbox.core.any.any_type import AnyType
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import jit_options
 from numbox.core.work.loader_utils import load_array_row_into_dict, np_struct_member_type
 from numbox.core.work.lowlevel_work_utils import ll_make_work
 from numbox.utils.highlevel import cres
@@ -33,7 +33,7 @@ def prepare_input_data(num_of_entities=NUM_OF_ENTITIES):
     return data_
 
 
-@njit(void(Array(typeof(data_ty).dtype, 1, "C"), int64, DictType(unicode_type, AnyType)), **default_jit_options)
+@njit(void(Array(typeof(data_ty).dtype, 1, "C"), int64, DictType(unicode_type, AnyType)), **jit_options)
 def aux_load_array_row_into_dict(data, row_ind, loader_dict):
     return load_array_row_into_dict(data, row_ind, loader_dict)
 
@@ -52,7 +52,7 @@ def test_load_array_row_into_dict(num_of_entities=NUM_OF_ENTITIES):
 derive_total_sig = float64(*[np_struct_member_type(data_ty, name) for name in data_ty.names])
 
 
-@cres(derive_total_sig, **default_jit_options)
+@cres(derive_total_sig, **jit_options)
 def derive_total(quantity_, value_, state_):
     if state_ == b"liquid":
         prod_ = 0.1 * quantity_ * value_
@@ -70,7 +70,7 @@ def derive_total(quantity_, value_, state_):
 state_ty = np_struct_member_type(data_ty, "state")
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def make_graph(derive_total_):
     quantity = ll_make_work("quantity", int16(0), (), None)
     value = ll_make_work("value", 0.0, (), None)
@@ -80,14 +80,14 @@ def make_graph(derive_total_):
     return total
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def run_entity(total, loader_dict):
     total.load(loader_dict)
     total.calculate()
     return total.data
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def run(total, data, loader_dict, num_of_entities=NUM_OF_ENTITIES):
     total_data = numpy.empty((num_of_entities,), dtype=float64)
     for i in range(num_of_entities):

@@ -30,7 +30,7 @@ from numba.core import cgutils
 from numba.core.types import DictType, unicode_type, void
 from numba.typed.typeddict import Dict
 
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import jit_options
 from numbox.core.work.node import NodeType
 
 
@@ -76,7 +76,7 @@ def _set_global(typingctx, type_ref, name_ty, v_ty):
 registry_type = DictType(unicode_type, NodeType)
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def set_global(registry_):
     _set_global(registry_type, "_work_registry", registry_)
 

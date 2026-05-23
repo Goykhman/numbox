@@ -6,7 +6,7 @@ from numba import from_dtype
 from numba.core.types import Record, unicode_type
 from numba.extending import overload
 
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import jit_options
 from numbox.core.any.any_type import AnyType, _make_any
 
 
@@ -29,7 +29,7 @@ def _load_to_dict_(array_, row_ind_, loader_dict_):
     return code_txt.getvalue()
 
 
-@overload(load_array_row_into_dict, strict=False, jit_options=default_jit_options)
+@overload(load_array_row_into_dict, strict=False, jit_options=jit_options)
 def ol_load_array_row_into_dict(array_ty, row_ind_ty, loader_dict_ty):
     record_ty: Record = array_ty.dtype
     record_fields = record_ty.fields

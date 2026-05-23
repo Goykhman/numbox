@@ -7,7 +7,7 @@ from numba.core.types import unicode_type
 from numba.typed.typeddict import Dict
 from numba.typed.typedlist import List
 
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import jit_options
 from numbox.core.work.print_tree import make_image
 from numbox.core.work.work_utils import make_init_data, make_work_helper
 from test.auxiliary_utils import collect_and_run_tests
@@ -43,7 +43,7 @@ def calc_val_py(time_array):
 
 def test_simple_time_1():
     val_init_data = make_init_data(shape=(h,), ty=numpy.float64)
-    val = make_work_helper("val", val_init_data, (time,), calc_val_py, default_jit_options)
+    val = make_work_helper("val", val_init_data, (time,), calc_val_py, jit_options)
 
     val.calculate()
 
@@ -130,7 +130,7 @@ def test_dict_data():
         return w1_dict["pi"] * w1_dict["e"]
 
     w2 = make_work_helper(
-        "w2", make_init_data(), sources=(w1,), derive_py=derive_w2, jit_options=default_jit_options
+        "w2", make_init_data(), sources=(w1,), derive_py=derive_w2, jit_options=jit_options
     )
     w2.calculate()
     assert numpy.isclose(w2.data, 3.14 * 2.17)
@@ -147,7 +147,7 @@ def test_list_data():
         return w1_lst[0] * w1_lst[1]
 
     w2 = make_work_helper(
-        "w2", make_init_data(), sources=(w1,), derive_py=derive_w2, jit_options=default_jit_options
+        "w2", make_init_data(), sources=(w1,), derive_py=derive_w2, jit_options=jit_options
     )
     w2.calculate()
     assert numpy.isclose(w2.data, 3.14 * 2.17)
@@ -161,7 +161,7 @@ def test_structref_data_1():
         return w1_struct.x1 * w1_struct.x3 + w1_struct.x2 / (w1_struct.calculate(5.3) + 1)
 
     w2 = make_work_helper(
-        "w2", make_init_data(), sources=(w1,), derive_py=derive_w2, jit_options=default_jit_options
+        "w2", make_init_data(), sources=(w1,), derive_py=derive_w2, jit_options=jit_options
     )
     w2.calculate()
     assert numpy.isclose(w2.data, 12 * 1.41 + 137 / ((137 + 5.3) + 1))
@@ -176,7 +176,7 @@ def test_structref_data_2():
         return w1_struct.x1 * w1_struct.x3 + w1_struct.x2 / (w1_struct.calculate(5.3) + w2_data)
 
     w3 = make_work_helper(
-        "w3", make_init_data(), sources=(w1, w2), derive_py=derive_w3, jit_options=default_jit_options
+        "w3", make_init_data(), sources=(w1, w2), derive_py=derive_w3, jit_options=jit_options
     )
     w3.calculate()
     assert numpy.isclose(w3.data, 12 * 1.41 + 137 / ((137 + 5.3) + 2.31))
@@ -192,7 +192,7 @@ def test_struct_array_data():
         return w2_.item()
 
     w2 = make_work_helper(
-        "w2", make_init_data(), sources=(w1,), derive_py=derive_w2, jit_options=default_jit_options
+        "w2", make_init_data(), sources=(w1,), derive_py=derive_w2, jit_options=jit_options
     )
     w2.calculate()
     assert numpy.isclose(w2.data, 137 * 2.17)

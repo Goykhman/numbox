@@ -2,7 +2,7 @@ from numba.core.types import StructRef
 from numba.experimental.structref import new, register
 from numba.extending import overload
 
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import jit_options
 
 
 @register
@@ -14,7 +14,7 @@ class _Content:
     pass
 
 
-@overload(_Content, strict=False, jit_options=default_jit_options)
+@overload(_Content, strict=False, jit_options=jit_options)
 def ol_content(x_ty):
     content_type = ContentTypeClass([("x", x_ty)])
 

@@ -1,5 +1,5 @@
 from numba import float64, njit
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import jit_options
 from numbox.core.work.work import make_work
 from numbox.core.work.work_utils import make_work_helper, make_init_data
 from numbox.utils.highlevel import cres
@@ -17,13 +17,13 @@ def run_1(w_):
 
 
 def test_cache_1():
-    w1 = make_work_helper("w1", make_init_data(), derive_py=derive_w1, jit_options=default_jit_options)
+    w1 = make_work_helper("w1", make_init_data(), derive_py=derive_w1, jit_options=jit_options)
     assert w1.name == "w1"
     w1_data = run_1(w1)
     assert abs(w1_data - 3.14) < 1e-15
 
 
-@cres(float64(), **default_jit_options)
+@cres(float64(), **jit_options)
 def derive_w2():
     return 3.14
 

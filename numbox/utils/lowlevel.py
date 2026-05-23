@@ -13,7 +13,7 @@ from numba.core.types import (
 from numba.core.typing.context import Context
 from numba.extending import intrinsic
 
-from numbox.core.configurations import default_jit_options, MAX_STR_LENGTH
+from numbox.core.configurations import jit_options, MAX_STR_LENGTH
 from numbox.utils.void_type import VoidType
 from numbox.utils.highlevel import determine_field_index
 
@@ -37,7 +37,7 @@ def _cast(typingctx: Context, source_ty, dest_ty_ref: TypeRef):
     return sig, codegen
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def cast(source, dest_ty):
     """ Cast `source` to the type `dest_ty` """
     return _cast(source, dest_ty)
@@ -63,7 +63,7 @@ def _load_at(typingctx: Context, p_ty, ty_ref: TypeRef):
     return sig, codegen
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def load_at(p, ty):
     """Load a value of type ``ty`` from raw pointer ``p`` (carried as ``intp``).
 
@@ -85,7 +85,7 @@ def _store_at(typingctx: Context, p_ty, v_ty):
     return sig, codegen
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def store_at(p, v):
     """Store ``v`` at raw pointer ``p`` (LLVM type derived from ``v``'s numba type).
 
@@ -113,7 +113,7 @@ def _deref_payload(typingctx: Context, struct_ty, ty_ref: TypeRef):
     return sig, codegen
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def deref_payload(p, ty):
     """ Dereference payload of structref `p` as type `ty` """
     return _deref_payload(p, ty)
@@ -158,7 +158,7 @@ def _get_func_p_as_int_from_func_struct(typingctx, func_ty):
     return intp(func_ty), codegen
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def get_func_p_as_int_from_func_struct(func_):
     return _get_func_p_as_int_from_func_struct(func_)
 
@@ -177,7 +177,7 @@ def _get_func_tuple(typingctx, func_ty):
     return sig, codegen
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def get_func_tuple(func):
     return _get_func_tuple(func)
 
@@ -190,7 +190,7 @@ def get_ll_func_sig(context: BaseContext, func_ty: FunctionType):
     return ir.FunctionType(context.get_data_type(func_sig.return_type), arg_types)
 
 
-@njit(unicode_type(intp), **default_jit_options)
+@njit(unicode_type(intp), **jit_options)
 def get_str_from_p_as_int(p):
     """ Given pointer to null-terminated array of characters as an integer `p`,
     return unicode string object copying the original string's data """
@@ -216,7 +216,7 @@ def _get_unicode_data_p(typingctx, str_ty):
     return intp(str_ty), codegen
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def get_unicode_data_p(s):
     """ Given Python unicode string, return pointer to its data payload,
     array of null-terminated characters.
@@ -305,7 +305,7 @@ def _tuple_of_struct_ptrs_as_int(typingctx: Context, tup_ty: Tuple):
     return sig, codegen
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def tuple_of_struct_ptrs_as_int(tup):
     return _tuple_of_struct_ptrs_as_int(tup)
 
@@ -334,7 +334,7 @@ def _uniformize_tuple_of_structs(typingctx: Context, tup_ty: Tuple, uniform_ty_r
     return sig, codegen
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def uniformize_tuple_of_structs(tup, uniform_ty=VoidType):
     return _uniformize_tuple_of_structs(tup, uniform_ty)
 

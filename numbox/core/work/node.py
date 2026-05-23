@@ -5,7 +5,7 @@ from numba.typed.typedlist import List
 from numba.experimental.structref import define_boxing, new, register
 from numba.extending import overload, overload_method
 
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import jit_options
 from numbox.core.work.node_base import NodeBase, NodeBaseType, NodeBaseTypeClass, node_base_attributes
 from numbox.utils.lowlevel import cast, _cast, _uniformize_tuple_of_structs
 
@@ -15,39 +15,39 @@ class Node(NodeBase):
         return make_node(name, inputs)
 
     @property
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def inputs(self):
         return self.inputs
 
     def get_input(self, i):
         return cast(self._get_input(i), typeof(self))
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def _get_input(self, i):
         return self.get_input(i)
 
     def get_inputs_names(self):
         return list(self._get_inputs_names())
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def _get_inputs_names(self):
         return self.get_inputs_names()
 
     def all_inputs_names(self):
         return list(self._all_inputs_names())
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def _all_inputs_names(self):
         return self.all_inputs_names()
 
     def all_end_nodes(self):
         return list(self._all_end_nodes())
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def _all_end_nodes(self):
         return self.all_end_nodes()
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def depends_on(self, obj_):
         return self.depends_on(obj_)
 
@@ -64,7 +64,7 @@ node_attributes = node_base_attributes + [
 NodeType = NodeTypeClass(node_attributes)
 
 
-@overload(Node, strict=False, jit_options=default_jit_options)
+@overload(Node, strict=False, jit_options=jit_options)
 def ol_node(name_ty, inputs_ty):
     def node_constructor(name, inputs):
         uniform_inputs_tuple = _uniformize_tuple_of_structs(inputs, NodeBaseType)
@@ -78,7 +78,7 @@ def ol_node(name_ty, inputs_ty):
     return node_constructor
 
 
-@overload_method(NodeTypeClass, "get_input", strict=False, jit_options=default_jit_options)
+@overload_method(NodeTypeClass, "get_input", strict=False, jit_options=jit_options)
 def ol_get_input(self_ty, i_ty):
     def _(self, i):
         num_inputs = len(self.inputs)
@@ -88,7 +88,7 @@ def ol_get_input(self_ty, i_ty):
     return _
 
 
-@overload_method(NodeTypeClass, "get_inputs_names", strict=False, jit_options=default_jit_options)
+@overload_method(NodeTypeClass, "get_inputs_names", strict=False, jit_options=jit_options)
 def ol_get_inputs_names(self_ty):
     def _(self):
         names_ = List.empty_list(unicode_type)
@@ -98,7 +98,7 @@ def ol_get_inputs_names(self_ty):
     return _
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def _all_input_names(node_, names_):
     node = _cast(node_, NodeType)
     for i in range(len(node.inputs)):
@@ -109,7 +109,7 @@ def _all_input_names(node_, names_):
         _all_input_names(input_, names_)
 
 
-@overload_method(NodeTypeClass, "all_inputs_names", strict=False, jit_options=default_jit_options)
+@overload_method(NodeTypeClass, "all_inputs_names", strict=False, jit_options=jit_options)
 def ol_all_inputs_names(self_ty):
     def _(self):
         names = List.empty_list(unicode_type)
@@ -123,7 +123,7 @@ def ol_all_inputs_names(self_ty):
     return _
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def _all_end_nodes(node_, names_):
     node = _cast(node_, NodeType)
     for i in range(len(node.inputs)):
@@ -134,7 +134,7 @@ def _all_end_nodes(node_, names_):
         _all_end_nodes(input_, names_)
 
 
-@overload_method(NodeTypeClass, "all_end_nodes", strict=False, jit_options=default_jit_options)
+@overload_method(NodeTypeClass, "all_end_nodes", strict=False, jit_options=jit_options)
 def ol_all_end_nodes(self_ty):
     def _(self):
         names = List.empty_list(unicode_type)
@@ -148,7 +148,7 @@ def ol_all_end_nodes(self_ty):
     return _
 
 
-@overload_method(NodeTypeClass, "depends_on", strict=False, jit_options=default_jit_options)
+@overload_method(NodeTypeClass, "depends_on", strict=False, jit_options=jit_options)
 def ol_depends_on(self_ty, obj_ty):
     if isinstance(obj_ty, (Literal, UnicodeType,)):
         def _(self, name_):
@@ -161,6 +161,6 @@ def ol_depends_on(self_ty, obj_ty):
     return _
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def make_node(name, inputs=()):
     return Node(name, inputs)

@@ -12,7 +12,7 @@ from numba.typed.typeddict import Dict
 from numba.typed.typedlist import List
 
 from numbox.core.any.erased_type import ErasedType
-from numbox.core.configurations import default_jit_options
+from numbox.core.configurations import jit_options
 from numbox.core.work.lowlevel_work_utils import ll_make_work, WorkTypeClass
 from numbox.core.work.node import NodeType
 from numbox.core.work.node_base import NodeBase, NodeBaseType
@@ -59,76 +59,76 @@ class Work(NodeBase):
         raise NotImplementedError(deleted_work_ctor_error)
 
     @property
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def inputs(self):
         return self.inputs
 
     @property
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def data(self):
         return self.data
 
     @property
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def sources(self):
         return self.sources
 
     @property
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def derive(self):
         return _get_func_tuple(self.derive)
 
     @property
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def derived(self):
         return self.derived
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def as_node(self):
         return self.as_node()
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def calculate(self):
         return self.calculate()
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def load(self, data):
         return self.load(data)
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def combine(self, data):
         return self.combine(data)
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def get_input(self, i):
         return self.get_input(i)
 
     def get_inputs_names(self):
         return list(self._get_inputs_names())
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def _get_inputs_names(self):
         return self.get_inputs_names()
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def make_inputs_vector(self):
         return self.make_inputs_vector()
 
     def all_inputs_names(self):
         return list(self._all_inputs_names())
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def _all_inputs_names(self):
         return self.all_inputs_names()
 
     def all_end_nodes(self):
         return list(self._all_end_nodes())
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def _all_end_nodes(self):
         return self.all_end_nodes()
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def depends_on(self, obj_):
         return self.depends_on(obj_)
 
@@ -140,10 +140,10 @@ def _deleted_work_ctor(*args, **kwargs):
     raise NumbaError(deleted_work_ctor_error)
 
 
-overload(Work, jit_options=default_jit_options)(_deleted_work_ctor)
+overload(Work, jit_options=jit_options)(_deleted_work_ctor)
 
 
-@njit(**default_jit_options)
+@njit(**jit_options)
 def make_work(name, data, sources=(), derive=None):
     return ll_make_work(name, data, sources, derive)
 
@@ -216,7 +216,7 @@ def ensure_presence_of_source_getters_in_ns(num_sources_, ns_):
         _source_getter_registry[source_i] = True
 
 
-@overload_method(WorkTypeClass, "calculate", strict=False, jit_options=default_jit_options)
+@overload_method(WorkTypeClass, "calculate", strict=False, jit_options=jit_options)
 def ol_calculate(self_ty):
     derive_ty = self_ty.field_dict["derive"]
     if isinstance(derive_ty, NoneType):
@@ -284,7 +284,7 @@ def _loader_(work_, data_):
 _loader_registry = {}
 
 
-@overload_method(WorkTypeClass, "load", strict=False, jit_options=default_jit_options)
+@overload_method(WorkTypeClass, "load", strict=False, jit_options=jit_options)
 def ol_load(work_ty, data_ty: DictType):
     """ Load `data` into the graph with the root node `work`.
      Data is provided as dictionary mapping node name to `Any` type
@@ -333,7 +333,7 @@ def _combine_(work_, data_, harvested_=None):
 _combine_registry = {}
 
 
-@overload_method(WorkTypeClass, "combine", strict=False, jit_options=default_jit_options)
+@overload_method(WorkTypeClass, "combine", strict=False, jit_options=jit_options)
 def ol_combine(work_ty, data_ty: DictType, harvested_ty=NoneType):
     """ Harvest nodes data from the graph with the root node `work`.
      `data` is provided as dictionary mapping node name to `Any` type
@@ -353,7 +353,7 @@ def ol_combine(work_ty, data_ty: DictType, harvested_ty=NoneType):
     return _combine
 
 
-@overload_method(WorkTypeClass, "get_input", strict=False, jit_options=default_jit_options)
+@overload_method(WorkTypeClass, "get_input", strict=False, jit_options=jit_options)
 def ol_get_input(self_ty, i_ty):
     def _(self, i):
         num_inputs = len(self.inputs)
@@ -364,7 +364,7 @@ def ol_get_input(self_ty, i_ty):
     return _
 
 
-@overload_method(WorkTypeClass, "get_inputs_names", strict=False, jit_options=default_jit_options)
+@overload_method(WorkTypeClass, "get_inputs_names", strict=False, jit_options=jit_options)
 def ol_get_inputs_names(self_ty):
     def _(self):
         names_ = List.empty_list(unicode_type)
@@ -399,7 +399,7 @@ def _inputs_vector_(work_):
 _inputs_vector_registry = {}
 
 
-@overload_method(WorkTypeClass, "make_inputs_vector", strict=False, jit_options=default_jit_options)
+@overload_method(WorkTypeClass, "make_inputs_vector", strict=False, jit_options=jit_options)
 def ol_make_inputs_vector(self_ty):
     sources_ty = self_ty.field_dict["sources"]
     num_sources = sources_ty.count
@@ -421,7 +421,7 @@ def ol_make_inputs_vector(self_ty):
     return _inputs_vector
 
 
-@overload_method(WorkTypeClass, "as_node", strict=False, jit_options=default_jit_options)
+@overload_method(WorkTypeClass, "as_node", strict=False, jit_options=jit_options)
 def ol_as_node(self_ty):
     def _(self):
         node = self.node
@@ -435,7 +435,7 @@ def ol_as_node(self_ty):
     return _
 
 
-@overload_method(WorkTypeClass, "all_inputs_names", strict=False, jit_options=default_jit_options)
+@overload_method(WorkTypeClass, "all_inputs_names", strict=False, jit_options=jit_options)
 def ol_all_inputs_names(self_ty):
     def _(self):
         node = self.as_node()
@@ -443,7 +443,7 @@ def ol_all_inputs_names(self_ty):
     return _
 
 
-@overload_method(WorkTypeClass, "all_end_nodes", strict=False, jit_options=default_jit_options)
+@overload_method(WorkTypeClass, "all_end_nodes", strict=False, jit_options=jit_options)
 def ol_all_end_nodes(self_ty):
     def _(self):
         node = self.as_node()
@@ -451,7 +451,7 @@ def ol_all_end_nodes(self_ty):
     return _
 
 
-@overload_method(WorkTypeClass, "depends_on", strict=False, jit_options=default_jit_options)
+@overload_method(WorkTypeClass, "depends_on", strict=False, jit_options=jit_options)
 def ol_depends_on(self_ty, obj_ty):
     if isinstance(obj_ty, (Literal, UnicodeType,)):
         def _(self, name_):
