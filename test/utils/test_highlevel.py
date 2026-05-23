@@ -21,6 +21,7 @@ from numbox.utils.highlevel import (
 from numbox.utils.preprocessing import (
     _ORPHAN_AGE_SECONDS,
     _anchor_root,
+    _materialize_anchor,
     _orphan_anchor_sweep,
 )
 from test.auxiliary_utils import collect_and_run_tests
@@ -337,6 +338,19 @@ def test_orphan_anchor_sweep_spares_fresh_tmp_files():
     finally:
         fresh.unlink(missing_ok=True)
         aged.unlink(missing_ok=True)
+
+
+def test_materialize_anchor_writes_utf8_bytes(tmp_path):
+    """Anchor file must be written as utf-8 to match ``_anchor_path``'s
+    sha256(content.encode('utf-8')) addressing. On Windows the default
+    encoding from ``os.fdopen`` can be cp1252; explicit utf-8 ensures
+    round-trip integrity for non-ASCII source AND keeps the bytes-on-disk
+    consistent with the path hash.
+    """
+    content = "# café — non-ASCII sentinel\nx = 1\n"
+    anchor = tmp_path / "anchor.py"
+    _materialize_anchor(anchor, content)
+    assert anchor.read_bytes() == content.encode("utf-8")
 
 
 if __name__ == '__main__':

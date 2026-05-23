@@ -10,6 +10,8 @@ from numba.core.types import (
     boolean, FunctionType, intp, StructRef, TypeRef, Tuple, char,
     UnicodeType, unicode_type, uintp, UniTuple, void, voidptr
 )
+from numba.core.types.misc import unliteral
+from numba.core.errors import TypingError
 from numba.core.typing.context import Context
 from numba.extending import intrinsic
 
@@ -53,6 +55,10 @@ def _cast_int_to_void_p(typingctx, p_ty):
 
 @intrinsic
 def _load_at(typingctx: Context, p_ty, ty_ref: TypeRef):
+    if unliteral(p_ty) not in (intp, uintp):
+        raise TypingError(
+            f"load_at: pointer argument must be intp or uintp, got {p_ty}"
+        )
     ty = ty_ref.instance_type
     sig = ty(p_ty, ty_ref)
 
@@ -75,6 +81,10 @@ def load_at(p, ty):
 
 @intrinsic
 def _store_at(typingctx: Context, p_ty, v_ty):
+    if unliteral(p_ty) not in (intp, uintp):
+        raise TypingError(
+            f"store_at: pointer argument must be intp or uintp, got {p_ty}"
+        )
     sig = void(p_ty, v_ty)
 
     def codegen(context: BaseContext, builder, signature, args):

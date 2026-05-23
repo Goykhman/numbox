@@ -989,7 +989,9 @@ def test_njit_writer_rejects_tuple_arg(fn_name):
 
 @pytest.mark.parametrize(
     "fmt", ["%n", "%ln", "%lln", "%hn", "%hhn", "%5n", "%5.3n", "before %n after",
-            "%qn", "%I32n", "%I64n"]
+            "%qn", "%I32n", "%I64n",
+            "%1$n", "%2$n", "%1$ln", "%99$n",
+            "%1$*2$n", "%1$.*2$n", "%1$*2$.*3$n"]
 )
 def test_njit_printf_rejects_percent_n(fmt):
     """``%n`` writes the byte-count-written-so-far through a caller pointer
@@ -1077,6 +1079,19 @@ def test_python_printf_rejects_percent_n():
         printf("count=%n", 42)
 
 
+@pytest.mark.parametrize("fmt", ["%1$n", "%2$n", "%1$ln", "%99$n",
+                                  "%1$*2$n", "%1$.*2$n", "%1$*2$.*3$n"])
+def test_python_printf_rejects_positional_percent_n(fmt):
+    """POSIX positional argument specifier (``%N$n``) is just as much of a
+    memory-write hazard as plain ``%n`` — glibc supports it, and a literal
+    format string carrying ``%1$n`` would bypass a regex that only
+    recognized ``%n``. The positional `*N$` forms for width / precision
+    (``%1$*2$n``, ``%1$.*2$n``) are also valid POSIX shapes that must
+    be rejected. Reject defense-in-depth."""
+    with pytest.raises(ValueError, match="%n.*not allowed"):
+        printf(fmt, 42)
+
+
 def test_python_fprintf_rejects_percent_n():
     with pytest.raises(ValueError, match="%n.*not allowed"):
         fprintf(stdout(), "count=%n", 42)
@@ -1105,3 +1120,18 @@ def test_python_printf_accepts_literal_percent_percent_n(capfd):
     assert rc == len("100%n done\n")
     out, _ = capfd.readouterr()
     assert out == "100%n done\n"
+
+
+@pytest.mark.parametrize("modifier", ["z", "j", "t", "q", "I32", "I64"])
+def test_python_printf_strips_extended_length_modifiers(modifier, capfd):
+    """Pure-Python printf must strip C length modifiers ``j``/``z``/``t``/
+    ``q``/``I32``/``I64`` (parallel to the existing ``hh``/``ll``/``h``/
+    ``l``/``L`` set) so the resulting format string is acceptable to
+    Python's ``%`` operator. Without stripping, Python raises
+    ``ValueError`` on the unrecognized format spec — breaking the dual-
+    mode equivalence promise with the ``@njit`` path (which accepts all
+    of these via the libc binding)."""
+    rc = printf(f"%{modifier}d\n", 42)
+    out, _ = capfd.readouterr()
+    assert out == "42\n", repr(out)
+    assert rc == 3

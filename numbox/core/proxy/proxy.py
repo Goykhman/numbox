@@ -96,3 +96,34 @@ def {func_proxy_name}({func_args_str}):
         dispatcher.as_func = CompileResultWAP(func_jit.get_compile_result(main_sig))
         return dispatcher
     return wrap
+
+
+def proxy_if_available(lib, sig, jit_options: Optional[dict] = None):
+    """Like ``proxy(sig, jit_options=...)``, but stubs out the wrapper if
+    the C symbol matching ``func.__name__`` is absent from ``lib``.
+
+    Use for binding sets that target multiple library versions where some
+    symbols only exist in newer releases. Callers get a stub that raises
+    ``NotImplementedError`` instead of a confusing LLVM link error at call
+    time. Parallel to ``cres_if_available`` in :mod:`numbox.utils.highlevel`.
+
+    The stub does NOT expose ``.as_func`` — a function-value handle is
+    meaningless without an underlying jitted body, and a stub one would
+    have to either raise on attribute access (ugly) or pretend to be a
+    function value (worse). Callers that pass ``.as_func`` to function-
+    type arguments must guard the access::
+
+        if hasattr(my_binding, "as_func"):
+            use(my_binding.as_func)
+    """
+    def _(func):
+        if hasattr(lib, func.__name__):
+            return proxy(sig, jit_options=jit_options)(func)
+
+        def stub(*args, **_kwargs):
+            raise NotImplementedError(f"{func.__name__} is not available")
+        stub.__name__ = make_proxy_name(func.__name__)
+        stub.__qualname__ = func.__qualname__
+        stub.__doc__ = func.__doc__
+        return stub
+    return _
