@@ -1,11 +1,16 @@
+import math
 import re
 
 import numpy as np
+import pytest
 from numba import float64, njit
 from numba.core.types import Omitted
+from numba.core.types.function_type import CompileResultWAP
 
 from numbox.core.bindings import errno_get, getenv, memcpy
-from numbox.core.proxy.proxy import proxy, make_proxy_name
+from numbox.core.bindings.call import _call_lib_func
+from numbox.core.bindings.utils import load_lib_path, platform_
+from numbox.core.proxy.proxy import proxy, proxy_if_available, make_proxy_name
 from numbox.utils.lowlevel import array_data_p, get_unicode_data_p
 from test.auxiliary_utils import (
     assert_njit_cache_survives_subprocess_roundtrip,
@@ -112,6 +117,61 @@ def test_proxy_caller_survives_subprocess_round_trip(tmp_path):
         """,
         expected_stdout_lines=["42"],
     )
+
+
+def _locate_libm():
+    """Find a math/libc library with at least the ``cos`` symbol."""
+    if platform_ == "Windows":
+        from ctypes.util import find_msvcrt
+        return find_msvcrt()
+    from ctypes.util import find_library
+    return find_library("m")
+
+
+def test_proxy_if_available_present_symbol_returns_real_proxy():
+    """When the C symbol is present, ``proxy_if_available`` returns a
+    real ``@proxy``-wrapped dispatcher with ``.as_func`` attached."""
+    lib_path = _locate_libm()
+    if lib_path is None:
+        pytest.skip("No suitable math/C runtime library discoverable")
+    lib = load_lib_path(lib_path)
+
+    @proxy_if_available(lib, float64(float64), jit_options={"cache": True})
+    def cos(x):
+        return _call_lib_func("cos", (x,))
+
+    assert hasattr(cos, "as_func")
+    assert isinstance(cos.as_func, CompileResultWAP)
+    assert abs(cos(0.5) - math.cos(0.5)) < 1e-15
+
+
+def test_proxy_if_available_missing_symbol_returns_stub():
+    """When the C symbol is absent, ``proxy_if_available`` returns a
+    Python stub that raises ``NotImplementedError`` on call. The stub
+    intentionally lacks ``.as_func`` (see helper docstring).
+
+    Stub metadata matches the real ``@proxy`` dispatcher where applicable:
+    ``__name__`` is prefixed via :func:`make_proxy_name` (so callers
+    that ``repr()`` or log the binding see the same shape regardless
+    of whether the symbol was available); ``__qualname__`` and
+    ``__doc__`` preserve the user-side function for debugging.
+    """
+    lib_path = _locate_libm()
+    if lib_path is None:
+        pytest.skip("No suitable math/C runtime library discoverable")
+    lib = load_lib_path(lib_path)
+
+    @proxy_if_available(lib, float64(float64))
+    def nonexistent_fn(x):
+        """Docstring on the stub-target for metadata-preservation check."""
+        return x
+
+    assert nonexistent_fn.__name__ == make_proxy_name("nonexistent_fn")
+    assert nonexistent_fn.__qualname__.endswith("nonexistent_fn")
+    assert nonexistent_fn.__doc__ == "Docstring on the stub-target for metadata-preservation check."
+    assert not hasattr(nonexistent_fn, "as_func")
+    with pytest.raises(NotImplementedError, match="nonexistent_fn is not available"):
+        nonexistent_fn(1.0)
 
 
 if __name__ == "__main__":

@@ -10,8 +10,8 @@ from numbox.utils.meminfo import get_nrt_refcount, structref_meminfo
 from numbox.utils.highlevel import cres
 from numbox.utils.lowlevel import (
     cast, deref_payload, extract_struct_member, get_func_p_as_int_from_func_struct,
-    get_func_tuple, get_str_from_p_as_int, get_unicode_data_p, numba_version,
-    tuple_of_struct_ptrs_as_int, uniformize_tuple_of_structs
+    get_func_tuple, get_str_from_p_as_int, get_unicode_data_p, load_at, numba_version,
+    store_at, tuple_of_struct_ptrs_as_int, uniformize_tuple_of_structs
 )
 from test.auxiliary_utils import collect_and_run_tests, deref_int64_intp, str_from_p_as_int
 from test.common_structrefs import ll_make_s4, S1, S1Type, S12, S12Type, S2
@@ -251,6 +251,67 @@ def test_array_data_p_njit():
 
     arr = numpy.arange(4, dtype=numpy.int32)
     assert wrap(arr) == arr.ctypes.data
+
+
+def test_load_at_store_at_int32_roundtrip():
+    """Positive path: store an int32 at an intp pointer, load it back."""
+    import numpy
+    from numba import int32, njit
+    from numbox.utils.lowlevel import array_data_p
+
+    @njit
+    def roundtrip(arr, value):
+        p = array_data_p(arr)
+        store_at(p, int32(value))
+        return load_at(p, int32)
+
+    arr = numpy.zeros(1, dtype=numpy.int32)
+    assert roundtrip(arr, 12345) == 12345
+
+
+def test_load_at_rejects_non_intp_pointer():
+    """The pointer is contract-carried as ``intp`` — accepting any integer
+    width would silently truncate addresses on inttoptr (an int32 pointer
+    captures only the low 32 bits of the real address)."""
+    from numba import int32, njit
+    from numba.core.errors import TypingError
+    with pytest.raises(TypingError, match="intp"):
+        @njit(int32(int32))
+        def bad_call(p):
+            return load_at(p, int32)
+
+
+def test_store_at_rejects_non_intp_pointer():
+    """Parallel guard for ``store_at``."""
+    from numba import int32, njit, void
+    from numba.core.errors import TypingError
+    with pytest.raises(TypingError, match="intp"):
+        @njit(void(int32, int32))
+        def bad_call(p, v):
+            store_at(p, v)
+
+
+def test_load_at_accepts_integer_literal_pointer():
+    """Integer literals in ``@njit`` are typed as ``IntegerLiteral``, not
+    ``intp``. The guard uses ``unliteral()`` so callers can pass literal
+    pointers (e.g. compile-time-known addresses) without hitting a
+    spurious TypingError. We only compile — calling a literal-zero
+    pointer would segfault, but compilation is enough to exercise the
+    typing-time guard."""
+    from numba import int32, njit
+    @njit("int32()")
+    def kernel():
+        return load_at(0, int32)
+    assert kernel is not None
+
+
+def test_store_at_accepts_integer_literal_pointer():
+    """Parallel literal-acceptance for ``store_at``."""
+    from numba import int32, njit
+    @njit("void()")
+    def kernel():
+        store_at(0, int32(42))
+    assert kernel is not None
 
 
 if __name__ == '__main__':

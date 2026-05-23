@@ -42,7 +42,7 @@ def _materialize_anchor(path: Path, code_txt: str) -> None:
     fd, tmp_str = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".tmp-")
     tmp = Path(tmp_str)
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
             f.write(code_txt)
         tmp.replace(path)
     except BaseException:

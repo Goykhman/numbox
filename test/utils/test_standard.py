@@ -64,5 +64,50 @@ def test_make_params_strings_rejects_combined_var_args_and_kwargs():
         make_params_strings(f)
 
 
+def test_make_params_strings_string_default_uses_repr():
+    """String defaults must round-trip through the generated source.
+
+    ``str("hello") == "hello"`` (no quotes) which is invalid as a
+    default-value expression — it would parse as a bare identifier
+    and NameError at exec time. ``repr("hello") == "'hello'"`` round-
+    trips correctly.
+    """
+    def f(x="hello"):
+        pass
+    sig, call = make_params_strings(f)
+    assert sig == "x='hello'"
+    assert call == "x"
+    namespace = {}
+    exec(f"def wrapper({sig}): return x", namespace)
+    assert namespace["wrapper"]() == "hello"
+
+
+def test_make_params_strings_none_default_round_trips():
+    """None default — both str and repr produce ``"None"``; pin the
+    repr fix didn't break the case that ``str`` handled correctly."""
+    def f(x=None):
+        pass
+    sig, _ = make_params_strings(f)
+    assert sig == "x=None"
+    namespace = {}
+    exec(f"def wrapper({sig}): return x", namespace)
+    assert namespace["wrapper"]() is None
+
+
+@pytest.mark.parametrize("bad_float", [float('nan'), float('inf'), float('-inf')])
+def test_make_params_strings_nan_inf_floats_documented_no_roundtrip(bad_float):
+    """nan/inf floats render via repr() to bare identifiers (``nan`` /
+    ``inf`` / ``-inf``) which are not valid Python expressions and raise
+    NameError at exec time. The docstring documents this as a known
+    limitation. Pin the behavior so the gotcha stays visible if the
+    codepath ever changes."""
+    def f(x=bad_float):
+        pass
+    sig, _ = make_params_strings(f)
+    namespace = {}
+    with pytest.raises(NameError):
+        exec(f"def wrapper({sig}): return x", namespace)
+
+
 if __name__ == '__main__':
     collect_and_run_tests(__name__)

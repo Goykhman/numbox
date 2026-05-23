@@ -24,14 +24,15 @@ def make_params_strings(func):
     wrapper exposes ``f(x, y=default)`` so callers can pass ``y``
     positionally as well. Documented at :func:`numbox.core.proxy.proxy`.
 
-    Default-argument values are formatted via ``str(default)`` —
-    primitives whose ``str()`` is a valid Python expression (ints,
-    floats, strings, ``None``, booleans) round-trip; complex objects
-    whose ``str()`` is e.g. ``"<MyClass object at 0x...>"`` would render
-    to invalid source. We don't reject defaults because plain numeric
-    defaults are in active use; non-trivial defaults raise
-    ``SyntaxError`` / ``NameError`` at exec time — a visible failure,
-    not a silent miscompile.
+    Default-argument values are formatted via ``repr(default)`` —
+    primitives whose ``repr()`` is a valid Python expression (ints,
+    finite floats, strings, ``None``, booleans, tuples thereof) round-
+    trip. Non-round-tripping exceptions: ``float('nan')`` /
+    ``float('inf')`` render as bare identifiers ``nan`` / ``inf`` and
+    ``NameError`` at exec time; complex objects whose ``repr()`` is e.g.
+    ``"<MyClass object at 0x...>"`` likewise render to invalid source and
+    raise ``SyntaxError`` / ``NameError``. These are visible failures,
+    not silent miscompiles.
     """
     func_params = inspect.signature(func).parameters
     for name, p in func_params.items():
@@ -42,7 +43,7 @@ def make_params_strings(func):
                 f"use explicit positional-or-keyword parameters"
             )
     func_params_str = ', '.join(
-        [k if v.default == inspect._empty else f'{k}={v.default}' for k, v in func_params.items()]
+        [k if v.default == inspect._empty else f'{k}={v.default!r}' for k, v in func_params.items()]
     )
     func_names_params_str = ', '.join(func_params.keys())
     return func_params_str, func_names_params_str
