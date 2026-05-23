@@ -1,6 +1,6 @@
 import hashlib
 import re
-from inspect import getfile, getmodule, getsource
+from inspect import getmodule, getsource
 from io import StringIO
 from numba import njit
 from numba.core.itanium_mangler import mangle_type_or_value
@@ -15,6 +15,7 @@ from textwrap import dedent, indent
 from typing import Callable, Iterable, Optional
 
 from numbox.core.configurations import default_jit_options
+from numbox.utils.preprocessing import _materialize_anchor, _structref_anchor_path
 from numbox.utils.standard import make_params_strings
 
 
@@ -200,6 +201,13 @@ def make_structref(
     without poking the jitted caller can result in a stale cache - when the latter is
     cached. This is not an exclusive limitation of a dynamic structref creation via
     this function and is equally true when the structref definition is coded explicitly.
+
+    Anchor file
+    -----------
+    The generated ``code_txt`` is written to a content-addressed file
+    under numba's cache directory and that file -- not ``highlevel.py``
+    -- is used as the ``compile()`` anchor. See the "Cache-anchor
+    mechanism" section in ``docs/numbox.utils.rst`` for the rationale.
     """
     code_txt, fields_types = make_structref_code_txt(
         struct_name, struct_fields, struct_type_class, struct_methods
@@ -221,7 +229,9 @@ def make_structref(
             struct_type_class.__name__: struct_type_class
         }
     }
-    code = compile(code_txt, getfile(_file_anchor), mode="exec")
+    anchor = _structref_anchor_path(struct_name, code_txt)
+    _materialize_anchor(anchor, code_txt)
+    code = compile(code_txt, str(anchor), mode="exec")
     exec(code, ns)
     return ns[struct_name]
 

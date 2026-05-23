@@ -11,6 +11,35 @@ signatures_c = {
     "srand": void(int32),
     "strlen": intp(intp),
     "lldiv": lldiv_t(int64, int64),
+    # === stdio (non-variadic) ===
+    "puts": int32(intp),
+    "fputs": int32(intp, intp),
+    "fputc": int32(int32, intp),
+    "putchar": int32(int32),
+    "fwrite": intp(intp, intp, intp, intp),
+    "fread": intp(intp, intp, intp, intp),
+    "fflush": int32(intp),
+    "fopen": intp(intp, intp),
+    "fclose": int32(intp),
+    "feof": int32(intp),
+    "ferror": int32(intp),
+    "clearerr": void(intp),
+    # === strings ===
+    "strcmp": int32(intp, intp),
+    "strncmp": int32(intp, intp, intp),
+    "strchr": intp(intp, int32),
+    "strrchr": intp(intp, int32),
+    "strstr": intp(intp, intp),
+    "strncpy": intp(intp, intp, intp),
+    "strerror": intp(int32),
+    # === memory ===
+    "memcpy": intp(intp, intp, intp),
+    "memmove": intp(intp, intp, intp),
+    "memset": intp(intp, int32, intp),
+    "memcmp": int32(intp, intp, intp),
+    "memchr": intp(intp, int32, intp),
+    # === env ===
+    "getenv": intp(intp),
 }
 
 signatures_m = {
