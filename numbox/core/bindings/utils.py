@@ -116,44 +116,38 @@ _loaded_libs = {}
 
 
 def load_lib(name):
-    """Load library ``name`` in global symbol mode; cache + retain the
-    CDLL handle in ``_loaded_libs`` so it survives any single caller's
-    scope. Legacy contract: returns None.
+    """Load library ``name`` in global symbol mode and return the cached
+    CDLL handle. Loads on first call; subsequent calls return the same
+    handle from ``_loaded_libs``.
 
-    Caching matters because ``ctypes.CDLL.__del__`` calls ``dlclose`` /
-    ``FreeLibrary``; if the only reference is a local variable in this
-    function, the OS-level reference count drops to zero on return and
+    ``find_library`` is a relatively basic utility that mostly just
+    prefixes ``lib`` and suffixes the platform extension. When binding
+    user-compiled shared libraries that aren't on the system loader's
+    default search path, consider setting ``DYLD_LIBRARY_PATH`` (macOS)
+    or ``LD_LIBRARY_PATH`` (Linux) before the first ``load_lib`` call;
+    the loader consults those env vars before its built-in search. For
+    full control over the path, use :func:`load_lib_path` instead.
+
+    Caching pins the handle for the process lifetime so modules can
+    share it without cross-module imports. It also matters because
+    ``ctypes.CDLL.__del__`` calls ``dlclose`` / ``FreeLibrary``; without
+    retention, the OS-level reference count drops to zero on return and
     the library can be unloaded — invalidating any extern-ref symbols
-    LLVM's JIT linker already resolved into module IR.
-    """
-    get_loaded_lib(name)
-
-
-def get_loaded_lib(name):
-    """Cached form of ``load_lib_with_handle``. Loads on first call,
-    returns the cached CDLL handle on subsequent calls.
-
-    Use this whenever a module needs the handle for ``proxy_if_available``
-    or for ``hasattr(handle, func_name)`` symbol-presence checks. Storing
-    in ``_loaded_libs`` pins the handle for the process lifetime so other
-    modules can share it without cross-module imports (avoids coupling
-    e.g. ``_sqlite_column`` to ``_sqlite_conn`` just to get ``_sqlite3_lib``).
+    LLVM's JIT linker already resolved into module IR. Returning the
+    handle also enables ``proxy_if_available`` to query symbol presence
+    via ``hasattr(handle, func_name)``.
     """
     handle = _loaded_libs.get(name)
     if handle is None:
-        handle = load_lib_with_handle(name)
+        handle = _load_lib_with_handle(name)
         _loaded_libs[name] = handle
     return handle
 
 
-def load_lib_with_handle(name):
-    """Load library ``name`` in global symbol mode AND return the CDLL handle.
-
-    Returning the handle enables ``proxy_if_available`` to query symbol
-    presence via ``hasattr(handle, func_name)``. The caller is responsible
-    for keeping the returned handle alive — for shared-across-modules
-    use, prefer ``get_loaded_lib(name)`` which caches it in a
-    module-level dict so it outlives any single caller's scope.
+def _load_lib_with_handle(name):
+    """Internal: resolve ``name`` via :func:`_resolve_lib_path` and load
+    the resulting library in global symbol mode, returning the CDLL
+    handle. Use :func:`load_lib` instead — it caches.
     """
     path = _resolve_lib_path(name)
     if path is None:
@@ -171,14 +165,15 @@ def load_lib_with_handle(name):
 
 
 def load_lib_path(path):
-    """Load a shared library by ``ctypes.CDLL``-acceptable identifier.
+    """Load a shared library by ``ctypes.CDLL``-acceptable identifier
+    and return the handle (uncached).
 
     Accepts any string ``CDLL`` accepts — an absolute path, a soname
     (e.g. ``libm.so.6`` as returned by ``ctypes.util.find_library``), or
     a bare filename resolvable by the loader. Linux/Darwin use
     ``RTLD_GLOBAL`` so symbols reach LLVM's JIT; Windows uses
-    ``winmode=0``. Unlike ``load_lib(name)``, the handle is returned so
-    callers can check symbol presence with ``hasattr``.
+    ``winmode=0``. Prefer :func:`load_lib` when the library is
+    referenced by name and across multiple modules in the same process.
     """
     if platform_ in ("Darwin", "Linux"):
         from os import RTLD_GLOBAL

@@ -1,6 +1,6 @@
 """SQLite connection + metadata bindings.
 
-Resolves the shared library via ``get_loaded_lib("sqlite3")`` from
+Resolves the shared library via ``load_lib("sqlite3")`` from
 ``utils._loaded_libs``. Other ``_sqlite_*.py`` modules (currently
 ``_sqlite_column``) call the same getter rather than importing
 ``_sqlite3_lib`` from here, so there's no cross-module dependency on
@@ -17,7 +17,7 @@ to the int32 variants.
 """
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
-from numbox.core.bindings.utils import get_loaded_lib
+from numbox.core.bindings.utils import load_lib
 from numbox.core.proxy.proxy import proxy, proxy_if_available
 
 __all__ = [
@@ -31,7 +31,7 @@ __all__ = [
 ]
 
 
-_sqlite3_lib = get_loaded_lib("sqlite3")
+_sqlite3_lib = load_lib("sqlite3")
 
 
 @proxy(signatures.get("sqlite3_open"), jit_options={"cache": True})

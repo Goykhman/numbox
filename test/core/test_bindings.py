@@ -58,12 +58,9 @@ def test_load_lib_path_returns_handle_with_known_symbol():
     assert hasattr(lib, "cos")
 
 
-def test_load_lib_with_handle_returns_queryable_handle():
-    """load_lib_with_handle must return a CDLL the caller can hasattr-query —
-    that's the whole point of the refactor (proxy_if_available uses hasattr)."""
-    from numbox.core.bindings.utils import load_lib_with_handle
-    name = "c"
-    handle = load_lib_with_handle(name)
+def test_load_lib_returns_queryable_handle():
+    from numbox.core.bindings.utils import load_lib
+    handle = load_lib("c")
     assert handle is not None
     # strlen is in libc on every supported platform
     assert hasattr(handle, "strlen")
