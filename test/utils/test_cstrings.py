@@ -37,6 +37,16 @@ def test_nul_terminator_present():
         assert c_char.from_address(p + len(s.encode("utf-8"))).value == b"\x00"
 
 
+def test_embedded_nul_rejected():
+    """Embedded NUL bytes would silently truncate the C string at the
+    first NUL — would mask bugs in callers passing untrusted input.
+    Reject up front instead.
+    """
+    with pytest.raises(ValueError, match="embedded NUL"):
+        with c_string("foo\x00bar"):
+            pass
+
+
 def test_distinct_strings_get_distinct_pointers():
     with ExitStack() as stack:
         a_p = stack.enter_context(c_string("first"))

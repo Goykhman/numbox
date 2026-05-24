@@ -21,7 +21,7 @@ bytes + a trailing NUL outside the JIT scope, then pass
 kernel.
 """
 from contextlib import contextmanager
-from ctypes import c_char_p, c_void_p
+from ctypes import addressof, create_string_buffer
 
 
 @contextmanager
@@ -43,6 +43,11 @@ def c_string(s):
     dropped and ctypes frees the memory; the pointer is then dangling
     and must not be used.
 
+    Embedded NULs in ``s`` are rejected with ``ValueError``. Passing a
+    string containing ``"\\x00"`` would silently truncate the C string
+    at the first NUL — a footgun that CPython's own ``sqlite3.connect``
+    rejects similarly on filename inputs.
+
     For concurrent multi-string needs, nest ``with`` statements or use
     ``contextlib.ExitStack``::
 
@@ -55,5 +60,11 @@ def c_string(s):
     Python-only -- not callable inside ``@njit``. See module docstring
     for the JIT alternative.
     """
-    buf = c_char_p(s.encode("utf-8"))
-    yield c_void_p.from_buffer(buf).value
+    encoded = s.encode("utf-8")
+    if b"\x00" in encoded:
+        raise ValueError(
+            "c_string: input contains an embedded NUL byte; would truncate "
+            "the C string at the first NUL"
+        )
+    buf = create_string_buffer(encoded)
+    yield addressof(buf)
