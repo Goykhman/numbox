@@ -46,33 +46,128 @@ def intp_ll_type(context=None):
     return llir.IntType(intp.bitwidth)
 
 
-def load_lib(name):
-    """ Load library `libname` in global symbol mode.
-     `find_library` is a relatively basic utility that
-     mostly just prefixes `lib` and suffixes extension.
-     When adding (custom) libraries to the global symbol
-     scope, consider setting `DYLD_LIBRARY_PATH`."""
-    if platform_ in ("Darwin", "Linux"):
-        from os import RTLD_GLOBAL
+def _windows_bundled_dll_path(name):
+    """Best-effort: find a DLL bundled with the Python distribution on Windows.
 
-        lib_path = find_library(name)
-        _ = CDLL(lib_path, mode=RTLD_GLOBAL)
-    elif platform_ == "Windows":
+    Tries (in order):
+    - <sys.prefix>/DLLs/<name>.dll (CPython, also catches non-venv installs)
+    - <sys.base_prefix>/DLLs/<name>.dll (venv -> base Python)
+    - <sys.base_prefix>/Library/bin/<name>.dll (conda layout)
+
+    Returns the absolute path of the first existing candidate, or None if no
+    bundled DLL is found.
+    """
+    import os
+    import sys
+    dirs = [
+        os.path.join(sys.prefix, "DLLs"),
+        os.path.join(sys.base_prefix, "DLLs"),
+        os.path.join(sys.base_prefix, "Library", "bin"),
+    ]
+    for d in dirs:
+        candidate = os.path.join(d, f"{name}.dll")
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def _resolve_lib_path(name):
+    """Resolve a library name to a CDLL-loadable path.
+
+    Per-platform logic:
+    - Linux / Darwin: ctypes.util.find_library(name)
+    - Windows: for "c"/"m", find_msvcrt(); otherwise prefer
+      _windows_bundled_dll_path(name) (the Python-distribution-bundled
+      DLL in <prefix>/DLLs/ or <prefix>/Library/bin/) over PATH-based
+      find_library(name). PATH lookup goes last because PATH on Windows
+      may contain third-party-shipped copies of common DLLs that are
+      statically configured for that tool's internal use and AV on
+      external calls. The motivating example: GitHub Actions
+      windows-latest runners ship AWS CLI v2, whose
+      C:\\Program Files\\Amazon\\AWSCLIV2\\sqlite3.dll is on PATH,
+      exports the full SQLite symbol surface, but writes to NULL inside
+      sqlite3_open when called from a process other than aws.exe.
+      CPython's bundled sqlite3.dll is the canonical SQLite for the
+      Python ecosystem on Windows, so prefer it whenever it's present.
+
+    Returns the path string, or None if no path can be resolved.
+    """
+    if platform_ in ("Darwin", "Linux"):
+        return find_library(name)
+    if platform_ == "Windows":
         from ctypes.util import find_msvcrt
         if name in ("c", "m"):
-            lib_path = find_msvcrt()
-            if lib_path is not None:
-                _ = CDLL(lib_path, winmode=0)
-            else:
-                import ctypes
-                _ = ctypes.cdll.msvcrt
-        else:
-            lib_path = find_library(name)
-            if lib_path is None:
-                raise RuntimeError(f"Could not find shared library for {name}")
-            _ = CDLL(lib_path, winmode=0)
-    else:
-        raise RuntimeError(f"Platform {platform_} is not supported, yet.")
+            return find_msvcrt()
+        bundled = _windows_bundled_dll_path(name)
+        if name == "sqlite3":
+            # _sqlite3.pyd is dynamically linked to <prefix>/DLLs/sqlite3.dll,
+            # so that DLL is a hard prerequisite of every working Python on
+            # Windows. Never fall back to find_library — third-party tools
+            # may ship statically-configured sqlite3.dll copies that AV on
+            # external callers (AWS CLI v2 is the motivating example).
+            return bundled
+        if bundled is not None:
+            return bundled
+        return find_library(name)
+    return None
+
+
+_loaded_libs = {}
+
+
+def load_lib(name):
+    """Load library ``name`` in global symbol mode; cache + retain the
+    CDLL handle in ``_loaded_libs`` so it survives any single caller's
+    scope. Legacy contract: returns None.
+
+    Caching matters because ``ctypes.CDLL.__del__`` calls ``dlclose`` /
+    ``FreeLibrary``; if the only reference is a local variable in this
+    function, the OS-level reference count drops to zero on return and
+    the library can be unloaded — invalidating any extern-ref symbols
+    LLVM's JIT linker already resolved into module IR.
+    """
+    get_loaded_lib(name)
+
+
+def get_loaded_lib(name):
+    """Cached form of ``load_lib_with_handle``. Loads on first call,
+    returns the cached CDLL handle on subsequent calls.
+
+    Use this whenever a module needs the handle for ``proxy_if_available``
+    or for ``hasattr(handle, func_name)`` symbol-presence checks. Storing
+    in ``_loaded_libs`` pins the handle for the process lifetime so other
+    modules can share it without cross-module imports (avoids coupling
+    e.g. ``_sqlite_column`` to ``_sqlite_conn`` just to get ``_sqlite3_lib``).
+    """
+    handle = _loaded_libs.get(name)
+    if handle is None:
+        handle = load_lib_with_handle(name)
+        _loaded_libs[name] = handle
+    return handle
+
+
+def load_lib_with_handle(name):
+    """Load library ``name`` in global symbol mode AND return the CDLL handle.
+
+    Returning the handle enables ``proxy_if_available`` to query symbol
+    presence via ``hasattr(handle, func_name)``. The caller is responsible
+    for keeping the returned handle alive — for shared-across-modules
+    use, prefer ``get_loaded_lib(name)`` which caches it in a
+    module-level dict so it outlives any single caller's scope.
+    """
+    path = _resolve_lib_path(name)
+    if path is None:
+        # Preserve the historical Windows c/m fallback (msvcrt via ctypes.cdll).
+        if platform_ == "Windows" and name in ("c", "m"):
+            import ctypes
+            return ctypes.cdll.msvcrt
+        raise RuntimeError(f"Could not find shared library for {name}")
+    if platform_ in ("Darwin", "Linux"):
+        from os import RTLD_GLOBAL
+        return CDLL(path, mode=RTLD_GLOBAL)
+    if platform_ == "Windows":
+        return CDLL(path, winmode=0)
+    raise RuntimeError(f"Platform {platform_} is not supported, yet.")
 
 
 def load_lib_path(path):

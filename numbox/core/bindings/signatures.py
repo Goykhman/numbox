@@ -102,9 +102,75 @@ signatures_m = {
 }
 
 signatures_sqlite = {
+    # === Connection ===
+    "sqlite3_open": int32(intp, intp),
+    "sqlite3_open_v2": int32(intp, intp, int32, intp),
     "sqlite3_close": int32(intp),
     "sqlite3_libversion": intp(),
-    "sqlite3_open": int32(intp, intp),
+    "sqlite3_libversion_number": int32(),
+    "sqlite3_errmsg": intp(intp),
+    "sqlite3_errcode": int32(intp),
+    "sqlite3_extended_errcode": int32(intp),
+    "sqlite3_threadsafe": int32(),
+    "sqlite3_db_handle": intp(intp),
+    "sqlite3_db_filename": intp(intp, intp),
+    "sqlite3_db_readonly": int32(intp, intp),
+    "sqlite3_changes": int32(intp),
+    "sqlite3_last_insert_rowid": int64(intp),
+    "sqlite3_total_changes": int32(intp),
+    # 64-bit row counts — SQLite 3.37+ (Nov 2021); guarded via proxy_if_available
+    "sqlite3_changes64": int64(intp),
+    "sqlite3_total_changes64": int64(intp),
+    # === Statement lifecycle ===
+    "sqlite3_prepare_v2": int32(intp, intp, int32, intp, intp),
+    "sqlite3_finalize": int32(intp),
+    "sqlite3_reset": int32(intp),
+    "sqlite3_step": int32(intp),
+    "sqlite3_sql": intp(intp),
+    "sqlite3_expanded_sql": intp(intp),
+    "sqlite3_stmt_busy": int32(intp),
+    # === Parameter binding ===
+    "sqlite3_bind_int": int32(intp, int32, int32),
+    "sqlite3_bind_int64": int32(intp, int32, int64),
+    "sqlite3_bind_double": int32(intp, int32, float64),
+    "sqlite3_bind_text": int32(intp, int32, intp, int32, intp),
+    "sqlite3_bind_blob": int32(intp, int32, intp, int32, intp),
+    "sqlite3_bind_null": int32(intp, int32),
+    "sqlite3_bind_parameter_count": int32(intp),
+    "sqlite3_bind_parameter_index": int32(intp, intp),
+    "sqlite3_bind_parameter_name": intp(intp, int32),
+    # === Column accessors ===
+    "sqlite3_column_int": int32(intp, int32),
+    "sqlite3_column_int64": int64(intp, int32),
+    "sqlite3_column_double": float64(intp, int32),
+    "sqlite3_column_text": intp(intp, int32),
+    "sqlite3_column_blob": intp(intp, int32),
+    "sqlite3_column_bytes": int32(intp, int32),
+    "sqlite3_column_type": int32(intp, int32),
+    "sqlite3_column_count": int32(intp),
+    "sqlite3_column_name": intp(intp, int32),
+    "sqlite3_column_decltype": intp(intp, int32),
+    # Compile-flag-gated (SQLITE_ENABLE_COLUMN_METADATA); via proxy_if_available
+    "sqlite3_column_database_name": intp(intp, int32),
+    "sqlite3_column_table_name": intp(intp, int32),
+    "sqlite3_column_origin_name": intp(intp, int32),
+    # === Exec + free ===
+    "sqlite3_exec": int32(intp, intp, intp, intp, intp),
+    "sqlite3_free": void(intp),
+    # === BLOB incremental I/O ===
+    "sqlite3_blob_open": int32(intp, intp, intp, intp, int64, int32, intp),
+    "sqlite3_blob_close": int32(intp),
+    "sqlite3_blob_bytes": int32(intp),
+    "sqlite3_blob_read": int32(intp, intp, int32, int32),
+    "sqlite3_blob_write": int32(intp, intp, int32, int32),
+    "sqlite3_blob_reopen": int32(intp, int64),
+    # === Callback hooks ===
+    "sqlite3_update_hook": intp(intp, intp, intp),
+    "sqlite3_progress_handler": void(intp, int32, intp, intp),
+    "sqlite3_busy_handler": int32(intp, intp, intp),
+    "sqlite3_commit_hook": intp(intp, intp, intp),
+    "sqlite3_rollback_hook": intp(intp, intp, intp),
+    "sqlite3_trace_v2": int32(intp, int32, intp, intp),
 }
 
 signatures = {
