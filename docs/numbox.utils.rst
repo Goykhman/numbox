@@ -166,6 +166,49 @@ bytes plus a trailing NUL at Python level, then pass
    :show-inheritance:
    :undoc-members:
 
+numbox.utils.pysqlite_bridge
+----------------------------
+
+Bridging Python ``sqlite3`` connections to the bindings layer
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+CPython's stdlib ``sqlite3.Connection`` holds the underlying
+``sqlite3 *db`` C handle as a private field inside its PyObject
+struct. :func:`~numbox.utils.pysqlite_bridge.extract_connection_ptr`
+reads that field via ``ctypes`` so callers can pass the handle into
+numbox's JIT-callable SQLite bindings::
+
+    import numbox.utils.pysqlite_bridge as pysqlite_bridge
+    import sqlite3
+    from numbox.core.bindings import sqlite3_changes
+
+    conn = sqlite3.connect("app.db")
+    conn.execute("CREATE TABLE t(x INTEGER)")
+    conn.execute("INSERT INTO t VALUES (1), (2), (3)")
+    db_p = pysqlite_bridge.extract_connection_ptr(conn)
+    assert sqlite3_changes(db_p) == 3
+
+Mirrors the pattern in
+`numbduck.pybridge <https://github.com/Goykhman/numbduck/blob/main/numbduck/pybridge.py>`_.
+
+**Import order matters on macOS.** macOS python.org framework builds
+link the stdlib ``_sqlite3`` extension against Homebrew's libsqlite3,
+not the system ``/usr/lib/libsqlite3.dylib`` that
+``ctypes.util.find_library("sqlite3")`` returns. Importing
+``numbox.utils.pysqlite_bridge`` preloads Python's libsqlite3 with
+``RTLD_GLOBAL`` so subsequent numba JIT compiles resolve sqlite3
+symbols to the same library. Import this module **before** anything
+that touches ``numbox.core.bindings._sqlite_*``.
+
+Assumes a release Python build; ``Py_DEBUG`` builds shift the
+``sqlite3 *db`` field by 16 bytes for refcount tracing and are not
+supported.
+
+.. automodule:: numbox.utils.pysqlite_bridge
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 numbox.utils.timer
 ------------------
 
