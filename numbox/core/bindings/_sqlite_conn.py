@@ -8,9 +8,12 @@ which file happens to load the library first.
 
 Two functions are decorated with ``proxy_if_available``:
 ``sqlite3_changes64`` and ``sqlite3_total_changes64``, both added in
-SQLite 3.37 (Nov 2021). On Python 3.10 (which ships SQLite 3.34), they
-stub to ``NotImplementedError`` so callers can ``hasattr(...,"as_func")``
-to decide whether to use them or fall back to the int32 variants.
+SQLite 3.37 (Nov 2021). Older library versions lack these symbols —
+notably the SQLite 3.34 shipped with CPython 3.10 on Windows, and
+distro-shipped system sqlite3 on Linux / macOS that predates 3.37.
+The wrappers stub to ``NotImplementedError`` so callers can
+``hasattr(...,"as_func")`` to decide whether to use them or fall back
+to the int32 variants.
 """
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures

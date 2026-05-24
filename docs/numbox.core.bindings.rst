@@ -20,7 +20,9 @@ Bindings module conventions
 +++++++++++++++++++++++++++
 
 Every binding in the ``numbox.core.bindings`` family (``_c``, ``_math``,
-``_sqlite``, ``_stdio``, ``_errno``, ``_strerror``, ``_fmtio``) uses
+``_sqlite_conn`` / ``_stmt`` / ``_bind`` / ``_column`` / ``_exec`` /
+``_blob`` / ``_hooks`` / ``_constants``, ``_stdio``, ``_errno``,
+``_strerror``, ``_fmtio``) uses
 extern-symbol references via
 :func:`~numbox.core.bindings.call._call_lib_func`, so the ABI dispatch is
 ASLR-safe. Pointer arguments are typed as ``intp`` -- the caller is
@@ -493,10 +495,66 @@ numbox.core.bindings._math
    :show-inheritance:
    :undoc-members:
 
-numbox.core.bindings._sqlite
-----------------------------
+numbox.core.bindings._sqlite_conn
+---------------------------------
 
-.. automodule:: numbox.core.bindings._sqlite
+.. automodule:: numbox.core.bindings._sqlite_conn
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+numbox.core.bindings._sqlite_stmt
+---------------------------------
+
+.. automodule:: numbox.core.bindings._sqlite_stmt
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+numbox.core.bindings._sqlite_bind
+---------------------------------
+
+.. automodule:: numbox.core.bindings._sqlite_bind
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+numbox.core.bindings._sqlite_column
+-----------------------------------
+
+.. automodule:: numbox.core.bindings._sqlite_column
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+numbox.core.bindings._sqlite_exec
+---------------------------------
+
+.. automodule:: numbox.core.bindings._sqlite_exec
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+numbox.core.bindings._sqlite_blob
+---------------------------------
+
+.. automodule:: numbox.core.bindings._sqlite_blob
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+numbox.core.bindings._sqlite_hooks
+----------------------------------
+
+.. automodule:: numbox.core.bindings._sqlite_hooks
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+numbox.core.bindings._sqlite_constants
+--------------------------------------
+
+.. automodule:: numbox.core.bindings._sqlite_constants
    :members:
    :show-inheritance:
    :undoc-members:

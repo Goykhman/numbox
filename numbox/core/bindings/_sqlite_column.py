@@ -2,9 +2,12 @@
 
 Three metadata accessors (column_database_name / column_table_name /
 column_origin_name) require SQLite to be compiled with
-SQLITE_ENABLE_COLUMN_METADATA. CPython's bundled sqlite3 has this enabled,
-but external sqlite3.dlls on user PATH may not. proxy_if_available stubs
-them out when absent so callers can hasattr-guard or fall back.
+SQLITE_ENABLE_COLUMN_METADATA. CPython's bundled sqlite3.dll on Windows
+has it enabled, and we use only that bundled DLL on Windows (see
+``_resolve_lib_path`` in ``utils.py``); the system sqlite3 picked up
+via ``find_library`` on Linux / macOS may or may not, depending on the
+distribution. proxy_if_available stubs the accessors out when absent so
+callers can hasattr-guard or fall back.
 
 All other accessors are universally available across the matrix.
 """
