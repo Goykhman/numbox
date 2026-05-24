@@ -10,6 +10,7 @@ caller can guarantee the array outlives the prepared statement.
 """
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
+from numbox.core.bindings.utils import load_lib
 from numbox.core.proxy.proxy import proxy
 
 __all__ = [
@@ -18,6 +19,9 @@ __all__ = [
     "sqlite3_bind_parameter_count", "sqlite3_bind_parameter_index",
     "sqlite3_bind_parameter_name",
 ]
+
+
+load_lib("sqlite3")
 
 
 @proxy(signatures.get("sqlite3_bind_int"), jit_options={"cache": True})

@@ -120,6 +120,52 @@ numbox.utils.lowlevel
    :show-inheritance:
    :undoc-members:
 
+numbox.utils.cstrings
+---------------------
+
+Allocating C strings for the bindings layer
+'''''''''''''''''''''''''''''''''''''''''''
+
+The bindings family (``numbox.core.bindings._c``, ``_sqlite_*``, etc.)
+takes ``intp`` pointers for every text argument. Producing a valid
+NUL-terminated UTF-8 C string from a Python ``str`` is non-trivial:
+:func:`~numbox.utils.lowlevel.get_unicode_data_p` returns a pointer to
+the Python string's internal data payload, which CPython stores as
+UCS-1/2/4 depending on contents -- only safe for ASCII inputs.
+
+:func:`~numbox.utils.cstrings.c_string` is a Python-side context
+manager that allocates a real C buffer with the UTF-8 encoding of the
+input and yields the pointer with safe lifetime tied to the ``with``
+block::
+
+    from numbox.utils.cstrings import c_string
+    from numbox.core.bindings import sqlite3_exec
+
+    with c_string("CREATE TABLE t(x INTEGER)") as sql_p:
+        sqlite3_exec(db_p, sql_p, 0, 0, 0)
+    # buffer freed here automatically
+
+For concurrent multi-string calls, use a single ``with`` with multiple
+context managers, or :class:`contextlib.ExitStack` when the count is
+dynamic::
+
+    with c_string("main") as schema_p, c_string("t") as table_p, c_string("b") as col_p:
+        sqlite3_blob_open(db_p, schema_p, table_p, col_p, rowid, flags,
+                          addressof(blob_p))
+
+**Python-only.** ``c_string`` cannot be used inside ``@njit`` -- numba
+does not support arbitrary context managers (raises
+``UnsupportedBytecodeError``), and ``ctypes`` objects can't be
+manipulated under JIT anyway. For ``@njit`` callers that need a C
+string, pre-allocate a numpy ``uint8`` buffer containing the UTF-8
+bytes plus a trailing NUL at Python level, then pass
+:func:`~numbox.utils.lowlevel.array_data_p` into the JIT kernel.
+
+.. automodule:: numbox.utils.cstrings
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 numbox.utils.timer
 ------------------
 

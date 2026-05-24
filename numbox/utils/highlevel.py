@@ -115,7 +115,7 @@ class {struct_name}(StructRefProxy):
             code_txt.write(f"""
     def {method_name}({params_str}):
         return {self_name}.{method_name}_{method_hash}({names_params_str_wo_self})
-    
+
     @njit(**jit_options)
     def {method_name}_{method_hash}({params_str}):
         return {self_name}.{method_name}({names_params_str_wo_self})
@@ -124,7 +124,7 @@ class {struct_name}(StructRefProxy):
             assert len(method_header) == 1, method_header
             method_name, params_str_ = method_header[0]
             assert params_str == params_str_, (params_str, params_str_)
-            method_source = re.sub(r"\bdef\s+([a-zA-Z_]\w*)\b", f"def _", method_source)
+            method_source = re.sub(r"\bdef\s+([a-zA-Z_]\w*)\b", "def _", method_source)
             methods_code_txt.write(f"""
 @overload_method({struct_type_class.__name__}, "{method_name}", jit_options=jit_options)
 def ol_{method_name}({params_str}):
@@ -138,20 +138,20 @@ define_boxing({struct_type_class.__name__}, {struct_name})
     struct_fields_ty_str = ", ".join([f"{field}_ty" for field in struct_fields])
     struct_type_code_block = ""
     if fields_types is None:
-        struct_type_code_block = f"""fields_types = [{struct_fields_ty_str}]
-    fields_and_their_types = list(zip(fields, fields_types))    
-    {struct_name}Type = {struct_type_class.__name__}(fields_and_their_types)        
+        struct_type_code_block = f"""    fields_types = [{struct_fields_ty_str}]
+    fields_and_their_types = list(zip(fields, fields_types))
+    {struct_name}Type = {struct_type_class.__name__}(fields_and_their_types)
 """
     else:
         code_txt.write(f"""
-fields_and_their_types = list(zip(fields, fields_types))    
+fields_and_their_types = list(zip(fields, fields_types))
 {struct_name}Type = {struct_type_class.__name__}(fields_and_their_types)
 """)
     ctor_code_block = "\n".join([f"        struct_.{field} = {field}" for field in struct_fields])
     code_txt.write(f"""
 @overload({struct_name}, strict=False, jit_options=jit_options)
 def ol_{struct_name.lower()}({struct_fields_ty_str}):
-    {struct_type_code_block}
+{struct_type_code_block}
     def ctor({struct_fields_str}):
         struct_ = new({struct_type_name})
 {ctor_code_block}
@@ -232,7 +232,7 @@ def make_structref(
     anchor = _structref_anchor_path(struct_name, code_txt)
     _materialize_anchor(anchor, code_txt)
     code = compile(code_txt, str(anchor), mode="exec")
-    exec(code, ns)
+    exec(code, ns)  # nosec B102 - JIT codegen of internal source
     return ns[struct_name]
 
 

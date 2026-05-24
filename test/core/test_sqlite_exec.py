@@ -7,8 +7,9 @@ from numba import carray, cfunc, types
 from numbox.core.bindings._sqlite_conn import sqlite3_changes
 from numbox.core.bindings._sqlite_constants import SQLITE_ABORT, SQLITE_OK
 from numbox.core.bindings._sqlite_exec import sqlite3_exec, sqlite3_free
+from numbox.utils.cstrings import c_string
 from numbox.utils.lowlevel import get_str_from_p_as_int
-from test.auxiliary_utils import collect_and_run_tests, cstr
+from test.auxiliary_utils import collect_and_run_tests
 
 
 # Module-level cfuncs — must outlive exec for the hooks/exec tests.
@@ -27,36 +28,36 @@ def _abort_cb(ctx, n, values_pp, names_pp):
 
 
 def test_exec_create_insert_null_callback(memory_db):
-    _, sql_p = cstr("CREATE TABLE t(a INTEGER); INSERT INTO t VALUES (1);")
-    assert sqlite3_exec(memory_db, sql_p, 0, 0, 0) == SQLITE_OK
+    with c_string("CREATE TABLE t(a INTEGER); INSERT INTO t VALUES (1);") as sql_p:
+        assert sqlite3_exec(memory_db, sql_p, 0, 0, 0) == SQLITE_OK
     assert sqlite3_changes(memory_db) == 1
 
 
 def test_exec_callback_collects_row_count(memory_db):
-    _, setup_p = cstr("CREATE TABLE t(a INTEGER); INSERT INTO t VALUES (1), (2), (3);")
-    sqlite3_exec(memory_db, setup_p, 0, 0, 0)
+    with c_string("CREATE TABLE t(a INTEGER); INSERT INTO t VALUES (1), (2), (3);") as setup_p:
+        sqlite3_exec(memory_db, setup_p, 0, 0, 0)
 
     ctx = np.zeros(1, dtype=np.int64)
-    _, sel_p = cstr("SELECT a FROM t")
-    rc = sqlite3_exec(memory_db, sel_p, _count_rows_cb.address,
-                      ctx.ctypes.data, 0)
+    with c_string("SELECT a FROM t") as sel_p:
+        rc = sqlite3_exec(memory_db, sel_p, _count_rows_cb.address,
+                          ctx.ctypes.data, 0)
     assert rc == SQLITE_OK
     assert ctx[0] == 3
 
 
 def test_exec_callback_can_abort(memory_db):
-    _, setup_p = cstr("CREATE TABLE t(a INTEGER); INSERT INTO t VALUES (1);")
-    sqlite3_exec(memory_db, setup_p, 0, 0, 0)
+    with c_string("CREATE TABLE t(a INTEGER); INSERT INTO t VALUES (1);") as setup_p:
+        sqlite3_exec(memory_db, setup_p, 0, 0, 0)
 
-    _, sel_p = cstr("SELECT a FROM t")
-    rc = sqlite3_exec(memory_db, sel_p, _abort_cb.address, 0, 0)
+    with c_string("SELECT a FROM t") as sel_p:
+        rc = sqlite3_exec(memory_db, sel_p, _abort_cb.address, 0, 0)
     assert rc == SQLITE_ABORT
 
 
 def test_exec_invalid_sql_writes_errmsg(memory_db):
-    _, sql_p = cstr("SELECT FROM WHERE")
     errmsg_p = c_int64(0)
-    rc = sqlite3_exec(memory_db, sql_p, 0, 0, addressof(errmsg_p))
+    with c_string("SELECT FROM WHERE") as sql_p:
+        rc = sqlite3_exec(memory_db, sql_p, 0, 0, addressof(errmsg_p))
     assert rc != SQLITE_OK
     assert errmsg_p.value != 0
     msg = get_str_from_p_as_int(errmsg_p.value)

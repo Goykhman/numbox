@@ -8,12 +8,16 @@ ownership in a way the rest of the bindings don't.
 """
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
+from numbox.core.bindings.utils import load_lib
 from numbox.core.proxy.proxy import proxy
 
 __all__ = [
     "sqlite3_prepare_v2", "sqlite3_finalize", "sqlite3_reset", "sqlite3_step",
     "sqlite3_sql", "sqlite3_expanded_sql", "sqlite3_stmt_busy",
 ]
+
+
+load_lib("sqlite3")
 
 
 @proxy(signatures.get("sqlite3_prepare_v2"), jit_options={"cache": True})

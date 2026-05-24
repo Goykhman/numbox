@@ -6,12 +6,16 @@ All functions present in SQLite 3.4.0 (2007) except _reopen which arrived in
 """
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
+from numbox.core.bindings.utils import load_lib
 from numbox.core.proxy.proxy import proxy
 
 __all__ = [
     "sqlite3_blob_open", "sqlite3_blob_close", "sqlite3_blob_bytes",
     "sqlite3_blob_read", "sqlite3_blob_write", "sqlite3_blob_reopen",
 ]
+
+
+load_lib("sqlite3")
 
 
 @proxy(signatures.get("sqlite3_blob_open"), jit_options={"cache": True})

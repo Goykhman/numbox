@@ -39,7 +39,7 @@ def ol_load_array_row_into_dict(array_ty, row_ind_ty, loader_dict_ty):
         "AnyType": AnyType, "_make_any": _make_any, "unicode_type": unicode_type
     }}
     code = compile(code_txt, getfile(load_array_row_into_dict), mode="exec")
-    exec(code, ns)
+    exec(code, ns)  # nosec B102 - JIT codegen of internal source
     _load_to_dict = ns["_load_to_dict_"]
     return _load_to_dict
 

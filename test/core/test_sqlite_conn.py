@@ -25,15 +25,16 @@ from numbox.core.bindings._sqlite_constants import (
     SQLITE_OPEN_READONLY,
     SQLITE_OPEN_READWRITE,
 )
+from numbox.utils.cstrings import c_string
 from numbox.utils.lowlevel import get_str_from_p_as_int
-from test.auxiliary_utils import collect_and_run_tests, cstr, str_from_p_as_int
+from test.auxiliary_utils import collect_and_run_tests, str_from_p_as_int
 
 
 def _open_memory():
     """Open ':memory:' via sqlite3_open. Returns the db_p as an int."""
-    _, name_p = cstr(":memory:")
     db_p = c_int64(0)
-    rc = sqlite3_open(name_p, addressof(db_p))
+    with c_string(":memory:") as name_p:
+        rc = sqlite3_open(name_p, addressof(db_p))
     assert rc == SQLITE_OK, f"sqlite3_open failed: rc={rc}"
     assert db_p.value != 0
     return db_p.value
@@ -59,10 +60,10 @@ def test_open_close_memory_db():
 
 def test_open_v2_with_create_flag(tmp_path):
     db_file = tmp_path / "create.sqlite"
-    _, name_p = cstr(str(db_file))
     db_p = c_int64(0)
-    rc = sqlite3_open_v2(name_p, addressof(db_p),
-                         SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0)
+    with c_string(str(db_file)) as name_p:
+        rc = sqlite3_open_v2(name_p, addressof(db_p),
+                             SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0)
     assert rc == SQLITE_OK, rc
     assert db_p.value != 0
     assert sqlite3_close(db_p.value) == SQLITE_OK
@@ -71,9 +72,9 @@ def test_open_v2_with_create_flag(tmp_path):
 
 def test_open_v2_bad_path_returns_cantopen(tmp_path):
     bad_path = tmp_path / "nonexistent_dir" / "x.sqlite"
-    _, name_p = cstr(str(bad_path))
     db_p = c_int64(0)
-    rc = sqlite3_open_v2(name_p, addressof(db_p), SQLITE_OPEN_READONLY, 0)
+    with c_string(str(bad_path)) as name_p:
+        rc = sqlite3_open_v2(name_p, addressof(db_p), SQLITE_OPEN_READONLY, 0)
     assert rc == SQLITE_CANTOPEN, rc
     # Even on failure, SQLite returns a (possibly bare) connection handle that
     # owns the errmsg. Caller must close it.
@@ -85,12 +86,12 @@ def test_open_v2_bad_path_returns_cantopen(tmp_path):
 
 def test_db_filename_returns_main_path(tmp_path):
     db_file = tmp_path / "named.sqlite"
-    name_buf, name_p = cstr(str(db_file))
     db_p = c_int64(0)
-    sqlite3_open_v2(name_p, addressof(db_p),
-                    SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0)
-    main_buf, main_p = cstr("main")
-    got_p = sqlite3_db_filename(db_p.value, main_p)
+    with c_string(str(db_file)) as name_p:
+        sqlite3_open_v2(name_p, addressof(db_p),
+                        SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0)
+    with c_string("main") as main_p:
+        got_p = sqlite3_db_filename(db_p.value, main_p)
     got = str_from_p_as_int(got_p)
     assert got == str(db_file), (got, str(db_file))
     sqlite3_close(db_p.value)
@@ -98,12 +99,12 @@ def test_db_filename_returns_main_path(tmp_path):
 
 def test_db_readonly_zero_for_writable(tmp_path):
     db_file = tmp_path / "rw.sqlite"
-    name_buf, name_p = cstr(str(db_file))
     db_p = c_int64(0)
-    sqlite3_open_v2(name_p, addressof(db_p),
-                    SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0)
-    main_buf, main_p = cstr("main")
-    assert sqlite3_db_readonly(db_p.value, main_p) == 0
+    with c_string(str(db_file)) as name_p:
+        sqlite3_open_v2(name_p, addressof(db_p),
+                        SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, 0)
+    with c_string("main") as main_p:
+        assert sqlite3_db_readonly(db_p.value, main_p) == 0
     sqlite3_close(db_p.value)
 
 
@@ -115,9 +116,9 @@ def test_threadsafe_returns_nonzero():
 
 def test_errcode_matches_errmsg_after_bad_open(tmp_path):
     bad_path = tmp_path / "nonexistent_dir" / "x.sqlite"
-    _, name_p = cstr(str(bad_path))
     db_p = c_int64(0)
-    rc = sqlite3_open_v2(name_p, addressof(db_p), SQLITE_OPEN_READONLY, 0)
+    with c_string(str(bad_path)) as name_p:
+        rc = sqlite3_open_v2(name_p, addressof(db_p), SQLITE_OPEN_READONLY, 0)
     assert rc != SQLITE_OK
     if db_p.value != 0:
         assert sqlite3_errcode(db_p.value) == rc

@@ -182,7 +182,7 @@ def {make_name}({make_params}):""" + code_txt + f"""
 access_tuple_ = {make_name}({make_params})
 """
     code = compile(code_txt, getfile(_file_anchor), mode="exec")
-    exec(code, ns)
+    exec(code, ns)  # nosec B102 - JIT codegen of internal source
     access_tuple_ = ns["access_tuple_"]
     Access = namedtuple("Access", access_nodes_names)
     return Access(*access_tuple_)

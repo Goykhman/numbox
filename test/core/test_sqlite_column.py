@@ -33,7 +33,8 @@ from numbox.core.bindings._sqlite_stmt import (
     sqlite3_prepare_v2,
     sqlite3_step,
 )
-from test.auxiliary_utils import collect_and_run_tests, cstr, str_from_p_as_int
+from numbox.utils.cstrings import c_string
+from test.auxiliary_utils import collect_and_run_tests, str_from_p_as_int
 
 
 @pytest.fixture
@@ -49,19 +50,19 @@ def populated_table(tmp_path):
     )
     conn.commit()
     conn.close()
-    _, name_p = cstr(str(db_file))
     db_p = c_int64(0)
-    assert sqlite3_open(name_p, addressof(db_p)) == SQLITE_OK
+    with c_string(str(db_file)) as name_p:
+        assert sqlite3_open(name_p, addressof(db_p)) == SQLITE_OK
     yield db_p.value
     sqlite3_close(db_p.value)
 
 
 def _prepare_and_step(db_p, sql):
-    _, sql_p = cstr(sql)
     stmt_p = c_int64(0)
     tail_p = c_int64(0)
-    rc = sqlite3_prepare_v2(db_p, sql_p, -1, addressof(stmt_p), addressof(tail_p))
-    assert rc == SQLITE_OK, f"prepare failed: rc={rc}"
+    with c_string(sql) as sql_p:
+        rc = sqlite3_prepare_v2(db_p, sql_p, -1, addressof(stmt_p), addressof(tail_p))
+        assert rc == SQLITE_OK, f"prepare failed: rc={rc}"
     rc = sqlite3_step(stmt_p.value)
     assert rc == SQLITE_ROW
     return stmt_p.value

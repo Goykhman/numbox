@@ -90,17 +90,17 @@ def test_basic():
     assert values.get(u_var).value == -144
 
     assert graph.explain("variables2.u") == """
-'variables2.u' depends on ('variables1.a',) via 
+'variables2.u' depends on ('variables1.a',) via
 
 def derive_u(a_):
     return 2 * a_
 
-'variables1.a' depends on ('variables1.x',) via 
+'variables1.a' depends on ('variables1.x',) via
 
 def derive_a(x_):
     return x_ - 74
 
-'variables1.x' depends on ('basket.y',) via 
+'variables1.x' depends on ('basket.y',) via
 
 def derive_x(y_):
     return 2 * y_

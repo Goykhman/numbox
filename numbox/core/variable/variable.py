@@ -565,7 +565,7 @@ class Graph:
                 derivation.append(f"'{variable_name}' comes from external source '{source_name}'\n")
             else:
                 derivation.append(
-                    f"""'{qual_name_}' depends on {tuple(sorted(inputs_qual_names))} via \n\n{variable.metadata}"""
+                    f"""'{qual_name_}' depends on {tuple(sorted(inputs_qual_names))} via\n\n{variable.metadata}"""
                 )
 
         collect(qual_name)

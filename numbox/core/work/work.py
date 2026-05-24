@@ -212,7 +212,7 @@ def ensure_presence_of_source_getters_in_ns(num_sources_, ns_):
     for source_i in range(num_sources_):
         source_getter_code_txt = _make_source_getter(source_i)
         source_getter_code = compile(source_getter_code_txt, getfile(_file_anchor), mode="exec")
-        exec(source_getter_code, ns_)
+        exec(source_getter_code, ns_)  # nosec B102 - JIT codegen of internal source
         _source_getter_registry[source_i] = True
 
 
@@ -233,7 +233,7 @@ def ol_calculate(self_ty):
     ensure_presence_of_source_getters_in_ns(num_sources, ns)
     code_txt = _make_calculate_code(num_sources)
     code = compile(code_txt, getfile(_file_anchor), mode="exec")
-    exec(code, ns)
+    exec(code, ns)  # nosec B102 - JIT codegen of internal source
     _calculate = ns["_calculate_"]
     _calculate_registry[num_sources] = _calculate
     return _calculate
@@ -298,7 +298,7 @@ def ol_load(work_ty, data_ty: DictType):
     ensure_presence_of_source_getters_in_ns(num_sources, ns)
     code_txt = _make_loader_code(num_sources)
     code = compile(code_txt, getfile(_file_anchor), mode="exec")
-    exec(code, ns)
+    exec(code, ns)  # nosec B102 - JIT codegen of internal source
     _loader = ns["_loader_"]
     _loader_registry[num_sources] = _loader
     return _loader
@@ -347,7 +347,7 @@ def ol_combine(work_ty, data_ty: DictType, harvested_ty=NoneType):
     ensure_presence_of_source_getters_in_ns(num_sources, ns)
     code_txt = _make_combine_code(num_sources)
     code = compile(code_txt, getfile(_file_anchor), mode="exec")
-    exec(code, ns)
+    exec(code, ns)  # nosec B102 - JIT codegen of internal source
     _combine = ns["_combine_"]
     _combine_registry[num_sources] = _combine
     return _combine
@@ -415,7 +415,7 @@ def ol_make_inputs_vector(self_ty):
     ensure_presence_of_source_getters_in_ns(num_sources, ns)
     code_txt = _make_inputs_vector_code(num_sources)
     code = compile(code_txt, getfile(_file_anchor), mode="exec")
-    exec(code, ns)
+    exec(code, ns)  # nosec B102 - JIT codegen of internal source
     _inputs_vector = ns["_inputs_vector_"]
     _inputs_vector_registry[num_sources] = _inputs_vector
     return _inputs_vector

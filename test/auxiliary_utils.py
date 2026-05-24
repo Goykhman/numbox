@@ -7,6 +7,7 @@ import sys
 import textwrap
 from ctypes import addressof, c_char, c_char_p, c_int64, c_void_p
 from io import BytesIO
+
 from numba import njit
 from numba.core import types
 from numba.extending import intrinsic
@@ -53,27 +54,6 @@ def test_deref_int64_intp():
     v1 = c_int64(137)
     v1_p = addressof(v1)
     assert deref_int64_intp(v1_p) == 137
-
-
-def cstr(s):
-    """Allocate a NUL-terminated C string for a Python ``str``; return
-    ``(keepalive, intp)``.
-
-    The first element keeps the underlying ``c_char_p`` buffer alive. The
-    caller MUST hold that reference for as long as the pointer is needed.
-    Binding multiple calls to ``_`` in the same scope drops earlier buffers
-    and dangles their pointers — use distinct names when more than one C
-    string is needed concurrently (e.g. ``a_buf, a_p = cstr(...)``,
-    ``b_buf, b_p = cstr(...)``).
-    """
-    buf = c_char_p(s.encode())
-    return buf, c_void_p.from_buffer(buf).value
-
-
-def test_cstr():
-    buf, ptr = cstr("hello")
-    assert buf.value == b"hello"
-    assert str_from_p_as_int(ptr) == "hello"
 
 
 def str_from_p_as_int(p_as_int):

@@ -61,7 +61,7 @@ def ol_load_array_row_into_dict(array_ty, sheaf_ty):
     code_txt = _make_load_to_array_code(record_fields)
     ns = {**getmodule(_load_dict_into_array).__dict__, **{"record_fields": record_fields}}
     code = compile(code_txt, getfile(_load_dict_into_array), mode="exec")
-    exec(code, ns)
+    exec(code, ns)  # nosec B102 - JIT codegen of internal source
     _load_to_array = ns["_load_to_array_"]
     return _load_to_array
 

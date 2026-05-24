@@ -25,22 +25,23 @@ from numbox.core.bindings._sqlite_stmt import (
     sqlite3_finalize,
     sqlite3_prepare_v2,
 )
-from test.auxiliary_utils import collect_and_run_tests, cstr, str_from_p_as_int
+from numbox.utils.cstrings import c_string
+from test.auxiliary_utils import collect_and_run_tests, str_from_p_as_int
 
 
 @pytest.fixture
 def stmt_three_params():
     """Open :memory: db, prepare 'SELECT ?1, ?2, ?3', yield (db_p, stmt_p),
     teardown finalizes + closes."""
-    _, name_p = cstr(":memory:")
     db_p = c_int64(0)
-    assert sqlite3_open(name_p, addressof(db_p)) == SQLITE_OK
+    with c_string(":memory:") as name_p:
+        assert sqlite3_open(name_p, addressof(db_p)) == SQLITE_OK
 
-    _, sql_p = cstr("SELECT ?1, ?2, ?3")
     stmt_p = c_int64(0)
     tail_p = c_int64(0)
-    assert sqlite3_prepare_v2(db_p.value, sql_p, -1,
-                              addressof(stmt_p), addressof(tail_p)) == SQLITE_OK
+    with c_string("SELECT ?1, ?2, ?3") as sql_p:
+        assert sqlite3_prepare_v2(db_p.value, sql_p, -1,
+                                  addressof(stmt_p), addressof(tail_p)) == SQLITE_OK
     yield db_p.value, stmt_p.value
     sqlite3_finalize(stmt_p.value)
     sqlite3_close(db_p.value)
@@ -63,8 +64,8 @@ def test_bind_double_returns_ok(stmt_three_params):
 
 def test_bind_text_transient_returns_ok(stmt_three_params):
     _, stmt_p = stmt_three_params
-    _, text_p = cstr("hello")
-    assert sqlite3_bind_text(stmt_p, 1, text_p, -1, SQLITE_TRANSIENT) == SQLITE_OK
+    with c_string("hello") as text_p:
+        assert sqlite3_bind_text(stmt_p, 1, text_p, -1, SQLITE_TRANSIENT) == SQLITE_OK
 
 
 def test_bind_blob_with_numpy_uint8_returns_ok(stmt_three_params):
@@ -91,20 +92,19 @@ def test_bind_out_of_range_returns_sqlite_range(stmt_three_params):
 
 
 def test_bind_parameter_index_by_name():
-    name_buf, name_p = cstr(":memory:")
     db_p = c_int64(0)
-    assert sqlite3_open(name_p, addressof(db_p)) == SQLITE_OK
+    with c_string(":memory:") as name_p:
+        assert sqlite3_open(name_p, addressof(db_p)) == SQLITE_OK
     try:
-        sql_buf, sql_p = cstr("SELECT :foo, :bar")
         stmt_p = c_int64(0)
         tail_p = c_int64(0)
-        sqlite3_prepare_v2(db_p.value, sql_p, -1,
-                           addressof(stmt_p), addressof(tail_p))
-        foo_buf, foo_p = cstr(":foo")
-        bar_buf, bar_p = cstr(":bar")
-        assert sqlite3_bind_parameter_index(stmt_p.value, foo_p) == 1
-        assert sqlite3_bind_parameter_index(stmt_p.value, bar_p) == 2
-        # name lookup round trip
+        with c_string("SELECT :foo, :bar") as sql_p:
+            sqlite3_prepare_v2(db_p.value, sql_p, -1,
+                               addressof(stmt_p), addressof(tail_p))
+        with c_string(":foo") as foo_p, c_string(":bar") as bar_p:
+            assert sqlite3_bind_parameter_index(stmt_p.value, foo_p) == 1
+            assert sqlite3_bind_parameter_index(stmt_p.value, bar_p) == 2
+        # name lookup round trip (output points into SQLite-owned memory)
         name_back_p = sqlite3_bind_parameter_name(stmt_p.value, 1)
         assert str_from_p_as_int(name_back_p) == ":foo"
         sqlite3_finalize(stmt_p.value)

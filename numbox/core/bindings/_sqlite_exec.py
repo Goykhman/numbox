@@ -20,11 +20,15 @@ Produce the callback address from Python via:
 """
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
+from numbox.core.bindings.utils import load_lib
 from numbox.core.proxy.proxy import proxy
 
 __all__ = [
     "sqlite3_exec", "sqlite3_free",
 ]
+
+
+load_lib("sqlite3")
 
 
 @proxy(signatures.get("sqlite3_exec"), jit_options={"cache": True})

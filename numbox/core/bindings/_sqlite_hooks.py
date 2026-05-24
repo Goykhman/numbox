@@ -15,12 +15,16 @@ Callback shapes (informational; signatures are caller's responsibility):
 """
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
+from numbox.core.bindings.utils import load_lib
 from numbox.core.proxy.proxy import proxy
 
 __all__ = [
     "sqlite3_update_hook", "sqlite3_progress_handler", "sqlite3_busy_handler",
     "sqlite3_commit_hook", "sqlite3_rollback_hook", "sqlite3_trace_v2",
 ]
+
+
+load_lib("sqlite3")
 
 
 @proxy(signatures.get("sqlite3_update_hook"), jit_options={"cache": True})

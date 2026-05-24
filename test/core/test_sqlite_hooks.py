@@ -26,7 +26,7 @@ from numbox.core.bindings._sqlite_hooks import (
     sqlite3_trace_v2,
     sqlite3_update_hook,
 )
-from test.auxiliary_utils import cstr
+from numbox.utils.cstrings import c_string
 
 
 # Module-level cfuncs — must outlive any hook registration.
@@ -79,9 +79,9 @@ def populated_db(tmp_path):
     )
     conn.commit()
     conn.close()
-    name_buf, name_p = cstr(str(db_file))
     db_p = c_int64(0)
-    assert sqlite3_open(name_p, addressof(db_p)) == SQLITE_OK
+    with c_string(str(db_file)) as name_p:
+        assert sqlite3_open(name_p, addressof(db_p)) == SQLITE_OK
     yield db_p.value
     sqlite3_close(db_p.value)
 
@@ -90,8 +90,8 @@ def test_update_hook_records_ops(populated_db):
     # ctx layout: arr[0..63] = op log, arr[64] = next-write index
     ctx = np.zeros(128, dtype=np.int64)
     sqlite3_update_hook(populated_db, _update_cb.address, ctx.ctypes.data)
-    _, sql_p = cstr("INSERT INTO t VALUES (99); DELETE FROM t WHERE a=99;")
-    rc = sqlite3_exec(populated_db, sql_p, 0, 0, 0)
+    with c_string("INSERT INTO t VALUES (99); DELETE FROM t WHERE a=99;") as sql_p:
+        rc = sqlite3_exec(populated_db, sql_p, 0, 0, 0)
     assert rc == SQLITE_OK
     # SQLITE_INSERT = 18, SQLITE_DELETE = 9
     assert ctx[64] == 2  # two callbacks fired
@@ -101,8 +101,8 @@ def test_update_hook_records_ops(populated_db):
 
 def test_progress_handler_aborts(populated_db):
     sqlite3_progress_handler(populated_db, 1, _progress_abort_cb.address, 0)
-    _, sql_p = cstr("SELECT * FROM t")
-    rc = sqlite3_exec(populated_db, sql_p, 0, 0, 0)
+    with c_string("SELECT * FROM t") as sql_p:
+        rc = sqlite3_exec(populated_db, sql_p, 0, 0, 0)
     assert rc == SQLITE_INTERRUPT
 
 
@@ -115,8 +115,8 @@ def test_busy_handler_registration_returns_ok(populated_db):
 
 def test_commit_hook_vetoes(populated_db):
     sqlite3_commit_hook(populated_db, _commit_veto_cb.address, 0)
-    _, sql_p = cstr("INSERT INTO t VALUES (42)")
-    rc = sqlite3_exec(populated_db, sql_p, 0, 0, 0)
+    with c_string("INSERT INTO t VALUES (42)") as sql_p:
+        rc = sqlite3_exec(populated_db, sql_p, 0, 0, 0)
     # Vetoed commit -> rolled back; sqlite3_exec returns non-OK (typically
     # SQLITE_CONSTRAINT_TRIGGER or SQLITE_CONSTRAINT in some versions).
     assert rc != SQLITE_OK
@@ -125,8 +125,8 @@ def test_commit_hook_vetoes(populated_db):
 def test_rollback_hook_fires(populated_db):
     ctx = np.zeros(1, dtype=np.int64)
     sqlite3_rollback_hook(populated_db, _rollback_count_cb.address, ctx.ctypes.data)
-    _, sql_p = cstr("BEGIN; INSERT INTO t VALUES (77); ROLLBACK;")
-    rc = sqlite3_exec(populated_db, sql_p, 0, 0, 0)
+    with c_string("BEGIN; INSERT INTO t VALUES (77); ROLLBACK;") as sql_p:
+        rc = sqlite3_exec(populated_db, sql_p, 0, 0, 0)
     assert rc == SQLITE_OK
     assert ctx[0] == 1
 
@@ -136,8 +136,8 @@ def test_trace_v2_fires_for_stmt(populated_db):
     rc = sqlite3_trace_v2(populated_db, SQLITE_TRACE_STMT,
                           _trace_count_cb.address, ctx.ctypes.data)
     assert rc == SQLITE_OK
-    _, sql_p = cstr("SELECT 1")
-    sqlite3_exec(populated_db, sql_p, 0, 0, 0)
+    with c_string("SELECT 1") as sql_p:
+        sqlite3_exec(populated_db, sql_p, 0, 0, 0)
     assert ctx[0] >= 1
 
 

@@ -17,15 +17,16 @@ from numbox.core.bindings._sqlite_stmt import (
     sqlite3_step,
     sqlite3_stmt_busy,
 )
-from test.auxiliary_utils import collect_and_run_tests, cstr, str_from_p_as_int
+from numbox.utils.cstrings import c_string
+from test.auxiliary_utils import collect_and_run_tests, str_from_p_as_int
 
 
 def _prepare(db_p, sql):
-    _, sql_p = cstr(sql)
     stmt_p = c_int64(0)
     tail_p = c_int64(0)
-    rc = sqlite3_prepare_v2(db_p, sql_p, -1, addressof(stmt_p), addressof(tail_p))
-    assert rc == SQLITE_OK, f"prepare failed: rc={rc}"
+    with c_string(sql) as sql_p:
+        rc = sqlite3_prepare_v2(db_p, sql_p, -1, addressof(stmt_p), addressof(tail_p))
+        assert rc == SQLITE_OK, f"prepare failed: rc={rc}"
     return stmt_p.value
 
 
@@ -71,11 +72,11 @@ def test_stmt_busy_is_nonzero_mid_iteration(memory_db):
 
 
 def test_prepare_invalid_sql_returns_error(memory_db):
-    _, sql_p = cstr("SELECT FROM WHERE")  # garbage
     stmt_p = c_int64(0)
     tail_p = c_int64(0)
-    rc = sqlite3_prepare_v2(memory_db, sql_p, -1,
-                            addressof(stmt_p), addressof(tail_p))
+    with c_string("SELECT FROM WHERE") as sql_p:  # garbage
+        rc = sqlite3_prepare_v2(memory_db, sql_p, -1,
+                                addressof(stmt_p), addressof(tail_p))
     assert rc != SQLITE_OK
     assert stmt_p.value == 0  # no statement on failure
 
