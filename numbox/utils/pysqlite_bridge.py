@@ -166,28 +166,56 @@ _patch_numbox_sqlite_for_python_libsqlite3()
 from numbox.core.bindings._sqlite_conn import sqlite3_errmsg  # noqa: E402
 
 
+def _pyobject_head_fields():
+    """Return ctypes field list for CPython's ``PyObject_HEAD``.
+
+    Detects debug and free-threaded builds at runtime so the struct
+    offset to ``db`` is correct in all configurations.
+    """
+    import sys
+    import sysconfig
+
+    fields = []
+
+    if hasattr(sys, "gettotalrefcount"):
+        fields += [
+            ("_ob_next", ctypes.c_void_p),
+            ("_ob_prev", ctypes.c_void_p),
+        ]
+
+    if sysconfig.get_config_var("Py_GIL_DISABLED"):
+        fields += [
+            ("ob_tid", ctypes.c_size_t),
+            ("_padding", ctypes.c_uint16),
+            ("ob_mutex", ctypes.c_uint8),
+            ("ob_gc_bits", ctypes.c_uint8),
+            ("ob_ref_local", ctypes.c_uint32),
+            ("ob_ref_shared", ctypes.c_ssize_t),
+            ("ob_type", ctypes.c_void_p),
+        ]
+    else:
+        fields += [
+            ("ob_refcnt", ctypes.c_ssize_t),
+            ("ob_type", ctypes.c_void_p),
+        ]
+
+    return fields
+
+
 class _PysqliteConnection(ctypes.Structure):
     """Model the first fields of CPython's ``pysqlite_Connection``.
 
     Mirrors the layout in `Modules/_sqlite/connection.h
     <https://github.com/python/cpython/blob/main/Modules/_sqlite/connection.h>`_.
     ``ctypes.Structure`` computes the ``db`` offset from the declared
-    field types, so the layout is correct on both 32-bit (offset 8) and
-    64-bit (offset 16) platforms without a hardcoded constant.
+    field types, so the layout is correct across 32/64-bit, debug, and
+    free-threaded builds without hardcoded constants.
 
     Pattern from `numbsql
     <https://github.com/cpcloud/numbsql/blob/main/numbsql/sqlite.py#L282>`_.
-
-    Assumes a release (non-debug, non-free-threaded) CPython build.
-    ``Py_DEBUG`` builds prepend ``_PyObject_HEAD_EXTRA``; free-threaded
-    (``Py_GIL_DISABLED``) builds use a larger ``PyObject``.
     """
 
-    _fields_ = [
-        ("ob_refcnt", ctypes.c_ssize_t),
-        ("ob_type", ctypes.c_void_p),
-        ("db", ctypes.c_void_p),
-    ]
+    _fields_ = _pyobject_head_fields() + [("db", ctypes.c_void_p)]
 
 
 def extract_connection_ptr(conn):
