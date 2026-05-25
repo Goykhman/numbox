@@ -166,26 +166,38 @@ _patch_numbox_sqlite_for_python_libsqlite3()
 from numbox.core.bindings._sqlite_conn import sqlite3_errmsg  # noqa: E402
 
 
+class _PysqliteConnection(ctypes.Structure):
+    """Model the first fields of CPython's ``pysqlite_Connection``.
+
+    Mirrors the layout in `Modules/_sqlite/connection.h
+    <https://github.com/python/cpython/blob/main/Modules/_sqlite/connection.h>`_.
+    ``ctypes.Structure`` computes the ``db`` offset from the declared
+    field types, so the layout is correct on both 32-bit (offset 8) and
+    64-bit (offset 16) platforms without a hardcoded constant.
+
+    Pattern from `numbsql
+    <https://github.com/cpcloud/numbsql/blob/main/numbsql/sqlite.py#L282>`_.
+
+    Assumes a release (non-debug, non-free-threaded) CPython build.
+    ``Py_DEBUG`` builds prepend ``_PyObject_HEAD_EXTRA``; free-threaded
+    (``Py_GIL_DISABLED``) builds use a larger ``PyObject``.
+    """
+
+    _fields_ = [
+        ("ob_refcnt", ctypes.c_ssize_t),
+        ("ob_type", ctypes.c_void_p),
+        ("db", ctypes.c_void_p),
+    ]
+
+
 def extract_connection_ptr(conn):
     """Return the raw ``sqlite3*`` underlying a Python ``sqlite3.Connection``.
 
-    Reads the ``pysqlite_Connection`` PyObject struct layout defined in
-    CPython's `Modules/_sqlite/connection.h
-    <https://github.com/python/cpython/blob/main/Modules/_sqlite/connection.h>`_::
-
-        [0]  PyObject_HEAD   (16 bytes on 64-bit release builds)
-        [16] sqlite3 *db     <-- returned
-
-    Assumes a release (non-debug, non-free-threaded) Python build.
-    ``Py_DEBUG`` builds prepend a 16-byte ``_PyObject_HEAD_EXTRA``;
-    free-threaded (``Py_GIL_DISABLED``) builds use a 32-byte
-    ``PyObject``. Neither layout is handled here.
-
-    The extracted pointer is validated by calling
-    :func:`~numbox.core.bindings._sqlite_conn.sqlite3_errmsg` against
-    it: a healthy connection returns ``"not an error"``. See the module
-    docstring for how macOS coordinates Python's libsqlite3 with
-    numbox's bindings.
+    Uses :class:`_PysqliteConnection` to read the ``db`` field at its
+    platform-correct offset inside the PyObject struct, then validates
+    the pointer by calling
+    :func:`~numbox.core.bindings._sqlite_conn.sqlite3_errmsg` (a
+    healthy connection returns ``"not an error"``).
 
     Parameters
     ----------
@@ -207,7 +219,7 @@ def extract_connection_ptr(conn):
         raise TypeError(
             f"expected sqlite3.Connection, got {type(conn).__name__}"
         )
-    db_ptr = ctypes.c_void_p.from_address(id(conn) + 16).value
+    db_ptr = _PysqliteConnection.from_address(id(conn)).db
     if db_ptr is None:
         raise RuntimeError("extracted null sqlite3* from sqlite3.Connection")
     errmsg = ctypes.c_char_p(sqlite3_errmsg(db_ptr)).value

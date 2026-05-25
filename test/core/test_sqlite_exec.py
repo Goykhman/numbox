@@ -4,9 +4,13 @@ from ctypes import addressof, c_int64
 import numpy as np
 from numba import carray, cfunc, types
 
-from numbox.core.bindings._sqlite_conn import sqlite3_changes
-from numbox.core.bindings._sqlite_constants import SQLITE_ABORT, SQLITE_OK
-from numbox.core.bindings._sqlite_exec import sqlite3_exec, sqlite3_free
+from numbox.core.bindings import (
+    SQLITE_ABORT,
+    SQLITE_OK,
+    sqlite3_changes,
+    sqlite3_exec,
+    sqlite3_free,
+)
 from numbox.utils.cstrings import c_string
 from numbox.utils.lowlevel import get_str_from_p_as_int
 from test.auxiliary_utils import collect_and_run_tests

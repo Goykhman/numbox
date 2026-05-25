@@ -3,7 +3,15 @@ from ctypes import addressof, c_int64, c_ubyte
 
 import pytest
 
-from numbox.core.bindings._sqlite_column import (
+from numbox.core.bindings import (
+    SQLITE_BLOB,
+    SQLITE_FLOAT,
+    SQLITE_INTEGER,
+    SQLITE_NULL,
+    SQLITE_OK,
+    SQLITE_ROW,
+    SQLITE_TEXT,
+    sqlite3_close,
     sqlite3_column_blob,
     sqlite3_column_bytes,
     sqlite3_column_count,
@@ -17,19 +25,8 @@ from numbox.core.bindings._sqlite_column import (
     sqlite3_column_table_name,
     sqlite3_column_text,
     sqlite3_column_type,
-)
-from numbox.core.bindings._sqlite_conn import sqlite3_close, sqlite3_open
-from numbox.core.bindings._sqlite_constants import (
-    SQLITE_BLOB,
-    SQLITE_FLOAT,
-    SQLITE_INTEGER,
-    SQLITE_NULL,
-    SQLITE_OK,
-    SQLITE_ROW,
-    SQLITE_TEXT,
-)
-from numbox.core.bindings._sqlite_stmt import (
     sqlite3_finalize,
+    sqlite3_open,
     sqlite3_prepare_v2,
     sqlite3_step,
 )

@@ -4,7 +4,10 @@ from ctypes import addressof, c_int64
 import numpy as np
 import pytest
 
-from numbox.core.bindings._sqlite_bind import (
+from numbox.core.bindings import (
+    SQLITE_OK,
+    SQLITE_RANGE,
+    SQLITE_TRANSIENT,
     sqlite3_bind_blob,
     sqlite3_bind_double,
     sqlite3_bind_int,
@@ -14,15 +17,9 @@ from numbox.core.bindings._sqlite_bind import (
     sqlite3_bind_parameter_index,
     sqlite3_bind_parameter_name,
     sqlite3_bind_text,
-)
-from numbox.core.bindings._sqlite_conn import sqlite3_close, sqlite3_open
-from numbox.core.bindings._sqlite_constants import (
-    SQLITE_OK,
-    SQLITE_RANGE,
-    SQLITE_TRANSIENT,
-)
-from numbox.core.bindings._sqlite_stmt import (
+    sqlite3_close,
     sqlite3_finalize,
+    sqlite3_open,
     sqlite3_prepare_v2,
 )
 from numbox.utils.cstrings import c_string

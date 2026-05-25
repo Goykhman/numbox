@@ -11,16 +11,15 @@ import numpy as np
 import pytest
 from numba import carray, cfunc, types
 
-from numbox.core.bindings._sqlite_conn import sqlite3_close, sqlite3_open
-from numbox.core.bindings._sqlite_constants import (
+from numbox.core.bindings import (
     SQLITE_INTERRUPT,
     SQLITE_OK,
     SQLITE_TRACE_STMT,
-)
-from numbox.core.bindings._sqlite_exec import sqlite3_exec
-from numbox.core.bindings._sqlite_hooks import (
     sqlite3_busy_handler,
+    sqlite3_close,
     sqlite3_commit_hook,
+    sqlite3_exec,
+    sqlite3_open,
     sqlite3_progress_handler,
     sqlite3_rollback_hook,
     sqlite3_trace_v2,

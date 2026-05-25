@@ -3,8 +3,7 @@ from ctypes import addressof, c_int64
 
 import pytest
 
-from numbox.core.bindings._sqlite_conn import sqlite3_close, sqlite3_open
-from numbox.core.bindings._sqlite_constants import SQLITE_OK
+from numbox.core.bindings import sqlite3_close, sqlite3_open, SQLITE_OK
 from numbox.utils.cstrings import c_string
 
 
