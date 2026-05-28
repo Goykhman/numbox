@@ -8,10 +8,12 @@ macOS caveat
 ~~~~~~~~~~~~
 
 On macOS, the system sqlite is in the `dyld shared cache
-<https://developer.apple.com/documentation/kernel/os_dyld_shared_cache_header>`_, mapped into every process
-at launch.  LLVM's JIT linker resolves ``sqlite3_*`` symbols via ``dlsym(RTLD_DEFAULT)``, which returns the
-first match in load order — the system copy.  Python's ``_sqlite3.so`` may use a *different* sqlite (statically
-linked on python.org framework builds, or dynamically linked to Homebrew's copy).
+<https://keith.github.io/xcode-man-pages/dyld.1.html>`_ (structure defined in Apple's
+`DyldSharedCache.h <https://github.com/apple-oss-distributions/dyld/blob/main/common/DyldSharedCache.h>`_),
+mapped into every process at launch.  LLVM's JIT linker resolves ``sqlite3_*`` symbols via
+``dlsym(RTLD_DEFAULT)``, which returns the first match in load order — the system copy.  Python's
+``_sqlite3.so`` may use a *different* sqlite (statically linked on python.org framework builds, or
+dynamically linked to Homebrew's copy).
 
 If the system sqlite and Python's sqlite differ enough in version or internal layout, passing the pointer from
 :func:`extract_connection_ptr` to numbox's ``@njit`` bindings can produce wrong results or segfaults.
