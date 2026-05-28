@@ -33,7 +33,7 @@ On Linux there is typically only one sqlite on the system, so no workaround is n
 import ctypes
 import sqlite3
 
-from numbox.core.bindings._sqlite_conn import sqlite3_errmsg
+from numbox.core.bindings._sqlite_conn import sqlite3_errmsg, sqlite3_libversion
 
 
 def _pyobject_head_fields():
@@ -97,11 +97,12 @@ def extract_connection_ptr(conn):
     :func:`~numbox.core.bindings._sqlite_conn.sqlite3_errmsg` (a
     healthy connection returns ``"not an error"``).
 
-    .. warning::
-
-       On macOS the ``sqlite3_errmsg`` call may resolve to the system
-       sqlite rather than the one Python uses.  See the module-level
-       docstring for the ``DYLD_INSERT_LIBRARIES`` workaround.
+    Before reading the pointer, checks that numbox's bindings and Python's
+    ``sqlite3`` module resolve to the same libsqlite3 (by comparing
+    :func:`~numbox.core.bindings._sqlite_conn.sqlite3_libversion` against
+    ``sqlite3.sqlite_version``).  If they differ — the macOS shared-cache
+    situation in the module docstring — it raises rather than pass the
+    pointer to a mismatched library, which could segfault.
 
     Parameters
     ----------
@@ -117,11 +118,22 @@ def extract_connection_ptr(conn):
     TypeError
         If *conn* is not a ``sqlite3.Connection``.
     RuntimeError
-        If the extracted pointer fails the validation call.
+        If numbox's bindings and Python's ``sqlite3`` use different
+        libsqlite3 instances, or if the extracted pointer fails the
+        validation call.
     """
     if not isinstance(conn, sqlite3.Connection):
         raise TypeError(
             f"expected sqlite3.Connection, got {type(conn).__name__}"
+        )
+    numbox_version = ctypes.c_char_p(sqlite3_libversion()).value.decode()
+    if numbox_version != sqlite3.sqlite_version:
+        raise RuntimeError(
+            f"numbox's @njit bindings resolve libsqlite3 {numbox_version!r}, but Python's "
+            f"sqlite3 module uses {sqlite3.sqlite_version!r}.  Passing this connection "
+            f"pointer to numbox's bindings would be unsafe (possible segfault).  On macOS, "
+            f"set DYLD_INSERT_LIBRARIES to your Python's libsqlite3.dylib — see the "
+            f"numbox.utils.pysqlite_bridge module docstring."
         )
     db_ptr = _PysqliteConnection.from_address(id(conn)).db
     if db_ptr is None:

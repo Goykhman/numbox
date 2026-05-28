@@ -38,6 +38,8 @@ def test_numbox_and_python_use_same_libsqlite3():
 
 
 def test_extract_connection_ptr_memory_db():
+    if not _libraries_coordinated():
+        pytest.skip("uncoordinated libraries — extract_connection_ptr guards against use")
     conn = sqlite3.connect(":memory:")
     try:
         p = extract_connection_ptr(conn)
@@ -48,6 +50,8 @@ def test_extract_connection_ptr_memory_db():
 
 
 def test_extract_connection_ptr_file_db(tmp_path):
+    if not _libraries_coordinated():
+        pytest.skip("uncoordinated libraries — extract_connection_ptr guards against use")
     db_path = tmp_path / "test.db"
     conn = sqlite3.connect(str(db_path))
     try:
@@ -61,6 +65,24 @@ def test_extract_connection_ptr_file_db(tmp_path):
 def test_extract_connection_ptr_rejects_non_connection():
     with pytest.raises(TypeError, match="expected sqlite3.Connection"):
         extract_connection_ptr("not a connection")
+
+
+def test_extract_connection_ptr_raises_on_uncoordinated_libraries(monkeypatch):
+    """Guard: when numbox's bindings and Python's sqlite3 report different
+    libsqlite3 versions, :func:`extract_connection_ptr` raises a helpful
+    ``RuntimeError`` (pointing at the ``DYLD_INSERT_LIBRARIES`` workaround)
+    instead of risking a segfault on its internal validation call.
+
+    Forces a mismatch via monkeypatch so the guard is exercised on every
+    platform, not just an uncoordinated macOS host.
+    """
+    monkeypatch.setattr(sqlite3, "sqlite_version", "0.0.0-mismatch")
+    conn = sqlite3.connect(":memory:")
+    try:
+        with pytest.raises(RuntimeError, match="DYLD_INSERT_LIBRARIES"):
+            extract_connection_ptr(conn)
+    finally:
+        conn.close()
 
 
 def test_extracted_pointer_usable_with_numbox_bindings(tmp_path):
