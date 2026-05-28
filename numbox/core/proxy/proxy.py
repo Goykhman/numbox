@@ -91,7 +91,7 @@ def {func_proxy_name}({func_args_str}):
         prepend = max(0, func.__code__.co_firstlineno - njit_lineno_in_txt)
         prefixed = '\n' * prepend + code_txt
         code = compile(prefixed, inspect.getfile(func), mode='exec')
-        exec(code, ns)
+        exec(code, ns)  # nosec B102 - JIT codegen of internal source
         dispatcher = ns[func_proxy_name]
         dispatcher.as_func = CompileResultWAP(func_jit.get_compile_result(main_sig))
         return dispatcher

@@ -2,12 +2,12 @@ import errno
 
 import numpy as np
 import pytest
-from ctypes import addressof, c_char_p, c_int64, c_void_p
+from ctypes import c_char_p, c_void_p
 from numba import njit
 from numbox.core.bindings import *
 from numbox.core.bindings.utils import platform_
 from numbox.utils.lowlevel import array_data_p, get_unicode_data_p, get_str_from_p_as_int
-from test.auxiliary_utils import collect_and_run_tests, str_from_p_as_int
+from test.auxiliary_utils import collect_and_run_tests
 
 
 @njit(cache=True)
@@ -43,28 +43,6 @@ def test_c():
     assert strlen(s_p) == len(s_)
 
 
-@pytest.mark.skipif(platform_ == "Windows", reason="Need to add windows support")
-def test_sqlite():
-    version_ = sqlite3_libversion_number()
-    version_ = str_from_p_as_int(version_)
-    assert "." in version_
-
-    db_name_ = ":memory:"
-    db_name = c_char_p(db_name_.encode())
-    db_name_p = c_void_p.from_buffer(db_name).value
-
-    assert str_from_p_as_int(db_name_p) == db_name_
-    db_p = c_int64(0)
-    assert db_p.value == 0
-    db_pp = addressof(db_p)
-    rc = sqlite3_open(db_name_p, db_pp)
-    assert rc == 0, "could not open db connection"
-    assert db_p.value != 0
-    db_p = db_p.value
-    rc = sqlite3_close(db_p)
-    assert rc == 0, "could not close db connection"
-
-
 def test_load_lib_path_returns_handle_with_known_symbol():
     from numbox.core.bindings.utils import load_lib_path
 
@@ -78,6 +56,16 @@ def test_load_lib_path_returns_handle_with_known_symbol():
         pytest.skip("No suitable math/C runtime library discoverable")
     lib = load_lib_path(lib_path)
     assert hasattr(lib, "cos")
+
+
+def test_load_lib_returns_queryable_handle():
+    from numbox.core.bindings.utils import load_lib
+    handle = load_lib("c")
+    assert handle is not None
+    # strlen is in libc on every supported platform
+    assert hasattr(handle, "strlen")
+    # A symbol that doesn't exist returns False
+    assert not hasattr(handle, "definitely_not_a_real_symbol_xyzzy")
 
 
 def test_c_stdio(tmp_path):

@@ -108,14 +108,14 @@ class S3(StructRefProxy):
 
     def calculate_1(self, z, w=1):
         return self.calculate_1_ce22f04cc18ac7c1059871d9675272b0766d329e8c416d9ec4ddf77b181ebcbc(z, w)
-    
+
     @njit(**jit_options)
     def calculate_1_ce22f04cc18ac7c1059871d9675272b0766d329e8c416d9ec4ddf77b181ebcbc(self, z, w=1):
         return self.calculate_1(z, w)
 
     def calculate_2(self):
         return self.calculate_2_81b5823ed107b9478f23165e8f88211d7795d11f8e0cabe3dd3b8e96481f3f2e()
-    
+
     @njit(**jit_options)
     def calculate_2_81b5823ed107b9478f23165e8f88211d7795d11f8e0cabe3dd3b8e96481f3f2e(self):
         return self.calculate_2()
@@ -125,8 +125,8 @@ define_boxing(S3TypeClass, S3)
 @overload(S3, strict=False, jit_options=jit_options)
 def ol_s3(x_ty, y_ty):
     fields_types = [x_ty, y_ty]
-    fields_and_their_types = list(zip(fields, fields_types))    
-    S3Type = S3TypeClass(fields_and_their_types)        
+    fields_and_their_types = list(zip(fields, fields_types))
+    S3Type = S3TypeClass(fields_and_their_types)
 
     def ctor(x, y):
         struct_ = new(S3Type)
@@ -195,12 +195,12 @@ class S4(StructRefProxy):
 
 define_boxing(S4TypeClass, S4)
 
-fields_and_their_types = list(zip(fields, fields_types))    
+fields_and_their_types = list(zip(fields, fields_types))
 S4Type = S4TypeClass(fields_and_their_types)
 
 @overload(S4, strict=False, jit_options=jit_options)
 def ol_s4(x_ty, y_ty):
-    
+
     def ctor(x, y):
         struct_ = new(S4Type)
         struct_.x = x
@@ -234,12 +234,12 @@ class S5(StructRefProxy):
 
 define_boxing(S5TypeClass, S5)
 
-fields_and_their_types = list(zip(fields, fields_types))    
+fields_and_their_types = list(zip(fields, fields_types))
 S5Type = S5TypeClass(fields_and_their_types)
 
 @overload(S5, strict=False, jit_options=jit_options)
 def ol_s5():
-    
+
     def ctor():
         struct_ = new(S5Type)
 

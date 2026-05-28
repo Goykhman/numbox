@@ -463,7 +463,7 @@ def _build_overload_impl(name, fixed_params, args_tys, intrinsic_callable,
     intrinsic_args = ", ".join(list(fixed_params) + [args_tuple_expr])
     src = f"def impl({sig_params}):\n    return _intr({intrinsic_args})\n"
     ns = {"_intr": intrinsic_callable, "get_unicode_data_p": get_unicode_data_p}
-    exec(compile(src, f"<{name}-overload-impl>", "exec"), ns)
+    exec(compile(src, f"<{name}-overload-impl>", "exec"), ns)  # nosec B102 - JIT codegen of internal source
     return ns["impl"]
 
 

@@ -7,6 +7,7 @@ import sys
 import textwrap
 from ctypes import addressof, c_char, c_char_p, c_int64, c_void_p
 from io import BytesIO
+
 from numba import njit
 from numba.core import types
 from numba.extending import intrinsic

@@ -299,6 +299,7 @@ def test_load_at_accepts_integer_literal_pointer():
     pointer would segfault, but compilation is enough to exercise the
     typing-time guard."""
     from numba import int32, njit
+
     @njit("int32()")
     def kernel():
         return load_at(0, int32)
@@ -308,6 +309,7 @@ def test_load_at_accepts_integer_literal_pointer():
 def test_store_at_accepts_integer_literal_pointer():
     """Parallel literal-acceptance for ``store_at``."""
     from numba import int32, njit
+
     @njit("void()")
     def kernel():
         store_at(0, int32(42))

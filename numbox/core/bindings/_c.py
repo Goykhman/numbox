@@ -9,6 +9,16 @@ from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
 from numbox.core.bindings.utils import load_lib
 
+__all__ = [
+    "rand", "srand",
+    "strlen", "puts", "fputs", "fputc", "putchar",
+    "fwrite", "fread", "fflush",
+    "fopen", "fclose",
+    "feof", "ferror", "clearerr",
+    "strcmp", "strncmp", "strchr", "strrchr", "strstr", "strncpy", "strerror",
+    "memcpy", "memmove", "memset", "memcmp", "memchr",
+    "getenv",
+]
 
 load_lib("c")
 

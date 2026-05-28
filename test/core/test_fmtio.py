@@ -1080,7 +1080,7 @@ def test_python_printf_rejects_percent_n():
 
 
 @pytest.mark.parametrize("fmt", ["%1$n", "%2$n", "%1$ln", "%99$n",
-                                  "%1$*2$n", "%1$.*2$n", "%1$*2$.*3$n"])
+                                 "%1$*2$n", "%1$.*2$n", "%1$*2$.*3$n"])
 def test_python_printf_rejects_positional_percent_n(fmt):
     """POSIX positional argument specifier (``%N$n``) is just as much of a
     memory-write hazard as plain ``%n`` — glibc supports it, and a literal
