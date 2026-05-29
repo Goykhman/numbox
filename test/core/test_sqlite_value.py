@@ -11,8 +11,7 @@ import numpy as np
 from numba import carray, cfunc, njit, types
 from numba.core import types as nb_types
 
-from numbox.core.bindings._sqlite_conn import sqlite3_close, sqlite3_open
-from numbox.core.bindings._sqlite_constants import (
+from numbox.core.bindings import (
     SQLITE_BLOB,
     SQLITE_FLOAT,
     SQLITE_INTEGER,
@@ -20,14 +19,12 @@ from numbox.core.bindings._sqlite_constants import (
     SQLITE_OK,
     SQLITE_TEXT,
     SQLITE_UTF8,
-)
-from numbox.core.bindings._sqlite_exec import sqlite3_exec
-from numbox.core.bindings._sqlite_result import sqlite3_result_int
-from numbox.core.bindings._sqlite_udf import (
+    sqlite3_close,
     sqlite3_create_function_v2,
+    sqlite3_exec,
+    sqlite3_open,
+    sqlite3_result_int,
     sqlite3_user_data,
-)
-from numbox.core.bindings._sqlite_value import (
     sqlite3_value_blob,
     sqlite3_value_bytes,
     sqlite3_value_double,
