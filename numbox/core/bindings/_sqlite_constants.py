@@ -28,6 +28,8 @@ __all__ = [
     "SQLITE_TRACE_STMT", "SQLITE_TRACE_PROFILE", "SQLITE_TRACE_ROW",
     "SQLITE_TRACE_CLOSE",
     "SQLITE_STATIC", "SQLITE_TRANSIENT",
+    "SQLITE_UTF8", "SQLITE_DETERMINISTIC", "SQLITE_DIRECTONLY", "SQLITE_INNOCUOUS",
+    "SQLITE_SUBTYPE", "SQLITE_RESULT_SUBTYPE",
 ]
 
 # === Primary result codes (sqlite3.h) ===
@@ -94,3 +96,16 @@ SQLITE_TRACE_CLOSE = 0x08
 # === Destructor sentinels for sqlite3_bind_text / sqlite3_bind_blob ===
 SQLITE_STATIC = 0
 SQLITE_TRANSIENT = -1
+
+# === sqlite3_create_function_v2 / sqlite3_create_window_function flags ===
+SQLITE_UTF8 = 1
+SQLITE_DETERMINISTIC = 0x800
+SQLITE_DIRECTONLY = 0x80000
+SQLITE_INNOCUOUS = 0x200000
+# SQLITE_SUBTYPE (since 3.30.0) declares a function may read its arguments'
+# subtypes via sqlite3_value_subtype; SQLITE_RESULT_SUBTYPE (since 3.45.0)
+# declares it may set a result subtype via sqlite3_result_subtype. Both are
+# required on strict-subtype builds (-DSQLITE_STRICT_SUBTYPE=1, e.g. conda-forge)
+# and harmlessly ignored on older sqlite.
+SQLITE_SUBTYPE = 0x100000
+SQLITE_RESULT_SUBTYPE = 0x1000000

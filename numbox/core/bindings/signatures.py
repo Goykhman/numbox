@@ -1,5 +1,5 @@
 from numba.core.types import (
-    Tuple, float64, int32, int64, intp, void
+    Tuple, float64, int32, int64, intp, uint8, uint32, uint64, void
 )
 
 
@@ -171,6 +171,43 @@ signatures_sqlite = {
     "sqlite3_commit_hook": intp(intp, intp, intp),
     "sqlite3_rollback_hook": intp(intp, intp, intp),
     "sqlite3_trace_v2": int32(intp, int32, intp, intp),
+    # -- value accessors (read UDF arguments) --
+    "sqlite3_value_int": int32(intp),
+    "sqlite3_value_int64": int64(intp),
+    "sqlite3_value_double": float64(intp),
+    "sqlite3_value_text": intp(intp),
+    "sqlite3_value_blob": intp(intp),
+    "sqlite3_value_bytes": int32(intp),
+    "sqlite3_value_type": int32(intp),
+    "sqlite3_value_numeric_type": int32(intp),
+    "sqlite3_value_nochange": int32(intp),
+    "sqlite3_value_frombind": int32(intp),
+    "sqlite3_value_subtype": uint32(intp),
+    "sqlite3_value_dup": intp(intp),
+    "sqlite3_value_free": void(intp),
+    # -- result setters (write UDF return value) --
+    "sqlite3_result_int": void(intp, int32),
+    "sqlite3_result_int64": void(intp, int64),
+    "sqlite3_result_double": void(intp, float64),
+    "sqlite3_result_text": void(intp, intp, int32, intp),
+    "sqlite3_result_text64": void(intp, intp, uint64, intp, uint8),
+    "sqlite3_result_blob": void(intp, intp, int32, intp),
+    "sqlite3_result_blob64": void(intp, intp, uint64, intp),
+    "sqlite3_result_null": void(intp),
+    "sqlite3_result_error": void(intp, intp, int32),
+    "sqlite3_result_error_nomem": void(intp),
+    "sqlite3_result_error_toobig": void(intp),
+    "sqlite3_result_error_code": void(intp, int32),
+    "sqlite3_result_subtype": void(intp, uint32),
+    "sqlite3_result_value": void(intp, intp),
+    "sqlite3_result_zeroblob": void(intp, int32),
+    "sqlite3_result_zeroblob64": int32(intp, uint64),
+    # -- UDF registration + context --
+    "sqlite3_create_function_v2": int32(intp, intp, int32, int32, intp, intp, intp, intp, intp),
+    "sqlite3_create_window_function": int32(intp, intp, int32, int32, intp, intp, intp, intp, intp, intp),
+    "sqlite3_aggregate_context": intp(intp, int32),
+    "sqlite3_user_data": intp(intp),
+    "sqlite3_context_db_handle": intp(intp),
 }
 
 signatures = {
