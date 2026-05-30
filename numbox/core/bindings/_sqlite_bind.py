@@ -11,7 +11,9 @@ caller can guarantee the array outlives the prepared statement.
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
 from numbox.core.bindings.utils import load_lib
+from numbox.core.configurations import jit_options
 from numbox.core.proxy.proxy import proxy
+
 
 __all__ = [
     "sqlite3_bind_int", "sqlite3_bind_int64", "sqlite3_bind_double",
@@ -24,50 +26,50 @@ __all__ = [
 load_lib("sqlite3")
 
 
-@proxy(signatures.get("sqlite3_bind_int"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_bind_int"), jit_options=jit_options)
 def sqlite3_bind_int(stmt_p, idx, val):
     return _call_lib_func("sqlite3_bind_int", (stmt_p, idx, val))
 
 
-@proxy(signatures.get("sqlite3_bind_int64"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_bind_int64"), jit_options=jit_options)
 def sqlite3_bind_int64(stmt_p, idx, val):
     return _call_lib_func("sqlite3_bind_int64", (stmt_p, idx, val))
 
 
-@proxy(signatures.get("sqlite3_bind_double"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_bind_double"), jit_options=jit_options)
 def sqlite3_bind_double(stmt_p, idx, val):
     return _call_lib_func("sqlite3_bind_double", (stmt_p, idx, val))
 
 
-@proxy(signatures.get("sqlite3_bind_text"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_bind_text"), jit_options=jit_options)
 def sqlite3_bind_text(stmt_p, idx, text_p, n, destructor):
     return _call_lib_func(
         "sqlite3_bind_text", (stmt_p, idx, text_p, n, destructor)
     )
 
 
-@proxy(signatures.get("sqlite3_bind_blob"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_bind_blob"), jit_options=jit_options)
 def sqlite3_bind_blob(stmt_p, idx, data_p, n, destructor):
     return _call_lib_func(
         "sqlite3_bind_blob", (stmt_p, idx, data_p, n, destructor)
     )
 
 
-@proxy(signatures.get("sqlite3_bind_null"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_bind_null"), jit_options=jit_options)
 def sqlite3_bind_null(stmt_p, idx):
     return _call_lib_func("sqlite3_bind_null", (stmt_p, idx))
 
 
-@proxy(signatures.get("sqlite3_bind_parameter_count"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_bind_parameter_count"), jit_options=jit_options)
 def sqlite3_bind_parameter_count(stmt_p):
     return _call_lib_func("sqlite3_bind_parameter_count", (stmt_p,))
 
 
-@proxy(signatures.get("sqlite3_bind_parameter_index"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_bind_parameter_index"), jit_options=jit_options)
 def sqlite3_bind_parameter_index(stmt_p, name_p):
     return _call_lib_func("sqlite3_bind_parameter_index", (stmt_p, name_p))
 
 
-@proxy(signatures.get("sqlite3_bind_parameter_name"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_bind_parameter_name"), jit_options=jit_options)
 def sqlite3_bind_parameter_name(stmt_p, idx):
     return _call_lib_func("sqlite3_bind_parameter_name", (stmt_p, idx))

@@ -5,6 +5,7 @@ from numba.core.types import int32, int64, intp, void
 from numba.extending import intrinsic
 
 from numbox.core.bindings.utils import platform_, load_lib
+from numbox.core.configurations import jit_options
 from numbox.core.proxy.proxy import proxy
 from numbox.utils.lowlevel import load_at, store_at
 
@@ -46,7 +47,7 @@ def _errno_ptr(typingctx):
     return intp(), codegen
 
 
-@proxy(int32(), jit_options={"cache": True})
+@proxy(int32(), jit_options=jit_options)
 def errno_get():
     """Return the current thread's errno as int32.
 
@@ -59,7 +60,7 @@ def errno_get():
     return load_at(_errno_ptr(), int32)
 
 
-@proxy(void(int64), jit_options={"cache": True})
+@proxy(void(int64), jit_options=jit_options)
 def errno_set(v):
     """Set the current thread's errno to v.
 

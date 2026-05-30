@@ -21,7 +21,9 @@ Produce the callback address from Python via:
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
 from numbox.core.bindings.utils import load_lib
+from numbox.core.configurations import jit_options
 from numbox.core.proxy.proxy import proxy
+
 
 __all__ = [
     "sqlite3_exec", "sqlite3_free",
@@ -31,13 +33,13 @@ __all__ = [
 load_lib("sqlite3")
 
 
-@proxy(signatures.get("sqlite3_exec"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_exec"), jit_options=jit_options)
 def sqlite3_exec(db_p, sql_p, cb_p, ctx_p, errmsg_pp):
     return _call_lib_func(
         "sqlite3_exec", (db_p, sql_p, cb_p, ctx_p, errmsg_pp)
     )
 
 
-@proxy(signatures.get("sqlite3_free"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_free"), jit_options=jit_options)
 def sqlite3_free(mem_p):
     return _call_lib_func("sqlite3_free", (mem_p,))

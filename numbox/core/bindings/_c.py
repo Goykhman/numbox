@@ -8,6 +8,8 @@ from numbox.core.proxy.proxy import proxy
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
 from numbox.core.bindings.utils import load_lib
+from numbox.core.configurations import jit_options
+
 
 __all__ = [
     "rand", "srand",
@@ -23,21 +25,21 @@ __all__ = [
 load_lib("c")
 
 
-@proxy(signatures.get("rand"), jit_options={"cache": True})
+@proxy(signatures.get("rand"), jit_options=jit_options)
 def rand():
     """POSIX `rand() <https://man7.org/linux/man-pages/man3/rand.3.html>`_:
     pseudo-random int in [0, RAND_MAX]. Not thread-safe."""
     return _call_lib_func("rand", ())
 
 
-@proxy(signatures.get("srand"), jit_options={"cache": True})
+@proxy(signatures.get("srand"), jit_options=jit_options)
 def srand(s):
     """POSIX `srand(seed) <https://man7.org/linux/man-pages/man3/rand.3.html>`_:
     seed the rand() generator."""
     return _call_lib_func("srand", (s,))
 
 
-@proxy(signatures.get("strlen"), jit_options={"cache": True})
+@proxy(signatures.get("strlen"), jit_options=jit_options)
 def strlen(s):
     """POSIX `strlen(s) <https://man7.org/linux/man-pages/man3/strlen.3.html>`_:
     number of bytes in the C string at `s` up to (but excluding) the trailing NUL.
@@ -45,7 +47,7 @@ def strlen(s):
     return _call_lib_func("strlen", (s,))
 
 
-@proxy(signatures.get("puts"), jit_options={"cache": True})
+@proxy(signatures.get("puts"), jit_options=jit_options)
 def puts(s):
     """POSIX `puts(s) <https://man7.org/linux/man-pages/man3/puts.3.html>`_:
     write the NUL-terminated string at `s` to stdout followed by a newline.
@@ -53,7 +55,7 @@ def puts(s):
     return _call_lib_func("puts", (s,))
 
 
-@proxy(signatures.get("fputs"), jit_options={"cache": True})
+@proxy(signatures.get("fputs"), jit_options=jit_options)
 def fputs(s, fp):
     """POSIX `fputs(s, fp) <https://man7.org/linux/man-pages/man3/fputs.3.html>`_:
     write the NUL-terminated string at `s` to FILE* `fp` (no trailing newline).
@@ -61,7 +63,7 @@ def fputs(s, fp):
     return _call_lib_func("fputs", (s, fp))
 
 
-@proxy(signatures.get("fputc"), jit_options={"cache": True})
+@proxy(signatures.get("fputc"), jit_options=jit_options)
 def fputc(c, fp):
     """POSIX `fputc(c, fp) <https://man7.org/linux/man-pages/man3/fputc.3.html>`_:
     write byte `c` (as unsigned char) to FILE* `fp`. Returns the byte on success,
@@ -69,14 +71,14 @@ def fputc(c, fp):
     return _call_lib_func("fputc", (c, fp))
 
 
-@proxy(signatures.get("putchar"), jit_options={"cache": True})
+@proxy(signatures.get("putchar"), jit_options=jit_options)
 def putchar(c):
     """POSIX `putchar(c) <https://man7.org/linux/man-pages/man3/putchar.3.html>`_:
     write byte `c` (as unsigned char) to stdout."""
     return _call_lib_func("putchar", (c,))
 
 
-@proxy(signatures.get("fwrite"), jit_options={"cache": True})
+@proxy(signatures.get("fwrite"), jit_options=jit_options)
 def fwrite(ptr, size, nmemb, fp):
     """POSIX `fwrite(ptr, size, nmemb, fp)
     <https://man7.org/linux/man-pages/man3/fwrite.3.html>`_: write `nmemb`
@@ -85,7 +87,7 @@ def fwrite(ptr, size, nmemb, fp):
     return _call_lib_func("fwrite", (ptr, size, nmemb, fp))
 
 
-@proxy(signatures.get("fread"), jit_options={"cache": True})
+@proxy(signatures.get("fread"), jit_options=jit_options)
 def fread(ptr, size, nmemb, fp):
     """POSIX `fread(ptr, size, nmemb, fp)
     <https://man7.org/linux/man-pages/man3/fread.3.html>`_: read up to `nmemb`
@@ -94,7 +96,7 @@ def fread(ptr, size, nmemb, fp):
     return _call_lib_func("fread", (ptr, size, nmemb, fp))
 
 
-@proxy(signatures.get("fflush"), jit_options={"cache": True})
+@proxy(signatures.get("fflush"), jit_options=jit_options)
 def fflush(fp):
     """POSIX `fflush(fp) <https://man7.org/linux/man-pages/man3/fflush.3.html>`_:
     flush the C stdio buffer for FILE* `fp` (pass NULL/0 to flush all streams).
@@ -102,7 +104,7 @@ def fflush(fp):
     return _call_lib_func("fflush", (fp,))
 
 
-@proxy(signatures.get("fopen"), jit_options={"cache": True})
+@proxy(signatures.get("fopen"), jit_options=jit_options)
 def fopen(path, mode):
     """POSIX `fopen(path, mode) <https://man7.org/linux/man-pages/man3/fopen.3.html>`_:
     open the file at `path` (NUL-terminated) with mode string `mode` (e.g.
@@ -111,7 +113,7 @@ def fopen(path, mode):
     return _call_lib_func("fopen", (path, mode))
 
 
-@proxy(signatures.get("fclose"), jit_options={"cache": True})
+@proxy(signatures.get("fclose"), jit_options=jit_options)
 def fclose(fp):
     """POSIX `fclose(fp) <https://man7.org/linux/man-pages/man3/fclose.3.html>`_:
     close FILE* `fp` and flush any buffered output. Returns 0 on success, EOF
@@ -119,7 +121,7 @@ def fclose(fp):
     return _call_lib_func("fclose", (fp,))
 
 
-@proxy(signatures.get("feof"), jit_options={"cache": True})
+@proxy(signatures.get("feof"), jit_options=jit_options)
 def feof(fp):
     """POSIX `feof(fp) <https://man7.org/linux/man-pages/man3/feof.3.html>`_:
     non-zero iff the end-of-file indicator is set on FILE* `fp`. Cleared by
@@ -127,7 +129,7 @@ def feof(fp):
     return _call_lib_func("feof", (fp,))
 
 
-@proxy(signatures.get("ferror"), jit_options={"cache": True})
+@proxy(signatures.get("ferror"), jit_options=jit_options)
 def ferror(fp):
     """POSIX `ferror(fp) <https://man7.org/linux/man-pages/man3/ferror.3.html>`_:
     non-zero iff the error indicator is set on FILE* `fp`. Cleared only by
@@ -135,14 +137,14 @@ def ferror(fp):
     return _call_lib_func("ferror", (fp,))
 
 
-@proxy(signatures.get("clearerr"), jit_options={"cache": True})
+@proxy(signatures.get("clearerr"), jit_options=jit_options)
 def clearerr(fp):
     """POSIX `clearerr(fp) <https://man7.org/linux/man-pages/man3/clearerr.3.html>`_:
     clear the end-of-file and error indicators on FILE* `fp`."""
     return _call_lib_func("clearerr", (fp,))
 
 
-@proxy(signatures.get("strcmp"), jit_options={"cache": True})
+@proxy(signatures.get("strcmp"), jit_options=jit_options)
 def strcmp(a, b):
     """POSIX `strcmp(a, b) <https://man7.org/linux/man-pages/man3/strcmp.3.html>`_:
     lexicographic byte comparison of two NUL-terminated strings. Returns
@@ -150,7 +152,7 @@ def strcmp(a, b):
     return _call_lib_func("strcmp", (a, b))
 
 
-@proxy(signatures.get("strncmp"), jit_options={"cache": True})
+@proxy(signatures.get("strncmp"), jit_options=jit_options)
 def strncmp(a, b, n):
     """POSIX `strncmp(a, b, n) <https://man7.org/linux/man-pages/man3/strncmp.3.html>`_:
     `strcmp` bounded to the first `n` bytes (stops early at a NUL on either side).
@@ -158,7 +160,7 @@ def strncmp(a, b, n):
     return _call_lib_func("strncmp", (a, b, n))
 
 
-@proxy(signatures.get("strchr"), jit_options={"cache": True})
+@proxy(signatures.get("strchr"), jit_options=jit_options)
 def strchr(s, c):
     """POSIX `strchr(s, c) <https://man7.org/linux/man-pages/man3/strchr.3.html>`_:
     pointer to the FIRST occurrence of byte `c` in NUL-terminated string `s`,
@@ -166,7 +168,7 @@ def strchr(s, c):
     return _call_lib_func("strchr", (s, c))
 
 
-@proxy(signatures.get("strrchr"), jit_options={"cache": True})
+@proxy(signatures.get("strrchr"), jit_options=jit_options)
 def strrchr(s, c):
     """POSIX `strrchr(s, c) <https://man7.org/linux/man-pages/man3/strrchr.3.html>`_:
     pointer to the LAST occurrence of byte `c` in NUL-terminated string `s`,
@@ -174,7 +176,7 @@ def strrchr(s, c):
     return _call_lib_func("strrchr", (s, c))
 
 
-@proxy(signatures.get("strstr"), jit_options={"cache": True})
+@proxy(signatures.get("strstr"), jit_options=jit_options)
 def strstr(haystack, needle):
     """POSIX `strstr(haystack, needle) <https://man7.org/linux/man-pages/man3/strstr.3.html>`_:
     pointer to the first occurrence of NUL-terminated `needle` within
@@ -183,7 +185,7 @@ def strstr(haystack, needle):
     return _call_lib_func("strstr", (haystack, needle))
 
 
-@proxy(signatures.get("strncpy"), jit_options={"cache": True})
+@proxy(signatures.get("strncpy"), jit_options=jit_options)
 def strncpy(dst, src, n):
     """POSIX `strncpy(dst, src, n) <https://man7.org/linux/man-pages/man3/strncpy.3.html>`_:
     copy at most n bytes from src to dst.
@@ -196,7 +198,7 @@ def strncpy(dst, src, n):
     return _call_lib_func("strncpy", (dst, src, n))
 
 
-@proxy(signatures.get("strerror"), jit_options={"cache": True})
+@proxy(signatures.get("strerror"), jit_options=jit_options)
 def strerror(errnum):
     """POSIX `strerror(errnum) <https://man7.org/linux/man-pages/man3/strerror.3.html>`_:
     pointer to the static error-message string for errnum.
@@ -208,7 +210,7 @@ def strerror(errnum):
     return _call_lib_func("strerror", (errnum,))
 
 
-@proxy(signatures.get("memcpy"), jit_options={"cache": True})
+@proxy(signatures.get("memcpy"), jit_options=jit_options)
 def memcpy(dst, src, n):
     """POSIX `memcpy(dst, src, n) <https://man7.org/linux/man-pages/man3/memcpy.3.html>`_:
     copy `n` bytes from `src` to `dst`. Source and destination must NOT overlap
@@ -216,7 +218,7 @@ def memcpy(dst, src, n):
     return _call_lib_func("memcpy", (dst, src, n))
 
 
-@proxy(signatures.get("memmove"), jit_options={"cache": True})
+@proxy(signatures.get("memmove"), jit_options=jit_options)
 def memmove(dst, src, n):
     """POSIX `memmove(dst, src, n) <https://man7.org/linux/man-pages/man3/memmove.3.html>`_:
     copy `n` bytes from `src` to `dst`, correctly handling overlapping regions.
@@ -224,7 +226,7 @@ def memmove(dst, src, n):
     return _call_lib_func("memmove", (dst, src, n))
 
 
-@proxy(signatures.get("memset"), jit_options={"cache": True})
+@proxy(signatures.get("memset"), jit_options=jit_options)
 def memset(dst, c, n):
     """POSIX `memset(dst, c, n) <https://man7.org/linux/man-pages/man3/memset.3.html>`_:
     fill the first `n` bytes of `dst` with the byte value `c & 0xff`. Returns `dst`.
@@ -232,7 +234,7 @@ def memset(dst, c, n):
     return _call_lib_func("memset", (dst, c, n))
 
 
-@proxy(signatures.get("memcmp"), jit_options={"cache": True})
+@proxy(signatures.get("memcmp"), jit_options=jit_options)
 def memcmp(a, b, n):
     """POSIX `memcmp(a, b, n) <https://man7.org/linux/man-pages/man3/memcmp.3.html>`_:
     byte-wise compare the first `n` bytes of `a` and `b`. Returns negative, zero,
@@ -241,7 +243,7 @@ def memcmp(a, b, n):
     return _call_lib_func("memcmp", (a, b, n))
 
 
-@proxy(signatures.get("memchr"), jit_options={"cache": True})
+@proxy(signatures.get("memchr"), jit_options=jit_options)
 def memchr(s, c, n):
     """POSIX `memchr(s, c, n) <https://man7.org/linux/man-pages/man3/memchr.3.html>`_:
     pointer to the first byte equal to `c & 0xff` in the first `n` bytes at `s`,
@@ -249,7 +251,7 @@ def memchr(s, c, n):
     return _call_lib_func("memchr", (s, c, n))
 
 
-@proxy(signatures.get("getenv"), jit_options={"cache": True})
+@proxy(signatures.get("getenv"), jit_options=jit_options)
 def getenv(name):
     """POSIX `getenv(name) <https://man7.org/linux/man-pages/man3/getenv.3.html>`_:
     pointer to the value string in the process environ table for variable `name`,

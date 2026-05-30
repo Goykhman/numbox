@@ -16,7 +16,9 @@ Callback shapes (informational; signatures are caller's responsibility):
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
 from numbox.core.bindings.utils import load_lib
+from numbox.core.configurations import jit_options
 from numbox.core.proxy.proxy import proxy
+
 
 __all__ = [
     "sqlite3_update_hook", "sqlite3_progress_handler", "sqlite3_busy_handler",
@@ -27,31 +29,31 @@ __all__ = [
 load_lib("sqlite3")
 
 
-@proxy(signatures.get("sqlite3_update_hook"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_update_hook"), jit_options=jit_options)
 def sqlite3_update_hook(db_p, cb_p, ctx_p):
     return _call_lib_func("sqlite3_update_hook", (db_p, cb_p, ctx_p))
 
 
-@proxy(signatures.get("sqlite3_progress_handler"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_progress_handler"), jit_options=jit_options)
 def sqlite3_progress_handler(db_p, n_ops, cb_p, ctx_p):
     return _call_lib_func("sqlite3_progress_handler", (db_p, n_ops, cb_p, ctx_p))
 
 
-@proxy(signatures.get("sqlite3_busy_handler"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_busy_handler"), jit_options=jit_options)
 def sqlite3_busy_handler(db_p, cb_p, ctx_p):
     return _call_lib_func("sqlite3_busy_handler", (db_p, cb_p, ctx_p))
 
 
-@proxy(signatures.get("sqlite3_commit_hook"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_commit_hook"), jit_options=jit_options)
 def sqlite3_commit_hook(db_p, cb_p, ctx_p):
     return _call_lib_func("sqlite3_commit_hook", (db_p, cb_p, ctx_p))
 
 
-@proxy(signatures.get("sqlite3_rollback_hook"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_rollback_hook"), jit_options=jit_options)
 def sqlite3_rollback_hook(db_p, cb_p, ctx_p):
     return _call_lib_func("sqlite3_rollback_hook", (db_p, cb_p, ctx_p))
 
 
-@proxy(signatures.get("sqlite3_trace_v2"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_trace_v2"), jit_options=jit_options)
 def sqlite3_trace_v2(db_p, mask, cb_p, ctx_p):
     return _call_lib_func("sqlite3_trace_v2", (db_p, mask, cb_p, ctx_p))

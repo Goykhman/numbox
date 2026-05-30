@@ -17,6 +17,7 @@ from numba.core.types import intp
 from numba.extending import intrinsic
 
 from numbox.core.bindings.utils import extract_literal_str, load_lib, platform_
+from numbox.core.configurations import jit_options
 from numbox.core.proxy.proxy import proxy
 
 
@@ -73,19 +74,19 @@ def _stdio_handle(typingctx, name_ty):
     return sig, codegen
 
 
-@proxy(intp(), jit_options={"cache": True})
+@proxy(intp(), jit_options=jit_options)
 def stdout():
     """Return the current process's stdout FILE* as intp. See module docstring."""
     return _stdio_handle("stdout")
 
 
-@proxy(intp(), jit_options={"cache": True})
+@proxy(intp(), jit_options=jit_options)
 def stderr():
     """Return the current process's stderr FILE* as intp. See module docstring."""
     return _stdio_handle("stderr")
 
 
-@proxy(intp(), jit_options={"cache": True})
+@proxy(intp(), jit_options=jit_options)
 def stdin():
     """Return the current process's stdin FILE* as intp. See module docstring."""
     return _stdio_handle("stdin")
