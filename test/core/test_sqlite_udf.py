@@ -48,8 +48,7 @@ def _open_memory():
 
 @structref.register
 class SumStateType(nb_types.StructRef):
-    def preprocess_fields(self, fields):
-        return tuple((n, nb_types.unliteral(t)) for n, t in fields)
+    pass
 
 
 class SumState(structref.StructRefProxy):
