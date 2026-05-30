@@ -31,7 +31,7 @@ from numbox.core.bindings import (
 )
 from numbox.utils.cstrings import c_string
 from numbox.utils.lowlevel import _cast_int_to_void_p
-from numbox.utils.meminfo import borrow_structref, export_meminfo, release_meminfo
+from numbox.utils.meminfo import _incref_meminfo, borrow_structref, export_meminfo, release_meminfo, structref_meminfo
 
 
 def _open_memory():
@@ -151,22 +151,38 @@ _sum_final_cb = cfunc(types.void(types.intp))(_sum_final_impl)
 
 
 # ---------------------------------------------------------------------------
-# Window UDF callbacks
+# Window UDF callbacks (array-backed state)
+#
+# Alternative to the structref-backed aggregate above: the aggregate_context
+# slot is 16 bytes holding two intp values -- [meminfo_p, data_p] -- instead
+# of a single structref meminfo pointer. The payload is a 1-element int64
+# array (the running total) allocated with np.zeros inside the step callback.
+# Because np.zeros emits an NRT_MemInfo_alloc in that body, removerefctpass is
+# disabled there, so the manual _incref_meminfo (the @intrinsic, which inlines)
+# survives and pins the buffer past the callback; release_meminfo in xFinal
+# frees it. Subsequent callbacks reach the payload through data_p via carray --
+# no structref reconstruction. Same pattern as numbduck's array UDAF.
 # ---------------------------------------------------------------------------
+
+_WSUM_SLOTS = 2  # aggregate_context layout: slot[0]=meminfo_p, slot[1]=data_p
+
 
 @njit
 def _wsum_step_impl(ctx, argc, argv_pp):
-    agg_ptr = sqlite3_aggregate_context(ctx, 8)
+    agg_ptr = sqlite3_aggregate_context(ctx, 16)
     if agg_ptr == 0:  # NULL on OOM; carray on a NULL pointer would segfault
         return
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
     val = sqlite3_value_int64(args[0])
-    slot = carray(_cast_int_to_void_p(agg_ptr), (1,), dtype=np.intp)
+    slot = carray(_cast_int_to_void_p(agg_ptr), (_WSUM_SLOTS,), dtype=np.intp)
     if slot[0] == 0:
-        s = SumState(nb_types.int64(0))
-        slot[0] = export_meminfo(s)
-    state = borrow_structref(sum_state_type, slot[0])
-    state.total += val
+        payload = np.zeros(1, dtype=np.int64)
+        meminfo_p, data_p = structref_meminfo(payload)
+        _incref_meminfo(meminfo_p)
+        slot[0] = meminfo_p
+        slot[1] = data_p
+    state = carray(_cast_int_to_void_p(slot[1]), (1,), dtype=np.int64)
+    state[0] += val
 
 
 _wsum_step_cb = cfunc(
@@ -176,14 +192,14 @@ _wsum_step_cb = cfunc(
 
 @njit
 def _wsum_inverse_impl(ctx, argc, argv_pp):
-    agg_ptr = sqlite3_aggregate_context(ctx, 8)
+    agg_ptr = sqlite3_aggregate_context(ctx, 16)
     if agg_ptr == 0:  # NULL on OOM; carray on a NULL pointer would segfault
         return
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
     val = sqlite3_value_int64(args[0])
-    slot = carray(_cast_int_to_void_p(agg_ptr), (1,), dtype=np.intp)
-    state = borrow_structref(sum_state_type, slot[0])
-    state.total -= val
+    slot = carray(_cast_int_to_void_p(agg_ptr), (_WSUM_SLOTS,), dtype=np.intp)
+    state = carray(_cast_int_to_void_p(slot[1]), (1,), dtype=np.int64)
+    state[0] -= val
 
 
 _wsum_inverse_cb = cfunc(
@@ -197,12 +213,12 @@ def _wsum_value_impl(ctx):
     if agg_ptr == 0:
         sqlite3_result_int64(ctx, nb_types.int64(0))
         return
-    slot = carray(_cast_int_to_void_p(agg_ptr), (1,), dtype=np.intp)
+    slot = carray(_cast_int_to_void_p(agg_ptr), (_WSUM_SLOTS,), dtype=np.intp)
     if slot[0] == 0:
         sqlite3_result_int64(ctx, nb_types.int64(0))
         return
-    state = borrow_structref(sum_state_type, slot[0])
-    sqlite3_result_int64(ctx, state.total)
+    state = carray(_cast_int_to_void_p(slot[1]), (1,), dtype=np.int64)
+    sqlite3_result_int64(ctx, state[0])
 
 
 _wsum_value_cb = cfunc(types.void(types.intp))(_wsum_value_impl)
@@ -214,12 +230,12 @@ def _wsum_final_impl(ctx):
     if agg_ptr == 0:
         sqlite3_result_int64(ctx, nb_types.int64(0))
         return
-    slot = carray(_cast_int_to_void_p(agg_ptr), (1,), dtype=np.intp)
+    slot = carray(_cast_int_to_void_p(agg_ptr), (_WSUM_SLOTS,), dtype=np.intp)
     if slot[0] == 0:
         sqlite3_result_int64(ctx, nb_types.int64(0))
         return
-    state = borrow_structref(sum_state_type, slot[0])
-    sqlite3_result_int64(ctx, state.total)
+    state = carray(_cast_int_to_void_p(slot[1]), (1,), dtype=np.int64)
+    sqlite3_result_int64(ctx, state[0])
     release_meminfo(slot[0])
 
 
@@ -412,13 +428,16 @@ def test_window_running_sum():
 
 
 def test_udaf_no_meminfo_leak():
-    """Regression guard for the structref-state lifecycle.
+    """Regression guard for the aggregate/window state lifecycle.
 
-    The aggregate/window state is kept alive across callbacks by
-    ``export_meminfo``'s +1 incref and freed by a single ``release_meminfo``
-    in xFinal. If export stopped increffing, the state would be freed early
-    (use-after-free); if release were dropped, it would leak. Either shows up
-    as an imbalance between meminfo allocations and frees.
+    Exercises both bridge idioms: the structref-backed aggregate
+    (``test_udaf_sum_structref``) and the array-backed window function
+    (``test_window_running_sum``). Each keeps its state alive across callbacks
+    with a +1 incref -- ``export_meminfo`` for the structref, the inlined
+    ``_incref_meminfo`` for the array -- and frees it with a single
+    ``release_meminfo`` in xFinal. A dropped incref frees the state early
+    (use-after-free); a dropped release leaks. Either shows up as an imbalance
+    between meminfo allocations and frees.
     """
     from numba.core.runtime import nrt
     _nrt = nrt._nrt
