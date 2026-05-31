@@ -18,8 +18,7 @@ be a silent wrong result; the in-body catch also lets numba run the borrowed
 state's reference-count decrement, which the unwind would otherwise skip -- a
 per-group meminfo leak. Only ``xFinal`` releases the slot.
 
-Mechanism (see docs/superpowers/specs/2026-05-29-sqlite-udaf-registration-helper-design.md):
-per-UDAF callback source is generated with the state type and the user functions
+Mechanism: per-UDAF callback source is generated with the state type and the user functions
 baked in as module globals (so the calls inline), written to a content-addressed
 anchor file under numba's cache dir (reusing numbox.utils.preprocessing), and the
 ``@njit(cache=True)`` impls cache across processes. The anchor's content hash
