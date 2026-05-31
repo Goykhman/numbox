@@ -5,8 +5,8 @@ functions (xStep/xInverse/xValue/xFinal) that perform the per-group state
 lifecycle -- ``sqlite3_aggregate_context`` allocation + NULL guard, the single
 intp slot, init-on-first-step via ``export_meminfo``, ``borrow_structref``, and
 the release-in-xFinal-but-NOT-xValue rule -- so callers write only their
-``@njit`` ``init``/``step``/``finalize`` (and ``inverse``/``value`` for windows)
-state logic.
+``init``/``step``/``finalize`` (and ``inverse``/``value`` for windows) state
+logic, as plain Python or already-jitted (``@njit``/``@proxy``) functions.
 
 **Exception handling.** Each generated callback wraps the user
 step/inverse/value/finalize call in a ``try``/``except`` that reports a
@@ -26,8 +26,10 @@ anchor file under numba's cache dir (reusing numbox.utils.preprocessing), and th
 folds a cloudpickle of the user functions' code objects so editing a body --
 including a numeric literal -- invalidates correctly.
 
-**Caller requirements.** The generated ``@njit(cache=True)`` impls cache and
-invalidate correctly even when the state-type class and the ``@njit`` callbacks
+**Caller requirements.** Callbacks may be plain Python functions or already-jitted
+callables (``@njit``/``@proxy``); plain ones are compiled with ``njit`` (see
+``_prepare_callbacks``). The generated ``@njit(cache=True)`` impls cache and
+invalidate correctly even when the state-type class and the callbacks
 are defined in ``__main__`` -- the anchor key is content-addressed on a
 ``cloudpickle`` of each callback's ``__code__`` (plus ``repr(state_type)`` and
 the numba/numbox versions), never on ``__module__`` (see ``_digest``); the
@@ -207,14 +209,24 @@ def _validate_state_type(state_type):
             "(e.g. MyStateType([('x', int64)])), got %r" % (state_type,))
 
 
-def _validate_callbacks(**fns):
-    """Reject non-``@njit`` callbacks up front with a clear message; otherwise a
-    plain Python callable surfaces as a cryptic numba ``TypingError`` when it
-    fails to bake into the generated source."""
+def _prepare_callbacks(**fns):
+    """Return ``fns`` with each callback ensured numba-compiled: an already
+    jitted callable (``@njit``, ``@proxy``, ...) passes through; a plain Python
+    function is wrapped with ``njit``. The callbacks are inlined into the
+    generated ``@njit(cache=True)`` impls, so a lazy ``njit`` (no explicit
+    signature) suffices -- the impl drives specialization -- and the
+    content-addressed anchor (keyed on ``py_func.__code__``) provides the
+    cross-process caching, so callbacks need no ``cache=True`` of their own."""
+    prepared = {}
     for role, fn in fns.items():
-        if not is_jitted(fn):
+        if is_jitted(fn):
+            prepared[role] = fn
+        elif callable(fn):
+            prepared[role] = njit(fn)
+        else:
             raise TypeError(
-                "%s must be an @njit-compiled function, got %r" % (role, fn))
+                "%s must be a callable (plain Python or @njit), got %r" % (role, fn))
+    return prepared
 
 
 def _digest(state_type, fns):
@@ -271,21 +283,24 @@ def register_aggregate(db, name, n_arg, state_type, init, step, finalize,
                        *, deterministic=False):
     """Register a structref-backed aggregate UDAF.
 
+    Callbacks may be plain Python or already-jitted (``@njit``/``@proxy``); plain
+    functions are compiled with ``njit``.
+
     :param db: connection pointer (intp), as returned by ``sqlite3_open``.
     :param name: SQL function name (str); the C-string lifetime is handled here.
     :param n_arg: argument count, or -1 for variadic.
     :param state_type: the numba structref *instance* type for per-group state.
-    :param init: ``@njit`` ``() -> state`` returning a fresh state.
-    :param step: ``@njit`` ``(state, ctx, argc, argv_pp)`` updating state.
-    :param finalize: ``@njit`` ``(state, ctx)`` writing the result.
+    :param init: ``() -> state`` returning a fresh state.
+    :param step: ``(state, ctx, argc, argv_pp)`` updating state.
+    :param finalize: ``(state, ctx)`` writing the result.
     :param deterministic: OR-in ``SQLITE_DETERMINISTIC``.
     :returns: a keep-alive handle the caller MUST retain (see ``_UDAFHandle``).
     """
     _validate_state_type(state_type)
-    _validate_callbacks(init=init, step=step, finalize=finalize)
+    fns = _prepare_callbacks(init=init, step=step, finalize=finalize)
     ns = _compile_callbacks(
         _stem("udaf_", name), [_XSTEP_SRC, _XFINAL_SRC], state_type,
-        {"_init": init, "_step": step, "_finalize": finalize})
+        {"_init": fns["init"], "_step": fns["step"], "_finalize": fns["finalize"]})
     xstep_impl = ns["_xstep_impl"]
     xfinal_impl = ns["_xfinal_impl"]
 
@@ -305,7 +320,7 @@ def register_aggregate(db, name, n_arg, state_type, init, step, finalize,
     if rc != SQLITE_OK:
         _raise_rc(db, name, rc)
     return _UDAFHandle(step_cb, final_cb, xstep_impl, xfinal_impl,
-                       init, step, finalize)
+                       fns["init"], fns["step"], fns["finalize"])
 
 
 def register_window(db, name, n_arg, state_type, init, step, inverse, value,
@@ -318,13 +333,13 @@ def register_window(db, name, n_arg, state_type, init, step, inverse, value,
     releases the meminfo.
     """
     _validate_state_type(state_type)
-    _validate_callbacks(init=init, step=step, inverse=inverse, value=value,
-                        finalize=finalize)
+    fns = _prepare_callbacks(init=init, step=step, inverse=inverse, value=value,
+                             finalize=finalize)
     ns = _compile_callbacks(
         _stem("wudaf_", name),
         [_XSTEP_SRC, _XINVERSE_SRC, _XVALUE_SRC, _XFINAL_SRC], state_type,
-        {"_init": init, "_step": step, "_inverse": inverse,
-         "_value": value, "_finalize": finalize})
+        {"_init": fns["init"], "_step": fns["step"], "_inverse": fns["inverse"],
+         "_value": fns["value"], "_finalize": fns["finalize"]})
     xstep_impl = ns["_xstep_impl"]
     xinverse_impl = ns["_xinverse_impl"]
     xvalue_impl = ns["_xvalue_impl"]
@@ -356,4 +371,5 @@ def register_window(db, name, n_arg, state_type, init, step, inverse, value,
         _raise_rc(db, name, rc)
     return _UDAFHandle(step_cb, inverse_cb, value_cb, final_cb,
                        xstep_impl, xinverse_impl, xvalue_impl, xfinal_impl,
-                       init, step, inverse, value, finalize)
+                       fns["init"], fns["step"], fns["inverse"],
+                       fns["value"], fns["finalize"])

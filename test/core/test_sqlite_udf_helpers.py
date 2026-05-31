@@ -396,18 +396,38 @@ def test_registration_error_raises(monkeypatch):
     sqlite3_close(db)
 
 
-def test_non_njit_callback_rejected():
-    """A plain (non-@njit) callback is rejected up front with a clear TypeError
-    rather than a cryptic numba TypingError at bake time."""
-    import pytest
+def test_plain_python_callbacks_accepted():
+    """Plain (undecorated) Python callbacks are njit-wrapped by the helper and
+    work end-to-end -- callers need not pre-``@njit`` them."""
     db = _open_memory()
+    _make_table(db, [1, 2, 3, 4, 5])
+
+    def plain_init():
+        return SumState(nb_types.int64(0))
 
     def plain_step(state, ctx, argc, argv_pp):
-        pass
+        args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
+        state.total += sqlite3_value_int64(args[0])
 
-    with pytest.raises(TypeError, match="step must be an @njit"):
+    def plain_finalize(state, ctx):
+        sqlite3_result_int64(ctx, state.total)
+
+    h = register_aggregate(db, "plain_sum", 1, sum_state_type,
+                           plain_init, plain_step, plain_finalize)
+    gc.collect()  # handle must keep callbacks alive
+    val, _cap = _read1_int64(db, "SELECT __cap(plain_sum(v)) FROM t")
+    sqlite3_close(db)
+    assert val == 15
+    assert h is not None
+
+
+def test_non_callable_callback_rejected():
+    """A non-callable callback is rejected up front with a clear TypeError."""
+    import pytest
+    db = _open_memory()
+    with pytest.raises(TypeError, match="step must be a callable"):
         register_aggregate(db, "bad_cb", 1, sum_state_type,
-                           sum_init, plain_step, sum_finalize)
+                           sum_init, 42, sum_finalize)
     sqlite3_close(db)
 
 
