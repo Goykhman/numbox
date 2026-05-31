@@ -167,7 +167,8 @@ def make_graph(
     for derived_ in all_derived_:
         line_ = _derived_line(derived_, ns, initializers, derive_hashes, _make_args, jit_options)
         code_txt.write(f"\n\t{line_}")
-    hash_str = f"code_block = {code_txt.getvalue()} initializers = {list(initializers.values())} derive_hashes = {derive_hashes}"  # noqa: E501
+    init_types = [str(get_ty(s)) for s in (*all_inputs_, *all_derived_)]
+    hash_str = f"code_block = {code_txt.getvalue()} init_types = {init_types} derive_hashes = {derive_hashes}"  # noqa: E501
     hash_ = code_block_hash(hash_str)
     access_nodes_names = [n.name for n in access_nodes]
     tup_ = ", ".join(access_nodes_names) + ","

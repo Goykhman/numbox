@@ -1,3 +1,8 @@
+import os
+import subprocess
+import sys
+import textwrap
+
 import numpy
 import pytest
 
@@ -460,6 +465,39 @@ def test_9():
     assert d1.data == 0.0
     d1.calculate()
     assert isclose(d1.data, 3.14)
+
+
+# Regression guard: make_graph's cached _make function must be keyed on node
+# TYPES, not init-value contents. A numpy.empty init (uninitialized memory,
+# non-deterministic repr) must not write a fresh .nbc on every process.
+_GRAPH_DRIVER = textwrap.dedent('''
+    import numpy as np
+    from numbox.core.work.builder import End, make_graph
+    make_graph(End(name="probe_a", init_value=np.empty((4,), np.float64)))
+    print("OK")
+''')
+
+
+def _run_graph_driver(tmp_path, cache):
+    script = tmp_path / "graph_drv.py"
+    script.write_text(_GRAPH_DRIVER)
+    env = dict(os.environ, NUMBA_CACHE_DIR=str(cache))
+    out = subprocess.run([sys.executable, str(script)], env=env,
+                         capture_output=True, text=True, timeout=600)
+    assert out.returncode == 0, out.stderr
+
+
+def test_make_graph_cache_key_content_independent(tmp_path):
+    cache = tmp_path / "nbcache"
+    cache.mkdir()
+    _run_graph_driver(tmp_path, cache)               # cold: compiles + caches
+    n_cold = sum(1 for _ in cache.rglob("builder._make*.nbc"))
+    assert n_cold > 0
+    _run_graph_driver(tmp_path, cache)               # warm: np.empty garbage differs
+    n_warm = sum(1 for _ in cache.rglob("builder._make*.nbc"))
+    assert n_warm == n_cold, (
+        "make_graph wrote a new _make .nbc in a second process "
+        "(cache key depends on init contents)")
 
 
 if __name__ == "__main__":
