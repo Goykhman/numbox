@@ -167,8 +167,12 @@ def make_graph(
     for derived_ in all_derived_:
         line_ = _derived_line(derived_, ns, initializers, derive_hashes, _make_args, jit_options)
         code_txt.write(f"\n\t{line_}")
-    init_types = [str(get_ty(s)) for s in (*all_inputs_, *all_derived_)]
-    hash_str = f"code_block = {code_txt.getvalue()} init_types = {init_types} derive_hashes = {derive_hashes}"  # noqa: E501
+    # No node types in the key: numba dispatches the generated _make by argument
+    # signature, so identical-structure graphs with different init types share the
+    # _make name and compile/load separate overloads correctly (pinned by
+    # test_make_graph_distinct_types_dispatch). The init *value* is deliberately
+    # absent too -- a non-deterministic repr (numpy.empty) would churn the cache.
+    hash_str = f"code_block = {code_txt.getvalue()} derive_hashes = {derive_hashes}"
     hash_ = code_block_hash(hash_str)
     access_nodes_names = [n.name for n in access_nodes]
     tup_ = ", ".join(access_nodes_names) + ","

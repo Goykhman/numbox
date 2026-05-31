@@ -506,5 +506,44 @@ def test_make_graph_cache_key_content_independent(tmp_path):
         "contents (cache key depends on init values, not just types)")
 
 
+# With node types out of the hash, identical-structure graphs with different init
+# TYPES collide on one _make name; numba dispatches the generated _make by argument
+# signature, so each loads its own overload correctly across a shared cache dir.
+_TYPED_GRAPH_DRIVER = textwrap.dedent('''
+    import sys
+    from numbox.core.work.builder import End, Derived, make_graph
+
+    def inc(x):
+        return x + 1
+
+    t = sys.argv[1]
+    iv_e, iv_d = (2.0, 0.0) if t == "f" else (2, 0)
+    e = End(name="e", init_value=iv_e)
+    d = Derived(name="d", init_value=iv_d, sources=(e,), derive=inc)
+    acc = make_graph(d)
+    acc.d.calculate()
+    print("RESULT", t, acc.d.data, type(acc.d.data).__name__)
+''')
+
+
+def _run_typed_driver(tmp_path, cache, t):
+    script = tmp_path / ("typed_drv_%s.py" % t)
+    script.write_text(_TYPED_GRAPH_DRIVER)
+    env = dict(os.environ, NUMBA_CACHE_DIR=str(cache))
+    out = subprocess.run([sys.executable, str(script), t], env=env,
+                         capture_output=True, text=True, timeout=600)
+    assert out.returncode == 0, out.stderr
+    return [ln for ln in out.stdout.splitlines() if ln.startswith("RESULT")][0].split()
+
+
+def test_make_graph_distinct_types_dispatch(tmp_path):
+    cache = tmp_path / "nbcache_types"
+    cache.mkdir()
+    rf = _run_typed_driver(tmp_path, cache, "f")     # cold: float overload
+    ri = _run_typed_driver(tmp_path, cache, "i")     # warm dir: int overload, same _make name
+    assert rf == ["RESULT", "f", "3.0", "float"]
+    assert ri == ["RESULT", "i", "3", "int"]
+
+
 if __name__ == "__main__":
     collect_and_run_tests(__name__)
