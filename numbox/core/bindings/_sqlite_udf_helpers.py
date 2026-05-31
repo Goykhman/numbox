@@ -21,17 +21,19 @@ per-group meminfo leak. Only ``xFinal`` releases the slot.
 Mechanism: per-UDAF callback source is generated with the state type and the user functions
 baked in as module globals (so the calls inline), written to a content-addressed
 anchor file under numba's cache dir (reusing numbox.utils.preprocessing), and the
-``@njit(cache=True)`` impls cache across processes. The anchor's content hash
+impls (``@njit(**jit_options)`` -- the numbox-wide config, default ``cache=True``)
+cache across processes. The anchor's content hash
 folds a cloudpickle of the user functions' code objects so editing a body --
 including a numeric literal -- invalidates correctly.
 
 **Caller requirements.** Callbacks may be plain Python functions or already-jitted
 callables (``@njit``/``@proxy``); plain ones are compiled with ``njit`` (see
-``_prepare_callbacks``). The generated ``@njit(cache=True)`` impls cache and
-invalidate correctly even when the state-type class and the callbacks
-are defined in ``__main__`` -- the anchor key is content-addressed on a
-``cloudpickle`` of each callback's ``__code__`` (plus ``repr(state_type)`` and
-the numba/numbox versions), never on ``__module__`` (see ``_digest``); the
+``_prepare_callbacks``). The generated impls (``@njit(**jit_options)``, default
+``cache=True``) cache and invalidate correctly even when the state-type class and
+the callbacks are defined in ``__main__`` -- the anchor key is content-addressed
+on a ``cloudpickle`` of each callback's ``__code__`` (plus ``repr(state_type)``,
+the resolved ``jit_options``, and the numba/numbox versions), never on
+``__module__`` (see ``_digest``); the
 subprocess tests ``test_xprocess_cache_no_growth`` /
 ``test_invalidation_on_literal_edit`` exercise this ``__main__`` path. The one
 case that does require a stable ``__module__`` is a *caller-side*
@@ -49,6 +51,7 @@ from numba.core.types import StructRef
 from numba.extending import is_jitted
 
 import numbox
+from numbox.core.configurations import jit_options
 from numbox.core.bindings._sqlite_conn import sqlite3_errmsg
 from numbox.core.bindings._sqlite_constants import (
     SQLITE_DETERMINISTIC,
@@ -86,10 +89,11 @@ _orphan_anchor_sweep(_ANCHOR_SUBDIR)
 
 
 # Generated-source templates. Baked global names: _state_type, _init, _step,
-# _finalize, _inverse, _value. Each impl is @njit(cache=True) so it caches
-# cross-process; the user fns inline because they are module globals here.
+# _finalize, _inverse, _value, jit_options. Each impl is @njit(**jit_options)
+# (numbox-wide config, default cache=True) so it caches cross-process; the user
+# fns inline because they are module globals here.
 _XSTEP_SRC = '''
-@njit(cache=True)
+@njit(**jit_options)
 def _xstep_impl(ctx, argc, argv_pp):
     agg = sqlite3_aggregate_context(ctx, 8)
     if agg == 0:
@@ -108,7 +112,7 @@ def _xstep_impl(ctx, argc, argv_pp):
 '''
 
 _XFINAL_SRC = '''
-@njit(cache=True)
+@njit(**jit_options)
 def _xfinal_impl(ctx):
     agg = sqlite3_aggregate_context(ctx, 0)
     if agg == 0:
@@ -142,7 +146,7 @@ def _xfinal_impl(ctx):
 '''
 
 _XINVERSE_SRC = '''
-@njit(cache=True)
+@njit(**jit_options)
 def _xinverse_impl(ctx, argc, argv_pp):
     agg = sqlite3_aggregate_context(ctx, 0)
     if agg == 0:
@@ -157,7 +161,7 @@ def _xinverse_impl(ctx, argc, argv_pp):
 '''
 
 _XVALUE_SRC = '''
-@njit(cache=True)
+@njit(**jit_options)
 def _xvalue_impl(ctx):
     agg = sqlite3_aggregate_context(ctx, 0)
     if agg == 0:
@@ -231,7 +235,7 @@ def _prepare_callbacks(**fns):
 def _digest(state_type, fns):
     """Content hash that invalidates when the state type, the user functions
     (co_consts-sensitive, via cloudpickle of the code object -- NOT bare
-    co_code), or the numba/numbox versions change."""
+    co_code), the resolved ``jit_options``, or the numba/numbox versions change."""
     h = hashlib.sha256()
     h.update(repr(state_type).encode("utf-8"))
     h.update(numba.__version__.encode("utf-8"))
@@ -241,6 +245,9 @@ def _digest(state_type, fns):
     # numba version above and the code-object hash below do the real
     # invalidating work (proven by test_invalidation_on_literal_edit).
     h.update((numbox.__version__ or "").encode("utf-8"))
+    # fold the resolved numbox-wide jit_options so flipping NUMBOX_JIT_OPTIONS
+    # (e.g. cache off) re-keys the anchor; numba's own cache also keys on flags.
+    h.update(repr(sorted(jit_options.items())).encode("utf-8"))
     for fn in fns:
         py = getattr(fn, "py_func", fn)
         h.update(cloudpickle.dumps(py.__code__))

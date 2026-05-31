@@ -236,6 +236,23 @@ def test_invalidation_on_literal_edit(tmp_path):
     assert _run_driver(tmp_path, cache, 3) == 45       # step: += 3*v  => 45 (not stale 15)
 
 
+def test_jit_options_cache_disabled_honored(tmp_path):
+    """Generated impls honor the numbox-wide jit_options: with NUMBOX_JIT_OPTIONS
+    cache off, the UDAF still computes correctly and writes no impl .nbc."""
+    cache = tmp_path / "nbcache_nocache"
+    cache.mkdir()
+    script = tmp_path / "drv_nocache.py"
+    script.write_text(_DRIVER.replace("{MULT}", "1"))
+    env = dict(os.environ, NUMBA_CACHE_DIR=str(cache),
+               NUMBOX_JIT_OPTIONS='{"cache": false}')
+    out = subprocess.run([sys.executable, str(script)], env=env,
+                         capture_output=True, text=True, timeout=600)
+    assert out.returncode == 0, out.stderr
+    result = [ln for ln in out.stdout.splitlines() if ln.startswith("RESULT")][0]
+    assert int(result.split()[1]) == 15                # correct with cache disabled
+    assert _count_nbc(cache) == 0, "cache disabled but a udaf impl .nbc was written"
+
+
 @njit
 def w_inverse(state, ctx, argc, argv_pp):
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
