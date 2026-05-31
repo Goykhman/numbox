@@ -468,20 +468,26 @@ def test_9():
 
 
 # Regression guard: make_graph's cached _make function must be keyed on node
-# TYPES, not init-value contents. A numpy.empty init (uninitialized memory,
-# non-deterministic repr) must not write a fresh .nbc on every process.
+# TYPES, not init-value contents -- else a non-deterministic init repr (e.g.
+# numpy.empty's uninitialized bytes) mints a fresh .nbc every process, growing
+# the cache without bound. The value is injected per run (PROBE_VAL) so it
+# DIFFERS between the two processes while the TYPE stays identical; this catches
+# the regression deterministically on every platform rather than relying on
+# np.empty happening to return distinct garbage across processes.
 _GRAPH_DRIVER = textwrap.dedent('''
+    import os
     import numpy as np
     from numbox.core.work.builder import End, make_graph
-    make_graph(End(name="probe_a", init_value=np.empty((4,), np.float64)))
+    v = np.full((4,), float(os.environ["PROBE_VAL"]), np.float64)
+    make_graph(End(name="probe_a", init_value=v))
     print("OK")
 ''')
 
 
-def _run_graph_driver(tmp_path, cache):
+def _run_graph_driver(tmp_path, cache, probe_val):
     script = tmp_path / "graph_drv.py"
     script.write_text(_GRAPH_DRIVER)
-    env = dict(os.environ, NUMBA_CACHE_DIR=str(cache))
+    env = dict(os.environ, NUMBA_CACHE_DIR=str(cache), PROBE_VAL=probe_val)
     out = subprocess.run([sys.executable, str(script)], env=env,
                          capture_output=True, text=True, timeout=600)
     assert out.returncode == 0, out.stderr
@@ -490,14 +496,14 @@ def _run_graph_driver(tmp_path, cache):
 def test_make_graph_cache_key_content_independent(tmp_path):
     cache = tmp_path / "nbcache"
     cache.mkdir()
-    _run_graph_driver(tmp_path, cache)               # cold: compiles + caches
+    _run_graph_driver(tmp_path, cache, "1.0")        # cold: compiles + caches
     n_cold = sum(1 for _ in cache.rglob("builder._make*.nbc"))
     assert n_cold > 0
-    _run_graph_driver(tmp_path, cache)               # warm: np.empty garbage differs
+    _run_graph_driver(tmp_path, cache, "2.0")        # warm: same TYPE, different value
     n_warm = sum(1 for _ in cache.rglob("builder._make*.nbc"))
     assert n_warm == n_cold, (
-        "make_graph wrote a new _make .nbc in a second process "
-        "(cache key depends on init contents)")
+        "make_graph wrote a new _make .nbc for a same-typed init with different "
+        "contents (cache key depends on init values, not just types)")
 
 
 if __name__ == "__main__":
