@@ -467,13 +467,6 @@ def test_9():
     assert isclose(d1.data, 3.14)
 
 
-# Regression guard: make_graph's cached _make function must be keyed on node
-# TYPES, not init-value contents -- else a non-deterministic init repr (e.g.
-# numpy.empty's uninitialized bytes) mints a fresh .nbc every process, growing
-# the cache without bound. The value is injected per run (PROBE_VAL) so it
-# DIFFERS between the two processes while the TYPE stays identical; this catches
-# the regression deterministically on every platform rather than relying on
-# np.empty happening to return distinct garbage across processes.
 _GRAPH_DRIVER = textwrap.dedent('''
     import os
     import numpy as np
@@ -506,9 +499,6 @@ def test_make_graph_cache_key_content_independent(tmp_path):
         "contents (cache key depends on init values, not just types)")
 
 
-# With node types out of the hash, identical-structure graphs with different init
-# TYPES collide on one _make name; numba dispatches the generated _make by argument
-# signature, so each loads its own overload correctly across a shared cache dir.
 _TYPED_GRAPH_DRIVER = textwrap.dedent('''
     import sys
     from numbox.core.work.builder import End, Derived, make_graph
