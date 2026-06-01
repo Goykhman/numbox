@@ -592,6 +592,14 @@ numbox.core.bindings._sqlite_udf_helpers
    :show-inheritance:
    :undoc-members:
 
+numbox.core.bindings._sqlite_vtable
+-----------------------------------
+
+.. automodule:: numbox.core.bindings._sqlite_vtable
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 numbox.core.bindings.call
 -------------------------
 
