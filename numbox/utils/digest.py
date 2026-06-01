@@ -35,5 +35,6 @@ def digest(subject, fns):
     h.update(repr(sorted(jit_options.items())).encode("utf-8"))
     for fn in fns:
         py = getattr(fn, "py_func", fn)
-        h.update(cloudpickle.dumps(py.__code__))
+        code = getattr(py, "__code__", py)
+        h.update(cloudpickle.dumps(code))
     return h.hexdigest()[:16]

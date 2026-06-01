@@ -1,3 +1,5 @@
+import functools
+
 from numbox.utils.digest import digest
 from test.auxiliary_utils import collect_and_run_tests
 
@@ -40,6 +42,25 @@ def test_digest_varies_with_jit_options(monkeypatch):
     before = digest("StateType", (cb,))
     monkeypatch.setitem(digest_mod.jit_options, "cache", not digest_mod.jit_options.get("cache", True))
     assert digest("StateType", (cb,)) != before
+
+
+def test_digest_accepts_codeless_callable():
+    # a callable with no __code__ (builtin, functools.partial, callable object)
+    # must hash via cloudpickle of the object itself instead of raising.
+    assert len(digest("StateType", (functools.partial(len),))) == 16
+
+
+def test_digest_codeless_callable_captures_state():
+    # object-fallback hashes the whole object, so differing partial args (state)
+    # yield different digests -- which __call__.__code__ alone would miss.
+    one = digest("StateType", (functools.partial(len, "a"),))
+    two = digest("StateType", (functools.partial(len, "ab"),))
+    assert one != two
+
+
+def test_digest_empty_inputs_deterministic():
+    assert digest("", ()) == digest("", ())
+    assert len(digest("", ())) == 16
 
 
 if __name__ == '__main__':
