@@ -1,3 +1,8 @@
+import os
+import subprocess
+import sys
+import textwrap
+
 import numpy
 import pytest
 
@@ -460,6 +465,84 @@ def test_9():
     assert d1.data == 0.0
     d1.calculate()
     assert isclose(d1.data, 3.14)
+
+
+# Regression guard: make_graph's cached _make function must be keyed on node
+# TYPES, not init-value contents -- else a non-deterministic init repr (e.g.
+# numpy.empty's uninitialized bytes) mints a fresh .nbc every process, growing
+# the cache without bound. The value is injected per run (PROBE_VAL) so it
+# DIFFERS between the two processes while the TYPE stays identical; this catches
+# the regression deterministically on every platform rather than relying on
+# np.empty happening to return distinct garbage across processes.
+_GRAPH_DRIVER = textwrap.dedent('''
+    import os
+    import numpy as np
+    from numbox.core.work.builder import End, make_graph
+    v = np.full((4,), float(os.environ["PROBE_VAL"]), np.float64)
+    make_graph(End(name="probe_a", init_value=v))
+    print("OK")
+''')
+
+
+def _run_graph_driver(tmp_path, cache, probe_val):
+    script = tmp_path / "graph_drv.py"
+    script.write_text(_GRAPH_DRIVER)
+    env = dict(os.environ, NUMBA_CACHE_DIR=str(cache), PROBE_VAL=probe_val)
+    out = subprocess.run([sys.executable, str(script)], env=env,
+                         capture_output=True, text=True, timeout=600)
+    assert out.returncode == 0, out.stderr
+
+
+def test_make_graph_cache_key_content_independent(tmp_path):
+    cache = tmp_path / "nbcache"
+    cache.mkdir()
+    _run_graph_driver(tmp_path, cache, "1.0")        # cold: compiles + caches
+    n_cold = sum(1 for _ in cache.rglob("builder._make*.nbc"))
+    assert n_cold > 0
+    _run_graph_driver(tmp_path, cache, "2.0")        # warm: same TYPE, different value
+    n_warm = sum(1 for _ in cache.rglob("builder._make*.nbc"))
+    assert n_warm == n_cold, (
+        "make_graph wrote a new _make .nbc for a same-typed init with different "
+        "contents (cache key depends on init values, not just types)")
+
+
+# With node types out of the hash, identical-structure graphs with different init
+# TYPES collide on one _make name; numba dispatches the generated _make by argument
+# signature, so each loads its own overload correctly across a shared cache dir.
+_TYPED_GRAPH_DRIVER = textwrap.dedent('''
+    import sys
+    from numbox.core.work.builder import End, Derived, make_graph
+
+    def inc(x):
+        return x + 1
+
+    t = sys.argv[1]
+    iv_e, iv_d = (2.0, 0.0) if t == "f" else (2, 0)
+    e = End(name="e", init_value=iv_e)
+    d = Derived(name="d", init_value=iv_d, sources=(e,), derive=inc)
+    acc = make_graph(d)
+    acc.d.calculate()
+    print("RESULT", t, acc.d.data, type(acc.d.data).__name__)
+''')
+
+
+def _run_typed_driver(tmp_path, cache, t):
+    script = tmp_path / ("typed_drv_%s.py" % t)
+    script.write_text(_TYPED_GRAPH_DRIVER)
+    env = dict(os.environ, NUMBA_CACHE_DIR=str(cache))
+    out = subprocess.run([sys.executable, str(script), t], env=env,
+                         capture_output=True, text=True, timeout=600)
+    assert out.returncode == 0, out.stderr
+    return [ln for ln in out.stdout.splitlines() if ln.startswith("RESULT")][0].split()
+
+
+def test_make_graph_distinct_types_dispatch(tmp_path):
+    cache = tmp_path / "nbcache_types"
+    cache.mkdir()
+    rf = _run_typed_driver(tmp_path, cache, "f")     # cold: float overload
+    ri = _run_typed_driver(tmp_path, cache, "i")     # warm dir: int overload, same _make name
+    assert rf == ["RESULT", "f", "3.0", "float"]
+    assert ri == ["RESULT", "i", "3", "int"]
 
 
 if __name__ == "__main__":
