@@ -33,7 +33,7 @@ callables (``@njit``/``@proxy``); plain ones are compiled with ``njit`` (see
 the callbacks are defined in ``__main__`` -- the anchor key is content-addressed
 on a ``cloudpickle`` of each callback's ``__code__`` (plus ``repr(state_type)``,
 the resolved ``jit_options``, and the numba/numbox versions), never on
-``__module__`` (see ``_digest``); the
+``__module__`` (see ``numbox.utils.digest.digest``); the
 subprocess tests ``test_xprocess_cache_no_growth`` /
 ``test_invalidation_on_literal_edit`` exercise this ``__main__`` path. The one
 case that does require a stable ``__module__`` is a *caller-side*
@@ -42,16 +42,11 @@ case that does require a stable ``__module__`` is a *caller-side*
 the state-type class and callbacks in an importable module.
 """
 import ctypes
-import hashlib
 
-import numba
 from numba import cfunc, types
-from numba.core.serialize import cloudpickle
 from numba.core.types import StructRef
 from numba.extending import is_jitted
 
-import numbox
-from numbox.core.configurations import jit_options
 from numbox.core.bindings._sqlite_conn import sqlite3_errmsg
 from numbox.core.bindings._sqlite_constants import (
     SQLITE_DETERMINISTIC,
@@ -63,6 +58,7 @@ from numbox.core.bindings._sqlite_udf import (
     sqlite3_create_window_function,
 )
 from numbox.utils.cstrings import c_string
+from numbox.utils.digest import digest
 from numbox.utils.preprocessing import (
     _anchor_path,
     _materialize_anchor,
@@ -73,6 +69,7 @@ from numbox.utils.preprocessing import (
 # puts them in this module's __dict__, which seeds the exec namespace below.
 import numpy as np  # noqa: F401
 from numba import carray, njit  # noqa: F401
+from numbox.core.configurations import jit_options  # noqa: F401
 from numbox.core.bindings._sqlite_result import sqlite3_result_error  # noqa: F401
 from numbox.core.bindings._sqlite_udf import sqlite3_aggregate_context  # noqa: F401
 from numbox.utils.lowlevel import _cast_int_to_void_p, get_unicode_data_p  # noqa: F401
@@ -221,35 +218,13 @@ def _prepare_callbacks(**fns):
     return prepared
 
 
-def _digest(state_type, fns):
-    """Content hash that invalidates when the state type, the user functions
-    (co_consts-sensitive, via cloudpickle of the code object -- NOT bare
-    co_code), the resolved ``jit_options``, or the numba/numbox versions change."""
-    h = hashlib.sha256()
-    h.update(repr(state_type).encode("utf-8"))
-    h.update(numba.__version__.encode("utf-8"))
-    # numbox.__version__ is "" upstream (the package version derives from it via
-    # pyproject's dynamic attr), so this fold is currently inert; it is kept so
-    # digests auto-invalidate should numbox ever set a real __version__. The
-    # numba version above and the code-object hash below do the real
-    # invalidating work (proven by test_invalidation_on_literal_edit).
-    h.update((numbox.__version__ or "").encode("utf-8"))
-    # fold the resolved numbox-wide jit_options so flipping NUMBOX_JIT_OPTIONS
-    # (e.g. cache off) re-keys the anchor; numba's own cache also keys on flags.
-    h.update(repr(sorted(jit_options.items())).encode("utf-8"))
-    for fn in fns:
-        py = getattr(fn, "py_func", fn)
-        h.update(cloudpickle.dumps(py.__code__))
-    return h.hexdigest()[:16]
-
-
 def _compile_callbacks(stem, srcs, state_type, fns):
     """Generate + content-address-anchor + exec the @njit(cache=True) impls.
 
     ``fns`` maps generated global names (``_init``, ``_step``, ...) to user
     callables. Returns the exec namespace (contains ``_xstep_impl`` etc.)."""
-    digest = _digest(state_type, list(fns.values()))
-    code_txt = "# udaf-digest: %s\n%s" % (digest, "".join(srcs))
+    udaf_digest = digest(state_type, list(fns.values()))
+    code_txt = "# udaf-digest: %s\n%s" % (udaf_digest, "".join(srcs))
     # globals() is this module's __dict__; it carries __name__, which numba's
     # warm-cache Environment rebuild requires when reloading the cached impls.
     ns = {**globals(), "_state_type": state_type, **fns}

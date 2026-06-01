@@ -112,6 +112,14 @@ validity check.
    :show-inheritance:
    :undoc-members:
 
+numbox.utils.digest
+-------------------
+
+.. automodule:: numbox.utils.digest
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 numbox.utils.lowlevel
 ---------------------
 
