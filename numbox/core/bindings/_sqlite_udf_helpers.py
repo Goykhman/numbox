@@ -194,17 +194,6 @@ def _xvalue_impl(ctx):
 '''
 
 
-class _UDAFHandle:
-    """Keeps the generated ``cfunc`` callbacks (and the user functions they bake
-    in) alive. SQLite holds raw pointers to the cfuncs; if this handle is
-    garbage-collected the pointers dangle and the next call segfaults. **The
-    caller MUST retain the returned handle for as long as the UDAF is used.**"""
-    __slots__ = ("_keep",)
-
-    def __init__(self, *objs):
-        self._keep = objs
-
-
 def _validate_state_type(state_type):
     if not isinstance(state_type, StructRef):
         raise TypeError(
@@ -300,7 +289,9 @@ def register_aggregate(db, name, n_arg, state_type, init, step, finalize,
     :param step: ``(state, ctx, argc, argv_pp)`` updating state.
     :param finalize: ``(state, ctx)`` writing the result.
     :param deterministic: OR-in ``SQLITE_DETERMINISTIC``.
-    :returns: a keep-alive handle the caller MUST retain (see ``_UDAFHandle``).
+
+    Returns ``None``; the generated callbacks need not be retained -- numba keeps
+    the compiled cfunc code and dispatchers resident for the process lifetime.
     """
     _validate_state_type(state_type)
     fns = _prepare_callbacks(init=init, step=step, finalize=finalize)
@@ -325,8 +316,6 @@ def register_aggregate(db, name, n_arg, state_type, init, step, finalize,
             step_cb.address, final_cb.address, 0)
     if rc != SQLITE_OK:
         _raise_rc(db, name, rc)
-    return _UDAFHandle(step_cb, final_cb, xstep_impl, xfinal_impl,
-                       fns["init"], fns["step"], fns["finalize"])
 
 
 def register_window(db, name, n_arg, state_type, init, step, inverse, value,
@@ -375,7 +364,3 @@ def register_window(db, name, n_arg, state_type, init, step, inverse, value,
             value_cb.address, inverse_cb.address, 0)
     if rc != SQLITE_OK:
         _raise_rc(db, name, rc)
-    return _UDAFHandle(step_cb, inverse_cb, value_cb, final_cb,
-                       xstep_impl, xinverse_impl, xvalue_impl, xfinal_impl,
-                       fns["init"], fns["step"], fns["inverse"],
-                       fns["value"], fns["finalize"])

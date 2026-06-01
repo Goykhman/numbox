@@ -104,24 +104,20 @@ def _read1_int64(db, select_sql):
 def test_aggregate_sum():
     db = _open_memory()
     _make_table(db, [1, 2, 3, 4, 5])
-    h = register_aggregate(db, "my_sum", 1, sum_state_type,
-                           sum_init, sum_step, sum_finalize)
-    gc.collect()  # handle must keep callbacks alive
+    register_aggregate(db, "my_sum", 1, sum_state_type, sum_init, sum_step, sum_finalize)
+    gc.collect()  # no handle retained; callbacks survive GC (numba keeps the JIT code alive)
     val, _cap = _read1_int64(db, "SELECT __cap(my_sum(v)) FROM t")
     sqlite3_close(db)
     assert val == 15
-    assert h is not None
 
 
 def test_aggregate_empty_group():
     db = _open_memory()
     _make_table(db, [])
-    h = register_aggregate(db, "my_sum", 1, sum_state_type,
-                           sum_init, sum_step, sum_finalize)
+    register_aggregate(db, "my_sum", 1, sum_state_type, sum_init, sum_step, sum_finalize)
     val, _cap = _read1_int64(db, "SELECT __cap(my_sum(v)) FROM t")
     sqlite3_close(db)
     assert val == 0
-    assert h is not None
 
 
 def test_aggregate_bad_state_type():
@@ -185,7 +181,7 @@ _DRIVER = textwrap.dedent('''
     for v in (1, 2, 3, 4, 5):
         with c_string("INSERT INTO t VALUES (%d)" % v) as p:
             sqlite3_exec(db, p, 0, 0, 0)
-    h = register_aggregate(db, "f", 1, st, s_init, s_step, s_fin)
+    register_aggregate(db, "f", 1, st, s_init, s_step, s_fin)
     buf = np.zeros(1, dtype=np.int64)
     @cfunc(types.void(types.intp, types.int32, types.intp))
     def cap(ctx, argc, argv):
@@ -288,15 +284,13 @@ def _read_window(db, select_sql, nrows):
 def test_window_running_sum():
     db = _open_memory()
     _make_table(db, [1, 2, 3, 4, 5])
-    h = register_window(db, "my_wsum", 1, sum_state_type,
-                        sum_init, sum_step, w_inverse, w_value, sum_finalize)
+    register_window(db, "my_wsum", 1, sum_state_type, sum_init, sum_step, w_inverse, w_value, sum_finalize)
     sql = ("SELECT __wcap(my_wsum(v) OVER "
            "(ORDER BY v ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)) "
            "FROM t ORDER BY v")
     vals, _cap = _read_window(db, sql, 5)
     sqlite3_close(db)
     assert vals == [1, 3, 5, 7, 9]
-    assert h is not None
 
 
 @njit
@@ -308,26 +302,21 @@ def sum2_step(state, ctx, argc, argv_pp):  # distinct body => independent compil
 def test_two_distinct_aggregates_no_collision():
     db = _open_memory()
     _make_table(db, [1, 2, 3, 4, 5])
-    h1 = register_aggregate(db, "my_sum", 1, sum_state_type,
-                            sum_init, sum_step, sum_finalize)
-    h2 = register_aggregate(db, "my_sum2", 1, sum_state_type,
-                            sum_init, sum2_step, sum_finalize)
+    register_aggregate(db, "my_sum", 1, sum_state_type, sum_init, sum_step, sum_finalize)
+    register_aggregate(db, "my_sum2", 1, sum_state_type, sum_init, sum2_step, sum_finalize)
     v1, _c1 = _read1_int64(db, "SELECT __cap(my_sum(v)) FROM t")
     v2, _c2 = _read1_int64(db, "SELECT __cap(my_sum2(v)) FROM t")
     sqlite3_close(db)
     assert (v1, v2) == (15, 30)
-    assert h1 is not None and h2 is not None
 
 
 def test_deterministic_flag():
     db = _open_memory()
     _make_table(db, [1, 2, 3, 4, 5])
-    h = register_aggregate(db, "my_sum_det", 1, sum_state_type,
-                           sum_init, sum_step, sum_finalize, deterministic=True)
+    register_aggregate(db, "my_sum_det", 1, sum_state_type, sum_init, sum_step, sum_finalize, deterministic=True)
     val, _cap = _read1_int64(db, "SELECT __cap(my_sum_det(v)) FROM t")
     sqlite3_close(db)
     assert val == 15
-    assert h is not None
 
 
 def test_deterministic_flag_ors_bit(monkeypatch):
@@ -345,10 +334,8 @@ def test_deterministic_flag_ors_bit(monkeypatch):
 
     monkeypatch.setattr(helpers, "sqlite3_create_function_v2", spy)
     db = _open_memory()
-    register_aggregate(db, "det_on", 1, sum_state_type,
-                       sum_init, sum_step, sum_finalize, deterministic=True)
-    register_aggregate(db, "det_off", 1, sum_state_type,
-                       sum_init, sum_step, sum_finalize)
+    register_aggregate(db, "det_on", 1, sum_state_type, sum_init, sum_step, sum_finalize, deterministic=True)
+    register_aggregate(db, "det_off", 1, sum_state_type, sum_init, sum_step, sum_finalize)
     sqlite3_close(db)
     assert seen[0] & helpers.SQLITE_DETERMINISTIC
     assert not (seen[1] & helpers.SQLITE_DETERMINISTIC)
@@ -387,10 +374,8 @@ def test_window_deterministic_flag_ors_bit(monkeypatch):
 
     monkeypatch.setattr(helpers, "sqlite3_create_window_function", spy)
     db = _open_memory()
-    register_window(db, "wdet_on", 1, sum_state_type, sum_init, sum_step,
-                    w_inverse, w_value, sum_finalize, deterministic=True)
-    register_window(db, "wdet_off", 1, sum_state_type, sum_init, sum_step,
-                    w_inverse, w_value, sum_finalize)
+    register_window(db, "wdet_on", 1, sum_state_type, sum_init, sum_step, w_inverse, w_value, sum_finalize, deterministic=True)
+    register_window(db, "wdet_off", 1, sum_state_type, sum_init, sum_step, w_inverse, w_value, sum_finalize)
     sqlite3_close(db)
     assert seen[0] & helpers.SQLITE_DETERMINISTIC
     assert not (seen[1] & helpers.SQLITE_DETERMINISTIC)
@@ -408,8 +393,7 @@ def test_registration_error_raises(monkeypatch):
                         lambda *a, **k: 1)  # non-OK rc (SQLITE_ERROR)
     db = _open_memory()
     with pytest.raises(RuntimeError, match="registration failed"):
-        register_aggregate(db, "err", 1, sum_state_type,
-                           sum_init, sum_step, sum_finalize)
+        register_aggregate(db, "err", 1, sum_state_type, sum_init, sum_step, sum_finalize)
     sqlite3_close(db)
 
 
@@ -429,13 +413,11 @@ def test_plain_python_callbacks_accepted():
     def plain_finalize(state, ctx):
         sqlite3_result_int64(ctx, state.total)
 
-    h = register_aggregate(db, "plain_sum", 1, sum_state_type,
-                           plain_init, plain_step, plain_finalize)
-    gc.collect()  # handle must keep callbacks alive
+    register_aggregate(db, "plain_sum", 1, sum_state_type, plain_init, plain_step, plain_finalize)
+    gc.collect()  # no handle retained; plain callbacks njit-wrapped, survive GC too
     val, _cap = _read1_int64(db, "SELECT __cap(plain_sum(v)) FROM t")
     sqlite3_close(db)
     assert val == 15
-    assert h is not None
 
 
 def test_non_callable_callback_rejected():
@@ -443,8 +425,7 @@ def test_non_callable_callback_rejected():
     import pytest
     db = _open_memory()
     with pytest.raises(TypeError, match="step must be a callable"):
-        register_aggregate(db, "bad_cb", 1, sum_state_type,
-                           sum_init, 42, sum_finalize)
+        register_aggregate(db, "bad_cb", 1, sum_state_type, sum_init, 42, sum_finalize)
     sqlite3_close(db)
 
 
@@ -488,12 +469,10 @@ def test_multiarg_multifield_state():
     for a, b in [(1, 4), (2, 5), (3, 6)]:
         with c_string("INSERT INTO t2 VALUES (%d, %d)" % (a, b)) as p:
             assert sqlite3_exec(db, p, 0, 0, 0) == SQLITE_OK
-    h = register_aggregate(db, "pairsum", 2, pair_state_type,
-                           pair_init, pair_step, pair_finalize)
+    register_aggregate(db, "pairsum", 2, pair_state_type, pair_init, pair_step, pair_finalize)
     val, _cap = _read1_int64(db, "SELECT __cap(pairsum(a, b)) FROM t2")
     sqlite3_close(db)
     assert val == 156  # sa=1+2+3=6, sb=4+5+6=15 => 6 + 10*15
-    assert h is not None
 
 
 @njit
@@ -512,8 +491,7 @@ def test_finalize_exception_surfaces_error_and_no_leak():
 
     db = _open_memory()
     _make_table(db, [1, 2, 3, 4, 5])
-    h = register_aggregate(db, "raise_fin", 1, sum_state_type,
-                           sum_init, sum_step, raising_finalize)
+    register_aggregate(db, "raise_fin", 1, sum_state_type, sum_init, sum_step, raising_finalize)
     with c_string("SELECT raise_fin(v) FROM t") as sp:
         rc = sqlite3_exec(db, sp, 0, 0, 0)
     assert rc != SQLITE_OK  # error surfaced to sqlite, not a silent wrong result
@@ -531,7 +509,6 @@ def test_finalize_exception_surfaces_error_and_no_leak():
     allocated = after.mi_alloc - before.mi_alloc
     freed = after.mi_free - before.mi_free
     assert allocated == freed, "leak on raising finalize: %d alloc, %d free" % (allocated, freed)
-    assert h is not None
 
 
 @njit
@@ -550,8 +527,7 @@ def test_step_exception_surfaces_error_and_no_leak():
 
     db = _open_memory()
     _make_table(db, [1, 2, 3, 4, 5])
-    h = register_aggregate(db, "raise_step", 1, sum_state_type,
-                           sum_init, raising_step, sum_finalize)
+    register_aggregate(db, "raise_step", 1, sum_state_type, sum_init, raising_step, sum_finalize)
     with c_string("SELECT raise_step(v) FROM t") as sp:
         rc = sqlite3_exec(db, sp, 0, 0, 0)
     assert rc != SQLITE_OK  # raising step fails the query, not a silent wrong result
@@ -569,7 +545,6 @@ def test_step_exception_surfaces_error_and_no_leak():
     allocated = after.mi_alloc - before.mi_alloc
     freed = after.mi_free - before.mi_free
     assert allocated == freed, "leak on raising step: %d alloc, %d free" % (allocated, freed)
-    assert h is not None
 
 
 _WIN_SQL = ("SELECT %s(v) OVER (ORDER BY v ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) "
@@ -592,8 +567,7 @@ def test_value_exception_surfaces_error_and_no_leak():
 
     db = _open_memory()
     _make_table(db, [1, 2, 3, 4, 5])
-    h = register_window(db, "raise_wval", 1, sum_state_type, sum_init, sum_step,
-                        w_inverse, raising_value, sum_finalize)
+    register_window(db, "raise_wval", 1, sum_state_type, sum_init, sum_step, w_inverse, raising_value, sum_finalize)
     with c_string(_WIN_SQL % "raise_wval") as sp:
         rc = sqlite3_exec(db, sp, 0, 0, 0)
     assert rc != SQLITE_OK
@@ -611,7 +585,6 @@ def test_value_exception_surfaces_error_and_no_leak():
     allocated = after.mi_alloc - before.mi_alloc
     freed = after.mi_free - before.mi_free
     assert allocated == freed, "leak on raising value: %d alloc, %d free" % (allocated, freed)
-    assert h is not None
 
 
 @njit
@@ -631,8 +604,7 @@ def test_inverse_exception_surfaces_error_and_no_leak():
 
     db = _open_memory()
     _make_table(db, [1, 2, 3, 4, 5])
-    h = register_window(db, "raise_winv", 1, sum_state_type, sum_init, sum_step,
-                        raising_inverse, w_value, sum_finalize)
+    register_window(db, "raise_winv", 1, sum_state_type, sum_init, sum_step, raising_inverse, w_value, sum_finalize)
     with c_string(_WIN_SQL % "raise_winv") as sp:
         rc = sqlite3_exec(db, sp, 0, 0, 0)
     assert rc != SQLITE_OK
@@ -649,7 +621,6 @@ def test_inverse_exception_surfaces_error_and_no_leak():
     allocated = after.mi_alloc - before.mi_alloc
     freed = after.mi_free - before.mi_free
     assert allocated == freed, "leak on raising inverse: %d alloc, %d free" % (allocated, freed)
-    assert h is not None
 
 
 def test_finalize_exception_empty_group_surfaces_error():
@@ -658,15 +629,13 @@ def test_finalize_exception_empty_group_surfaces_error():
     silently swallowed -- the empty-group branch is guarded like the borrow path."""
     db = _open_memory()
     _make_table(db, [])  # empty: xStep never runs -> xFinal hits the no-state branch
-    h = register_aggregate(db, "raise_fin_empty", 1, sum_state_type,
-                           sum_init, sum_step, raising_finalize)
+    register_aggregate(db, "raise_fin_empty", 1, sum_state_type, sum_init, sum_step, raising_finalize)
     with c_string("SELECT raise_fin_empty(v) FROM t") as sp:
         rc = sqlite3_exec(db, sp, 0, 0, 0)
     msg = _errmsg(db)
     sqlite3_close(db)
     assert rc != SQLITE_OK  # raising finalize on an empty group must fail loudly
     assert "finalize callback" in msg  # descriptive message even on the empty-group path
-    assert h is not None
 
 
 @njit
@@ -683,8 +652,7 @@ def test_init_exception_surfaces_error_no_unraisable():
     boundary as an 'Exception ignored' unraisable."""
     db = _open_memory()
     _make_table(db, [1, 2, 3])
-    h = register_aggregate(db, "raise_init", 1, sum_state_type,
-                           init_raise, sum_step, sum_finalize)
+    register_aggregate(db, "raise_init", 1, sum_state_type, init_raise, sum_step, sum_finalize)
     captured = []
     old_hook = sys.unraisablehook
     sys.unraisablehook = lambda a: captured.append(a)
@@ -698,7 +666,6 @@ def test_init_exception_surfaces_error_no_unraisable():
     assert not captured, "raising init leaked an unraisable (swallowed): %r" % (captured,)
     assert rc != SQLITE_OK
     assert "init callback" in msg  # accurate role, not a mislabeled finalize error
-    assert h is not None
 
 
 def test_init_exception_empty_group_surfaces_error():
@@ -706,12 +673,10 @@ def test_init_exception_empty_group_surfaces_error():
     'error in user init callback', not the mislabeled 'finalize callback'."""
     db = _open_memory()
     _make_table(db, [])
-    h = register_aggregate(db, "raise_init_empty", 1, sum_state_type,
-                           init_raise, sum_step, sum_finalize)
+    register_aggregate(db, "raise_init_empty", 1, sum_state_type, init_raise, sum_step, sum_finalize)
     with c_string("SELECT raise_init_empty(v) FROM t") as sp:
         rc = sqlite3_exec(db, sp, 0, 0, 0)
     msg = _errmsg(db)
     sqlite3_close(db)
     assert rc != SQLITE_OK
     assert "init callback" in msg
-    assert h is not None
