@@ -96,7 +96,6 @@ def test_descriptor_structured_mixed():
 
 
 def test_descriptor_rejects_bad_shapes():
-    import pytest
     with pytest.raises((TypeError, ValueError)):
         _build_descriptor(np.zeros((2, 2, 2), dtype=np.int64), ["a", "b"], False)
     with pytest.raises((TypeError, ValueError)):
