@@ -432,10 +432,29 @@ def register_table(db, name, arr, columns=None, *, text_as_blob=False):
     Registering a second table under an existing name follows SQLite's
     eponymous-module semantics: the later registration replaces the earlier one
     (it does not raise). Column names may be any string (they are quoted in the
-    generated schema). ``text_as_blob`` affects only bytes (``'S'``) columns;
-    unicode (``'U'``) is always TEXT. numpy has no missing value, so no cell is
-    SQL NULL (a float NaN passes through as a REAL NaN). uint64 values >= 2**63
-    are stored as SQLite's signed INTEGER and therefore wrap to negative.
+    generated schema).
+
+    Value semantics:
+
+    - ``uint64`` values >= 2**63 are stored as SQLite's signed INTEGER and
+      therefore wrap to negative.
+    - Floats pass through as REAL, including +/-inf -- EXCEPT NaN: SQLite coerces
+      a NaN ``REAL`` to SQL NULL (via ``sqlite3IsNaN``), so a NaN cell reads back
+      as NULL, not as a REAL NaN. There is no other source of SQL NULL (numpy has
+      no missing value), so every non-NaN cell is non-NULL.
+
+    String columns:
+
+    - ``text_as_blob`` affects only bytes (``'S'``) columns; unicode (``'U'``) is
+      always TEXT. By default ``'S'`` becomes TEXT and its raw bytes pass through
+      unvalidated -- pass ``text_as_blob=True`` for non-UTF-8 bytes so they are
+      stored as BLOB rather than malformed TEXT.
+    - Fixed-width ``'S'``/``'U'`` columns are NUL-padded by numpy; trailing NUL
+      padding is trimmed on read while interior NULs are preserved.
+    - A TEXT value with an interior NUL is stored faithfully (an explicit byte
+      length is passed), but C-string readers and most SQL text functions
+      truncate at the first NUL; read it via ``sqlite3_column_bytes`` + the
+      text/blob pointer, or use ``text_as_blob=True`` for full fidelity.
     """
     built = _build_descriptor(arr, columns, text_as_blob)
     with c_string(name) as name_p:
