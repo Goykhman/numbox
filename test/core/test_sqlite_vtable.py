@@ -212,6 +212,20 @@ def test_bool_dtype():
     sqlite3_close(db)
 
 
+@pytest.mark.parametrize("dt", [np.float64, np.float32])
+def test_float_nan_becomes_null_inf_passes_through(dt):
+    db = _open_memory()
+    a = np.array([[np.nan], [np.inf], [-np.inf], [1.5]], dtype=dt)
+    h = register_table(db, "t", a, columns=["x"])  # noqa: F841
+    rows = _fetchall(db, "SELECT x FROM t")
+    assert rows[0] == (None,)  # SQLite coerces a NaN REAL to SQL NULL
+    assert rows[1] == (float("inf"),)
+    assert rows[2] == (float("-inf"),)
+    assert rows[3] == (1.5,)
+    assert _fetchall(db, "SELECT COUNT(*) FROM t WHERE x IS NULL") == [(1,)]
+    sqlite3_close(db)
+
+
 def test_structured_text_and_unicode():
     db = _open_memory()
     dt = np.dtype([("t", "U6"), ("q", "i4"), ("p", "f8"), ("s", "S4")])
@@ -301,6 +315,18 @@ def test_join_two_tables():
     h2 = register_table(db, "rhs", b, columns=["id", "w"])  # noqa: F841
     got = _fetchall(db, "SELECT lhs.v, rhs.w FROM lhs JOIN rhs ON lhs.id = rhs.id ORDER BY lhs.id")
     assert got == [(100, 7), (200, 9)]
+    sqlite3_close(db)
+
+
+def test_self_join_unicode_two_cursors():
+    db = _open_memory()
+    dt = np.dtype([("k", "i8"), ("u", "U4")])
+    a = np.array([(1, "wörd"), (2, "café"), (3, "ab")], dtype=dt)
+    h = register_table(db, "t", a)  # noqa: F841
+    # a self-join keeps two cursors open on the same vtable at once, so each
+    # decodes its 'U' column into its own per-cursor scratch buffer
+    got = _fetchall(db, "SELECT a.u, b.u FROM t a JOIN t b ON a.k = b.k ORDER BY a.k")
+    assert got == [("wörd", "wörd"), ("café", "café"), ("ab", "ab")]
     sqlite3_close(db)
 
 
