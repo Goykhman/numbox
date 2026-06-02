@@ -1,8 +1,8 @@
 """Expose a numpy array as a read-only SQLite virtual table (register_table).
 
 A single generic sqlite3_module (built once at import) serves every table; the
-per-table base pointer / strides / dtype tags / schema live in a ctypes
-descriptor passed as pClientData.
+per-table base pointer / strides / dtype tags / schema live in a numpy
+structured-array descriptor whose data pointer is passed as pClientData.
 """
 import ctypes
 
@@ -42,9 +42,18 @@ _TAG_U8, _TAG_U16, _TAG_U32, _TAG_U64 = 4, 5, 6, 7
 _TAG_F32, _TAG_F64, _TAG_BOOL = 8, 9, 10
 _TAG_S, _TAG_U, _TAG_BLOB = 11, 12, 13
 
-# descriptor field byte offsets (mirror of _NdarrayTableDescriptor)
-_D_NROWS, _D_NCOLS, _D_ROW_STRIDE, _D_DATA_BASE = 0, 8, 16, 24
-_D_COL_OFFSETS, _D_COL_TAGS, _D_COL_WIDTHS, _D_SCHEMA, _D_SCRATCH = 32, 40, 48, 56, 64
+# per-table descriptor passed as pClientData; the cfuncs read it field-by-name
+# via carray(ptr, (1,), dtype=_DESC_DTYPE). The dtype is the single source of
+# truth for the layout (numpy owns the offsets). ('_pad', 'i4') holds the
+# alignment slot after the i4 ncols and is load-bearing -- do not drop it or
+# pass align=True (either would silently shift every field offset).
+_DESC_DTYPE = np.dtype([
+    ("nrows", "i8"), ("ncols", "i4"), ("_pad", "i4"),
+    ("row_stride", "i8"), ("data_base", "i8"),
+    ("col_offsets", "i8"), ("col_tags", "i8"), ("col_widths", "i8"),
+    ("schema_ptr", "i8"), ("scratch_bytes", "i8"),
+])
+assert _DESC_DTYPE.itemsize == 72
 
 # vtab layout: base sqlite3_vtab is 24 bytes; the descriptor_ptr is appended at +24
 _VTAB_DESC, _VTAB_SIZE = 24, 32
@@ -106,33 +115,6 @@ def utf32_to_utf8(src, n_codepoints, dst):
     return k
 
 
-class _NdarrayTableDescriptor(ctypes.Structure):
-    _fields_ = [
-        ("nrows", ctypes.c_int64),
-        ("ncols", ctypes.c_int32),
-        ("_pad", ctypes.c_int32),
-        ("row_stride", ctypes.c_int64),
-        ("data_base", ctypes.c_int64),
-        ("col_offsets", ctypes.c_int64),
-        ("col_tags", ctypes.c_int64),
-        ("col_widths", ctypes.c_int64),
-        ("schema_ptr", ctypes.c_int64),
-        ("scratch_bytes", ctypes.c_int64),
-    ]
-
-
-def _assert_descriptor_layout():
-    f = _NdarrayTableDescriptor
-    assert ctypes.sizeof(f) == 72
-    assert (f.nrows.offset, f.ncols.offset, f.row_stride.offset, f.data_base.offset) == \
-        (_D_NROWS, _D_NCOLS, _D_ROW_STRIDE, _D_DATA_BASE)
-    assert (f.col_offsets.offset, f.col_tags.offset, f.col_widths.offset) == \
-        (_D_COL_OFFSETS, _D_COL_TAGS, _D_COL_WIDTHS)
-    assert (f.schema_ptr.offset, f.scratch_bytes.offset) == (_D_SCHEMA, _D_SCRATCH)
-
-
-_assert_descriptor_layout()
-
 _NUMERIC_TAGS = {
     np.dtype("int8"): _TAG_I8, np.dtype("int16"): _TAG_I16,
     np.dtype("int32"): _TAG_I32, np.dtype("int64"): _TAG_I64,
@@ -160,7 +142,7 @@ def _col_tag(dt, text_as_blob):
 
 
 class _BuiltDescriptor:
-    """The ctypes descriptor plus every buffer whose pointer it holds."""
+    """The numpy structured-array descriptor plus every buffer whose pointer it holds."""
     __slots__ = ("c", "offsets", "tags", "widths", "schema",
                  "nrows", "ncols", "row_stride", "scratch_bytes", "arr")
 
@@ -171,10 +153,10 @@ class _BuiltDescriptor:
         self.widths = widths
         self.schema = schema
         self.arr = arr
-        self.nrows = c.nrows
-        self.ncols = c.ncols
-        self.row_stride = c.row_stride
-        self.scratch_bytes = c.scratch_bytes
+        self.nrows = int(c["nrows"][0])
+        self.ncols = int(c["ncols"][0])
+        self.row_stride = int(c["row_stride"][0])
+        self.scratch_bytes = int(c["scratch_bytes"][0])
 
 
 def _build_descriptor(arr, columns, text_as_blob):
@@ -213,16 +195,16 @@ def _build_descriptor(arr, columns, text_as_blob):
     cols_sql = ", ".join('"%s" %s' % (n.replace('"', '""'), _SQL_TYPE[t]) for n, t in zip(col_names, tags))
     schema = ("CREATE TABLE x(%s)" % cols_sql).encode("utf-8") + b"\x00"
 
-    c = _NdarrayTableDescriptor()
-    c.nrows = int(arr.shape[0])
-    c.ncols = len(col_names)
-    c.row_stride = int(arr.strides[0])
-    c.data_base = arr.ctypes.data
-    c.col_offsets = offsets_buf.ctypes.data
-    c.col_tags = tags_buf.ctypes.data
-    c.col_widths = widths_buf.ctypes.data
-    c.schema_ptr = ctypes.cast(ctypes.c_char_p(schema), ctypes.c_void_p).value
-    c.scratch_bytes = int(scratch)
+    c = np.zeros(1, _DESC_DTYPE)
+    c["nrows"] = int(arr.shape[0])
+    c["ncols"] = len(col_names)
+    c["row_stride"] = int(arr.strides[0])
+    c["data_base"] = arr.ctypes.data
+    c["col_offsets"] = offsets_buf.ctypes.data
+    c["col_tags"] = tags_buf.ctypes.data
+    c["col_widths"] = widths_buf.ctypes.data
+    c["schema_ptr"] = ctypes.cast(ctypes.c_char_p(schema), ctypes.c_void_p).value
+    c["scratch_bytes"] = int(scratch)
     return _BuiltDescriptor(c, offsets_buf, tags_buf, widths_buf, schema, arr)
 
 
@@ -230,8 +212,8 @@ def _build_descriptor(arr, columns, text_as_blob):
 def _xconnect(db, p_aux, argc, argv, pp_vtab, pz_err):
     vtab = 0
     try:
-        schema_p = load_at(p_aux + _D_SCHEMA, int64)
-        rc = sqlite3_declare_vtab(db, schema_p)
+        d = carray(_cast_int_to_void_p(p_aux), (1,), dtype=_DESC_DTYPE)
+        rc = sqlite3_declare_vtab(db, d[0].schema_ptr)
         if rc != SQLITE_OK:
             return rc
         vtab = sqlite3_malloc(int32(_VTAB_SIZE))
@@ -268,7 +250,8 @@ def _xopen(vtab, pp_cursor):
     cur = 0
     try:
         desc = load_at(vtab + _VTAB_DESC, int64)
-        scratch = load_at(desc + _D_SCRATCH, int64)
+        d = carray(_cast_int_to_void_p(desc), (1,), dtype=_DESC_DTYPE)
+        scratch = d[0].scratch_bytes
         cur = sqlite3_malloc(int32(_CUR_SCRATCH + scratch))  # _build_descriptor caps scratch: int32 cast cannot overflow
         if cur == 0:
             return SQLITE_NOMEM
@@ -308,8 +291,8 @@ def _xnext(cur):
 def _xeof(cur):
     desc = load_at(cur + _CUR_DESC, int64)
     rowid = load_at(cur + _CUR_ROWID, int64)
-    nrows = load_at(desc + _D_NROWS, int64)
-    if rowid >= nrows:
+    d = carray(_cast_int_to_void_p(desc), (1,), dtype=_DESC_DTYPE)
+    if rowid >= d[0].nrows:
         return 1
     return 0
 
@@ -325,12 +308,13 @@ def _xcolumn(cur, ctx, j):
     try:
         desc = load_at(cur + _CUR_DESC, int64)
         rowid = load_at(cur + _CUR_ROWID, int64)
-        ncols = load_at(desc + _D_NCOLS, int32)
-        base = load_at(desc + _D_DATA_BASE, int64)
-        row_stride = load_at(desc + _D_ROW_STRIDE, int64)
-        offsets = carray(_cast_int_to_void_p(load_at(desc + _D_COL_OFFSETS, int64)), (ncols,), dtype=np.int64)
-        tags = carray(_cast_int_to_void_p(load_at(desc + _D_COL_TAGS, int64)), (ncols,), dtype=np.int32)
-        widths = carray(_cast_int_to_void_p(load_at(desc + _D_COL_WIDTHS, int64)), (ncols,), dtype=np.int64)
+        d = carray(_cast_int_to_void_p(desc), (1,), dtype=_DESC_DTYPE)
+        ncols = d[0].ncols
+        base = d[0].data_base
+        row_stride = d[0].row_stride
+        offsets = carray(_cast_int_to_void_p(d[0].col_offsets), (ncols,), dtype=np.int64)
+        tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=np.int32)
+        widths = carray(_cast_int_to_void_p(d[0].col_widths), (ncols,), dtype=np.int64)
         addr = base + rowid * row_stride + offsets[j]
         tag = tags[j]
         if tag == _TAG_I8:
@@ -454,7 +438,7 @@ def register_table(db, name, arr, columns=None, *, text_as_blob=False):
     """
     built = _build_descriptor(arr, columns, text_as_blob)
     with c_string(name) as name_p:
-        rc = sqlite3_create_module(db, name_p, _THE_MODULE_P, ctypes.addressof(built.c))
+        rc = sqlite3_create_module(db, name_p, _THE_MODULE_P, built.c.ctypes.data)
     if rc != SQLITE_OK:
         _raise_rc(db, name, rc)
     return _VTableHandle(built)

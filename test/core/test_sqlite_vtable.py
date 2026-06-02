@@ -1,4 +1,3 @@
-import ctypes
 import gc
 import os
 import subprocess
@@ -116,9 +115,9 @@ def test_unicode_width_overflow_rejected():
         _build_descriptor(a, None, False)
 
 
-def test_descriptor_offsets_assertion_holds():
-    from numbox.core.bindings._sqlite_vtable import _NdarrayTableDescriptor
-    assert ctypes.sizeof(_NdarrayTableDescriptor) == 72
+def test_descriptor_dtype_itemsize():
+    from numbox.core.bindings._sqlite_vtable import _DESC_DTYPE
+    assert _DESC_DTYPE.itemsize == 72
 
 
 _SQLITE_ROW = 100
