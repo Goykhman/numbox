@@ -50,7 +50,8 @@ _D_COL_OFFSETS, _D_COL_TAGS, _D_COL_WIDTHS, _D_SCHEMA, _D_SCRATCH = 32, 40, 48, 
 _VTAB_DESC, _VTAB_SIZE = 24, 32
 # cursor layout: pVtab(+0), descriptor(+8), rowid(+16), scratch(+24)
 _CUR_PVTAB, _CUR_DESC, _CUR_ROWID, _CUR_SCRATCH = 0, 8, 16, 24
-assert _VTAB_DESC + 8 == _VTAB_SIZE and _CUR_SCRATCH == _CUR_ROWID + 8
+assert _VTAB_DESC + 8 == _VTAB_SIZE
+assert _CUR_DESC == _CUR_PVTAB + 8 and _CUR_ROWID == _CUR_DESC + 8 and _CUR_SCRATCH == _CUR_ROWID + 8
 
 
 @proxy(signatures.get("sqlite3_create_module"), jit_options={"cache": True})
