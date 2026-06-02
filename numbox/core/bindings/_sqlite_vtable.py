@@ -17,7 +17,7 @@ from numbox.core.bindings._sqlite_constants import (
     SQLITE_OK, SQLITE_TRANSIENT, SQLITE_ERROR, SQLITE_NOMEM,
 )
 from numbox.core.bindings._sqlite_conn import sqlite3_errmsg
-from numbox.core.bindings._sqlite_exec import sqlite3_free
+from numbox.core.bindings._sqlite_exec import sqlite3_free, sqlite3_malloc
 from numbox.core.bindings._sqlite_result import (
     sqlite3_result_int64, sqlite3_result_double,
     sqlite3_result_text, sqlite3_result_blob, sqlite3_result_error,
@@ -62,11 +62,6 @@ def sqlite3_create_module(db, z_name, p_module, p_client_data):
 @proxy(signatures.get("sqlite3_declare_vtab"), jit_options={"cache": True})
 def sqlite3_declare_vtab(db, z_sql):
     return _call_lib_func("sqlite3_declare_vtab", (db, z_sql))
-
-
-@proxy(signatures.get("sqlite3_malloc"), jit_options={"cache": True})
-def sqlite3_malloc(n):
-    return _call_lib_func("sqlite3_malloc", (n,))
 
 
 @njit(**jit_options)
