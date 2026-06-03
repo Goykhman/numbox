@@ -80,6 +80,22 @@ _CUR_DTYPE = np.dtype([("base", _SQLITE3_VTAB_CURSOR_DTYPE), ("descriptor", "i8"
 assert _CUR_DTYPE.itemsize == 24
 _CUR_HEADER = _CUR_DTYPE.itemsize
 
+# struct sqlite3_index_info -- https://www.sqlite.org/c3ref/index_info.html
+# Modelled only through estimatedRows: xBestIndex writes the two cardinality
+# outputs and leaves everything else at SQLite's zero/default init. Fields after
+# estimatedRows (idxFlags 3.9.0, colUsed 3.10.0) are omitted -- never addressed;
+# estimatedRows needs SQLite 3.8.2+, met by the >=3.34 support floor.
+_IDX_INFO_DTYPE = np.dtype([
+    ("nConstraint", "i4"), ("_pad0", "i4"), ("aConstraint", "i8"),
+    ("nOrderBy", "i4"), ("_pad1", "i4"), ("aOrderBy", "i8"),
+    ("aConstraintUsage", "i8"),
+    ("idxNum", "i4"), ("_pad2", "i4"), ("idxStr", "i8"),
+    ("needToFreeIdxStr", "i4"), ("orderByConsumed", "i4"),
+    ("estimatedCost", "f8"), ("estimatedRows", "i8"),
+])
+assert _IDX_INFO_DTYPE.fields["estimatedCost"][1] == 64
+assert _IDX_INFO_DTYPE.fields["estimatedRows"][1] == 72
+
 # @cfunc takes a cache bool (not a jit_options dict like @njit/@proxy); thread
 # the package-wide cache setting through it (default True).
 _CACHE = jit_options.get("cache", True)
@@ -258,6 +274,15 @@ def _xconnect(db, p_aux, argc, argv, pp_vtab, pz_err):
 
 @cfunc(types.int32(types.intp, types.intp), cache=_CACHE)
 def _xbestindex(vtab, idx_info):
+    # No constraints are usable (read-only full scan), so leave SQLite's zeroed
+    # outputs as-is except the cardinality: feed the real row count so joins and
+    # subqueries over a large table aren't mis-costed (SQLite defaults
+    # estimatedRows to 25 and estimatedCost to a huge value).
+    v = carray(_cast_int_to_void_p(vtab), (1,), dtype=_VTAB_DTYPE)
+    d = carray(_cast_int_to_void_p(v[0].descriptor), (1,), dtype=_DESC_DTYPE)
+    ii = carray(_cast_int_to_void_p(idx_info), (1,), dtype=_IDX_INFO_DTYPE)
+    ii[0].estimatedRows = d[0].nrows
+    ii[0].estimatedCost = float64(d[0].nrows)
     return SQLITE_OK
 
 

@@ -120,6 +120,44 @@ def test_descriptor_dtype_itemsize():
     assert _DESC_DTYPE.itemsize == 72
 
 
+def test_index_info_offsets_match_c_abi():
+    import ctypes
+    from numbox.core.bindings._sqlite_vtable import _IDX_INFO_DTYPE
+
+    class _IndexInfo(ctypes.Structure):
+        _fields_ = [
+            ("nConstraint", ctypes.c_int),
+            ("aConstraint", ctypes.c_void_p),
+            ("nOrderBy", ctypes.c_int),
+            ("aOrderBy", ctypes.c_void_p),
+            ("aConstraintUsage", ctypes.c_void_p),
+            ("idxNum", ctypes.c_int),
+            ("idxStr", ctypes.c_void_p),
+            ("needToFreeIdxStr", ctypes.c_int),
+            ("orderByConsumed", ctypes.c_int),
+            ("estimatedCost", ctypes.c_double),
+            ("estimatedRows", ctypes.c_longlong),
+        ]
+    assert _IDX_INFO_DTYPE.fields["estimatedCost"][1] == _IndexInfo.estimatedCost.offset
+    assert _IDX_INFO_DTYPE.fields["estimatedRows"][1] == _IndexInfo.estimatedRows.offset
+
+
+def test_xbestindex_sets_cardinality():
+    from numbox.core.bindings._sqlite_vtable import (
+        _xbestindex, _build_descriptor, _VTAB_DTYPE, _VTAB_SIZE, _IDX_INFO_DTYPE,
+    )
+    arr = np.arange(12, dtype=np.int64).reshape(4, 3)
+    built = _build_descriptor(arr, ["a", "b", "c"], False)
+    vtab = np.zeros(_VTAB_SIZE // 8, dtype=np.int64)
+    vtab.view(_VTAB_DTYPE)[0]["descriptor"] = built.c.ctypes.data
+    ii = np.zeros(_IDX_INFO_DTYPE.itemsize // 8, dtype=np.int64)
+    rc = _xbestindex.ctypes(int(vtab.ctypes.data), int(ii.ctypes.data))
+    assert rc == 0
+    view = ii.view(_IDX_INFO_DTYPE)[0]
+    assert int(view["estimatedRows"]) == 4
+    assert float(view["estimatedCost"]) == 4.0
+
+
 _SQLITE_ROW = 100
 _T_INT, _T_FLOAT, _T_TEXT, _T_BLOB, _T_NULL = 1, 2, 3, 4, 5
 
