@@ -107,12 +107,15 @@ def test_descriptor_rejects_bad_shapes():
         _build_descriptor(np.empty((3, 0), dtype=np.int64), [], False)
 
 
-def test_unicode_width_overflow_rejected():
-    # itemsize 4*536870906 = 2147483624; + 1 (scratch) + 24 (_CUR_HEADER) overflows int32
-    dt = np.dtype([("u", "U536870906")])
-    a = np.zeros(0, dtype=dt)
-    with pytest.raises(ValueError):
-        _build_descriptor(a, None, False)
+def test_widest_unicode_width_accepted():
+    # The per-cursor scratch buffer is its own int32-sized sqlite3_malloc, and
+    # numpy caps 'U' itemsize below 2**31, so even the widest constructible
+    # unicode column yields a scratch size that fits int32 -- no
+    # registration-time guard.
+    dt = np.dtype([("u", "U536870911")])
+    built = _build_descriptor(np.zeros(0, dtype=dt), None, False)
+    assert built.scratch_bytes == 4 * 536870911 + 1
+    assert built.scratch_bytes <= 2 ** 31 - 1
 
 
 def test_descriptor_dtype_itemsize():

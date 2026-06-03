@@ -2,10 +2,14 @@
 
 A single generic sqlite3_module (built once at import) serves every table; the
 per-table base pointer / strides / dtype tags / schema live in a numpy
-structured-array descriptor whose data pointer is passed as pClientData. The
-sqlite3_vtab and sqlite3_vtab_cursor SQLite allocates through us are likewise
-numpy structured dtypes, with their SQLite-owned base nested as field 'base'.
-See https://www.sqlite.org/vtab.html.
+structured-array descriptor whose data pointer is passed as pClientData.
+
+The sqlite3_vtab and sqlite3_vtab_cursor that our xCreate/xOpen callbacks
+allocate are C structs whose first member is the SQLite-owned base; we append
+our own members after it. Each is modelled as a numpy structured dtype with that
+base nested as field 'base', so the cfuncs address members by name rather than
+raw offsets (align=True reproduces the C padding, e.g. the int nRef in
+sqlite3_vtab). See https://www.sqlite.org/vtab.html.
 """
 import ctypes
 
@@ -19,9 +23,8 @@ from numba.core.types import (
 from numbox.core.bindings._sqlite_constants import (
     SQLITE_OK, SQLITE_TRANSIENT, SQLITE_ERROR, SQLITE_NOMEM,
 )
-from numbox.core.bindings._sqlite_conn import sqlite3_errmsg
-from numbox.core.bindings._sqlite_exec import sqlite3_free, sqlite3_malloc
-from numbox.core.bindings._sqlite_result import (
+from numbox.core.bindings import (
+    sqlite3_errmsg, sqlite3_free, sqlite3_malloc,
     sqlite3_result_int64, sqlite3_result_double,
     sqlite3_result_text, sqlite3_result_blob, sqlite3_result_error,
 )
@@ -47,22 +50,15 @@ _TAG_S, _TAG_U, _TAG_BLOB = 11, 12, 13
 
 # per-table descriptor passed as pClientData; the cfuncs read it field-by-name
 # via carray(ptr, (1,), dtype=_DESC_DTYPE). The dtype is the single source of
-# truth for the layout (numpy owns the offsets). ('_pad', 'i4') holds the
-# alignment slot after the i4 ncols and is load-bearing -- do not drop it or
-# pass align=True (either would silently shift every field offset).
+# truth for the layout (numpy owns the offsets); align=True inserts the natural
+# padding after the i4 ncols so every i8 field stays 8-aligned.
 _DESC_DTYPE = np.dtype([
-    ("nrows", "i8"), ("ncols", "i4"), ("_pad", "i4"),
+    ("nrows", "i8"), ("ncols", "i4"),
     ("row_stride", "i8"), ("data_base", "i8"),
     ("col_offsets", "i8"), ("col_tags", "i8"), ("col_widths", "i8"),
     ("schema_ptr", "i8"), ("scratch_bytes", "i8"),
-])
+], align=True)
 assert _DESC_DTYPE.itemsize == 72
-
-# The vtab and cursor SQLite allocates through us are C structs whose first
-# member is the SQLite-owned base (sqlite3_vtab / sqlite3_vtab_cursor); we append
-# our own members after it. Each is a numpy structured dtype with the base nested
-# as field 'base', so the cfuncs address members by name instead of raw offsets
-# (align=True reproduces the C padding, e.g. the int nRef in sqlite3_vtab).
 
 # struct sqlite3_vtab { const sqlite3_module *pModule; int nRef; char *zErrMsg; }
 # https://www.sqlite.org/c3ref/vtab.html -- SQLite owns/sets these fields.
@@ -73,12 +69,14 @@ _VTAB_SIZE = _VTAB_DTYPE.itemsize
 
 # struct sqlite3_vtab_cursor { sqlite3_vtab *pVtab; }
 # https://www.sqlite.org/c3ref/vtab_cursor.html -- one-member SQLite base. The
-# per-cursor UTF-8 scratch buffer is allocated right after this fixed header,
-# starting at offset _CUR_HEADER.
+# per-cursor UTF-8 scratch buffer is a separate sqlite3_malloc held in scratch_p
+# (allocated in xOpen, freed in xClose), so the cursor itself is a fixed dtype.
 _SQLITE3_VTAB_CURSOR_DTYPE = np.dtype([("pVtab", "i8")])
-_CUR_DTYPE = np.dtype([("base", _SQLITE3_VTAB_CURSOR_DTYPE), ("descriptor", "i8"), ("rowid", "i8")], align=True)
-assert _CUR_DTYPE.itemsize == 24
-_CUR_HEADER = _CUR_DTYPE.itemsize
+_CUR_DTYPE = np.dtype([
+    ("base", _SQLITE3_VTAB_CURSOR_DTYPE), ("descriptor", "i8"), ("rowid", "i8"), ("scratch_p", "i8"),
+], align=True)
+assert _CUR_DTYPE.itemsize == 32
+_CUR_SIZE = _CUR_DTYPE.itemsize
 
 # struct sqlite3_index_info -- https://www.sqlite.org/c3ref/index_info.html
 # Modelled only through estimatedRows: xBestIndex writes the two cardinality
@@ -96,8 +94,6 @@ _IDX_INFO_DTYPE = np.dtype([
 assert _IDX_INFO_DTYPE.fields["estimatedCost"][1] == 64
 assert _IDX_INFO_DTYPE.fields["estimatedRows"][1] == 72
 
-# @cfunc takes a cache bool (not a jit_options dict like @njit/@proxy); thread
-# the package-wide cache setting through it (default True).
 _CACHE = jit_options.get("cache", True)
 
 
@@ -224,8 +220,6 @@ def _build_descriptor(arr, columns, text_as_blob):
     tags = [_col_tag(dt, text_as_blob) for dt in sub]
     widths = [int(dt.itemsize) for dt in sub]
     scratch = max([w + 1 for w, t in zip(widths, tags) if t == _TAG_U], default=0)
-    if _CUR_HEADER + scratch > 2 ** 31 - 1:
-        raise ValueError("unicode column too wide: per-cursor scratch buffer would overflow int32")
 
     offsets_buf = np.array(offs, dtype=np.int64)
     tags_buf = np.array(tags, dtype=np.int32)  # the xColumn cfunc reads int32 elements; do not widen
@@ -298,22 +292,30 @@ def _xdisconnect(vtab):
 @cfunc(types.int32(types.intp, types.intp), cache=_CACHE)
 def _xopen(vtab, pp_cursor):
     cur = 0
+    scratch_p = 0
     try:
         v = carray(_cast_int_to_void_p(vtab), (1,), dtype=_VTAB_DTYPE)
         desc = v[0].descriptor
         d = carray(_cast_int_to_void_p(desc), (1,), dtype=_DESC_DTYPE)
         scratch = d[0].scratch_bytes
-        cur = sqlite3_malloc(int32(_CUR_HEADER + scratch))  # _build_descriptor caps scratch: int32 cast cannot overflow
+        cur = sqlite3_malloc(int32(_CUR_SIZE))
         if cur == 0:
             return SQLITE_NOMEM
+        if scratch > 0:
+            scratch_p = sqlite3_malloc(int32(scratch))  # scratch <= numpy's int32 'U' itemsize cap: cast is safe
+            if scratch_p == 0:
+                sqlite3_free(cur)
+                return SQLITE_NOMEM
         c = carray(_cast_int_to_void_p(cur), (1,), dtype=_CUR_DTYPE)
         c[0].base.pVtab = vtab
         c[0].descriptor = desc
         c[0].rowid = 0
+        c[0].scratch_p = scratch_p
         slot = carray(_cast_int_to_void_p(pp_cursor), (1,), dtype=np.intp)
         slot[0] = cur
         return SQLITE_OK
     except Exception:
+        sqlite3_free(scratch_p)
         sqlite3_free(cur)
         return SQLITE_ERROR
 
@@ -321,6 +323,8 @@ def _xopen(vtab, pp_cursor):
 @cfunc(types.int32(types.intp), cache=_CACHE)
 def _xclose(cur):
     try:
+        c = carray(_cast_int_to_void_p(cur), (1,), dtype=_CUR_DTYPE)
+        sqlite3_free(c[0].scratch_p)
         sqlite3_free(cur)
         return SQLITE_OK
     except Exception:
@@ -400,7 +404,7 @@ def _xcolumn(cur, ctx, j):
             n = _nul_trimmed_len(addr, widths[j])
             sqlite3_result_blob(ctx, addr, int32(n), SQLITE_TRANSIENT)
         elif tag == _TAG_U:
-            scratch = cur + _CUR_HEADER
+            scratch = c[0].scratch_p
             n = utf32_to_utf8(addr, widths[j] // 4, scratch)
             sqlite3_result_text(ctx, scratch, int32(n), SQLITE_TRANSIENT)
         return SQLITE_OK
