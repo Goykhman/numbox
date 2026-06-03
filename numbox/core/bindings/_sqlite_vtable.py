@@ -2,7 +2,10 @@
 
 A single generic sqlite3_module (built once at import) serves every table; the
 per-table base pointer / strides / dtype tags / schema live in a numpy
-structured-array descriptor whose data pointer is passed as pClientData.
+structured-array descriptor whose data pointer is passed as pClientData. The
+sqlite3_vtab and sqlite3_vtab_cursor SQLite allocates through us are likewise
+numpy structured dtypes, with their SQLite-owned base nested as field 'base'.
+See https://www.sqlite.org/vtab.html.
 """
 import ctypes
 
@@ -29,7 +32,7 @@ from numbox.core.configurations import jit_options
 from numbox.core.proxy.proxy import proxy
 from numbox.utils.cstrings import c_string
 from numbox.utils.lowlevel import (
-    _cast_int_to_void_p, get_unicode_data_p, load_at, load_unaligned, store_at,
+    _cast_int_to_void_p, get_unicode_data_p, load_unaligned, store_at,
 )
 
 __all__ = ["register_table"]
@@ -55,20 +58,39 @@ _DESC_DTYPE = np.dtype([
 ])
 assert _DESC_DTYPE.itemsize == 72
 
-# vtab layout: base sqlite3_vtab is 24 bytes; the descriptor_ptr is appended at +24
-_VTAB_DESC, _VTAB_SIZE = 24, 32
-# cursor layout: pVtab(+0), descriptor(+8), rowid(+16), scratch(+24)
-_CUR_PVTAB, _CUR_DESC, _CUR_ROWID, _CUR_SCRATCH = 0, 8, 16, 24
-assert _VTAB_DESC + 8 == _VTAB_SIZE
-assert _CUR_DESC == _CUR_PVTAB + 8 and _CUR_ROWID == _CUR_DESC + 8 and _CUR_SCRATCH == _CUR_ROWID + 8
+# The vtab and cursor SQLite allocates through us are C structs whose first
+# member is the SQLite-owned base (sqlite3_vtab / sqlite3_vtab_cursor); we append
+# our own members after it. Each is a numpy structured dtype with the base nested
+# as field 'base', so the cfuncs address members by name instead of raw offsets
+# (align=True reproduces the C padding, e.g. the int nRef in sqlite3_vtab).
+
+# struct sqlite3_vtab { const sqlite3_module *pModule; int nRef; char *zErrMsg; }
+# https://www.sqlite.org/c3ref/vtab.html -- SQLite owns/sets these fields.
+_SQLITE3_VTAB_DTYPE = np.dtype([("pModule", "i8"), ("nRef", "i4"), ("zErrMsg", "i8")], align=True)
+_VTAB_DTYPE = np.dtype([("base", _SQLITE3_VTAB_DTYPE), ("descriptor", "i8")], align=True)
+assert _SQLITE3_VTAB_DTYPE.itemsize == 24 and _VTAB_DTYPE.itemsize == 32
+_VTAB_SIZE = _VTAB_DTYPE.itemsize
+
+# struct sqlite3_vtab_cursor { sqlite3_vtab *pVtab; }
+# https://www.sqlite.org/c3ref/vtab_cursor.html -- one-member SQLite base. The
+# per-cursor UTF-8 scratch buffer is allocated right after this fixed header,
+# starting at offset _CUR_HEADER.
+_SQLITE3_VTAB_CURSOR_DTYPE = np.dtype([("pVtab", "i8")])
+_CUR_DTYPE = np.dtype([("base", _SQLITE3_VTAB_CURSOR_DTYPE), ("descriptor", "i8"), ("rowid", "i8")], align=True)
+assert _CUR_DTYPE.itemsize == 24
+_CUR_HEADER = _CUR_DTYPE.itemsize
+
+# @cfunc takes a cache bool (not a jit_options dict like @njit/@proxy); thread
+# the package-wide cache setting through it (default True).
+_CACHE = jit_options.get("cache", True)
 
 
-@proxy(signatures.get("sqlite3_create_module"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_create_module"), jit_options=jit_options)
 def sqlite3_create_module(db, z_name, p_module, p_client_data):
     return _call_lib_func("sqlite3_create_module", (db, z_name, p_module, p_client_data))
 
 
-@proxy(signatures.get("sqlite3_declare_vtab"), jit_options={"cache": True})
+@proxy(signatures.get("sqlite3_declare_vtab"), jit_options=jit_options)
 def sqlite3_declare_vtab(db, z_sql):
     return _call_lib_func("sqlite3_declare_vtab", (db, z_sql))
 
@@ -186,7 +208,7 @@ def _build_descriptor(arr, columns, text_as_blob):
     tags = [_col_tag(dt, text_as_blob) for dt in sub]
     widths = [int(dt.itemsize) for dt in sub]
     scratch = max([w + 1 for w, t in zip(widths, tags) if t == _TAG_U], default=0)
-    if _CUR_SCRATCH + scratch > 2 ** 31 - 1:
+    if _CUR_HEADER + scratch > 2 ** 31 - 1:
         raise ValueError("unicode column too wide: per-cursor scratch buffer would overflow int32")
 
     offsets_buf = np.array(offs, dtype=np.int64)
@@ -208,7 +230,7 @@ def _build_descriptor(arr, columns, text_as_blob):
     return _BuiltDescriptor(c, offsets_buf, tags_buf, widths_buf, schema, arr)
 
 
-@cfunc(types.int32(types.intp, types.intp, types.int32, types.intp, types.intp, types.intp), cache=True)
+@cfunc(types.int32(types.intp, types.intp, types.int32, types.intp, types.intp, types.intp), cache=_CACHE)
 def _xconnect(db, p_aux, argc, argv, pp_vtab, pz_err):
     vtab = 0
     try:
@@ -219,10 +241,13 @@ def _xconnect(db, p_aux, argc, argv, pp_vtab, pz_err):
         vtab = sqlite3_malloc(int32(_VTAB_SIZE))
         if vtab == 0:
             return SQLITE_NOMEM
-        store_at(vtab + 0, int64(0))
-        store_at(vtab + 8, int64(0))
-        store_at(vtab + 16, int64(0))
-        store_at(vtab + _VTAB_DESC, int64(p_aux))
+        # canonical sqlite3_vtab init: zero the whole struct (sqlite3_malloc does
+        # not), then set our appended member; SQLite owns/sets the base fields.
+        raw = carray(_cast_int_to_void_p(vtab), (_VTAB_SIZE,), dtype=np.uint8)
+        for i in range(_VTAB_SIZE):
+            raw[i] = 0
+        v = carray(_cast_int_to_void_p(vtab), (1,), dtype=_VTAB_DTYPE)
+        v[0].descriptor = p_aux
         slot = carray(_cast_int_to_void_p(pp_vtab), (1,), dtype=np.intp)
         slot[0] = vtab
         return SQLITE_OK
@@ -231,12 +256,12 @@ def _xconnect(db, p_aux, argc, argv, pp_vtab, pz_err):
         return SQLITE_ERROR
 
 
-@cfunc(types.int32(types.intp, types.intp), cache=True)
+@cfunc(types.int32(types.intp, types.intp), cache=_CACHE)
 def _xbestindex(vtab, idx_info):
     return SQLITE_OK
 
 
-@cfunc(types.int32(types.intp), cache=True)
+@cfunc(types.int32(types.intp), cache=_CACHE)
 def _xdisconnect(vtab):
     try:
         sqlite3_free(vtab)
@@ -245,19 +270,21 @@ def _xdisconnect(vtab):
         return SQLITE_ERROR
 
 
-@cfunc(types.int32(types.intp, types.intp), cache=True)
+@cfunc(types.int32(types.intp, types.intp), cache=_CACHE)
 def _xopen(vtab, pp_cursor):
     cur = 0
     try:
-        desc = load_at(vtab + _VTAB_DESC, int64)
+        v = carray(_cast_int_to_void_p(vtab), (1,), dtype=_VTAB_DTYPE)
+        desc = v[0].descriptor
         d = carray(_cast_int_to_void_p(desc), (1,), dtype=_DESC_DTYPE)
         scratch = d[0].scratch_bytes
-        cur = sqlite3_malloc(int32(_CUR_SCRATCH + scratch))  # _build_descriptor caps scratch: int32 cast cannot overflow
+        cur = sqlite3_malloc(int32(_CUR_HEADER + scratch))  # _build_descriptor caps scratch: int32 cast cannot overflow
         if cur == 0:
             return SQLITE_NOMEM
-        store_at(cur + _CUR_PVTAB, int64(vtab))
-        store_at(cur + _CUR_DESC, int64(desc))
-        store_at(cur + _CUR_ROWID, int64(0))
+        c = carray(_cast_int_to_void_p(cur), (1,), dtype=_CUR_DTYPE)
+        c[0].base.pVtab = vtab
+        c[0].descriptor = desc
+        c[0].rowid = 0
         slot = carray(_cast_int_to_void_p(pp_cursor), (1,), dtype=np.intp)
         slot[0] = cur
         return SQLITE_OK
@@ -266,7 +293,7 @@ def _xopen(vtab, pp_cursor):
         return SQLITE_ERROR
 
 
-@cfunc(types.int32(types.intp), cache=True)
+@cfunc(types.int32(types.intp), cache=_CACHE)
 def _xclose(cur):
     try:
         sqlite3_free(cur)
@@ -275,40 +302,42 @@ def _xclose(cur):
         return SQLITE_ERROR
 
 
-@cfunc(types.int32(types.intp, types.int32, types.intp, types.int32, types.intp), cache=True)
+@cfunc(types.int32(types.intp, types.int32, types.intp, types.int32, types.intp), cache=_CACHE)
 def _xfilter(cur, idx_num, idx_str, argc, argv):
-    store_at(cur + _CUR_ROWID, int64(0))
+    c = carray(_cast_int_to_void_p(cur), (1,), dtype=_CUR_DTYPE)
+    c[0].rowid = 0
     return SQLITE_OK
 
 
-@cfunc(types.int32(types.intp), cache=True)
+@cfunc(types.int32(types.intp), cache=_CACHE)
 def _xnext(cur):
-    store_at(cur + _CUR_ROWID, load_at(cur + _CUR_ROWID, int64) + 1)
+    c = carray(_cast_int_to_void_p(cur), (1,), dtype=_CUR_DTYPE)
+    c[0].rowid = c[0].rowid + 1
     return SQLITE_OK
 
 
-@cfunc(types.int32(types.intp), cache=True)
+@cfunc(types.int32(types.intp), cache=_CACHE)
 def _xeof(cur):
-    desc = load_at(cur + _CUR_DESC, int64)
-    rowid = load_at(cur + _CUR_ROWID, int64)
-    d = carray(_cast_int_to_void_p(desc), (1,), dtype=_DESC_DTYPE)
-    if rowid >= d[0].nrows:
+    c = carray(_cast_int_to_void_p(cur), (1,), dtype=_CUR_DTYPE)
+    d = carray(_cast_int_to_void_p(c[0].descriptor), (1,), dtype=_DESC_DTYPE)
+    if c[0].rowid >= d[0].nrows:
         return 1
     return 0
 
 
-@cfunc(types.int32(types.intp, types.intp), cache=True)
+@cfunc(types.int32(types.intp, types.intp), cache=_CACHE)
 def _xrowid(cur, p_rowid):
-    store_at(p_rowid, load_at(cur + _CUR_ROWID, int64))
+    c = carray(_cast_int_to_void_p(cur), (1,), dtype=_CUR_DTYPE)
+    store_at(p_rowid, c[0].rowid)
     return SQLITE_OK
 
 
-@cfunc(types.int32(types.intp, types.intp, types.int32), cache=True)
+@cfunc(types.int32(types.intp, types.intp, types.int32), cache=_CACHE)
 def _xcolumn(cur, ctx, j):
     try:
-        desc = load_at(cur + _CUR_DESC, int64)
-        rowid = load_at(cur + _CUR_ROWID, int64)
-        d = carray(_cast_int_to_void_p(desc), (1,), dtype=_DESC_DTYPE)
+        c = carray(_cast_int_to_void_p(cur), (1,), dtype=_CUR_DTYPE)
+        rowid = c[0].rowid
+        d = carray(_cast_int_to_void_p(c[0].descriptor), (1,), dtype=_DESC_DTYPE)
         ncols = d[0].ncols
         base = d[0].data_base
         row_stride = d[0].row_stride
@@ -346,7 +375,7 @@ def _xcolumn(cur, ctx, j):
             n = _nul_trimmed_len(addr, widths[j])
             sqlite3_result_blob(ctx, addr, int32(n), SQLITE_TRANSIENT)
         elif tag == _TAG_U:
-            scratch = cur + _CUR_SCRATCH
+            scratch = cur + _CUR_HEADER
             n = utf32_to_utf8(addr, widths[j] // 4, scratch)
             sqlite3_result_text(ctx, scratch, int32(n), SQLITE_TRANSIENT)
         return SQLITE_OK
@@ -380,8 +409,6 @@ THE_MODULE.xEof = _xeof.address
 THE_MODULE.xColumn = _xcolumn.address
 THE_MODULE.xRowid = _xrowid.address
 _THE_MODULE_P = ctypes.addressof(THE_MODULE)
-_CFUNCS = (_xconnect, _xbestindex, _xdisconnect, _xopen, _xclose,
-           _xfilter, _xnext, _xeof, _xcolumn, _xrowid)
 
 
 class _VTableHandle:

@@ -108,7 +108,7 @@ def test_descriptor_rejects_bad_shapes():
 
 
 def test_unicode_width_overflow_rejected():
-    # itemsize 4*536870906 = 2147483624; + 1 (scratch) + 24 (_CUR_SCRATCH) overflows int32
+    # itemsize 4*536870906 = 2147483624; + 1 (scratch) + 24 (_CUR_HEADER) overflows int32
     dt = np.dtype([("u", "U536870906")])
     a = np.zeros(0, dtype=dt)
     with pytest.raises(ValueError):
