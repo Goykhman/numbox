@@ -20,7 +20,7 @@ from numba.core.types import (
     float32, float64,
 )
 
-from numbox.core.bindings._sqlite_constants import (
+from numbox.core.bindings import (
     SQLITE_OK, SQLITE_TRANSIENT, SQLITE_ERROR, SQLITE_NOMEM,
 )
 from numbox.core.bindings import (
@@ -84,13 +84,11 @@ _CUR_SIZE = _CUR_DTYPE.itemsize
 # estimatedRows (idxFlags 3.9.0, colUsed 3.10.0) are omitted -- never addressed;
 # estimatedRows needs SQLite 3.8.2+, met by the >=3.34 support floor.
 _IDX_INFO_DTYPE = np.dtype([
-    ("nConstraint", "i4"), ("_pad0", "i4"), ("aConstraint", "i8"),
-    ("nOrderBy", "i4"), ("_pad1", "i4"), ("aOrderBy", "i8"),
-    ("aConstraintUsage", "i8"),
-    ("idxNum", "i4"), ("_pad2", "i4"), ("idxStr", "i8"),
-    ("needToFreeIdxStr", "i4"), ("orderByConsumed", "i4"),
+    ("nConstraint", "i4"), ("aConstraint", "i8"), ("nOrderBy", "i4"),
+    ("aOrderBy", "i8"), ("aConstraintUsage", "i8"), ("idxNum", "i4"),
+    ("idxStr", "i8"), ("needToFreeIdxStr", "i4"), ("orderByConsumed", "i4"),
     ("estimatedCost", "f8"), ("estimatedRows", "i8"),
-])
+], align=True)
 assert _IDX_INFO_DTYPE.fields["estimatedCost"][1] == 64
 assert _IDX_INFO_DTYPE.fields["estimatedRows"][1] == 72
 
