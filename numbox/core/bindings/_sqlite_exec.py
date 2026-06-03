@@ -6,7 +6,8 @@ function pointer to a per-row callback; pass 0 for no callback.
 
 sqlite3_free releases memory SQLite allocated and returned to the caller —
 notably the errmsg buffer from sqlite3_exec's out-param, and the result of
-sqlite3_expanded_sql.
+sqlite3_expanded_sql. sqlite3_malloc is its allocation counterpart (used by the
+virtual-table machinery to allocate the vtab and cursor structs).
 
 Callback shape (informational):
     int (*sqlite3_exec_callback)(void *ctx, int ncol,
@@ -26,7 +27,7 @@ from numbox.core.proxy.proxy import proxy
 
 
 __all__ = [
-    "sqlite3_exec", "sqlite3_free",
+    "sqlite3_exec", "sqlite3_free", "sqlite3_malloc",
 ]
 
 
@@ -43,3 +44,8 @@ def sqlite3_exec(db_p, sql_p, cb_p, ctx_p, errmsg_pp):
 @proxy(signatures.get("sqlite3_free"), jit_options=jit_options)
 def sqlite3_free(mem_p):
     return _call_lib_func("sqlite3_free", (mem_p,))
+
+
+@proxy(signatures.get("sqlite3_malloc"), jit_options=jit_options)
+def sqlite3_malloc(n):
+    return _call_lib_func("sqlite3_malloc", (n,))

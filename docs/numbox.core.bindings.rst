@@ -247,17 +247,25 @@ sub-int-width values) but makes ``%lld`` against ``int32`` work in
 uses the value's natural width. The cost is one LLVM widening
 instruction per arg — free at runtime.
 
-============   ============================
-Numba type     Widened to (in varargs slot)
-============   ============================
-``float32``    ``float64`` (``fpext``)
-``float64``    pass through
-``bool``       ``int64`` (``zext``)
-``int8`` / ``int16`` / ``int32`` (signed)   ``int64`` (``sext``)
-``uint8`` / ``uint16`` / ``uint32`` (unsigned)   ``int64`` (``zext``)
-``int64`` / ``uint64`` / ``intp``   pass through
-``unicode_type`` / ``Literal[str]``   auto-converted via ``get_unicode_data_p`` → ``intp``
-============   ============================
+.. list-table::
+   :header-rows: 1
+
+   * - Numba type
+     - Widened to (in varargs slot)
+   * - ``float32``
+     - ``float64`` (``fpext``)
+   * - ``float64``
+     - pass through
+   * - ``bool``
+     - ``int64`` (``zext``)
+   * - ``int8`` / ``int16`` / ``int32`` (signed)
+     - ``int64`` (``sext``)
+   * - ``uint8`` / ``uint16`` / ``uint32`` (unsigned)
+     - ``int64`` (``zext``)
+   * - ``int64`` / ``uint64`` / ``intp``
+     - pass through
+   * - ``unicode_type`` / ``Literal[str]``
+     - auto-converted via ``get_unicode_data_p`` → ``intp``
 
 **Unsupported types raise ``TypingError`` at compile time** — numpy
 arrays (``Array``), complex numbers (``Complex``), tuples
@@ -588,6 +596,14 @@ numbox.core.bindings._sqlite_udf_helpers
 ----------------------------------------
 
 .. automodule:: numbox.core.bindings._sqlite_udf_helpers
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+numbox.core.bindings._sqlite_vtable
+-----------------------------------
+
+.. automodule:: numbox.core.bindings._sqlite_vtable
    :members:
    :show-inheritance:
    :undoc-members:
