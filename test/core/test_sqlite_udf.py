@@ -121,7 +121,7 @@ def _sum_step_impl(ctx, argc, argv_pp):
     val = sqlite3_value_int64(args[0])
     slot = carray(_cast_int_to_void_p(agg_ptr), (1,), dtype=np.intp)
     if slot[0] == 0:
-        s = SumState(nb_types.int64(0))
+        s = SumState(np.int64(0))
         slot[0] = export_meminfo(s)
     state = borrow_structref(sum_state_type, slot[0])
     state.total += val
@@ -136,11 +136,11 @@ _sum_step_cb = cfunc(
 def _sum_final_impl(ctx):
     agg_ptr = sqlite3_aggregate_context(ctx, 0)
     if agg_ptr == 0:
-        sqlite3_result_int64(ctx, nb_types.int64(0))
+        sqlite3_result_int64(ctx, np.int64(0))
         return
     slot = carray(_cast_int_to_void_p(agg_ptr), (1,), dtype=np.intp)
     if slot[0] == 0:
-        sqlite3_result_int64(ctx, nb_types.int64(0))
+        sqlite3_result_int64(ctx, np.int64(0))
         return
     state = borrow_structref(sum_state_type, slot[0])
     sqlite3_result_int64(ctx, state.total)
@@ -211,11 +211,11 @@ _wsum_inverse_cb = cfunc(
 def _wsum_value_impl(ctx):
     agg_ptr = sqlite3_aggregate_context(ctx, 0)
     if agg_ptr == 0:
-        sqlite3_result_int64(ctx, nb_types.int64(0))
+        sqlite3_result_int64(ctx, np.int64(0))
         return
     slot = carray(_cast_int_to_void_p(agg_ptr), (_WSUM_SLOTS,), dtype=np.intp)
     if slot[0] == 0:
-        sqlite3_result_int64(ctx, nb_types.int64(0))
+        sqlite3_result_int64(ctx, np.int64(0))
         return
     state = carray(_cast_int_to_void_p(slot[1]), (1,), dtype=np.int64)
     sqlite3_result_int64(ctx, state[0])
@@ -228,11 +228,11 @@ _wsum_value_cb = cfunc(types.void(types.intp))(_wsum_value_impl)
 def _wsum_final_impl(ctx):
     agg_ptr = sqlite3_aggregate_context(ctx, 0)
     if agg_ptr == 0:
-        sqlite3_result_int64(ctx, nb_types.int64(0))
+        sqlite3_result_int64(ctx, np.int64(0))
         return
     slot = carray(_cast_int_to_void_p(agg_ptr), (_WSUM_SLOTS,), dtype=np.intp)
     if slot[0] == 0:
-        sqlite3_result_int64(ctx, nb_types.int64(0))
+        sqlite3_result_int64(ctx, np.int64(0))
         return
     state = carray(_cast_int_to_void_p(slot[1]), (1,), dtype=np.int64)
     sqlite3_result_int64(ctx, state[0])
@@ -251,7 +251,7 @@ def _user_data_probe_impl(ctx, argc, argv_pp):
     ud = sqlite3_user_data(ctx)
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
     target_p = sqlite3_value_int64(args[0])
-    result = nb_types.int64(1) if ud == target_p else nb_types.int64(0)
+    result = np.int64(1) if ud == target_p else np.int64(0)
     sqlite3_result_int64(ctx, result)
 
 

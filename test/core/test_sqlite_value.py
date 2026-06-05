@@ -69,7 +69,7 @@ def _cap_int_impl(ctx, argc, argv_pp):
     ud = sqlite3_user_data(ctx)
     out = carray(_cast_int_to_void_p(ud), (1,), dtype=np.int64)
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
-    out[0] = nb_types.int64(sqlite3_value_int(args[0]))
+    out[0] = np.int64(sqlite3_value_int(args[0]))
     sqlite3_result_int(ctx, 0)
 
 
@@ -171,7 +171,7 @@ def _cap_types_impl(ctx, argc, argv_pp):
     ud = sqlite3_user_data(ctx)
     out = carray(_cast_int_to_void_p(ud), (6,), dtype=np.int64)
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
-    out[0] = nb_types.int64(argc)
+    out[0] = np.int64(argc)
     for i in range(argc):
         out[1 + i] = nb_types.int64(sqlite3_value_type(args[i]))
     sqlite3_result_int(ctx, 0)

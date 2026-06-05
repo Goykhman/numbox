@@ -44,7 +44,7 @@ sum_state_type = SumStateType([("total", nb_types.int64)])
 
 @njit
 def sum_init():
-    return SumState(nb_types.int64(0))
+    return SumState(np.int64(0))
 
 
 @njit
@@ -163,7 +163,7 @@ _DRIVER = textwrap.dedent('''
 
     @njit
     def s_init():
-        return St(nb_types.int64(0))
+        return St(np.int64(0))
     @njit
     def s_step(state, ctx, argc, argv_pp):
         a = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
@@ -404,7 +404,7 @@ def test_plain_python_callbacks_accepted():
     _make_table(db, [1, 2, 3, 4, 5])
 
     def plain_init():
-        return SumState(nb_types.int64(0))
+        return SumState(np.int64(0))
 
     def plain_step(state, ctx, argc, argv_pp):
         args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
@@ -447,7 +447,7 @@ pair_state_type = PairStateType([("sa", nb_types.int64), ("sb", nb_types.int64)]
 
 @njit
 def pair_init():
-    return PairState(nb_types.int64(0), nb_types.int64(0))
+    return PairState(np.int64(0), np.int64(0))
 
 
 @njit
@@ -640,7 +640,7 @@ def test_finalize_exception_empty_group_surfaces_error():
 
 @njit
 def init_raise():
-    s = SumState(nb_types.int64(0))
+    s = SumState(np.int64(0))
     if s.total >= 0:  # always true at runtime; keeps the St return type for typing
         raise ValueError("boom from init")
     return s
