@@ -255,7 +255,7 @@ def _xconnect(db, p_aux, argc, argv, pp_vtab, pz_err):
 
 @njit(**jit_options)
 def _is_numeric_tag(tag):
-    return tag <= _TAG_F64
+    return tag <= _TAG_BOOL
 
 
 @njit(**jit_options)
@@ -384,7 +384,7 @@ def _xclose(cur):
 def _cell_value(d, rowid, col):
     # Read the cell at (rowid, col) as float64, mirroring _xcolumn's full tag
     # ladder (same addr math, same load_unaligned widths). xBestIndex only
-    # claims tags up to _TAG_F64; the string/blob tags fall through to 0.
+    # claims tags up to _TAG_BOOL; the string/blob tags fall through to 0.
     ncols = d[0].ncols
     base = d[0].data_base
     row_stride = d[0].row_stride

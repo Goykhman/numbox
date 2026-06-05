@@ -657,6 +657,20 @@ def test_pushdown_explain_uses_index():
     sqlite3_close(db)
 
 
+def test_pushdown_bool_column():
+    # A bool column maps to SQLite INTEGER and the cursor reads/compares it, so
+    # an eq constraint must be pushed down (non-zero idxNum), not full-scanned.
+    db = _open_memory()
+    a = np.array([[True], [False], [True], [False], [True]], dtype=np.bool_)
+    h = register_table(db, "t", a, columns=["c"])  # noqa: F841
+    assert _select_col0(db, "SELECT c FROM t WHERE c = 1") == [1, 1, 1]
+    assert _select_col0(db, "SELECT c FROM t WHERE c = 0") == [0, 0]
+    plan = _fetchall(db, "EXPLAIN QUERY PLAN SELECT c FROM t WHERE c = 1")
+    text = " ".join(str(field) for row in plan for field in row).upper()
+    assert "VIRTUAL TABLE INDEX 1:" in text, text
+    sqlite3_close(db)
+
+
 def test_pushdown_int64_above_2_53_range():
     db = _open_memory()
     base = 1 << 53
