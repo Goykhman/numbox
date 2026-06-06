@@ -2,7 +2,6 @@
 import ctypes
 
 import numpy as np
-import numba
 from numba import njit, carray
 from numba.core.types import uint8, uint32
 
@@ -128,31 +127,30 @@ def _store_cell(buf, off, tag, width, stmt, j, scratch8):
 
 
 @njit(**jit_options)
-def _query_core(stmt, ncols, offsets, tags, widths, itemsize, dt):
-    """Step ``stmt`` to exhaustion, materialising rows into an NRT buffer that
-    grows geometrically, then trim to the exact length. Returns ``(array, rc)``
-    where ``rc`` is the terminal step return code (SQLITE_DONE on success).
+def _query_core(stmt, ncols, offsets, tags, widths, itemsize):
+    """Step ``stmt`` to exhaustion, materialising rows into a flat uint8 numpy
+    array that grows geometrically, then trim to the exact length. Returns
+    ``(buf, rc)`` where ``buf`` is ``n * itemsize`` native-order bytes (the
+    caller views it back to the structured dtype) and ``rc`` is the terminal
+    step return code (SQLITE_DONE on success).
     """
     cap = 16
-    out = np.zeros(cap, dt)
-    out_u8 = out.view(np.uint8)
+    out_u8 = np.zeros(cap * itemsize, np.uint8)
     scratch8 = np.empty(8, np.uint8)
     n = 0
     rc = sqlite3_step(stmt)
     while rc == SQLITE_ROW:
         if n == cap:
             cap = cap * 2
-            new = np.zeros(cap, dt)
-            new_u8 = new.view(np.uint8)
+            new_u8 = np.zeros(cap * itemsize, np.uint8)
             new_u8[:n * itemsize] = out_u8[:n * itemsize]
-            out = new
             out_u8 = new_u8
         row_off = n * itemsize
         for j in range(ncols):
             _store_cell(out_u8, row_off + offsets[j], tags[j], widths[j], stmt, j, scratch8)
         n += 1
         rc = sqlite3_step(stmt)
-    return out[:n].copy(), rc
+    return out_u8[:n * itemsize].copy(), rc
 
 
 def _raise_rc(db, rc):
@@ -184,10 +182,9 @@ def query_to_array(db, sql_p, dtype):
         ncols = sqlite3_column_count(stmt.value)
         if ncols != len(names):
             raise ValueError("dtype has %d fields but query returns %d columns" % (len(names), ncols))
-        res, last_rc = _query_core(stmt.value, ncols, offsets, tags, widths,
-                                   int(dtype.itemsize), numba.from_dtype(dtype))
+        buf, last_rc = _query_core(stmt.value, ncols, offsets, tags, widths, int(dtype.itemsize))
         if last_rc != SQLITE_DONE:
             _raise_rc(db, last_rc)
-        return res
+        return buf.view(dtype)
     finally:
         sqlite3_finalize(stmt.value)
