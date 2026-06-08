@@ -210,9 +210,69 @@ Only the affected nodes will be re-evaluated::
 
 .. rubric:: References
 
-.. [#f1] It is straightforward to adapt the variables specifications given here in pure Python to build a fully-JIT'ed graph of :class:`numbox.core.work.work.Work` nodes, by using the :class:`numbox.core.work.builder.Derived`. See :ref:`builder`.
+.. [#f1] It is straightforward to adapt the variables specifications given here in pure Python to build a fully-JIT'ed graph of :class:`numbox.core.work.work.Work` nodes, by using the :class:`numbox.core.work.builder.Derived`. See :ref:`builder`. As another route to fully-JIT'ed evaluation, :func:`numbox.core.variable.compile_kernel.compile_kernel` fuses the graph into a single ``@njit`` kernel (see below).
 
 .. automodule:: numbox.core.variable.variable
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+numbox.core.variable.compile_kernel
+-----------------------------------
+
+Overview
+********
+
+Alongside :meth:`numbox.core.variable.variable.Graph.compile` (which produces a
+:class:`numbox.core.variable.variable.CompiledGraph` evaluated node-by-node in pure Python),
+:func:`numbox.core.variable.compile_kernel.compile_kernel` compiles a `Graph` into
+*one* fused ``@njit`` kernel for a requested set of variables. It does not replace
+`core.work` or `CompiledGraph`; it is an additional, fully-JIT'ed evaluation path.
+
+The fused kernel takes the required external inputs as positional arguments and returns
+the requested variables as a tuple, with every interior graph node lowered to an SSA
+temporary inside the single compiled function. No per-node type information needs to be
+supplied: numba infers every interior type from the runtime argument types, provided each
+`formula` is njit-able. Plain-Python formulas are auto-wrapped with ``njit()``.
+
+The call returns a :class:`numbox.core.variable.compile_kernel.CompiledKernel`. It exposes
+the raw ``.kernel`` (the bare numba dispatcher — positional in, tuple out — for the
+zero-overhead hot path) and a dict-in / dict-out ``.execute`` convenience that mirrors
+:meth:`numbox.core.variable.variable.CompiledGraph.execute`. The qualified names of the
+kernel's positional inputs and tuple outputs are available as ``.params`` and ``.outputs``,
+the generated kernel text as ``.source``, and the per-variable temporary identifiers as
+``.identifiers``.
+
+This is a v1 fused path with two deliberate limitations: it does not honor the
+`cacheable` memoization of individual nodes, and it offers no incremental recompute of
+only the affected nodes. Use :class:`numbox.core.variable.variable.CompiledGraph` (or the
+`core.work` graph) when either of those is needed.
+
+A graph can be compiled to a fused kernel as follows:
+
+.. code-block:: python
+
+    from numba import njit
+    from numbox.core.variable.variable import Graph
+    from numbox.core.variable.compile_kernel import compile_kernel
+
+    graph = Graph(
+        variables_lists={"variables": [
+            {"name": "x", "inputs": {"y": "basket"}, "formula": njit(lambda y: 2 * y)},
+            {"name": "u", "inputs": {"x": "variables"}, "formula": njit(lambda x: x - 74)},
+        ]},
+        external_source_names=["basket"],
+    )
+
+    ck = compile_kernel(graph, ["variables.u"])
+    assert ck.execute({"basket": {"y": 100}}) == {"variables.u": 126}
+    assert ck.kernel(100) == (126,)
+
+Here the dict-in / dict-out ``ck.execute`` looks up the required external value
+``basket.y`` and returns the requested ``variables.u``, while the bare ``ck.kernel``
+is called positionally with the external input and returns the output tuple directly.
+
+.. automodule:: numbox.core.variable.compile_kernel
    :members:
    :show-inheritance:
    :undoc-members:
