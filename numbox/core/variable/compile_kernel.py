@@ -82,23 +82,24 @@ def _safe_getsource(formula):
     signature, which would let different bodies collide.
 
     When no source is recoverable (a cres/CompileResultWAP formula, or a lambda
-    defined outside a source file), we fall back to ``repr(formula)``. repr is
-    unique per object, so it never causes a hash *collision* (results stay
-    correct); it is just not stable across processes, so such a formula does
-    not get cross-process cache reuse. The same downgrade applies if a closure
-    cell value has no process-stable ``repr``.
+    defined outside a source file), we fall back to ``repr(formula)`` plus
+    ``id(formula)`` as a per-object discriminator, so the fallback is unique per
+    object even when ``__repr__`` is non-unique -- it never causes a hash
+    *collision* (results stay correct); it is just not stable across processes,
+    so such a formula does not get cross-process cache reuse. The same downgrade
+    applies if a closure cell value has no process-stable ``repr``.
     """
     target = getattr(formula, "py_func", formula)
     try:
         src = getsource(target)
     except (OSError, TypeError):
-        return repr(formula)
+        return f"{repr(formula)} @{id(formula)}"
     closure = getattr(target, "__closure__", None)
     if closure:
         try:
             src += "\n# closure: " + repr([c.cell_contents for c in closure])
         except Exception:  # noqa: BLE001 - unrepr-able cell -> per-object fallback
-            return repr(formula)
+            return f"{repr(formula)} @{id(formula)}"
     return src
 
 

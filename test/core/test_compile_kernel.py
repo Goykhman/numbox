@@ -383,3 +383,20 @@ def test_compile_kernel_duplicate_required_deduped():
     assert ck.outputs == ["variables.u"]
     assert ck.execute({"basket": {"y": 100}}) == {"variables.u": 326.5}
     assert ck.kernel(100) == (326.5,)
+
+
+def test_safe_getsource_repr_fallback_is_per_object():
+    # A callable whose source can't be recovered and whose __repr__ is
+    # non-unique must still hash distinctly per object (via the id() suffix),
+    # so two such formulas never collide in the content-addressed cache.
+    from numbox.core.variable.compile_kernel import _safe_getsource
+
+    class _Konst:
+        def __repr__(self):
+            return "<konst>"
+
+        def __call__(self, x):
+            return x
+
+    a, b = _Konst(), _Konst()
+    assert _safe_getsource(a) != _safe_getsource(b)
