@@ -20,7 +20,7 @@ from numba.core.types import (
 )
 
 from numbox.core.bindings import (
-    SQLITE_OK, SQLITE_TRANSIENT, SQLITE_ERROR, SQLITE_NOMEM,
+    SQLITE_OK, SQLITE_STATIC, SQLITE_TRANSIENT, SQLITE_ERROR, SQLITE_NOMEM,
     SQLITE_INDEX_CONSTRAINT_EQ, SQLITE_INDEX_CONSTRAINT_GT,
     SQLITE_INDEX_CONSTRAINT_GE, SQLITE_INDEX_CONSTRAINT_LT,
     SQLITE_INDEX_CONSTRAINT_LE,
@@ -109,6 +109,12 @@ assert _CONSTRAINT_DTYPE.itemsize == 12 and _USAGE_DTYPE.itemsize == 8 and _ORDE
 _PRED_DTYPE = np.dtype([("col", "i4"), ("op", "i4"), ("is_int", "i4"),
                         ("ival", "i8"), ("fval", "f8")], align=True)
 _PRED_SIZE = _PRED_DTYPE.itemsize
+
+# The (col, op) pair xBestIndex serialises per claimed constraint into the
+# idxStr side channel; xFilter reads it back through the same dtype.
+_SPEC_DTYPE = np.dtype([("col", "i4"), ("op", "i4")], align=True)
+_SPEC_SIZE = _SPEC_DTYPE.itemsize
+assert _SPEC_SIZE == 8
 
 _CACHE = jit_options.get("cache", True)
 
@@ -266,10 +272,10 @@ def _xbestindex(vtab, idx_info):
         cons = carray(_cast_int_to_void_p(ii[0].aConstraint), (n_constraint,), dtype=_CONSTRAINT_DTYPE)
         usage = carray(_cast_int_to_void_p(ii[0].aConstraintUsage), (n_constraint,), dtype=_USAGE_DTYPE)
 
-        idx_p = sqlite3_malloc(int32(n_constraint * 8)) if n_constraint > 0 else 0
+        idx_p = sqlite3_malloc(int32(n_constraint * _SPEC_SIZE)) if n_constraint > 0 else 0
         if n_constraint > 0 and idx_p == 0:
             return SQLITE_NOMEM
-        spec = carray(_cast_int_to_void_p(idx_p), (2 * n_constraint,), dtype=np.int32)
+        spec = carray(_cast_int_to_void_p(idx_p), (n_constraint,), dtype=_SPEC_DTYPE)
 
         nbound = 0
         for i in range(n_constraint):
@@ -282,8 +288,8 @@ def _xbestindex(vtab, idx_info):
                 # though _row_matches now prunes exactly (int64 for integer
                 # columns) so future predicate widening can't silently drop rows.
                 usage[i].omit = 0
-                spec[2 * nbound] = int32(col)
-                spec[2 * nbound + 1] = int32(op)
+                spec[nbound].col = int32(col)
+                spec[nbound].op = int32(op)
                 nbound += 1
 
         ii[0].idxNum = int32(nbound)
@@ -487,15 +493,15 @@ def _xfilter(cur, idx_num, idx_str, argc, argv):
             c[0].pred_p = pred_p
             c[0].n_pred = argc
             preds = carray(_cast_int_to_void_p(pred_p), (argc,), dtype=_PRED_DTYPE)
-            spec = carray(_cast_int_to_void_p(idx_str), (2 * argc,), dtype=np.int32)
+            spec = carray(_cast_int_to_void_p(idx_str), (argc,), dtype=_SPEC_DTYPE)
             vals = carray(_cast_int_to_void_p(argv), (argc,), dtype=np.intp)
             d = carray(_cast_int_to_void_p(c[0].descriptor), (1,), dtype=_DESC_DTYPE)
             ncols = d[0].ncols
             col_tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=tags_buf_t)
             for k in range(argc):
-                col = spec[2 * k]
+                col = spec[k].col
                 preds[k].col = col
-                preds[k].op = spec[2 * k + 1]
+                preds[k].op = spec[k].op
                 if _is_int_tag(col_tags[col]):
                     preds[k].is_int = 1
                     preds[k].ival = sqlite3_value_int64(vals[k])
@@ -574,11 +580,15 @@ def _xcolumn(cur, ctx, j):
         elif tag == _TAG_F64:
             sqlite3_result_double(ctx, load_unaligned(addr, float64))
         elif tag == _TAG_S:
+            # S/BLOB results point into the registered array, which outlives
+            # the statement (_DATA_ANCHOR + the no-mutation contract), so
+            # STATIC hands SQLite the pointer zero-copy. U must stay TRANSIENT:
+            # it serves the per-cursor scratch, overwritten by the next xColumn.
             n = _nul_trimmed_len(addr, widths[j])
-            sqlite3_result_text(ctx, addr, int32(n), SQLITE_TRANSIENT)
+            sqlite3_result_text(ctx, addr, int32(n), SQLITE_STATIC)
         elif tag == _TAG_BLOB:
             n = _nul_trimmed_len(addr, widths[j])
-            sqlite3_result_blob(ctx, addr, int32(n), SQLITE_TRANSIENT)
+            sqlite3_result_blob(ctx, addr, int32(n), SQLITE_STATIC)
         elif tag == _TAG_U:
             scratch = c[0].scratch_p
             n = utf32_to_utf8(addr, widths[j] // 4, scratch)
@@ -642,7 +652,9 @@ def register_table(db, name, arr, columns=None, *, text_as_blob=False):
     and is released by SQLite via ``xDestroy`` (on connection close
     or re-registration of the same name). The caller must not
     mutate or resize the array while the table is registered -- the view is
-    zero-copy, so queries read the array's buffer directly.
+    zero-copy, so queries read the array's buffer directly (numeric reads
+    alias it, and ``'S'``/BLOB values are handed to SQLite as
+    ``SQLITE_STATIC`` pointers into it).
 
     Registering a second table under an existing name follows SQLite's
     module-registration semantics: the later registration replaces the earlier one

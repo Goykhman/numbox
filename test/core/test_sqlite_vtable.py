@@ -276,6 +276,19 @@ def test_structured_text_and_unicode():
     sqlite3_close(db)
 
 
+def test_two_unicode_columns_single_cursor():
+    # Both U columns of a row are decoded into the SAME per-cursor scratch
+    # buffer, so SQLite must copy the first result before the second xColumn
+    # overwrites the scratch -- guards the TRANSIENT choice on the U branch
+    # (S/BLOB results are STATIC; flipping U to match corrupts exactly this).
+    db = _open_memory()
+    dt = np.dtype([("u1", "U4"), ("u2", "U4")])
+    a = np.array([("abcd", "wxyz"), ("hi", "yo")], dtype=dt)
+    register_table(db, "t", a)
+    assert _fetchall(db, "SELECT u1, u2 FROM t") == [("abcd", "wxyz"), ("hi", "yo")]
+    sqlite3_close(db)
+
+
 def test_text_as_blob():
     db = _open_memory()
     dt = np.dtype([("s", "S3")])
@@ -456,6 +469,8 @@ def test_pushdown_element_dtype_itemsizes():
     assert _CONSTRAINT_DTYPE.itemsize == 12
     assert _USAGE_DTYPE.itemsize == 8
     assert _ORDERBY_DTYPE.itemsize == 8
+    from numbox.core.bindings._sqlite_vtable import _SPEC_DTYPE
+    assert _SPEC_DTYPE.itemsize == 8
 
 
 def _select_col0(db, sql):
@@ -665,6 +680,28 @@ def test_pushdown_bool_column():
     plan = _fetchall(db, "EXPLAIN QUERY PLAN SELECT c FROM t WHERE c = 1")
     text = " ".join(str(field) for row in plan for field in row).upper()
     assert "VIRTUAL TABLE INDEX 1:" in text, text
+    sqlite3_close(db)
+
+
+def test_pushdown_bool_range_ops_match_stdlib():
+    # Bool pushdown goes through the FLOAT comparison domain (_is_int_tag
+    # excludes bool): an int64-truncated RHS would turn c > -0.5 into c > 0
+    # and drop rows the omit=0 re-check never sees. Cross-check every range op
+    # and a fractional/negative RHS against stdlib sqlite3 on INTEGER 0/1.
+    import sqlite3 as pysqlite
+    rows = [True, False, True, False, True]
+    ref = pysqlite.connect(":memory:")
+    ref.execute("CREATE TABLE t(c INTEGER)")
+    ref.executemany("INSERT INTO t VALUES (?)", [(int(v),) for v in rows])
+    db = _open_memory()
+    a = np.array([[v] for v in rows], dtype=np.bool_)
+    register_table(db, "t", a, columns=["c"])
+    for op in (">", ">=", "<", "<="):
+        for rhs in ("-0.5", "0.5", "0", "1"):
+            sql = "SELECT c FROM t WHERE c %s %s" % (op, rhs)
+            exp = sorted(r[0] for r in ref.execute(sql))
+            assert sorted(_select_col0(db, sql)) == exp, sql
+    ref.close()
     sqlite3_close(db)
 
 
