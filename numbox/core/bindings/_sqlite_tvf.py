@@ -156,9 +156,8 @@ def _make_xconnect():
             vtab = sqlite3_malloc(int32(_VTAB_SIZE))
             if vtab == 0:
                 return SQLITE_NOMEM
-            raw = carray(_cast_int_to_void_p(vtab), (_VTAB_SIZE,), dtype=np.uint8)
-            for i in range(_VTAB_SIZE):
-                raw[i] = 0
+            # no zeroing needed: SQLite memsets the sqlite3_vtab base after this
+            # callback returns; descriptor is the only member we own.
             v = carray(_cast_int_to_void_p(vtab), (1,), dtype=_VTAB_DTYPE)
             v[0].descriptor = p_aux
             slot = carray(_cast_int_to_void_p(pp_vtab), (1,), dtype=np.intp)
