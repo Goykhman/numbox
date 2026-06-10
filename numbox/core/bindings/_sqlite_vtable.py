@@ -486,7 +486,10 @@ def _xfilter(cur, idx_num, idx_str, argc, argv):
     c[0].n_pred = 0
     c[0].rowid = 0
     try:
-        if idx_num > 0 and argc > 0:
+        # argc equals xBestIndex's idxNum (= nbound) by construction, but only
+        # argc is load-bearing: idxStr holds argc (col, op) pairs and argv
+        # holds argc values, so the gate keys off argc alone.
+        if argc > 0:
             pred_p = sqlite3_malloc(int32(argc * _PRED_SIZE))
             if pred_p == 0:
                 return SQLITE_NOMEM

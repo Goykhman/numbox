@@ -150,6 +150,9 @@ def _query_core(stmt, ncols, offsets, tags, widths, itemsize):
             _store_cell(out_u8, row_off + offsets[j], tags[j], widths[j], stmt, j, scratch8)
         n += 1
         rc = sqlite3_step(stmt)
+    # The bare slice is lifetime-safe (it shares the parent's NRT meminfo via
+    # make_view/impl_ret_borrowed); .copy() only trims the growth slack --
+    # under 2x for n > 16, up to 16x at small n (cap floors at 16).
     return out_u8[:n * itemsize].copy(), rc
 
 
