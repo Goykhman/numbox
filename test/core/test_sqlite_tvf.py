@@ -15,7 +15,7 @@ from numbox.core.bindings._sqlite_vtable import (
     _VTAB_DTYPE, _IDX_INFO_DTYPE, _CONSTRAINT_DTYPE, _USAGE_DTYPE,
 )
 from numbox.core.bindings._sqlite_constants import (
-    SQLITE_OK, SQLITE_CONSTRAINT, SQLITE_INDEX_CONSTRAINT_EQ,
+    SQLITE_OK, SQLITE_CONSTRAINT, SQLITE_INDEX_CONSTRAINT_EQ, SQLITE_ROW,
 )
 
 _OUT = np.dtype([("n", "i8")])
@@ -53,7 +53,7 @@ def _select_int(db, sql, ncol=1):
         rc = sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0)
     rows = []
     if rc == 0:
-        while sqlite3_step(stmt.value) == 100:
+        while sqlite3_step(stmt.value) == SQLITE_ROW:
             rows.append(tuple(sqlite3_column_int64(stmt.value, j) for j in range(ncol)))
     sqlite3_finalize(stmt.value)
     return rc, rows
@@ -66,7 +66,7 @@ def test_tvf_series():
     with c_string("SELECT n FROM series(2, 5)") as p:
         sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0)
     got = []
-    while sqlite3_step(stmt.value) == 100:
+    while sqlite3_step(stmt.value) == SQLITE_ROW:
         got.append(sqlite3_column_int64(stmt.value, 0))
     sqlite3_finalize(stmt.value)
     assert got == [2, 3, 4]
@@ -93,7 +93,7 @@ def test_tvf_two_calls_one_query_plan():
     with c_string(sql) as p:
         sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0)
     got = []
-    while sqlite3_step(stmt.value) == 100:
+    while sqlite3_step(stmt.value) == SQLITE_ROW:
         got.append((sqlite3_column_int64(stmt.value, 0), sqlite3_column_int64(stmt.value, 1)))
     sqlite3_finalize(stmt.value)
     assert got == [(2, 10), (2, 11), (2, 12)]
@@ -108,7 +108,7 @@ def test_tvf_multi_column_and_float_arg():
     with c_string("SELECT n, v FROM scaled(0, 3, 2.5)") as p:
         sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0)
     got = []
-    while sqlite3_step(stmt.value) == 100:
+    while sqlite3_step(stmt.value) == SQLITE_ROW:
         got.append((sqlite3_column_int64(stmt.value, 0), sqlite3_column_double(stmt.value, 1)))
     sqlite3_finalize(stmt.value)
     assert got == [(0, 0.0), (1, 2.5), (2, 5.0)]
@@ -124,7 +124,7 @@ def test_tvf_missing_hidden_arg():
         rc = sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0)
     rows = []
     if rc == 0:
-        while sqlite3_step(stmt.value) == 100:
+        while sqlite3_step(stmt.value) == SQLITE_ROW:
             rows.append(sqlite3_column_int64(stmt.value, 0))
     sqlite3_finalize(stmt.value)
     assert rows == []
@@ -242,7 +242,7 @@ def test_tvf_two_distinct_registrations_same_process():
     with c_string("SELECT n, v FROM scaled(0, 3, 2.5)") as p:
         sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0)
     r2 = []
-    while sqlite3_step(stmt.value) == 100:
+    while sqlite3_step(stmt.value) == SQLITE_ROW:
         r2.append((sqlite3_column_int64(stmt.value, 0), sqlite3_column_double(stmt.value, 1)))
     sqlite3_finalize(stmt.value)
     assert [x[0] for x in r1] == [2, 3, 4]

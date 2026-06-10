@@ -22,7 +22,7 @@ from numbox.utils.lowlevel import array_data_p
 
 def test_imports():
     from numbox.core.bindings import _sqlite_vtable as v
-    assert hasattr(v.sqlite3_create_module, "py_func")
+    assert hasattr(v.sqlite3_create_module_v2, "py_func")
     assert hasattr(v.sqlite3_declare_vtab, "py_func")
     assert hasattr(v.sqlite3_malloc, "py_func")
 
@@ -397,7 +397,7 @@ _DRIVER = textwrap.dedent('''
     import numpy as np
     from numbox.core.bindings import (
         sqlite3_open, sqlite3_prepare_v2, sqlite3_step,
-        sqlite3_column_int64, sqlite3_finalize)
+        sqlite3_column_int64, sqlite3_finalize, SQLITE_ROW)
     from numbox.core.bindings._sqlite_vtable import register_table
     from numbox.utils.cstrings import c_string
 
@@ -412,7 +412,7 @@ _DRIVER = textwrap.dedent('''
         sqlite3_prepare_v2(db, sp, -1, addressof(stmt_p), 0)
     stmt = stmt_p.value
     rows = []
-    while sqlite3_step(stmt) == 100:
+    while sqlite3_step(stmt) == SQLITE_ROW:
         rows.append((sqlite3_column_int64(stmt, 0), sqlite3_column_int64(stmt, 1)))
     sqlite3_finalize(stmt)
     assert rows == [(1, 10), (2, 20), (3, 30)], rows
@@ -533,9 +533,9 @@ def test_xdestroy_pops_registry_on_close():
     arr = np.array([[1], [2]], dtype=np.int64)
     h = register_table(db.value, "t", arr, ["c"])
     assert _select_col0(db.value, "SELECT c FROM t") == [1, 2]
-    n_before = len(v._REGISTRY)
+    n_before = len(v._DATA_ANCHOR)
     sqlite3_close(db.value)
-    assert len(v._REGISTRY) == n_before - 1
+    assert len(v._DATA_ANCHOR) == n_before - 1
     del h
 
 
@@ -546,9 +546,9 @@ def test_xdestroy_two_tables():
         sqlite3_open(p, addressof(db))
     h1 = register_table(db.value, "t1", np.array([[1]], np.int64), ["c"])
     h2 = register_table(db.value, "t2", np.array([[2]], np.int64), ["c"])
-    n = len(v._REGISTRY)
+    n = len(v._DATA_ANCHOR)
     sqlite3_close(db.value)
-    assert len(v._REGISTRY) == n - 2
+    assert len(v._DATA_ANCHOR) == n - 2
     del h1, h2
 
 
@@ -560,9 +560,9 @@ def test_xdestroy_three_tables():
     h1 = register_table(db.value, "t1", np.array([[1]], np.int64), ["c"])
     h2 = register_table(db.value, "t2", np.array([[2]], np.int64), ["c"])
     h3 = register_table(db.value, "t3", np.array([[3]], np.int64), ["c"])
-    n = len(v._REGISTRY)
+    n = len(v._DATA_ANCHOR)
     sqlite3_close(db.value)
-    assert len(v._REGISTRY) == n - 3
+    assert len(v._DATA_ANCHOR) == n - 3
     del h1, h2, h3
 
 
@@ -573,20 +573,19 @@ def test_xdestroy_reregister_drops_first():
         sqlite3_open(p, addressof(db))
     a = np.array([[1]], np.int64)
     b = np.array([[2]], np.int64)
-    h1 = register_table(db.value, "t", a, ["c"])
-    key1 = h1._keep[0].c.ctypes.data  # the first descriptor pointer = its registry key
-    assert key1 in v._REGISTRY
-    h2 = register_table(db.value, "t", b, ["c"])
+    keys0 = set(v._DATA_ANCHOR)
+    register_table(db.value, "t", a, ["c"])
+    (key1,) = set(v._DATA_ANCHOR) - keys0  # the first descriptor pointer = its anchor key
+    register_table(db.value, "t", b, ["c"])
     # re-registration fires the FIRST descriptor's xDestroy synchronously
-    assert key1 not in v._REGISTRY, "first entry not dropped on re-register"
-    key2 = h2._keep[0].c.ctypes.data
-    assert key2 in v._REGISTRY and key2 != key1
+    assert key1 not in v._DATA_ANCHOR, "first entry not dropped on re-register"
+    (key2,) = set(v._DATA_ANCHOR) - keys0
+    assert key2 != key1
     assert _select_col0(db.value, "SELECT c FROM t") == [2]
-    n = len(v._REGISTRY)
+    n = len(v._DATA_ANCHOR)
     sqlite3_close(db.value)
-    assert key2 not in v._REGISTRY
-    assert len(v._REGISTRY) == n - 1
-    del h1, h2
+    assert key2 not in v._DATA_ANCHOR
+    assert len(v._DATA_ANCHOR) == n - 1
 
 
 def test_xdestroy_no_c_free_of_descriptor():
@@ -595,17 +594,15 @@ def test_xdestroy_no_c_free_of_descriptor():
     with c_string(":memory:") as p:
         sqlite3_open(p, addressof(db))
     arr = np.array([[11], [22], [33]], dtype=np.int64)
-    h = register_table(db.value, "t", arr, ["c"])
+    register_table(db.value, "t", arr, ["c"])
     assert _select_col0(db.value, "SELECT c FROM t") == [11, 22, 33]
-    n_before = len(v._REGISTRY)
+    n_before = len(v._DATA_ANCHOR)
     sqlite3_close(db.value)
-    assert len(v._REGISTRY) == n_before - 1
+    assert len(v._DATA_ANCHOR) == n_before - 1
     # xDestroy must NOT have C-freed the numpy-owned descriptor/array: the test
-    # still holds arr (and the handle), so reading it must not segfault and the
-    # data must be unchanged.
+    # still holds arr, so reading it must not segfault and the data must be
+    # unchanged.
     assert arr.tolist() == [[11], [22], [33]]
-    assert h._keep[0].c["nrows"][0] == 3
-    del h
 
 
 def test_xdestroy_tvf_pops_registry_on_close():
@@ -634,9 +631,9 @@ def test_xdestroy_tvf_pops_registry_on_close():
         got.append(sqlite3_column_int64(stmt.value, 0))
     sqlite3_finalize(stmt.value)
     assert got == [2, 3, 4]
-    n_before = len(v._REGISTRY)
+    n_before = len(v._DATA_ANCHOR)
     sqlite3_close(db.value)
-    assert len(v._REGISTRY) == n_before - 1
+    assert len(v._DATA_ANCHOR) == n_before - 1
     del h
 
 
@@ -728,11 +725,11 @@ def test_xdestroy_deferred_while_statement_open():
     with c_string("SELECT n FROM series(2, 5)") as p:
         sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0)
     sqlite3_step(stmt.value)  # leave the statement open (not finalized)
-    n_before = len(v._REGISTRY)
+    n_before = len(v._DATA_ANCHOR)
     rc = sqlite3_close(db.value)  # sqlite3_close (v1) returns SQLITE_BUSY with an open stmt
     assert rc != 0  # BUSY: close refused, xDestroy NOT fired
-    assert len(v._REGISTRY) == n_before  # registry entry still present
+    assert len(v._DATA_ANCHOR) == n_before  # registry entry still present
     sqlite3_finalize(stmt.value)
     assert sqlite3_close(db.value) == 0  # now it closes and fires xDestroy
-    assert len(v._REGISTRY) == n_before - 1
+    assert len(v._DATA_ANCHOR) == n_before - 1
     del h

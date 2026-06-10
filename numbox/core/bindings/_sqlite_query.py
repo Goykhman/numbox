@@ -23,10 +23,10 @@ __all__ = ["query_to_array"]
 
 
 @njit(**jit_options)
-def _put_native(buf, off, scratch8, nbytes):
-    """Copy ``nbytes`` native-order bytes from ``scratch8`` into ``buf`` at ``off``."""
+def _copy_bytes(dst, off, src, nbytes):
+    """Copy ``nbytes`` bytes from the start of ``src`` into ``dst`` at ``off``."""
     for k in range(nbytes):
-        buf[off + k] = scratch8[k]
+        dst[off + k] = src[k]
 
 
 @njit(**jit_options)
@@ -67,7 +67,7 @@ def _put_unicode(buf, off, scratch8, src_p, nbytes, width_cp):
             cp = 0xFFFD
             i += 1
         cps[0] = cp
-        _put_native(buf, off + 4 * k, scratch8, 4)
+        _copy_bytes(buf, off + 4 * k, scratch8, 4)
         k += 1
 
 
@@ -84,30 +84,30 @@ def _store_cell(buf, off, tag, width, stmt, j, scratch8):
     if ctype == SQLITE_NULL:
         if tag == _TAG_F32:
             scratch8.view(np.float32)[0] = np.float32(np.nan)
-            _put_native(buf, off, scratch8, 4)
+            _copy_bytes(buf, off, scratch8, 4)
         elif tag == _TAG_F64:
             scratch8.view(np.float64)[0] = np.float64(np.nan)
-            _put_native(buf, off, scratch8, 8)
+            _copy_bytes(buf, off, scratch8, 8)
         return
     if tag == _TAG_I8 or tag == _TAG_U8:
         buf[off] = uint8(sqlite3_column_int64(stmt, j))
     elif tag == _TAG_I16 or tag == _TAG_U16:
         scratch8.view(np.int16)[0] = np.int16(sqlite3_column_int64(stmt, j))
-        _put_native(buf, off, scratch8, 2)
+        _copy_bytes(buf, off, scratch8, 2)
     elif tag == _TAG_I32 or tag == _TAG_U32:
         scratch8.view(np.int32)[0] = np.int32(sqlite3_column_int64(stmt, j))
-        _put_native(buf, off, scratch8, 4)
+        _copy_bytes(buf, off, scratch8, 4)
     elif tag == _TAG_I64 or tag == _TAG_U64:
         scratch8.view(np.int64)[0] = np.int64(sqlite3_column_int64(stmt, j))
-        _put_native(buf, off, scratch8, 8)
+        _copy_bytes(buf, off, scratch8, 8)
     elif tag == _TAG_BOOL:
         buf[off] = uint8(1) if sqlite3_column_int64(stmt, j) != 0 else uint8(0)
     elif tag == _TAG_F32:
         scratch8.view(np.float32)[0] = np.float32(sqlite3_column_double(stmt, j))
-        _put_native(buf, off, scratch8, 4)
+        _copy_bytes(buf, off, scratch8, 4)
     elif tag == _TAG_F64:
         scratch8.view(np.float64)[0] = sqlite3_column_double(stmt, j)
-        _put_native(buf, off, scratch8, 8)
+        _copy_bytes(buf, off, scratch8, 8)
     elif tag == _TAG_U:
         _put_unicode(buf, off, scratch8, sqlite3_column_text(stmt, j), sqlite3_column_bytes(stmt, j), width // 4)
     elif tag == _TAG_S:

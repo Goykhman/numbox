@@ -18,8 +18,8 @@ Unlike the read-only ``register_table`` (one shared module), each
 dtype and the impls cache cross-process) and builds its own ``sqlite3_module``
 from this registration's cfunc addresses. The handle retains the module struct,
 every cfunc object (SQLite stores their addresses), the descriptor buffers, and
-``fn``; its keep-alive lives in the module-level ``_REGISTRY`` (released by SQLite
-via ``xDestroy``), so the returned handle is advisory.
+``fn``; its keep-alive lives in the module-level ``_DATA_ANCHOR`` (released by
+SQLite via ``xDestroy``).
 """
 import ctypes
 
@@ -30,7 +30,7 @@ from numbox.core.bindings._sqlite_constants import (
     SQLITE_OK, SQLITE_ERROR, SQLITE_NOMEM, SQLITE_CONSTRAINT,
     SQLITE_INDEX_CONSTRAINT_EQ,
 )
-from numbox.core.bindings._sqlite_typemap import _col_tag, _SQL_TYPE
+from numbox.core.bindings._sqlite_typemap import _col_tag, _SQL_TYPE, tags_buf_t
 from numbox.core.bindings._sqlite_vtable import (
     _Sqlite3Module, _SQLITE3_VTAB_CURSOR_DTYPE, _VTAB_DTYPE, _VTAB_SIZE,
     _IDX_INFO_DTYPE, _CONSTRAINT_DTYPE, _USAGE_DTYPE,
@@ -301,7 +301,7 @@ def _make_xcolumn():
             d = carray(_cast_int_to_void_p(c[0].descriptor), (1,), dtype=_TVF_DESC_DTYPE)
             ncols = d[0].ncols
             offsets = carray(_cast_int_to_void_p(d[0].col_offsets), (ncols,), dtype=np.int64)
-            tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=np.int32)
+            tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=tags_buf_t)
             widths = carray(_cast_int_to_void_p(d[0].col_widths), (ncols,), dtype=np.int64)
             addr = data_p + rowid * c[0].row_stride + offsets[j]
             tag = tags[j]
@@ -385,7 +385,7 @@ def _build_tvf_descriptor(name, arg_types, out_dtype):
             "string/bytes hidden args are not supported")
 
     offsets_buf = np.array(offs, dtype=np.int64)
-    tags_buf = np.array(vis_tags, dtype=np.int32)
+    tags_buf = np.array(vis_tags, dtype=tags_buf_t)
     widths_buf = np.array(vis_widths, dtype=np.int64)
     scratch = max([w + 1 for w, t in zip(vis_widths, vis_tags) if t == _TAG_U], default=0)
 
@@ -409,8 +409,8 @@ class _TvfHandle:
     """Keeps the per-registration module struct, every cfunc object (SQLite
     stores their addresses), the descriptor buffers, and fn alive. SQLite calls
     the cfuncs by address; if this handle is GC'd they free and SQLite calls
-    freed code. The keep-alive lives in the module-level ``_REGISTRY``, released
-    by SQLite via ``xDestroy``; the returned handle is advisory."""
+    freed code. The keep-alive lives in the module-level ``_DATA_ANCHOR``,
+    released by SQLite via ``xDestroy``."""
     __slots__ = ("_keep",)
 
     def __init__(self, *objs):
@@ -432,8 +432,8 @@ def register_tvf(db, name, arg_types, out_dtype, fn):
     be supplied with an equality value in the query; a call form that leaves a
     hidden arg unbound is rejected with a SQLite constraint error (no rows).
 
-    The returned handle is advisory: its keep-alive lives in the module-level
-    ``_REGISTRY`` and is released by SQLite via ``xDestroy`` (on connection close
+    The registration's keep-alive lives in the module-level ``_DATA_ANCHOR``
+    and is released by SQLite via ``xDestroy`` (on connection close
     or re-registration of the same name). ``out_dtype`` is baked
     into the generated allocator (so it caches cross-process); a NaN ``float``
     cell reads back as SQL NULL (SQLite coerces NaN REAL to NULL), as in
@@ -483,4 +483,4 @@ def register_tvf(db, name, arg_types, out_dtype, fn):
         module, c, offsets_buf, tags_buf, widths_buf, schema, fn,
         xfilter_impl, _tvf_xfilter, xconnect, xbestindex, xdisconnect,
         xopen, xclose, xnext, xeof, xrowid, xcolumn)
-    return _register_with_destroy(db, name, module_p, c.ctypes.data, handle)
+    _register_with_destroy(db, name, module_p, c.ctypes.data, handle)

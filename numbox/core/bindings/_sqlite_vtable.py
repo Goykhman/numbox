@@ -34,7 +34,7 @@ from numbox.core.bindings import (
 from numbox.core.bindings._sqlite_typemap import (
     _TAG_I8, _TAG_I16, _TAG_I32, _TAG_I64, _TAG_U8, _TAG_U16, _TAG_U32, _TAG_U64,
     _TAG_F32, _TAG_F64, _TAG_BOOL, _TAG_S, _TAG_U, _TAG_BLOB,
-    _SQL_TYPE, _col_tag, utf32_to_utf8, _nul_trimmed_len,
+    _SQL_TYPE, _col_tag, utf32_to_utf8, _nul_trimmed_len, tags_buf_t,
 )
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
@@ -113,21 +113,16 @@ _PRED_SIZE = _PRED_DTYPE.itemsize
 _CACHE = jit_options.get("cache", True)
 
 
-@proxy(signatures.get("sqlite3_create_module"), jit_options=jit_options)
-def sqlite3_create_module(db, z_name, p_module, p_client_data):
-    return _call_lib_func("sqlite3_create_module", (db, z_name, p_module, p_client_data))
-
-
 @proxy(signatures.get("sqlite3_create_module_v2"), jit_options=jit_options)
 def sqlite3_create_module_v2(db, z_name, p_module, p_client_data, x_destroy):
     return _call_lib_func("sqlite3_create_module_v2", (db, z_name, p_module, p_client_data, x_destroy))
 
 
-_REGISTRY = {}
+_DATA_ANCHOR = {}
 
 
 def _xdestroy_py(p_aux):
-    _REGISTRY.pop(p_aux, None)
+    _DATA_ANCHOR.pop(p_aux, None)
 
 
 _XDESTROY_CFUNC = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(_xdestroy_py)
@@ -135,13 +130,12 @@ _XDESTROY_ADDR = ctypes.cast(_XDESTROY_CFUNC, ctypes.c_void_p).value
 
 
 def _register_with_destroy(db, name, module_p, client_ptr, handle):
-    _REGISTRY[client_ptr] = handle
+    _DATA_ANCHOR[client_ptr] = handle
     with c_string(name) as name_p:
         rc = sqlite3_create_module_v2(db, name_p, module_p, client_ptr, _XDESTROY_ADDR)
     if rc != SQLITE_OK:
-        _REGISTRY.pop(client_ptr, None)
+        _DATA_ANCHOR.pop(client_ptr, None)
         _raise_rc(db, name, rc)
-    return handle
 
 
 @proxy(signatures.get("sqlite3_declare_vtab"), jit_options=jit_options)
@@ -196,7 +190,7 @@ def _build_descriptor(arr, columns, text_as_blob):
     scratch = max([w + 1 for w, t in zip(widths, tags) if t == _TAG_U], default=0)
 
     offsets_buf = np.array(offs, dtype=np.int64)
-    tags_buf = np.array(tags, dtype=np.int32)  # the xColumn cfunc reads int32 elements; do not widen
+    tags_buf = np.array(tags, dtype=tags_buf_t)
     widths_buf = np.array(widths, dtype=np.int64)
     cols_sql = ", ".join('"%s" %s' % (n.replace('"', '""'), _SQL_TYPE[t]) for n, t in zip(col_names, tags))
     schema = ("CREATE TABLE x(%s)" % cols_sql).encode("utf-8") + b"\x00"
@@ -267,7 +261,7 @@ def _xbestindex(vtab, idx_info):
         d = carray(_cast_int_to_void_p(v[0].descriptor), (1,), dtype=_DESC_DTYPE)
         ii = carray(_cast_int_to_void_p(idx_info), (1,), dtype=_IDX_INFO_DTYPE)
         ncols = d[0].ncols
-        tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=np.int32)
+        tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=tags_buf_t)
         n_constraint = ii[0].nConstraint
         cons = carray(_cast_int_to_void_p(ii[0].aConstraint), (n_constraint,), dtype=_CONSTRAINT_DTYPE)
         usage = carray(_cast_int_to_void_p(ii[0].aConstraintUsage), (n_constraint,), dtype=_USAGE_DTYPE)
@@ -366,7 +360,7 @@ def _xclose(cur):
 
 
 @njit(**jit_options)
-def _cell_value(d, rowid, col):
+def _cell_value_f64(d, rowid, col):
     """Read the cell at (rowid, col) as float64, mirroring _xcolumn's full tag
     ladder (same addr math, same load_unaligned widths). xBestIndex only
     claims tags up to _TAG_BOOL; the string/blob tags fall through to 0."""
@@ -374,7 +368,7 @@ def _cell_value(d, rowid, col):
     base = d[0].data_base
     row_stride = d[0].row_stride
     offsets = carray(_cast_int_to_void_p(d[0].col_offsets), (ncols,), dtype=np.int64)
-    tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=np.int32)
+    tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=tags_buf_t)
     addr = base + rowid * row_stride + offsets[col]
     tag = tags[col]
     if tag == _TAG_I8:
@@ -410,7 +404,7 @@ def _cell_value_i64(d, rowid, col):
     base = d[0].data_base
     row_stride = d[0].row_stride
     offsets = carray(_cast_int_to_void_p(d[0].col_offsets), (ncols,), dtype=np.int64)
-    tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=np.int32)
+    tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=tags_buf_t)
     addr = base + rowid * row_stride + offsets[col]
     tag = tags[col]
     if tag == _TAG_I8:
@@ -464,7 +458,7 @@ def _row_matches(cur):
         if preds[k].is_int != 0:
             ok = _cmp(op, _cell_value_i64(d, c[0].rowid, preds[k].col), preds[k].ival)
         else:
-            ok = _cmp(op, _cell_value(d, c[0].rowid, preds[k].col), preds[k].fval)
+            ok = _cmp(op, _cell_value_f64(d, c[0].rowid, preds[k].col), preds[k].fval)
         if not ok:
             return False
     return True
@@ -497,7 +491,7 @@ def _xfilter(cur, idx_num, idx_str, argc, argv):
             vals = carray(_cast_int_to_void_p(argv), (argc,), dtype=np.intp)
             d = carray(_cast_int_to_void_p(c[0].descriptor), (1,), dtype=_DESC_DTYPE)
             ncols = d[0].ncols
-            col_tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=np.int32)
+            col_tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=tags_buf_t)
             for k in range(argc):
                 col = spec[2 * k]
                 preds[k].col = col
@@ -553,7 +547,7 @@ def _xcolumn(cur, ctx, j):
         base = d[0].data_base
         row_stride = d[0].row_stride
         offsets = carray(_cast_int_to_void_p(d[0].col_offsets), (ncols,), dtype=np.int64)
-        tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=np.int32)
+        tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=tags_buf_t)
         widths = carray(_cast_int_to_void_p(d[0].col_widths), (ncols,), dtype=np.int64)
         addr = base + rowid * row_stride + offsets[j]
         tag = tags[j]
@@ -625,8 +619,8 @@ _THE_MODULE_P = ctypes.addressof(THE_MODULE)
 class _VTableHandle:
     """Keeps the array + descriptor + buffers alive. SQLite reads the array
     buffer directly; if this handle is GC'd the data frees and the next query
-    reads freed memory. The keep-alive lives in the module-level ``_REGISTRY``,
-    released by SQLite via ``xDestroy``; the returned handle is advisory."""
+    reads freed memory. The keep-alive lives in the module-level
+    ``_DATA_ANCHOR``, released by SQLite via ``xDestroy``."""
     __slots__ = ("_keep",)
 
     def __init__(self, *objs):
@@ -644,14 +638,14 @@ def _raise_rc(db, name, rc):
 def register_table(db, name, arr, columns=None, *, text_as_blob=False):
     """Expose a numpy array as a read-only eponymous SQLite virtual table.
 
-    The returned handle is advisory: the keep-alive lives in the module-level
-    ``_REGISTRY`` and is released by SQLite via ``xDestroy`` (on connection close
+    The registration's keep-alive lives in the module-level ``_DATA_ANCHOR``
+    and is released by SQLite via ``xDestroy`` (on connection close
     or re-registration of the same name). The caller must not
     mutate or resize the array while the table is registered -- the view is
     zero-copy, so queries read the array's buffer directly.
 
     Registering a second table under an existing name follows SQLite's
-    eponymous-module semantics: the later registration replaces the earlier one
+    module-registration semantics: the later registration replaces the earlier one
     (it does not raise). Column names may be any string (they are quoted in the
     generated schema).
 
@@ -679,4 +673,4 @@ def register_table(db, name, arr, columns=None, *, text_as_blob=False):
     """
     built = _build_descriptor(arr, columns, text_as_blob)
     handle = _VTableHandle(built)
-    return _register_with_destroy(db, name, _THE_MODULE_P, built.c.ctypes.data, handle)
+    _register_with_destroy(db, name, _THE_MODULE_P, built.c.ctypes.data, handle)

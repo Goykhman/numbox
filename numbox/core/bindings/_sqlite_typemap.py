@@ -17,6 +17,9 @@ _TAG_U8, _TAG_U16, _TAG_U32, _TAG_U64 = 4, 5, 6, 7
 _TAG_F32, _TAG_F64, _TAG_BOOL = 8, 9, 10
 _TAG_S, _TAG_U, _TAG_BLOB = 11, 12, 13
 
+# element type of every col_tags buffer; deref sites must use this alias
+tags_buf_t = np.int32
+
 
 @njit(**jit_options)
 def _nul_trimmed_len(p, width):

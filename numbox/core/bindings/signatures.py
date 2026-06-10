@@ -209,7 +209,6 @@ signatures_sqlite = {
     "sqlite3_user_data": intp(intp),
     "sqlite3_context_db_handle": intp(intp),
     # -- virtual table registration --
-    "sqlite3_create_module": int32(intp, intp, intp, intp),
     "sqlite3_create_module_v2": int32(intp, intp, intp, intp, intp),
     "sqlite3_declare_vtab": int32(intp, intp),
     "sqlite3_malloc": intp(int32),
