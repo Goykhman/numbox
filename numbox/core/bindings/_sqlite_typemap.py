@@ -12,7 +12,6 @@ from numba.core.types import uint8, uint32
 from numbox.core.configurations import jit_options
 from numbox.utils.lowlevel import _cast_int_to_void_p, load_unaligned, store_unaligned
 
-# dtype tags (col_tags[j])
 _TAG_I8, _TAG_I16, _TAG_I32, _TAG_I64 = 0, 1, 2, 3
 _TAG_U8, _TAG_U16, _TAG_U32, _TAG_U64 = 4, 5, 6, 7
 _TAG_F32, _TAG_F64, _TAG_BOOL = 8, 9, 10

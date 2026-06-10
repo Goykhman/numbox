@@ -8,8 +8,7 @@ The sqlite3_vtab and sqlite3_vtab_cursor that our xCreate/xOpen callbacks
 allocate are C structs whose first member is the SQLite-owned base; we append
 our own members after it. Each is modelled as a numpy structured dtype with that
 base nested as field 'base', so the cfuncs address members by name rather than
-raw offsets (align=True reproduces the C padding, e.g. the int nRef in
-sqlite3_vtab). See https://www.sqlite.org/vtab.html.
+raw offsets. See https://www.sqlite.org/vtab.html.
 """
 import ctypes
 
@@ -71,9 +70,7 @@ assert _SQLITE3_VTAB_DTYPE.itemsize == 24 and _VTAB_DTYPE.itemsize == 32
 _VTAB_SIZE = _VTAB_DTYPE.itemsize
 
 # struct sqlite3_vtab_cursor { sqlite3_vtab *pVtab; }
-# https://www.sqlite.org/c3ref/vtab_cursor.html -- one-member SQLite base. The
-# per-cursor UTF-8 scratch buffer is a separate sqlite3_malloc held in scratch_p
-# (allocated in xOpen, freed in xClose), so the cursor itself is a fixed dtype.
+# https://www.sqlite.org/c3ref/vtab_cursor.html -- one-member SQLite base.
 _SQLITE3_VTAB_CURSOR_DTYPE = np.dtype([("pVtab", "i8")])
 _CUR_DTYPE = np.dtype([
     ("base", _SQLITE3_VTAB_CURSOR_DTYPE), ("descriptor", "i8"), ("rowid", "i8"), ("scratch_p", "i8"),
@@ -83,10 +80,9 @@ assert _CUR_DTYPE.itemsize == 48
 _CUR_SIZE = _CUR_DTYPE.itemsize
 
 # struct sqlite3_index_info -- https://www.sqlite.org/c3ref/index_info.html
-# Modelled only through estimatedRows: xBestIndex writes the two cardinality
-# outputs and leaves everything else at SQLite's zero/default init. Fields after
-# estimatedRows (idxFlags 3.9.0, colUsed 3.10.0) are omitted -- never addressed;
-# estimatedRows needs SQLite 3.8.2+, met by the >=3.34 support floor.
+# Modelled only through estimatedRows: later fields (idxFlags 3.9.0, colUsed
+# 3.10.0) are never addressed. estimatedRows needs SQLite 3.8.2+, met by the
+# >=3.34 support floor.
 _IDX_INFO_DTYPE = np.dtype([
     ("nConstraint", "i4"), ("aConstraint", "i8"), ("nOrderBy", "i4"),
     ("aOrderBy", "i8"), ("aConstraintUsage", "i8"), ("idxNum", "i4"),
@@ -127,19 +123,10 @@ def sqlite3_create_module_v2(db, z_name, p_module, p_client_data, x_destroy):
     return _call_lib_func("sqlite3_create_module_v2", (db, z_name, p_module, p_client_data, x_destroy))
 
 
-# Module-level keep-alive registry: maps each registration's descriptor pointer
-# (the pClientData) to its handle. register_* stores the handle here BEFORE
-# create_module_v2; SQLite releases it by firing xDestroy on connection close
-# or re-registration of the same name. The returned handle is
-# advisory -- the registry owns the keep-alive.
 _REGISTRY = {}
 
 
 def _xdestroy_py(p_aux):
-    # SQLite passes pClientData (the descriptor pointer) back as the only arg;
-    # ctypes delivers a c_void_p as a Python int, matching the int key stored by
-    # register_*. Drop the keep-alive -- numpy owns the descriptor, so this NEVER
-    # frees C memory, it only releases the Python reference.
     _REGISTRY.pop(p_aux, None)
 
 
@@ -272,7 +259,7 @@ def _is_supported_op(op):
 
 @cfunc(types.int32(types.intp, types.intp), cache=_CACHE)
 def _xbestindex(vtab, idx_info):
-    # Claim every usable eq/range constraint on a numeric column: assign it an
+    # Claim every usable _is_supported_op constraint on a numeric column: assign it an
     # argvIndex (so xFilter receives its value) and serialise the (col, op) pair
     # into idxStr (the xBestIndex -> xFilter side channel). Cardinality is
     # reported regardless (joins/subqueries otherwise mis-cost; SQLite defaults
@@ -318,6 +305,7 @@ def _xbestindex(vtab, idx_info):
             idx_p = 0
 
         nrows = d[0].nrows
+        # heuristic: full scan if no predicates, else nrows/(nbound+1)+1 (floor, min 1)
         ii[0].estimatedRows = nrows if nbound == 0 else nrows // (nbound + 1) + 1
         ii[0].estimatedCost = float64(nrows)
         return SQLITE_OK
@@ -382,9 +370,9 @@ def _xclose(cur):
 
 @njit(**jit_options)
 def _cell_value(d, rowid, col):
-    # Read the cell at (rowid, col) as float64, mirroring _xcolumn's full tag
-    # ladder (same addr math, same load_unaligned widths). xBestIndex only
-    # claims tags up to _TAG_BOOL; the string/blob tags fall through to 0.
+    """Read the cell at (rowid, col) as float64, mirroring _xcolumn's full tag
+    ladder (same addr math, same load_unaligned widths). xBestIndex only
+    claims tags up to _TAG_BOOL; the string/blob tags fall through to 0."""
     ncols = d[0].ncols
     base = d[0].data_base
     row_stride = d[0].row_stride
@@ -419,8 +407,8 @@ def _cell_value(d, rowid, col):
 
 @njit(**jit_options)
 def _cell_value_i64(d, rowid, col):
-    # Read an integer cell at (rowid, col) as int64, mirroring _xcolumn's
-    # sqlite3_result_int64 (uint64 wrapped to the same int64 SQLite sees).
+    """Read an integer cell at (rowid, col) as int64, mirroring _xcolumn's
+    sqlite3_result_int64 (uint64 wrapped to the same int64 SQLite sees)."""
     ncols = d[0].ncols
     base = d[0].data_base
     row_stride = d[0].row_stride
@@ -449,9 +437,13 @@ def _cell_value_i64(d, rowid, col):
 
 @njit(**jit_options)
 def _cmp(op, cv, rv):
-    # Compare in the native type of cv/rv (kept separate per call site so numba
-    # never phi-unifies an int64 cell up to float64 -- that would lose precision
-    # above 2**53 and reintroduce the dropped-row bug this pushdown guards).
+    """Compare cv and rv in their native (call-site) type.
+
+    The int and float call sites stay separate so numba never phi-unifies an
+    int64 cell up to float64: above 2**53 that widening is lossy, and a
+    predicate evaluated on the rounded value prunes rows the omit=0 re-check
+    never gets to see (SQLite only re-checks rows the cursor surfaces).
+    """
     if op == SQLITE_INDEX_CONSTRAINT_EQ:
         return cv == rv
     elif op == SQLITE_INDEX_CONSTRAINT_GT:
