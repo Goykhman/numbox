@@ -383,10 +383,13 @@ def test_self_join_unicode_two_cursors():
     sqlite3_close(db)
 
 
-def test_handle_survives_gc():
+def test_registration_survives_gc():
+    # register_table returns None; the keep-alive is the module-level
+    # _DATA_ANCHOR, so the registration must survive gc.collect() with no
+    # user-held handle.
     db = _open_memory()
     a = np.array([[5, 6]], dtype=np.int64)
-    h = register_table(db, "t", a, columns=["a", "b"])  # noqa: F841
+    assert register_table(db, "t", a, columns=["a", "b"]) is None
     gc.collect()
     assert _fetchall(db, "SELECT a, b FROM t") == [(5, 6)]
     sqlite3_close(db)
@@ -471,6 +474,9 @@ def test_pushdown_element_dtype_itemsizes():
     assert _ORDERBY_DTYPE.itemsize == 8
     from numbox.core.bindings._sqlite_vtable import _SPEC_DTYPE
     assert _SPEC_DTYPE.itemsize == 8
+    assert _SPEC_DTYPE.names == ("col", "op")
+    assert _SPEC_DTYPE.fields["col"][1] == 0
+    assert _SPEC_DTYPE.fields["op"][1] == 4
 
 
 def _select_col0(db, sql):
@@ -540,18 +546,17 @@ def test_pushdown_no_constraint_full_scan():
     sqlite3_close(db)
 
 
-def test_xdestroy_pops_registry_on_close():
+def test_xdestroy_pops_anchor_on_close():
     from numbox.core.bindings import _sqlite_vtable as v
     db = c_int64(0)
     with c_string(":memory:") as p:
         sqlite3_open(p, addressof(db))
     arr = np.array([[1], [2]], dtype=np.int64)
-    h = register_table(db.value, "t", arr, ["c"])
+    register_table(db.value, "t", arr, ["c"])
     assert _select_col0(db.value, "SELECT c FROM t") == [1, 2]
     n_before = len(v._DATA_ANCHOR)
     sqlite3_close(db.value)
     assert len(v._DATA_ANCHOR) == n_before - 1
-    del h
 
 
 def test_xdestroy_two_tables():
@@ -609,18 +614,22 @@ def test_xdestroy_no_c_free_of_descriptor():
     with c_string(":memory:") as p:
         sqlite3_open(p, addressof(db))
     arr = np.array([[11], [22], [33]], dtype=np.int64)
+    keys0 = set(v._DATA_ANCHOR)
     register_table(db.value, "t", arr, ["c"])
+    (key,) = set(v._DATA_ANCHOR) - keys0
+    anchor = v._DATA_ANCHOR[key]  # hold the handle past xDestroy
     assert _select_col0(db.value, "SELECT c FROM t") == [11, 22, 33]
     n_before = len(v._DATA_ANCHOR)
     sqlite3_close(db.value)
     assert len(v._DATA_ANCHOR) == n_before - 1
     # xDestroy must NOT have C-freed the numpy-owned descriptor/array: the test
-    # still holds arr, so reading it must not segfault and the data must be
-    # unchanged.
+    # still holds arr and the anchored handle, so reading both must not
+    # segfault and both must be unchanged.
     assert arr.tolist() == [[11], [22], [33]]
+    assert anchor._keep[0].c["nrows"][0] == 3
 
 
-def test_xdestroy_tvf_pops_registry_on_close():
+def test_xdestroy_tvf_pops_anchor_on_close():
     from numbox.core.bindings import _sqlite_vtable as v
     from numbox.core.bindings import register_tvf
     from numba import njit
@@ -637,7 +646,7 @@ def test_xdestroy_tvf_pops_registry_on_close():
     db = c_int64(0)
     with c_string(":memory:") as p:
         sqlite3_open(p, addressof(db))
-    h = register_tvf(db.value, "series", (np.int64, np.int64), out, _series)
+    assert register_tvf(db.value, "series", (np.int64, np.int64), out, _series) is None
     stmt = c_int64(0)
     with c_string("SELECT n FROM series(2, 5)") as p:
         sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0)
@@ -649,7 +658,6 @@ def test_xdestroy_tvf_pops_registry_on_close():
     n_before = len(v._DATA_ANCHOR)
     sqlite3_close(db.value)
     assert len(v._DATA_ANCHOR) == n_before - 1
-    del h
 
 
 def test_pushdown_explain_uses_index():
@@ -701,6 +709,11 @@ def test_pushdown_bool_range_ops_match_stdlib():
             sql = "SELECT c FROM t WHERE c %s %s" % (op, rhs)
             exp = sorted(r[0] for r in ref.execute(sql))
             assert sorted(_select_col0(db, sql)) == exp, sql
+    # prove the fractional-RHS range predicate is actually claimed (pushed to
+    # xFilter), not just caught by SQLite's omit=0 re-check of surfaced rows
+    plan = _fetchall(db, "EXPLAIN QUERY PLAN SELECT c FROM t WHERE c > -0.5")
+    text = " ".join(str(field) for row in plan for field in row).upper()
+    assert "VIRTUAL TABLE INDEX 1:" in text, text
     ref.close()
     sqlite3_close(db)
 
@@ -765,7 +778,7 @@ def test_xdestroy_deferred_while_statement_open():
     n_before = len(v._DATA_ANCHOR)
     rc = sqlite3_close(db.value)  # sqlite3_close (v1) returns SQLITE_BUSY with an open stmt
     assert rc != 0  # BUSY: close refused, xDestroy NOT fired
-    assert len(v._DATA_ANCHOR) == n_before  # registry entry still present
+    assert len(v._DATA_ANCHOR) == n_before  # anchor entry still present
     sqlite3_finalize(stmt.value)
     assert sqlite3_close(db.value) == 0  # now it closes and fires xDestroy
     assert len(v._DATA_ANCHOR) == n_before - 1

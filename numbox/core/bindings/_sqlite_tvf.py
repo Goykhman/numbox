@@ -328,6 +328,10 @@ def _make_xcolumn():
             elif tag == _TAG_F64:
                 sqlite3_result_double(ctx, load_unaligned(addr, float64))
             elif tag == _TAG_S:
+                # unlike the vtable's STATIC S/BLOB, ALL tvf results stay
+                # TRANSIENT: they point into the per-cursor NRT array (or the
+                # scratch), which is released and replaced on the next xFilter,
+                # so a STATIC pointer here would dangle.
                 n = _nul_trimmed_len(addr, widths[j])
                 sqlite3_result_text(ctx, addr, int32(n), _SQLITE_TRANSIENT)
             elif tag == _TAG_BLOB:
