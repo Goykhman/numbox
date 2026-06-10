@@ -7,8 +7,7 @@ structured-array descriptor whose data pointer is passed as pClientData.
 The sqlite3_vtab and sqlite3_vtab_cursor that our xCreate/xOpen callbacks
 allocate are C structs whose first member is the SQLite-owned base; we append
 our own members after it. Each is modelled as a numpy structured dtype with that
-base nested as field 'base', so the cfuncs address members by name rather than
-raw offsets. See https://www.sqlite.org/vtab.html.
+base nested as field 'base'. See https://www.sqlite.org/vtab.html.
 """
 import ctypes
 
@@ -283,11 +282,8 @@ def _xbestindex(vtab, idx_info):
             op = cons[i].op
             if cons[i].usable != 0 and _is_supported_op(op) and 0 <= col < ncols and _is_numeric_tag(tags[col]):
                 usage[i].argvIndex = int32(nbound + 1)
-                # omit MUST stay 0: SQLite re-checks every surfaced row, the
-                # correctness net behind the cursor's pruning. Keep it 0 even
-                # though _row_matches now prunes exactly (int64 for integer
-                # columns) so future predicate widening can't silently drop rows.
-                usage[i].omit = 0
+                # omit is left at SQLite's zeroed default: the engine re-checks
+                # every surfaced row, the correctness net behind the pruning.
                 spec[nbound].col = int32(col)
                 spec[nbound].op = int32(op)
                 nbound += 1
@@ -302,7 +298,9 @@ def _xbestindex(vtab, idx_info):
             idx_p = 0
 
         nrows = d[0].nrows
-        # heuristic: full scan if no predicates, else nrows/(nbound+1)+1 (floor, min 1)
+        # Heuristic only (no column stats): each bound constraint is assumed to
+        # divide the surviving rows, nudging the planner toward plans that bind
+        # more of them (the +1 keeps the estimate non-zero).
         ii[0].estimatedRows = nrows if nbound == 0 else nrows // (nbound + 1) + 1
         ii[0].estimatedCost = float64(nrows)
         return SQLITE_OK
@@ -649,7 +647,9 @@ def _raise_rc(db, name, rc):
 
 
 def register_table(db, name, arr, columns=None, *, text_as_blob=False):
-    """Expose a numpy array as a read-only eponymous SQLite virtual table.
+    """Expose a numpy array as a read-only eponymous SQLite virtual table
+    (queryable directly as ``name`` with no CREATE VIRTUAL TABLE, since the
+    module's xCreate is its xConnect).
 
     The registration's keep-alive lives in the module-level ``_DATA_ANCHOR``
     and is released by SQLite via ``xDestroy`` (on connection close
