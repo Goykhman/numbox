@@ -107,6 +107,29 @@ def store_at(p, v):
 
 
 @intrinsic
+def _store_unaligned(typingctx: Context, p_ty, v_ty):
+    if unliteral(p_ty) not in (intp, uintp):
+        raise TypingError(
+            f"store_unaligned: pointer argument must be intp or uintp, got {p_ty}"
+        )
+    sig = void(p_ty, v_ty)
+
+    def codegen(context: BaseContext, builder, signature, args):
+        p, v = args
+        ty_ll = context.get_data_type(v_ty)
+        ptr = builder.inttoptr(p, ty_ll.as_pointer())
+        builder.store(v, ptr, align=1)
+    return sig, codegen
+
+
+@njit(**jit_options)
+def store_unaligned(p, v):
+    """Like :func:`store_at` but emits an ``align=1`` store, legal on a misaligned
+    address (e.g. a packed structured-dtype field) where ``store_at`` is UB."""
+    return _store_unaligned(p, v)
+
+
+@intrinsic
 def _load_unaligned(typingctx: Context, p_ty, ty_ref: TypeRef):
     if unliteral(p_ty) not in (intp, uintp):
         raise TypingError(

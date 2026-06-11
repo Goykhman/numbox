@@ -22,7 +22,7 @@ from numbox.utils.lowlevel import array_data_p
 
 def test_imports():
     from numbox.core.bindings import _sqlite_vtable as v
-    assert hasattr(v.sqlite3_create_module, "py_func")
+    assert hasattr(v.sqlite3_create_module_v2, "py_func")
     assert hasattr(v.sqlite3_declare_vtab, "py_func")
     assert hasattr(v.sqlite3_malloc, "py_func")
 
@@ -276,6 +276,19 @@ def test_structured_text_and_unicode():
     sqlite3_close(db)
 
 
+def test_two_unicode_columns_single_cursor():
+    # Both U columns of a row are decoded into the SAME per-cursor scratch
+    # buffer, so SQLite must copy the first result before the second xColumn
+    # overwrites the scratch -- guards the TRANSIENT choice on the U branch
+    # (S/BLOB results are STATIC; flipping U to match corrupts exactly this).
+    db = _open_memory()
+    dt = np.dtype([("u1", "U4"), ("u2", "U4")])
+    a = np.array([("abcd", "wxyz"), ("hi", "yo")], dtype=dt)
+    register_table(db, "t", a)
+    assert _fetchall(db, "SELECT u1, u2 FROM t") == [("abcd", "wxyz"), ("hi", "yo")]
+    sqlite3_close(db)
+
+
 def test_text_as_blob():
     db = _open_memory()
     dt = np.dtype([("s", "S3")])
@@ -370,10 +383,13 @@ def test_self_join_unicode_two_cursors():
     sqlite3_close(db)
 
 
-def test_handle_survives_gc():
+def test_registration_survives_gc():
+    # register_table returns None; the keep-alive is the module-level
+    # _DATA_ANCHOR, so the registration must survive gc.collect() with no
+    # user-held handle.
     db = _open_memory()
     a = np.array([[5, 6]], dtype=np.int64)
-    h = register_table(db, "t", a, columns=["a", "b"])  # noqa: F841
+    assert register_table(db, "t", a, columns=["a", "b"]) is None
     gc.collect()
     assert _fetchall(db, "SELECT a, b FROM t") == [(5, 6)]
     sqlite3_close(db)
@@ -397,7 +413,7 @@ _DRIVER = textwrap.dedent('''
     import numpy as np
     from numbox.core.bindings import (
         sqlite3_open, sqlite3_prepare_v2, sqlite3_step,
-        sqlite3_column_int64, sqlite3_finalize)
+        sqlite3_column_int64, sqlite3_finalize, SQLITE_ROW)
     from numbox.core.bindings._sqlite_vtable import register_table
     from numbox.utils.cstrings import c_string
 
@@ -412,7 +428,7 @@ _DRIVER = textwrap.dedent('''
         sqlite3_prepare_v2(db, sp, -1, addressof(stmt_p), 0)
     stmt = stmt_p.value
     rows = []
-    while sqlite3_step(stmt) == 100:
+    while sqlite3_step(stmt) == SQLITE_ROW:
         rows.append((sqlite3_column_int64(stmt, 0), sqlite3_column_int64(stmt, 1)))
     sqlite3_finalize(stmt)
     assert rows == [(1, 10), (2, 20), (3, 30)], rows
@@ -447,3 +463,323 @@ def test_xprocess_cache_no_growth(tmp_path):
     line2 = _run_vtable_driver(tmp_path, cache)  # warm: must reuse, not append
     assert line2 == "RESULT [(1, 10), (2, 20), (3, 30)]"
     assert _count_vtable_nbc(cache) == n_cold, "warm run grew the cache (cache reuse failed)"
+
+
+def test_pushdown_element_dtype_itemsizes():
+    from numbox.core.bindings._sqlite_vtable import (
+        _CONSTRAINT_DTYPE, _USAGE_DTYPE, _ORDERBY_DTYPE,
+    )
+    assert _CONSTRAINT_DTYPE.itemsize == 12
+    assert _USAGE_DTYPE.itemsize == 8
+    assert _ORDERBY_DTYPE.itemsize == 8
+    from numbox.core.bindings._sqlite_vtable import _SPEC_DTYPE
+    assert _SPEC_DTYPE.itemsize == 8
+    assert _SPEC_DTYPE.names == ("col", "op")
+    assert _SPEC_DTYPE.fields["col"][1] == 0
+    assert _SPEC_DTYPE.fields["op"][1] == 4
+
+
+def _select_col0(db, sql):
+    """Collect column 0 of every result row as Python ints."""
+    return [r[0] for r in _fetchall(db, sql)]
+
+
+def test_pushdown_eq():
+    db = _open_memory()
+    a = np.array([[3], [5], [7], [5], [9]], dtype=np.int64)
+    h = register_table(db, "t", a, columns=["c"])  # noqa: F841
+    assert sorted(_select_col0(db, "SELECT c FROM t WHERE c = 5")) == [5, 5]
+    assert _select_col0(db, "SELECT c FROM t WHERE c = 7") == [7]
+    assert _select_col0(db, "SELECT c FROM t WHERE c = 100") == []
+    sqlite3_close(db)
+
+
+def test_pushdown_range_matches_fullscan():
+    db = _open_memory()
+    vals = [3, 5, 7, 5, 9, 1, 5]
+    a = np.array([[v] for v in vals], dtype=np.int64)
+    h = register_table(db, "t", a, columns=["c"])  # noqa: F841
+    preds = {
+        ">": lambda v: v > 5,
+        ">=": lambda v: v >= 5,
+        "<": lambda v: v < 5,
+        "<=": lambda v: v <= 5,
+    }
+    for op, pred in preds.items():
+        got = sorted(_select_col0(db, "SELECT c FROM t WHERE c %s 5" % op))
+        exp = sorted(v for v in vals if pred(v))
+        assert got == exp, (op, got, exp)
+    sqlite3_close(db)
+
+
+def test_pushdown_multi_constraint():
+    db = _open_memory()
+    rows = [(1, 9), (4, 2), (7, 1), (3, 8), (6, 5), (2, 3), (9, 0)]
+    a = np.array(rows, dtype=np.int64)
+    h = register_table(db, "t", a, columns=["x", "y"])  # noqa: F841
+    got = sorted(
+        (r[0], r[1]) for r in _fetchall(db, "SELECT x, y FROM t WHERE x >= 3 AND y < 5")
+    )
+    exp = sorted((x, y) for (x, y) in rows if x >= 3 and y < 5)
+    assert got == exp, (got, exp)
+    sqlite3_close(db)
+
+
+def test_pushdown_float_column():
+    db = _open_memory()
+    vals = [1.5, 2.5, 5.0, 7.25, 5.0, 0.5]
+    a = np.array([[v] for v in vals], dtype=np.float64)
+    h = register_table(db, "t", a, columns=["c"])  # noqa: F841
+    got = sorted(r[0] for r in _fetchall(db, "SELECT c FROM t WHERE c >= 5.0"))
+    exp = sorted(v for v in vals if v >= 5.0)
+    assert got == exp, (got, exp)
+    eq = sorted(r[0] for r in _fetchall(db, "SELECT c FROM t WHERE c = 5.0"))
+    assert eq == [5.0, 5.0]
+    sqlite3_close(db)
+
+
+def test_pushdown_no_constraint_full_scan():
+    db = _open_memory()
+    a = np.array([[3], [5], [7], [5], [9]], dtype=np.int64)
+    h = register_table(db, "t", a, columns=["c"])  # noqa: F841
+    assert _select_col0(db, "SELECT c FROM t") == [3, 5, 7, 5, 9]
+    sqlite3_close(db)
+
+
+def test_xdestroy_pops_anchor_on_close():
+    from numbox.core.bindings import _sqlite_vtable as v
+    db = c_int64(0)
+    with c_string(":memory:") as p:
+        sqlite3_open(p, addressof(db))
+    arr = np.array([[1], [2]], dtype=np.int64)
+    register_table(db.value, "t", arr, ["c"])
+    assert _select_col0(db.value, "SELECT c FROM t") == [1, 2]
+    n_before = len(v._DATA_ANCHOR)
+    sqlite3_close(db.value)
+    assert len(v._DATA_ANCHOR) == n_before - 1
+
+
+def test_xdestroy_two_tables():
+    from numbox.core.bindings import _sqlite_vtable as v
+    db = c_int64(0)
+    with c_string(":memory:") as p:
+        sqlite3_open(p, addressof(db))
+    h1 = register_table(db.value, "t1", np.array([[1]], np.int64), ["c"])
+    h2 = register_table(db.value, "t2", np.array([[2]], np.int64), ["c"])
+    n = len(v._DATA_ANCHOR)
+    sqlite3_close(db.value)
+    assert len(v._DATA_ANCHOR) == n - 2
+    del h1, h2
+
+
+def test_xdestroy_three_tables():
+    from numbox.core.bindings import _sqlite_vtable as v
+    db = c_int64(0)
+    with c_string(":memory:") as p:
+        sqlite3_open(p, addressof(db))
+    h1 = register_table(db.value, "t1", np.array([[1]], np.int64), ["c"])
+    h2 = register_table(db.value, "t2", np.array([[2]], np.int64), ["c"])
+    h3 = register_table(db.value, "t3", np.array([[3]], np.int64), ["c"])
+    n = len(v._DATA_ANCHOR)
+    sqlite3_close(db.value)
+    assert len(v._DATA_ANCHOR) == n - 3
+    del h1, h2, h3
+
+
+def test_xdestroy_reregister_drops_first():
+    from numbox.core.bindings import _sqlite_vtable as v
+    db = c_int64(0)
+    with c_string(":memory:") as p:
+        sqlite3_open(p, addressof(db))
+    a = np.array([[1]], np.int64)
+    b = np.array([[2]], np.int64)
+    keys0 = set(v._DATA_ANCHOR)
+    register_table(db.value, "t", a, ["c"])
+    (key1,) = set(v._DATA_ANCHOR) - keys0  # the first descriptor pointer = its anchor key
+    register_table(db.value, "t", b, ["c"])
+    # re-registration fires the FIRST descriptor's xDestroy synchronously
+    assert key1 not in v._DATA_ANCHOR, "first entry not dropped on re-register"
+    (key2,) = set(v._DATA_ANCHOR) - keys0
+    assert key2 != key1
+    assert _select_col0(db.value, "SELECT c FROM t") == [2]
+    n = len(v._DATA_ANCHOR)
+    sqlite3_close(db.value)
+    assert key2 not in v._DATA_ANCHOR
+    assert len(v._DATA_ANCHOR) == n - 1
+
+
+def test_xdestroy_no_c_free_of_descriptor():
+    from numbox.core.bindings import _sqlite_vtable as v
+    db = c_int64(0)
+    with c_string(":memory:") as p:
+        sqlite3_open(p, addressof(db))
+    arr = np.array([[11], [22], [33]], dtype=np.int64)
+    keys0 = set(v._DATA_ANCHOR)
+    register_table(db.value, "t", arr, ["c"])
+    (key,) = set(v._DATA_ANCHOR) - keys0
+    anchor = v._DATA_ANCHOR[key]  # hold the handle past xDestroy
+    assert _select_col0(db.value, "SELECT c FROM t") == [11, 22, 33]
+    n_before = len(v._DATA_ANCHOR)
+    sqlite3_close(db.value)
+    assert len(v._DATA_ANCHOR) == n_before - 1
+    # xDestroy must NOT have C-freed the numpy-owned descriptor/array: the test
+    # still holds arr and the anchored handle, so reading both must not
+    # segfault and both must be unchanged.
+    assert arr.tolist() == [[11], [22], [33]]
+    assert anchor._keep[0].c["nrows"][0] == 3
+
+
+def test_xdestroy_tvf_pops_anchor_on_close():
+    from numbox.core.bindings import _sqlite_vtable as v
+    from numbox.core.bindings import register_tvf
+    from numba import njit
+
+    out = np.dtype([("n", "i8")])
+
+    @njit
+    def _series(start, stop):
+        o = np.empty(stop - start, out)
+        for i in range(stop - start):
+            o[i].n = start + i
+        return o
+
+    db = c_int64(0)
+    with c_string(":memory:") as p:
+        sqlite3_open(p, addressof(db))
+    assert register_tvf(db.value, "series", (np.int64, np.int64), out, _series) is None
+    stmt = c_int64(0)
+    with c_string("SELECT n FROM series(2, 5)") as p:
+        sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0)
+    got = []
+    while sqlite3_step(stmt.value) == _SQLITE_ROW:
+        got.append(sqlite3_column_int64(stmt.value, 0))
+    sqlite3_finalize(stmt.value)
+    assert got == [2, 3, 4]
+    n_before = len(v._DATA_ANCHOR)
+    sqlite3_close(db.value)
+    assert len(v._DATA_ANCHOR) == n_before - 1
+
+
+def test_pushdown_explain_uses_index():
+    # SQLite reports the chosen vtable plan as "VIRTUAL TABLE INDEX <idxNum>:".
+    # A full scan claims nothing, so idxNum stays 0; a claimed constraint sets a
+    # non-zero idxNum. Assert the constrained query picks a non-zero idxNum and
+    # the unconstrained query does not.
+    db = _open_memory()
+    a = np.array([[3], [5], [7]], dtype=np.int64)
+    h = register_table(db, "t", a, columns=["c"])  # noqa: F841
+    plan = _fetchall(db, "EXPLAIN QUERY PLAN SELECT c FROM t WHERE c = 5")
+    text = " ".join(str(field) for row in plan for field in row).upper()
+    assert "VIRTUAL TABLE INDEX 1:" in text, text
+    full = _fetchall(db, "EXPLAIN QUERY PLAN SELECT c FROM t")
+    full_text = " ".join(str(field) for row in full for field in row).upper()
+    assert "VIRTUAL TABLE INDEX 0:" in full_text, full_text
+    sqlite3_close(db)
+
+
+def test_pushdown_bool_column():
+    # A bool column maps to SQLite INTEGER and the cursor reads/compares it, so
+    # an eq constraint must be pushed down (non-zero idxNum), not full-scanned.
+    db = _open_memory()
+    a = np.array([[True], [False], [True], [False], [True]], dtype=np.bool_)
+    h = register_table(db, "t", a, columns=["c"])  # noqa: F841
+    assert _select_col0(db, "SELECT c FROM t WHERE c = 1") == [1, 1, 1]
+    assert _select_col0(db, "SELECT c FROM t WHERE c = 0") == [0, 0]
+    plan = _fetchall(db, "EXPLAIN QUERY PLAN SELECT c FROM t WHERE c = 1")
+    text = " ".join(str(field) for row in plan for field in row).upper()
+    assert "VIRTUAL TABLE INDEX 1:" in text, text
+    sqlite3_close(db)
+
+
+def test_pushdown_bool_range_ops_match_stdlib():
+    # Bool pushdown goes through the FLOAT comparison domain (_is_int_tag
+    # excludes bool): an int64-truncated RHS would turn c > -0.5 into c > 0
+    # and drop rows the omit=0 re-check never sees. Cross-check every range op
+    # and a fractional/negative RHS against stdlib sqlite3 on INTEGER 0/1.
+    import sqlite3 as pysqlite
+    rows = [True, False, True, False, True]
+    ref = pysqlite.connect(":memory:")
+    ref.execute("CREATE TABLE t(c INTEGER)")
+    ref.executemany("INSERT INTO t VALUES (?)", [(int(v),) for v in rows])
+    db = _open_memory()
+    a = np.array([[v] for v in rows], dtype=np.bool_)
+    register_table(db, "t", a, columns=["c"])
+    for op in (">", ">=", "<", "<="):
+        for rhs in ("-0.5", "0.5", "0", "1"):
+            sql = "SELECT c FROM t WHERE c %s %s" % (op, rhs)
+            exp = sorted(r[0] for r in ref.execute(sql))
+            assert sorted(_select_col0(db, sql)) == exp, sql
+    # prove the fractional-RHS range predicate is actually claimed (pushed to
+    # xFilter), not just caught by SQLite's omit=0 re-check of surfaced rows
+    plan = _fetchall(db, "EXPLAIN QUERY PLAN SELECT c FROM t WHERE c > -0.5")
+    text = " ".join(str(field) for row in plan for field in row).upper()
+    assert "VIRTUAL TABLE INDEX 1:" in text, text
+    ref.close()
+    sqlite3_close(db)
+
+
+def test_pushdown_int64_above_2_53_range():
+    db = _open_memory()
+    base = 1 << 53
+    vals = [base, base + 1, base + 2, base + 3]
+    a = np.array([[v] for v in vals], dtype=np.int64)
+    h = register_table(db, "t", a, columns=["c"])  # noqa: F841
+    threshold = base + 1
+    preds = {
+        ">": lambda v: v > threshold,
+        ">=": lambda v: v >= threshold,
+        "<": lambda v: v < threshold,
+        "<=": lambda v: v <= threshold,
+    }
+    for op, pred in preds.items():
+        got = sorted(_select_col0(db, "SELECT c FROM t WHERE c %s %d" % (op, threshold)))
+        exp = sorted(v for v in vals if pred(v))
+        assert got == exp, (op, got, exp)
+    # the exact row at 2**53+1 that float64 collapse used to drop under "> base":
+    assert sorted(_select_col0(db, "SELECT c FROM t WHERE c > %d" % base)) == sorted(vals[1:])
+    sqlite3_close(db)
+
+
+def test_pushdown_uint64_high_magnitude_consistent():
+    db = _open_memory()
+    vals = [(1 << 63), (1 << 63) + 5, (1 << 63) + 1]
+    a = np.array([[v] for v in vals], dtype=np.uint64)
+    h = register_table(db, "t", a, columns=["c"])  # noqa: F841
+    # xColumn surfaces uint64 as a wrapped int64; the cursor must agree, so a
+    # pushdown query returns exactly what a full scan + SQLite re-check returns.
+    pushed = sorted(_select_col0(db, "SELECT c FROM t WHERE c > %d" % ((1 << 63) + 0)))
+    allrows = sorted(_select_col0(db, "SELECT c FROM t"))
+    full = sorted(v for v in allrows if v > ((1 << 63) + 0))
+    assert pushed == full, (pushed, full)
+    sqlite3_close(db)
+
+
+def test_xdestroy_deferred_while_statement_open():
+    from numbox.core.bindings import _sqlite_vtable as v
+    from numbox.core.bindings import register_tvf
+    from numba import njit
+    out = np.dtype([("n", "i8")])
+
+    @njit
+    def series(start, stop):
+        o = np.empty(stop - start, out)
+        for i in range(stop - start):
+            o[i].n = start + i
+        return o
+
+    db = c_int64(0)
+    with c_string(":memory:") as p:
+        sqlite3_open(p, addressof(db))
+    h = register_tvf(db.value, "series", (np.int64, np.int64), out, series)
+    stmt = c_int64(0)
+    with c_string("SELECT n FROM series(2, 5)") as p:
+        sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0)
+    sqlite3_step(stmt.value)  # leave the statement open (not finalized)
+    n_before = len(v._DATA_ANCHOR)
+    rc = sqlite3_close(db.value)  # sqlite3_close (v1) returns SQLITE_BUSY with an open stmt
+    assert rc != 0  # BUSY: close refused, xDestroy NOT fired
+    assert len(v._DATA_ANCHOR) == n_before  # anchor entry still present
+    sqlite3_finalize(stmt.value)
+    assert sqlite3_close(db.value) == 0  # now it closes and fires xDestroy
+    assert len(v._DATA_ANCHOR) == n_before - 1
+    del h
