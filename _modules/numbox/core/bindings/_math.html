@@ -1,0 +1,462 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings._math &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/_math.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings._math</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings._math</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.call</span><span class="w"> </span><span class="kn">import</span> <span class="n">_call_lib_func</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.signatures</span><span class="w"> </span><span class="kn">import</span> <span class="n">signatures</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_lib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">&quot;cos&quot;</span><span class="p">,</span> <span class="s2">&quot;sin&quot;</span><span class="p">,</span> <span class="s2">&quot;tan&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;acos&quot;</span><span class="p">,</span> <span class="s2">&quot;asin&quot;</span><span class="p">,</span> <span class="s2">&quot;atan&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;cosh&quot;</span><span class="p">,</span> <span class="s2">&quot;sinh&quot;</span><span class="p">,</span> <span class="s2">&quot;tanh&quot;</span><span class="p">,</span> <span class="s2">&quot;acosh&quot;</span><span class="p">,</span> <span class="s2">&quot;asinh&quot;</span><span class="p">,</span> <span class="s2">&quot;atanh&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;exp&quot;</span><span class="p">,</span> <span class="s2">&quot;exp2&quot;</span><span class="p">,</span> <span class="s2">&quot;expm1&quot;</span><span class="p">,</span> <span class="s2">&quot;log&quot;</span><span class="p">,</span> <span class="s2">&quot;log2&quot;</span><span class="p">,</span> <span class="s2">&quot;log10&quot;</span><span class="p">,</span> <span class="s2">&quot;log1p&quot;</span><span class="p">,</span> <span class="s2">&quot;logb&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;sqrt&quot;</span><span class="p">,</span> <span class="s2">&quot;cbrt&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;ceil&quot;</span><span class="p">,</span> <span class="s2">&quot;floor&quot;</span><span class="p">,</span> <span class="s2">&quot;trunc&quot;</span><span class="p">,</span> <span class="s2">&quot;round&quot;</span><span class="p">,</span> <span class="s2">&quot;rint&quot;</span><span class="p">,</span> <span class="s2">&quot;nearbyint&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;erf&quot;</span><span class="p">,</span> <span class="s2">&quot;erfc&quot;</span><span class="p">,</span> <span class="s2">&quot;lgamma&quot;</span><span class="p">,</span> <span class="s2">&quot;tgamma&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;fabs&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;atan2&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;pow&quot;</span><span class="p">,</span> <span class="s2">&quot;fmod&quot;</span><span class="p">,</span> <span class="s2">&quot;remainder&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;hypot&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;fmax&quot;</span><span class="p">,</span> <span class="s2">&quot;fmin&quot;</span><span class="p">,</span> <span class="s2">&quot;fdim&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;copysign&quot;</span><span class="p">,</span>
+<span class="p">]</span>
+
+<span class="n">load_lib</span><span class="p">(</span><span class="s2">&quot;m&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="cos">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.cos">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;cos&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">cos</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;cos&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sin">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.sin">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sin&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sin</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sin&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="tan">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.tan">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;tan&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">tan</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;tan&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="acos">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.acos">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;acos&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">acos</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;acos&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="asin">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.asin">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;asin&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">asin</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;asin&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="atan">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.atan">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;atan&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">atan</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;atan&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="cosh">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.cosh">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;cosh&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">cosh</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;cosh&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sinh">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.sinh">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sinh&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sinh</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sinh&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="tanh">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.tanh">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;tanh&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">tanh</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;tanh&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="acosh">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.acosh">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;acosh&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">acosh</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;acosh&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="asinh">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.asinh">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;asinh&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">asinh</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;asinh&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="atanh">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.atanh">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;atanh&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">atanh</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;atanh&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="exp">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.exp">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;exp&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">exp</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;exp&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="exp2">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.exp2">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;exp2&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">exp2</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;exp2&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="expm1">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.expm1">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;expm1&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">expm1</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;expm1&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="log">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.log">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;log&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">log</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;log&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="log2">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.log2">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;log2&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">log2</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;log2&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="log10">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.log10">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;log10&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">log10</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;log10&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="log1p">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.log1p">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;log1p&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">log1p</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;log1p&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="logb">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.logb">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;logb&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">logb</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;logb&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqrt">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.sqrt">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqrt&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqrt</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqrt&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="cbrt">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.cbrt">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;cbrt&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">cbrt</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;cbrt&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="ceil">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.ceil">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ceil&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ceil</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;ceil&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="floor">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.floor">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;floor&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">floor</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;floor&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="trunc">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.trunc">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;trunc&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">trunc</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;trunc&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="round">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.round">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;round&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">round</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;round&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="rint">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.rint">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;rint&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">rint</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;rint&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="nearbyint">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.nearbyint">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;nearbyint&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">nearbyint</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;nearbyint&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="erf">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.erf">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;erf&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">erf</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;erf&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="erfc">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.erfc">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;erfc&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">erfc</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;erfc&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="lgamma">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.lgamma">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;lgamma&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">lgamma</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;lgamma&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="tgamma">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.tgamma">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;tgamma&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">tgamma</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;tgamma&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="fabs">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.fabs">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fabs&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fabs</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;fabs&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="atan2">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.atan2">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;atan2&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">atan2</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;atan2&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">x</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="pow">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.pow">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pow&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;pow&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fmod">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.fmod">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fmod&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fmod</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;fmod&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="remainder">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.remainder">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;remainder&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">remainder</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;remainder&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="hypot">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.hypot">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;hypot&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">hypot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;hypot&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fmax">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.fmax">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fmax&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fmax</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;fmax&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fmin">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.fmin">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fmin&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fmin</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;fmin&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fdim">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.fdim">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fdim&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fdim</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;fdim&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="copysign">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._math.copysign">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;copysign&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">copysign</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;copysign&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,450 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings._c &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/_c.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings._c</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings._c</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;libc wrappers callable from numba `@njit` code.</span>
+
+<span class="sd">See &quot;Bindings module conventions&quot; in ``docs/numbox.core.bindings.rst``</span>
+<span class="sd">for the ABI-safety, ``@proxy`` caching, and reference-source conventions</span>
+<span class="sd">shared across all binding modules.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.call</span><span class="w"> </span><span class="kn">import</span> <span class="n">_call_lib_func</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.signatures</span><span class="w"> </span><span class="kn">import</span> <span class="n">signatures</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_lib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">&quot;rand&quot;</span><span class="p">,</span> <span class="s2">&quot;srand&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;strlen&quot;</span><span class="p">,</span> <span class="s2">&quot;puts&quot;</span><span class="p">,</span> <span class="s2">&quot;fputs&quot;</span><span class="p">,</span> <span class="s2">&quot;fputc&quot;</span><span class="p">,</span> <span class="s2">&quot;putchar&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;fwrite&quot;</span><span class="p">,</span> <span class="s2">&quot;fread&quot;</span><span class="p">,</span> <span class="s2">&quot;fflush&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;fopen&quot;</span><span class="p">,</span> <span class="s2">&quot;fclose&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;feof&quot;</span><span class="p">,</span> <span class="s2">&quot;ferror&quot;</span><span class="p">,</span> <span class="s2">&quot;clearerr&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;strcmp&quot;</span><span class="p">,</span> <span class="s2">&quot;strncmp&quot;</span><span class="p">,</span> <span class="s2">&quot;strchr&quot;</span><span class="p">,</span> <span class="s2">&quot;strrchr&quot;</span><span class="p">,</span> <span class="s2">&quot;strstr&quot;</span><span class="p">,</span> <span class="s2">&quot;strncpy&quot;</span><span class="p">,</span> <span class="s2">&quot;strerror&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;memcpy&quot;</span><span class="p">,</span> <span class="s2">&quot;memmove&quot;</span><span class="p">,</span> <span class="s2">&quot;memset&quot;</span><span class="p">,</span> <span class="s2">&quot;memcmp&quot;</span><span class="p">,</span> <span class="s2">&quot;memchr&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;getenv&quot;</span><span class="p">,</span>
+<span class="p">]</span>
+
+<span class="n">load_lib</span><span class="p">(</span><span class="s2">&quot;c&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="rand">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.rand">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;rand&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">rand</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `rand() &lt;https://man7.org/linux/man-pages/man3/rand.3.html&gt;`_:</span>
+<span class="sd">    pseudo-random int in [0, RAND_MAX]. Not thread-safe.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;rand&quot;</span><span class="p">,</span> <span class="p">())</span></div>
+
+
+
+<div class="viewcode-block" id="srand">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.srand">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;srand&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">srand</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `srand(seed) &lt;https://man7.org/linux/man-pages/man3/rand.3.html&gt;`_:</span>
+<span class="sd">    seed the rand() generator.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;srand&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="strlen">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.strlen">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;strlen&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strlen</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `strlen(s) &lt;https://man7.org/linux/man-pages/man3/strlen.3.html&gt;`_:</span>
+<span class="sd">    number of bytes in the C string at `s` up to (but excluding) the trailing NUL.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;strlen&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="puts">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.puts">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;puts&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">puts</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `puts(s) &lt;https://man7.org/linux/man-pages/man3/puts.3.html&gt;`_:</span>
+<span class="sd">    write the NUL-terminated string at `s` to stdout followed by a newline.</span>
+<span class="sd">    Returns non-negative on success, EOF on error.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;puts&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="fputs">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.fputs">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fputs&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fputs</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `fputs(s, fp) &lt;https://man7.org/linux/man-pages/man3/fputs.3.html&gt;`_:</span>
+<span class="sd">    write the NUL-terminated string at `s` to FILE* `fp` (no trailing newline).</span>
+<span class="sd">    Returns non-negative on success, EOF on error.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;fputs&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">fp</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fputc">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.fputc">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fputc&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fputc</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `fputc(c, fp) &lt;https://man7.org/linux/man-pages/man3/fputc.3.html&gt;`_:</span>
+<span class="sd">    write byte `c` (as unsigned char) to FILE* `fp`. Returns the byte on success,</span>
+<span class="sd">    EOF on error.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;fputc&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">fp</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="putchar">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.putchar">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;putchar&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">putchar</span><span class="p">(</span><span class="n">c</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `putchar(c) &lt;https://man7.org/linux/man-pages/man3/putchar.3.html&gt;`_:</span>
+<span class="sd">    write byte `c` (as unsigned char) to stdout.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;putchar&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">c</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="fwrite">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.fwrite">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fwrite&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fwrite</span><span class="p">(</span><span class="n">ptr</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">nmemb</span><span class="p">,</span> <span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `fwrite(ptr, size, nmemb, fp)</span>
+<span class="sd">    &lt;https://man7.org/linux/man-pages/man3/fwrite.3.html&gt;`_: write `nmemb`</span>
+<span class="sd">    elements of `size` bytes each from `ptr` to FILE* `fp`. Returns the number</span>
+<span class="sd">    of elements successfully written (which may be less than `nmemb` on error).&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;fwrite&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">ptr</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">nmemb</span><span class="p">,</span> <span class="n">fp</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fread">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.fread">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fread&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fread</span><span class="p">(</span><span class="n">ptr</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">nmemb</span><span class="p">,</span> <span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `fread(ptr, size, nmemb, fp)</span>
+<span class="sd">    &lt;https://man7.org/linux/man-pages/man3/fread.3.html&gt;`_: read up to `nmemb`</span>
+<span class="sd">    elements of `size` bytes each from FILE* `fp` into `ptr`. Returns the number</span>
+<span class="sd">    of elements successfully read; use `feof`/`ferror` to disambiguate short reads.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;fread&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">ptr</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">nmemb</span><span class="p">,</span> <span class="n">fp</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fflush">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.fflush">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fflush&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fflush</span><span class="p">(</span><span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `fflush(fp) &lt;https://man7.org/linux/man-pages/man3/fflush.3.html&gt;`_:</span>
+<span class="sd">    flush the C stdio buffer for FILE* `fp` (pass NULL/0 to flush all streams).</span>
+<span class="sd">    Returns 0 on success, EOF on error.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;fflush&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">fp</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="fopen">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.fopen">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fopen&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fopen</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">mode</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `fopen(path, mode) &lt;https://man7.org/linux/man-pages/man3/fopen.3.html&gt;`_:</span>
+<span class="sd">    open the file at `path` (NUL-terminated) with mode string `mode` (e.g.</span>
+<span class="sd">    &quot;r&quot;, &quot;wb&quot;, &quot;a+&quot;). Returns a FILE* (as intp); 0 on error (caller can read</span>
+<span class="sd">    errno). Owned resource — caller MUST `fclose` to avoid leaks.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;fopen&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">mode</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fclose">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.fclose">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fclose&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fclose</span><span class="p">(</span><span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `fclose(fp) &lt;https://man7.org/linux/man-pages/man3/fclose.3.html&gt;`_:</span>
+<span class="sd">    close FILE* `fp` and flush any buffered output. Returns 0 on success, EOF</span>
+<span class="sd">    on error. After this call, `fp` is invalid and must not be reused.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;fclose&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">fp</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="feof">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.feof">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;feof&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">feof</span><span class="p">(</span><span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `feof(fp) &lt;https://man7.org/linux/man-pages/man3/feof.3.html&gt;`_:</span>
+<span class="sd">    non-zero iff the end-of-file indicator is set on FILE* `fp`. Cleared by</span>
+<span class="sd">    `clearerr` or successful repositioning (`fseek`/`rewind`).&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;feof&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">fp</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="ferror">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.ferror">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ferror&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ferror</span><span class="p">(</span><span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `ferror(fp) &lt;https://man7.org/linux/man-pages/man3/ferror.3.html&gt;`_:</span>
+<span class="sd">    non-zero iff the error indicator is set on FILE* `fp`. Cleared only by</span>
+<span class="sd">    `clearerr`.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;ferror&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">fp</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="clearerr">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.clearerr">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;clearerr&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">clearerr</span><span class="p">(</span><span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `clearerr(fp) &lt;https://man7.org/linux/man-pages/man3/clearerr.3.html&gt;`_:</span>
+<span class="sd">    clear the end-of-file and error indicators on FILE* `fp`.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;clearerr&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">fp</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="strcmp">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.strcmp">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;strcmp&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strcmp</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `strcmp(a, b) &lt;https://man7.org/linux/man-pages/man3/strcmp.3.html&gt;`_:</span>
+<span class="sd">    lexicographic byte comparison of two NUL-terminated strings. Returns</span>
+<span class="sd">    negative if a&lt;b, zero if equal, positive if a&gt;b.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;strcmp&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="strncmp">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.strncmp">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;strncmp&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strncmp</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `strncmp(a, b, n) &lt;https://man7.org/linux/man-pages/man3/strncmp.3.html&gt;`_:</span>
+<span class="sd">    `strcmp` bounded to the first `n` bytes (stops early at a NUL on either side).</span>
+<span class="sd">    `n == 0` always returns 0 by spec.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;strncmp&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="strchr">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.strchr">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;strchr&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strchr</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `strchr(s, c) &lt;https://man7.org/linux/man-pages/man3/strchr.3.html&gt;`_:</span>
+<span class="sd">    pointer to the FIRST occurrence of byte `c` in NUL-terminated string `s`,</span>
+<span class="sd">    or 0 if not found. `c==0` returns a pointer to the terminating NUL.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;strchr&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="strrchr">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.strrchr">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;strrchr&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strrchr</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `strrchr(s, c) &lt;https://man7.org/linux/man-pages/man3/strrchr.3.html&gt;`_:</span>
+<span class="sd">    pointer to the LAST occurrence of byte `c` in NUL-terminated string `s`,</span>
+<span class="sd">    or 0 if not found.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;strrchr&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="strstr">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.strstr">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;strstr&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strstr</span><span class="p">(</span><span class="n">haystack</span><span class="p">,</span> <span class="n">needle</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `strstr(haystack, needle) &lt;https://man7.org/linux/man-pages/man3/strstr.3.html&gt;`_:</span>
+<span class="sd">    pointer to the first occurrence of NUL-terminated `needle` within</span>
+<span class="sd">    NUL-terminated `haystack`, or 0 if not found. Empty `needle` returns `haystack`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;strstr&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">haystack</span><span class="p">,</span> <span class="n">needle</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="strncpy">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.strncpy">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;strncpy&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strncpy</span><span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `strncpy(dst, src, n) &lt;https://man7.org/linux/man-pages/man3/strncpy.3.html&gt;`_:</span>
+<span class="sd">    copy at most n bytes from src to dst.</span>
+
+<span class="sd">    Does NOT guarantee null termination: if strlen(src) &gt;= n, dst will</span>
+<span class="sd">    contain n bytes from src with no trailing NUL. Callers that need a</span>
+<span class="sd">    NUL-terminated result must reserve an extra byte and either pre-zero</span>
+<span class="sd">    the buffer or explicitly write dst[n] = 0 after the call.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;strncpy&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="strerror">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.strerror">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;strerror&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strerror</span><span class="p">(</span><span class="n">errnum</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `strerror(errnum) &lt;https://man7.org/linux/man-pages/man3/strerror.3.html&gt;`_:</span>
+<span class="sd">    pointer to the static error-message string for errnum.</span>
+
+<span class="sd">    NOT thread-safe — the returned pointer references a per-process static</span>
+<span class="sd">    buffer that subsequent strerror calls may overwrite. Use ``strerror_safe``</span>
+<span class="sd">    (in ``numbox.core.bindings._strerror``) for thread-safe operation.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;strerror&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">errnum</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="memcpy">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.memcpy">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;memcpy&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">memcpy</span><span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `memcpy(dst, src, n) &lt;https://man7.org/linux/man-pages/man3/memcpy.3.html&gt;`_:</span>
+<span class="sd">    copy `n` bytes from `src` to `dst`. Source and destination must NOT overlap</span>
+<span class="sd">    — use `memmove` for that. Returns `dst`.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;memcpy&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="memmove">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.memmove">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;memmove&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">memmove</span><span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `memmove(dst, src, n) &lt;https://man7.org/linux/man-pages/man3/memmove.3.html&gt;`_:</span>
+<span class="sd">    copy `n` bytes from `src` to `dst`, correctly handling overlapping regions.</span>
+<span class="sd">    Returns `dst`.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;memmove&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="memset">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.memset">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;memset&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">memset</span><span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `memset(dst, c, n) &lt;https://man7.org/linux/man-pages/man3/memset.3.html&gt;`_:</span>
+<span class="sd">    fill the first `n` bytes of `dst` with the byte value `c &amp; 0xff`. Returns `dst`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;memset&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="memcmp">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.memcmp">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;memcmp&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">memcmp</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `memcmp(a, b, n) &lt;https://man7.org/linux/man-pages/man3/memcmp.3.html&gt;`_:</span>
+<span class="sd">    byte-wise compare the first `n` bytes of `a` and `b`. Returns negative, zero,</span>
+<span class="sd">    or positive — same sign convention as `strcmp`, but on raw bytes (no NUL</span>
+<span class="sd">    short-circuit).&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;memcmp&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="memchr">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.memchr">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;memchr&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">memchr</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `memchr(s, c, n) &lt;https://man7.org/linux/man-pages/man3/memchr.3.html&gt;`_:</span>
+<span class="sd">    pointer to the first byte equal to `c &amp; 0xff` in the first `n` bytes at `s`,</span>
+<span class="sd">    or 0 if not found.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;memchr&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="getenv">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._c.getenv">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;getenv&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">getenv</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;POSIX `getenv(name) &lt;https://man7.org/linux/man-pages/man3/getenv.3.html&gt;`_:</span>
+<span class="sd">    pointer to the value string in the process environ table for variable `name`,</span>
+<span class="sd">    or 0 if unset.</span>
+
+<span class="sd">    The returned pointer is owned by the platform environ — do NOT mutate, free,</span>
+<span class="sd">    or assume it survives a subsequent setenv/putenv. Callers that need a stable</span>
+<span class="sd">    Python str should copy via `get_str_from_p_as_int` before mutating environ.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;getenv&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">name</span><span class="p">,))</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

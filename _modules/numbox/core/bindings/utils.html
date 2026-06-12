@@ -1,0 +1,297 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.utils &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/utils.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.utils</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.utils</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span><span class="w"> </span><span class="nn">ctypes</span><span class="w"> </span><span class="kn">import</span> <span class="n">CDLL</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ctypes.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">find_library</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">platform</span><span class="w"> </span><span class="kn">import</span> <span class="n">system</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">llvmlite</span><span class="w"> </span><span class="kn">import</span> <span class="n">ir</span> <span class="k">as</span> <span class="n">llir</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">TypingError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">Literal</span><span class="p">,</span> <span class="n">intp</span>
+
+
+<span class="n">platform_</span> <span class="o">=</span> <span class="n">system</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="extract_literal_str">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.utils.extract_literal_str">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">extract_literal_str</span><span class="p">(</span><span class="n">binding_name</span><span class="p">,</span> <span class="n">ty</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">field</span><span class="o">=</span><span class="s2">&quot;argument&quot;</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Extract the Python str value of a ``Literal[str]`` type, or raise</span>
+<span class="sd">    a clean ``TypingError`` naming the binding and the field.</span>
+
+<span class="sd">    Used by intrinsics that require a compile-time string (e.g. printf</span>
+<span class="sd">    format strings, libc function names, stdio handle names). ``field``</span>
+<span class="sd">    labels the offending argument in the error message.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">ty</span><span class="p">,</span> <span class="n">Literal</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">binding_name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">field</span><span class="si">}</span><span class="s2"> must be a literal str, got </span><span class="si">{</span><span class="n">ty</span><span class="si">!r}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+    <span class="n">val</span> <span class="o">=</span> <span class="n">ty</span><span class="o">.</span><span class="n">literal_value</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">val</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">binding_name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">field</span><span class="si">}</span><span class="s2"> must be a Python str, got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">val</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">val</span></div>
+
+
+
+<div class="viewcode-block" id="intp_ll_type">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.utils.intp_ll_type">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">intp_ll_type</span><span class="p">(</span><span class="n">context</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;LLVM integer type matching numba&#39;s ``intp`` on the current platform.</span>
+
+<span class="sd">    Pass the numba codegen ``context`` when available so the type is</span>
+<span class="sd">    derived via ``context.get_value_type(intp)`` — the canonical pattern</span>
+<span class="sd">    for platform-dependent widths (size_t, ssize_t, ptrdiff_t) in</span>
+<span class="sd">    intrinsics. When called outside codegen (test helpers, IR-rendering</span>
+<span class="sd">    probes), pass ``None`` for the locked-in fallback</span>
+<span class="sd">    ``llir.IntType(intp.bitwidth)``; numba&#39;s intp lowering is locked to</span>
+<span class="sd">    the same bitwidth, so the two paths produce identical LLVM types.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">context</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">context</span><span class="o">.</span><span class="n">get_value_type</span><span class="p">(</span><span class="n">intp</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="n">intp</span><span class="o">.</span><span class="n">bitwidth</span><span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_windows_bundled_dll_path</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Best-effort: find a DLL bundled with the Python distribution on Windows.</span>
+
+<span class="sd">    Tries (in order):</span>
+<span class="sd">    - &lt;sys.prefix&gt;/DLLs/&lt;name&gt;.dll (CPython, also catches non-venv installs)</span>
+<span class="sd">    - &lt;sys.base_prefix&gt;/DLLs/&lt;name&gt;.dll (venv -&gt; base Python)</span>
+<span class="sd">    - &lt;sys.base_prefix&gt;/Library/bin/&lt;name&gt;.dll (conda layout)</span>
+
+<span class="sd">    Returns the absolute path of the first existing candidate, or None if no</span>
+<span class="sd">    bundled DLL is found.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+    <span class="n">dirs</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">prefix</span><span class="p">,</span> <span class="s2">&quot;DLLs&quot;</span><span class="p">),</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">base_prefix</span><span class="p">,</span> <span class="s2">&quot;DLLs&quot;</span><span class="p">),</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">base_prefix</span><span class="p">,</span> <span class="s2">&quot;Library&quot;</span><span class="p">,</span> <span class="s2">&quot;bin&quot;</span><span class="p">),</span>
+    <span class="p">]</span>
+    <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">dirs</span><span class="p">:</span>
+        <span class="n">candidate</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.dll&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">candidate</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">candidate</span>
+    <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_resolve_lib_path</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Resolve a library name to a CDLL-loadable path.</span>
+
+<span class="sd">    Per-platform logic:</span>
+<span class="sd">    - Linux / Darwin: ctypes.util.find_library(name)</span>
+<span class="sd">    - Windows: for &quot;c&quot;/&quot;m&quot;, find_msvcrt(); otherwise prefer</span>
+<span class="sd">      _windows_bundled_dll_path(name) (the Python-distribution-bundled</span>
+<span class="sd">      DLL in &lt;prefix&gt;/DLLs/ or &lt;prefix&gt;/Library/bin/) over PATH-based</span>
+<span class="sd">      find_library(name). PATH lookup goes last because PATH on Windows</span>
+<span class="sd">      may contain third-party-shipped copies of common DLLs that are</span>
+<span class="sd">      statically configured for that tool&#39;s internal use and AV on</span>
+<span class="sd">      external calls. The motivating example: GitHub Actions</span>
+<span class="sd">      windows-latest runners ship AWS CLI v2, whose</span>
+<span class="sd">      C:\\Program Files\\Amazon\\AWSCLIV2\\sqlite3.dll is on PATH,</span>
+<span class="sd">      exports the full SQLite symbol surface, but writes to NULL inside</span>
+<span class="sd">      sqlite3_open when called from a process other than aws.exe.</span>
+<span class="sd">      CPython&#39;s bundled sqlite3.dll is the canonical SQLite for the</span>
+<span class="sd">      Python ecosystem on Windows, so prefer it whenever it&#39;s present.</span>
+
+<span class="sd">    Returns the path string, or None if no path can be resolved.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;Darwin&quot;</span><span class="p">,</span> <span class="s2">&quot;Linux&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">find_library</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">&quot;Windows&quot;</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">ctypes.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">find_msvcrt</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;c&quot;</span><span class="p">,</span> <span class="s2">&quot;m&quot;</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">find_msvcrt</span><span class="p">()</span>
+        <span class="n">bundled</span> <span class="o">=</span> <span class="n">_windows_bundled_dll_path</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="o">==</span> <span class="s2">&quot;sqlite3&quot;</span><span class="p">:</span>
+            <span class="c1"># _sqlite3.pyd is dynamically linked to &lt;prefix&gt;/DLLs/sqlite3.dll,</span>
+            <span class="c1"># so that DLL is a hard prerequisite of every working Python on</span>
+            <span class="c1"># Windows. Never fall back to find_library — third-party tools</span>
+            <span class="c1"># may ship statically-configured sqlite3.dll copies that AV on</span>
+            <span class="c1"># external callers (AWS CLI v2 is the motivating example).</span>
+            <span class="k">return</span> <span class="n">bundled</span>
+        <span class="k">if</span> <span class="n">bundled</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">bundled</span>
+        <span class="k">return</span> <span class="n">find_library</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="n">_loaded_libs</span> <span class="o">=</span> <span class="p">{}</span>
+
+
+<div class="viewcode-block" id="load_lib">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.utils.load_lib">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">load_lib</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Load library ``name`` in global symbol mode and return the cached</span>
+<span class="sd">    CDLL handle. Loads on first call; subsequent calls return the same</span>
+<span class="sd">    handle from ``_loaded_libs``.</span>
+
+<span class="sd">    ``find_library`` is a relatively basic utility that mostly just</span>
+<span class="sd">    prefixes ``lib`` and suffixes the platform extension. When binding</span>
+<span class="sd">    user-compiled shared libraries that aren&#39;t on the system loader&#39;s</span>
+<span class="sd">    default search path, consider setting ``DYLD_LIBRARY_PATH`` (macOS)</span>
+<span class="sd">    or ``LD_LIBRARY_PATH`` (Linux) before the first ``load_lib`` call;</span>
+<span class="sd">    the loader consults those env vars before its built-in search. For</span>
+<span class="sd">    full control over the path, use :func:`load_lib_path` instead.</span>
+
+<span class="sd">    Caching pins the handle for the process lifetime so modules can</span>
+<span class="sd">    share it without cross-module imports. It also matters because</span>
+<span class="sd">    ``ctypes.CDLL.__del__`` calls ``dlclose`` / ``FreeLibrary``; without</span>
+<span class="sd">    retention, the OS-level reference count drops to zero on return and</span>
+<span class="sd">    the library can be unloaded — invalidating any extern-ref symbols</span>
+<span class="sd">    LLVM&#39;s JIT linker already resolved into module IR. Returning the</span>
+<span class="sd">    handle also enables ``proxy_if_available`` to query symbol presence</span>
+<span class="sd">    via ``hasattr(handle, func_name)``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">handle</span> <span class="o">=</span> <span class="n">_loaded_libs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">handle</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">handle</span> <span class="o">=</span> <span class="n">_load_lib_with_handle</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+        <span class="n">_loaded_libs</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">handle</span>
+    <span class="k">return</span> <span class="n">handle</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_load_lib_with_handle</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Internal: resolve ``name`` via :func:`_resolve_lib_path` and load</span>
+<span class="sd">    the resulting library in global symbol mode, returning the CDLL</span>
+<span class="sd">    handle. Use :func:`load_lib` instead — it caches.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">_resolve_lib_path</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># Preserve the historical Windows c/m fallback (msvcrt via ctypes.cdll).</span>
+        <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">&quot;Windows&quot;</span> <span class="ow">and</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;c&quot;</span><span class="p">,</span> <span class="s2">&quot;m&quot;</span><span class="p">):</span>
+            <span class="kn">import</span><span class="w"> </span><span class="nn">ctypes</span>
+            <span class="k">return</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">cdll</span><span class="o">.</span><span class="n">msvcrt</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Could not find shared library for </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;Darwin&quot;</span><span class="p">,</span> <span class="s2">&quot;Linux&quot;</span><span class="p">):</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">os</span><span class="w"> </span><span class="kn">import</span> <span class="n">RTLD_GLOBAL</span>
+        <span class="k">return</span> <span class="n">CDLL</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="n">RTLD_GLOBAL</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">&quot;Windows&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">CDLL</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">winmode</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Platform </span><span class="si">{</span><span class="n">platform_</span><span class="si">}</span><span class="s2"> is not supported, yet.&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="load_lib_path">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.utils.load_lib_path">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">load_lib_path</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Load a shared library by ``ctypes.CDLL``-acceptable identifier</span>
+<span class="sd">    and return the handle (uncached).</span>
+
+<span class="sd">    Accepts any string ``CDLL`` accepts — an absolute path, a soname</span>
+<span class="sd">    (e.g. ``libm.so.6`` as returned by ``ctypes.util.find_library``), or</span>
+<span class="sd">    a bare filename resolvable by the loader. Linux/Darwin use</span>
+<span class="sd">    ``RTLD_GLOBAL`` so symbols reach LLVM&#39;s JIT; Windows uses</span>
+<span class="sd">    ``winmode=0``. Prefer :func:`load_lib` when the library is</span>
+<span class="sd">    referenced by name and across multiple modules in the same process.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;Darwin&quot;</span><span class="p">,</span> <span class="s2">&quot;Linux&quot;</span><span class="p">):</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">os</span><span class="w"> </span><span class="kn">import</span> <span class="n">RTLD_GLOBAL</span>
+        <span class="k">return</span> <span class="n">CDLL</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="n">RTLD_GLOBAL</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">&quot;Windows&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">CDLL</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">winmode</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Platform </span><span class="si">{</span><span class="n">platform_</span><span class="si">}</span><span class="s2"> is not supported, yet.&quot;</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

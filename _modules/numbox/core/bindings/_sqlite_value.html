@@ -1,0 +1,230 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings._sqlite_value &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/_sqlite_value.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings._sqlite_value</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings._sqlite_value</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;SQLite value accessor bindings.</span>
+
+<span class="sd">Read UDF arguments inside xFunc / xStep / xInverse callbacks. Each function</span>
+<span class="sd">takes a sqlite3_value* (as intp) obtained by dereferencing the argv_pp array</span>
+<span class="sd">at the appropriate index.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.call</span><span class="w"> </span><span class="kn">import</span> <span class="n">_call_lib_func</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.signatures</span><span class="w"> </span><span class="kn">import</span> <span class="n">signatures</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_lib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">&quot;sqlite3_value_int&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_value_int64&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_value_double&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;sqlite3_value_text&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_value_blob&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_value_bytes&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;sqlite3_value_type&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_value_numeric_type&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;sqlite3_value_nochange&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_value_frombind&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;sqlite3_value_subtype&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;sqlite3_value_dup&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_value_free&quot;</span><span class="p">,</span>
+<span class="p">]</span>
+
+
+<span class="n">load_lib</span><span class="p">(</span><span class="s2">&quot;sqlite3&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="sqlite3_value_int">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._sqlite_value.sqlite3_value_int">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_int&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_int</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_int&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_int64">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._sqlite_value.sqlite3_value_int64">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_int64&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_int64</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_int64&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_double">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._sqlite_value.sqlite3_value_double">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_double&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_double</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_double&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_text">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._sqlite_value.sqlite3_value_text">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_text&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_text</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_text&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_blob">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._sqlite_value.sqlite3_value_blob">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_blob&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_blob</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_blob&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_bytes">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._sqlite_value.sqlite3_value_bytes">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_bytes&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_bytes</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_bytes&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_type">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._sqlite_value.sqlite3_value_type">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_type&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_type</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_type&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_numeric_type">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._sqlite_value.sqlite3_value_numeric_type">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_numeric_type&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_numeric_type</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_numeric_type&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_nochange">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._sqlite_value.sqlite3_value_nochange">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_nochange&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_nochange</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_nochange&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_frombind">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._sqlite_value.sqlite3_value_frombind">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_frombind&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_frombind</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_frombind&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_subtype">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._sqlite_value.sqlite3_value_subtype">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_subtype&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_subtype</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_subtype&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_dup">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._sqlite_value.sqlite3_value_dup">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_dup&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_dup</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_dup&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_free">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._sqlite_value.sqlite3_value_free">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_free&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_free</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_value_free&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
