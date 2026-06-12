@@ -1085,3 +1085,18 @@ def test_compile_self_referential_jit_option_no_recursionerror(tmp_path):
     with pytest.raises(Exception) as ei:
         compile_kernel(g, "calc.y", jit_options={"_review_loop": loop}).execute({"ext": {"x": 1.0}})
     assert not isinstance(ei.value, RecursionError)
+
+
+def test_fingerprint_raising_repr_callable_degrades_not_crashes():
+    from numbox.core.variable.compile_kernel import _formula_fingerprint
+
+    class BoomRepr:
+        def __call__(self, x):
+            return x + 1.0
+
+        def __repr__(self):
+            raise RuntimeError("repr boom")
+
+    fp, ok = _formula_fingerprint(BoomRepr())   # must not raise
+    assert not ok
+    assert isinstance(fp, str) and "repr-failed" in fp

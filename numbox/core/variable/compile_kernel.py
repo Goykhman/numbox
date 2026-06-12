@@ -92,6 +92,16 @@ class _Unfingerprintable(Exception):
     """A value the cache digest cannot canonicalize; the kernel goes uncached."""
 
 
+def _safe_repr(obj):
+    """``repr(obj)`` that never raises -- the fingerprint fallback must always
+    yield a string so an un-fingerprintable formula degrades to uncached rather
+    than crashing when its ``__repr__`` itself raises."""
+    try:
+        return repr(obj)
+    except Exception:  # noqa: BLE001 - fallback must not crash on a raising __repr__
+        return f"<{type(obj).__name__} repr-failed>"
+
+
 def _canon_value(value, seen):
     if value is None or isinstance(value, (bool, int, float, complex, str, bytes)):
         return repr(value)
@@ -191,13 +201,13 @@ def _formula_fingerprint(formula):
     if target is None:
         target = formula
     if not isinstance(target, FunctionType):
-        return f"{repr(formula)} @{id(formula)}", False
+        return f"{_safe_repr(formula)} @{id(formula)}", False
     try:
         if isinstance(formula, Dispatcher):
             extra += ";targetoptions=" + _canon_value(dict(formula.targetoptions or {}), set())
         return _fingerprint_function(target, set()) + extra, not isinstance(formula, CFunc)
     except (_Unfingerprintable, RecursionError):
-        return f"{repr(formula)} @{id(formula)}", False
+        return f"{_safe_repr(formula)} @{id(formula)}", False
 
 
 def _check_formula_arity(formula, n_inputs, qual_name):
