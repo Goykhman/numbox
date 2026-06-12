@@ -31,7 +31,10 @@ from numba.core.types.function_type import CompileResultWAP
 from numba.np.ufunc.dufunc import DUFunc
 
 from numbox.core.configurations import jit_options as _default_jit_options
-from numbox.core.variable._kernel_partition import PartitionReport, Segment
+from numbox.core.variable._kernel_partition import (
+    PartitionReport, Segment, _JitStep, _Plan, _PyStep,
+    build_runs, discover, linearize, segment_liveness,
+)
 from numbox.core.variable.variable import QUAL_SEP, make_qual_name
 from numbox.utils.preprocessing import (
     _anchor_root, _materialize_anchor, _orphan_anchor_sweep,
@@ -442,9 +445,57 @@ class CompiledKernel:
             return self._discover_and_run(args)
 
     def _discover_and_run(self, args):
-        """Segmented execution; not yet wired -- defer to the fused dispatcher
-        so error timing stays exactly v1 until the segmented path lands."""
-        return self._fused(*args)
+        compiled, idents, bindings_by_var, jit_options, cache, external = self._ctx
+        values = dict(zip(self._external_vars, args))
+        demoted = discover(compiled.ordered_nodes, external, values, bindings_by_var)
+        nodes = [n for n in compiled.ordered_nodes if n.variable not in external]
+        order = linearize(nodes, set(demoted))
+        runs = build_runs(order, set(demoted))
+        steps, segments = [], []
+        for kind, run_nodes in runs:
+            quals = tuple(n.variable.qual_name() for n in run_nodes)
+            if kind == "python":
+                ins = set()
+                produced = set()
+                for n in run_nodes:
+                    ins.update(i for i in n.inputs if i not in produced)
+                    produced.add(n.variable)
+                    steps.append(_PyStep(
+                        var=n.variable,
+                        py_callable=getattr(n.variable.formula, "py_func", n.variable.formula),
+                        in_vars=tuple(n.inputs),
+                    ))
+                reasons = {n.variable.qual_name(): demoted[n.variable] for n in run_nodes}
+                key = lambda v: v.qual_name()   # noqa: E731 - tiny local sort key
+                segments.append(Segment(
+                    kind="python", nodes=quals,
+                    inputs=tuple(v.qual_name() for v in sorted(ins, key=key)),
+                    outputs=quals, source=None, reasons=reasons,
+                ))
+                continue
+            live_in, live_out = segment_liveness(
+                run_nodes, external, self._required_vars, order
+            )
+            src, seg_bindings, _, _ = _generate_segment_body(
+                run_nodes, live_in, live_out, idents
+            )
+            disp = _compile(src, seg_bindings, jit_options, cache)
+            disp.compile(tuple(typeof(values[v]) for v in live_in))
+            steps.append(_JitStep(dispatcher=disp, in_vars=live_in, out_vars=live_out))
+            segments.append(Segment(
+                kind="jit", nodes=quals,
+                inputs=tuple(v.qual_name() for v in live_in),
+                outputs=tuple(v.qual_name() for v in live_out),
+                source=src, reasons={},
+            ))
+        self._plan = _Plan(
+            steps=tuple(steps),
+            external_vars=tuple(self._external_vars),
+            output_vars=tuple(self._required_vars),
+        )
+        self._mode = "segmented"
+        self.partition = PartitionReport(mode="segmented", segments=tuple(segments))
+        return tuple(values[v] for v in self._required_vars)
 
     def execute(self, external_values):
         """Dict-in / dict-out convenience, symmetric with CompiledGraph.execute."""

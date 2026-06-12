@@ -8,7 +8,6 @@ import numpy as np
 import pytest
 from numba import njit, cfunc, vectorize
 from numba.core.dispatcher import Dispatcher
-from numba.core.errors import TypingError
 from numba.core.types import float64
 from numbox.core.variable.compile_kernel import (
     _sanitize, _assign_identifiers, _wrap_formula, _generate_body, _compile,
@@ -294,18 +293,21 @@ def test_cres_formula():
     assert ck.execute({"ext": {"p": 1.5, "q": 2.0}}) == {"variables.u": -0.5}
 
 
-def test_non_jittable_formula_fails_at_first_call_not_compile():
+def test_non_jittable_formula_demotes_at_first_call():
     def bad(y):
-        return open("/tmp/_ck_nope.txt", "w")
+        return json.dumps({"y": y}) and y + 100.0
     g = Graph(
         variables_lists={"variables": [
             {"name": "b", "inputs": {"y": "ext"}, "formula": bad},
         ]},
         external_source_names=["ext"],
     )
-    ck = compile_kernel(g, ["variables.b"])     # must NOT raise here (lazy)
-    with pytest.raises(TypingError):
-        ck.execute({"ext": {"y": 1}})           # error surfaces at first call
+    ck = compile_kernel(g, ["variables.b"])     # still must NOT raise here (lazy)
+    assert ck.execute({"ext": {"y": 1.0}}) == {"variables.b": bad(1.0)}  # first call succeeds via demotion
+    assert ck.partition.mode == "segmented"
+    assert "variables.b" in ck.partition.python_nodes
+    reasons = {q: r for s in ck.partition.segments for q, r in s.reasons.items()}
+    assert reasons["variables.b"]
 
 
 def test_cache_no_skeleton_collision(tmp_path):
@@ -1011,15 +1013,15 @@ def test_fingerprint_object_array_is_unfingerprintable():
 
 
 def test_object_array_closure_kernel_uncached(tmp_path):
-    # An object-dtype array in a formula's closure is un-fingerprintable, so the
-    # kernel is marked uncacheable: no anchor and no numba cache files. (numba
-    # itself cannot njit-compile a formula that closes over a pyobject array, so
-    # execution raises a TypingError -- the load-bearing claim is the empty cache
-    # dir, proving the un-fingerprintable formula never wrote an anchor.)
+    # An object-dtype array in a formula's closure is un-fingerprintable, and numba
+    # cannot njit-compile a formula that closes over a pyobject array, so the node is
+    # demoted to a Python segment and the call succeeds in plain Python. With the only
+    # node demoted there are zero jit segments, so nothing fingerprintable is ever
+    # compiled -- the load-bearing claim remains the empty cache dir, proving the
+    # un-fingerprintable/unjittable content never wrote an anchor.
     probe = tmp_path / "probe.py"
     probe.write_text(textwrap.dedent("""
         import numpy as np
-        from numba.core.errors import TypingError
         from numbox.core.variable.variable import Graph
         from numbox.core.variable.compile_kernel import compile_kernel
 
@@ -1031,10 +1033,8 @@ def test_object_array_closure_kernel_uncached(tmp_path):
 
         g = Graph({"calc": [{"name": "y", "inputs": {"x": "ext"}, "formula": factory(objs)}]}, ["ext"])
         ck = compile_kernel(g, "calc.y")
-        try:
-            ck.execute({"ext": {"x": 1.0}})
-        except TypingError:
-            pass
+        out = ck.execute({"ext": {"x": 1.0}})["calc.y"]
+        assert out == 2.0, out
         print("DONE")
     """))
     cache_dir = tmp_path / "nbcache"
@@ -1252,6 +1252,18 @@ class _Opaque:
     def __init__(self, v):
         self.v = v
 
+    def __mul__(self, other):
+        return _Opaque(self.v * other)
+
+    def __add__(self, other):
+        return _Opaque(self.v + other)
+
+    def __sub__(self, other):
+        return _Opaque(self.v - other)
+
+    def __truediv__(self, other):
+        return _Opaque(self.v / other)
+
 
 def _bindings_by_var(graph, required):
     compiled = graph.compile(required)
@@ -1403,3 +1415,92 @@ def test_fused_mode_resolution():
     assert isinstance(ck.kernel, Dispatcher)
     assert ck.kernel(100) == (326.5, 126)
     assert early(100) == (326.5, 126)      # early ref still valid post-resolution
+
+
+def _chain_graph_with_python_middle():
+    def n3(v):
+        json.dumps({"k": 1})
+        return v * 3.0
+
+    return Graph(
+        variables_lists={"calc": [
+            {"name": "n1", "inputs": {"x": "ext"}, "formula": lambda x: x + 1.0},
+            {"name": "n2", "inputs": {"n1": "calc"}, "formula": lambda n1: n1 * 2.0},
+            {"name": "n3", "inputs": {"n2": "calc"}, "formula": n3},
+            {"name": "n4", "inputs": {"n3": "calc"}, "formula": lambda n3: n3 - 4.0},
+            {"name": "n5", "inputs": {"n4": "calc"}, "formula": lambda n4: n4 / 2.0},
+        ]},
+        external_source_names=["ext"],
+    )
+
+
+def _compiled_graph_result(graph, required, external_values):
+    compiled = graph.compile(required)
+    values = Values()
+    compiled.execute(external_values, values)
+    by_qual = {n.variable.qual_name(): n.variable for n in compiled.ordered_nodes}
+    return {q: values.get(by_qual[q]).value for q in required}
+
+
+def test_goykhman_example_two_segments():
+    g = _chain_graph_with_python_middle()
+    ck = compile_kernel(g, "calc.n5", cache=False)
+    expected = _compiled_graph_result(
+        _chain_graph_with_python_middle(), ["calc.n5"], {"ext": {"x": 7.0}}
+    )
+    assert ck.execute({"ext": {"x": 7.0}}) == expected          # call 1: warm-up
+    assert ck.execute({"ext": {"x": 7.0}}) == expected          # call 2: plan
+    rep = ck.partition
+    assert rep.mode == "segmented"
+    kinds = [(s.kind, s.nodes) for s in rep.segments]
+    assert kinds == [
+        ("jit", ("calc.n1", "calc.n2")),
+        ("python", ("calc.n3",)),
+        ("jit", ("calc.n4", "calc.n5")),
+    ]
+    assert rep.python_nodes == {"calc.n3"}
+    assert rep.segments[1].reasons["calc.n3"]
+    assert rep.segments[0].source is not None and rep.segments[1].source is None
+
+
+def test_segmented_object_chain_groups_python_run():
+    g = Graph(
+        variables_lists={"calc": [
+            {"name": "a", "inputs": {"x": "ext"}, "formula": lambda x: x * 2.0},
+            {"name": "b", "inputs": {"a": "calc"}, "formula": lambda a: _Opaque(a)},
+            {"name": "c", "inputs": {"b": "calc"}, "formula": lambda b: b.v + 1.0},
+            {"name": "d", "inputs": {"c": "calc"}, "formula": lambda c: c * 10.0},
+        ]},
+        external_source_names=["ext"],
+    )
+    ck = compile_kernel(g, "calc.d", cache=False)
+    assert ck.kernel(3.0) == ((3.0 * 2.0 + 1.0) * 10.0,)
+    assert ck.kernel(3.0) == ((3.0 * 2.0 + 1.0) * 10.0,)
+    kinds = [(s.kind, s.nodes) for s in ck.partition.segments]
+    assert ("python", ("calc.b", "calc.c")) in kinds
+
+
+def test_segmented_all_python():
+    def f(x):
+        json.dumps({"k": 1})
+        return x + 2.0
+
+    g = Graph(
+        variables_lists={"calc": [{"name": "a", "inputs": {"x": "ext"}, "formula": f}]},
+        external_source_names=["ext"],
+    )
+    ck = compile_kernel(g, "calc.a", cache=False)
+    assert ck.kernel(1.0) == (3.0,)
+    assert ck.kernel(1.0) == (3.0,)
+    assert all(s.kind == "python" for s in ck.partition.segments)
+
+
+def test_plan_replacement_on_new_signature():
+    g = _chain_graph_with_python_middle()
+    ck = compile_kernel(g, "calc.n5", cache=False)
+    assert ck.kernel(7.0) == ((((7.0 + 1.0) * 2.0 * 3.0) - 4.0) / 2.0,)
+    assert len([s for s in ck.partition.segments if s.kind == "jit"]) == 2
+    out, = ck.kernel(_Opaque(7.0))          # breaks segment 1 -> re-discovery
+    assert isinstance(out, _Opaque) and out.v == (((7.0 + 1.0) * 2.0 * 3.0) - 4.0) / 2.0
+    assert [s.kind for s in ck.partition.segments] == ["python"]
+    assert ck.kernel(7.0) == ((((7.0 + 1.0) * 2.0 * 3.0) - 4.0) / 2.0,)
