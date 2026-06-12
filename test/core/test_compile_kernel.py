@@ -1194,3 +1194,41 @@ def test_partition_report_str_and_python_nodes():
     assert rep.python_nodes == {"calc.b"}
     text = str(rep)
     assert "segmented" in text and "calc.b" in text and "TypingError: nope" in text
+
+
+def test_fused_source_golden():
+    g = _diamond_graph()
+    ck = compile_kernel(g, ["variables.u", "variables.a"], cache=False)
+    expected = (
+        "def _kernel(basket_y):\n"
+        "    variables_x = f_variables_x(basket_y)  # 'variables.x' = f('basket.y')\n"
+        "    variables_a = f_variables_a(variables_x)  # 'variables.a' = f('variables.x')\n"
+        "    variables_b = f_variables_b(variables_x)  # 'variables.b' = f('variables.x')\n"
+        "    variables_u = f_variables_u(variables_a, variables_b)"
+        "  # 'variables.u' = f('variables.a', 'variables.b')\n"
+        "    return (variables_u, variables_a,)\n"
+    )
+    assert ck.source == expected
+
+
+def test_generate_segment_body():
+    from numbox.core.variable.compile_kernel import _generate_segment_body
+    g = _diamond_graph()
+    compiled = g.compile(["variables.u", "variables.a"])
+    idents = _assign_identifiers([n.variable for n in compiled.ordered_nodes])
+    external = {v for vs in compiled.required_external_variables.values() for v in vs.values()}
+    nodes = [n for n in compiled.ordered_nodes if n.variable not in external]
+    run = nodes[:2]                       # variables.x, variables.a
+    by_name = {n.variable.name: n.variable for n in nodes}
+    live_in = (next(iter(external)),)     # basket.y
+    live_out = (by_name["a"], by_name["x"])
+    source, bindings, params, outputs = _generate_segment_body(run, live_in, live_out, idents)
+    assert source == (
+        "def _kernel(basket_y):\n"
+        "    variables_x = f_variables_x(basket_y)  # 'variables.x' = f('basket.y')\n"
+        "    variables_a = f_variables_a(variables_x)  # 'variables.a' = f('variables.x')\n"
+        "    return (variables_a, variables_x,)\n"
+    )
+    assert [p[2] for p in params] == ["basket_y"]
+    assert outputs == ["variables.a", "variables.x"]
+    assert set(bindings) == {"f_variables_x", "f_variables_a"}

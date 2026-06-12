@@ -225,6 +225,50 @@ def _check_formula_arity(formula, n_inputs, qual_name):
         ) from None
 
 
+def _emit_lines(nodes, skip, idents, bindings):
+    """Emit one body line per node (excluding `skip`), filling `bindings`."""
+    lines = []
+    for node in nodes:
+        var = node.variable
+        if var in skip:
+            continue
+        if var.formula is None:
+            raise ValueError(
+                f"{var.qual_name()!r} has graph placement but no formula; a fused "
+                f"kernel cannot compile it. Provide a formula, or use CompiledGraph."
+            )
+        temp = idents[var]
+        fg = "f_" + temp
+        try:
+            bindings[fg] = _wrap_formula(var.formula)
+        except TypeError as e:
+            raise TypeError(f"{var.qual_name()!r}: {e}") from e
+        _check_formula_arity(var.formula, len(node.inputs), var.qual_name())
+        arg_ids = ", ".join(idents[inp] for inp in node.inputs)
+        in_names = ", ".join(repr(inp.qual_name()) for inp in node.inputs)
+        lines.append(f"    {temp} = {fg}({arg_ids})  # {var.qual_name()!r} = f({in_names})")
+    return lines
+
+
+def _generate_segment_body(run_nodes, live_in, live_out, idents):
+    """Like _generate_body, for one jit segment: live-ins are parameters,
+    live-outs the return tuple. Same source shape so _compile applies verbatim.
+
+    Returns (source, bindings, params, outputs) with params/outputs in the
+    caller-provided (qual-sorted) live_in/live_out order.
+    """
+    params = [(v.source, v.name, idents[v]) for v in live_in]
+    bindings = {}
+    lines = _emit_lines(run_nodes, set(), idents, bindings)
+    outputs = [v.qual_name() for v in live_out]
+    out_ids = [idents[v] for v in live_out]
+    sig = ", ".join(ident for _, _, ident in params)
+    ret = f"    return ({', '.join(out_ids)},)"
+    body = ("\n".join(lines) + "\n") if lines else ""
+    source = f"def _kernel({sig}):\n{body}{ret}\n"
+    return source, bindings, params, outputs
+
+
 def _generate_body(compiled, required, idents):
     """Generate `def _kernel(...): ...` source (no decorator) + bindings.
 
@@ -252,26 +296,7 @@ def _generate_body(compiled, required, idents):
     params = [(v.source, v.name, idents[v]) for v in ext_sorted]
 
     bindings = {}
-    lines = []
-    for node in compiled.ordered_nodes:
-        var = node.variable
-        if var in external:
-            continue
-        if var.formula is None:
-            raise ValueError(
-                f"{var.qual_name()!r} has graph placement but no formula; a fused "
-                f"kernel cannot compile it. Provide a formula, or use CompiledGraph."
-            )
-        temp = idents[var]
-        fg = "f_" + temp
-        try:
-            bindings[fg] = _wrap_formula(var.formula)
-        except TypeError as e:
-            raise TypeError(f"{var.qual_name()!r}: {e}") from e
-        _check_formula_arity(var.formula, len(node.inputs), var.qual_name())
-        arg_ids = ", ".join(idents[inp] for inp in node.inputs)
-        in_names = ", ".join(repr(inp.qual_name()) for inp in node.inputs)
-        lines.append(f"    {temp} = {fg}({arg_ids})  # {var.qual_name()!r} = f({in_names})")
+    lines = _emit_lines(compiled.ordered_nodes, external, idents, bindings)
 
     by_qual = {n.variable.qual_name(): n.variable for n in compiled.ordered_nodes}
     outputs, out_ids = [], []
