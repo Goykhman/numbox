@@ -395,8 +395,9 @@ def run_python_nodes_mode(n_nodes, size, repeats, profile, k):
     print(f"  mode                   {rep.mode}")
     print(f"  jit segments           {n_seg}")
     print(f"  python nodes           {n_py}")
-    print(f"  compile_kernel()       {t_compile:.3f}s")
-    print(f"  first call (discovery) {t_first:.3f}s")
+    print(f"  compile_kernel()       {t_compile:.3f}s  (defers all compilation to the first call)")
+    print(f"  first call (discovery) {t_first:.3f}s  (one-time per process; per-node probe "
+          f"compiles do not disk-cache away, only the segment compiles do)")
     print(f"\nhot path, best of {repeats} (microseconds/call):")
     print(f"  {'path':<26}{'best':>10}{'median':>10}{'vs segmented':>14}")
     for name, (best, med) in rows:
