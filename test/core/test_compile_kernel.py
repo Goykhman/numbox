@@ -1504,3 +1504,64 @@ def test_plan_replacement_on_new_signature():
     assert isinstance(out, _Opaque) and out.v == (((7.0 + 1.0) * 2.0 * 3.0) - 4.0) / 2.0
     assert [s.kind for s in ck.partition.segments] == ["python"]
     assert ck.kernel(7.0) == ((((7.0 + 1.0) * 2.0 * 3.0) - 4.0) / 2.0,)
+
+
+_SEGMENT_CACHE_SCRIPT = textwrap.dedent("""
+    import json, sys
+    from numbox.core.variable.compile_kernel import compile_kernel
+    from numbox.core.variable.variable import Graph
+
+    def n3(v):
+        json.dumps({"k": 1})
+        return v * 3.0
+
+    g = Graph(
+        variables_lists={"calc": [
+            {"name": "n1", "inputs": {"x": "ext"}, "formula": lambda x: x + 1.0},
+            {"name": "n2", "inputs": {"n1": "calc"}, "formula": lambda n1: n1 * 2.0},
+            {"name": "n3", "inputs": {"n2": "calc"}, "formula": n3},
+            {"name": "n4", "inputs": {"n3": "calc"}, "formula": lambda n3: n3 - 4.0},
+        ]},
+        external_source_names=["ext"],
+    )
+    ck = compile_kernel(g, "calc.n4", cache=True)
+    out = ck.kernel(7.0)
+    assert out == (((7.0 + 1.0) * 2.0 * 3.0) - 4.0,), out
+    assert ck.partition.mode == "segmented", ck.partition.mode
+    sys.exit(0)
+""")
+
+
+def test_segment_cache_survives_subprocess_roundtrip(tmp_path):
+    env = {**os.environ, "NUMBA_CACHE_DIR": str(tmp_path / "nbcache")}
+    saved = None
+    for attempt in ("save", "load"):
+        proc = subprocess.run(
+            [sys.executable, "-c", _SEGMENT_CACHE_SCRIPT],
+            capture_output=True, text=True, env=env,
+        )
+        assert proc.returncode == 0, f"{attempt}: {proc.stderr}"
+        nbc = list((tmp_path / "nbcache").rglob("*.nbc"))
+        if attempt == "save":
+            assert nbc, "segment compile produced no cache entries"
+            saved = len(nbc)
+        else:
+            assert len(nbc) == saved, "second process recompiled instead of loading"
+
+
+def test_shared_digest_identical_segments():
+    def n3(v):
+        json.dumps({"k": 1})
+        return v + 0.0
+
+    g = Graph(
+        variables_lists={"calc": [
+            {"name": "a", "inputs": {"x": "ext"}, "formula": lambda x: x * 2.0},
+            {"name": "p", "inputs": {"a": "calc"}, "formula": n3},
+            {"name": "b", "inputs": {"p": "calc"}, "formula": lambda x: x * 2.0},
+        ]},
+        external_source_names=["ext"],
+    )
+    ck = compile_kernel(g, "calc.b", cache=False)
+    assert ck.kernel(3.0) == (3.0 * 2.0 * 2.0,)
+    assert ck.kernel(3.0) == (3.0 * 2.0 * 2.0,)
