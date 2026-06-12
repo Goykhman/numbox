@@ -151,8 +151,9 @@ def _query_core(stmt, ncols, offsets, tags, widths, itemsize):
         n += 1
         rc = sqlite3_step(stmt)
     # The bare slice is lifetime-safe (it shares the parent's NRT meminfo via
-    # make_view/impl_ret_borrowed); .copy() only trims the growth slack --
-    # under 2x for n > 16, up to 16x at small n (cap floors at 16).
+    # make_view/impl_ret_borrowed); .copy() only trims the growth slack, whose
+    # absolute size is under one doubling: less than n rows' worth (n * itemsize
+    # bytes) for n > 16, at most 16 rows' worth when n <= 16 (cap floors at 16).
     return out_u8[:n * itemsize].copy(), rc
 
 
