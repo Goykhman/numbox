@@ -23,13 +23,15 @@ from types import CodeType, FunctionType, ModuleType
 
 import numpy as np
 
-from numba import njit
+from numba import njit, typeof
 from numba.core.ccallback import CFunc
 from numba.core.dispatcher import Dispatcher
+from numba.core.errors import NumbaError
 from numba.core.types.function_type import CompileResultWAP
 from numba.np.ufunc.dufunc import DUFunc
 
 from numbox.core.configurations import jit_options as _default_jit_options
+from numbox.core.variable._kernel_partition import PartitionReport, Segment
 from numbox.core.variable.variable import QUAL_SEP, make_qual_name
 from numbox.utils.preprocessing import (
     _anchor_root, _materialize_anchor, _orphan_anchor_sweep,
@@ -373,21 +375,76 @@ class CompiledKernel:
 
     Attributes::
 
-      kernel      - bare numba dispatcher; positional external args (in `params`
-                    order) -> tuple (in `outputs` order). Zero-overhead hot path.
+      kernel      - hot-path callable: resolver before the first call, the
+                    bare numba dispatcher once fused, the segmented master
+                    otherwise. Positional external args (in `params` order)
+                    -> tuple (in `outputs` order).
       params      - external input qual_names, kernel-argument order.
       outputs     - requested variable qual_names, return-tuple order.
       source      - generated kernel source text.
       identifiers - {qual_name: temp identifier} for inspection.
+      partition   - PartitionReport describing what runs where (None until
+                    the first call resolves the mode).
     """
 
-    def __init__(self, kernel, params, outputs, source, identifiers):
-        self.kernel = kernel
+    def __init__(self, kernel, params, outputs, source, identifiers, ctx=None):
+        self._fused = kernel
+        self._mode = "virgin"
+        self._plan = None
+        self.partition = None
+        self._ctx = ctx
         self._param_keys = [(src, name) for src, name, _ in params]
         self.params = [make_qual_name(src, name) for src, name, _ in params]
         self.outputs = list(outputs)
         self.source = source
         self.identifiers = identifiers
+
+    @property
+    def kernel(self):
+        if self._mode == "fused":
+            return self._fused
+        if self._mode == "segmented":
+            return self._run_segmented
+        return self._resolve_and_call
+
+    def _fused_report(self):
+        compiled, _, _, _, _, external = self._ctx
+        nodes = tuple(
+            n.variable.qual_name() for n in compiled.ordered_nodes
+            if n.variable not in external
+        )
+        return PartitionReport(mode="fused", segments=(Segment(
+            kind="jit", nodes=nodes, inputs=tuple(self.params),
+            outputs=tuple(self.outputs), source=self.source, reasons={},
+        ),))
+
+    def _resolve_and_call(self, *args):
+        if self._mode != "virgin":
+            return self.kernel(*args)
+        try:
+            arg_types = tuple(typeof(a) for a in args)
+        except (ValueError, TypeError):
+            arg_types = None
+        if arg_types is not None:
+            try:
+                self._fused.compile(arg_types)
+            except NumbaError:
+                return self._discover_and_run(args)
+            self._mode = "fused"
+            self.partition = self._fused_report()
+            return self._fused(*args)
+        return self._discover_and_run(args)
+
+    def _run_segmented(self, *args):
+        try:
+            return self._plan.run(args)
+        except NumbaError:
+            return self._discover_and_run(args)
+
+    def _discover_and_run(self, args):
+        """Segmented execution; not yet wired -- defer to the fused dispatcher
+        so error timing stays exactly v1 until the segmented path lands."""
+        return self._fused(*args)
 
     def execute(self, external_values):
         """Dict-in / dict-out convenience, symmetric with CompiledGraph.execute."""
@@ -469,5 +526,21 @@ def compile_kernel(graph, required, *, jit_options=None, cache=None):
     idents = _assign_identifiers([n.variable for n in compiled.ordered_nodes])
     source, bindings, params, outputs = _generate_body(compiled, required, idents)
     kernel = _compile(source, bindings, jit_options, cache)
+    external = {v for vs in compiled.required_external_variables.values() for v in vs.values()}
+    bindings_by_var = {
+        n.variable: bindings["f_" + idents[n.variable]]
+        for n in compiled.ordered_nodes if n.variable not in external
+    }
+    required_vars = [
+        next(n.variable for n in compiled.ordered_nodes if n.variable.qual_name() == q)
+        for q in outputs
+    ]
+    ctx = (compiled, idents, bindings_by_var, jit_options, cache, external)
     identifiers = {v.qual_name(): ident for v, ident in idents.items()}
-    return CompiledKernel(kernel, params, outputs, source, identifiers)
+    ck = CompiledKernel(kernel, params, outputs, source, identifiers, ctx)
+    ck._required_vars = required_vars
+    ck._external_vars = [
+        next(v for v in external if v.source == src and v.name == name)
+        for src, name in ck._param_keys
+    ]
+    return ck

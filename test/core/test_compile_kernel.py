@@ -1383,3 +1383,23 @@ def test_discover_exotic_untypeable_input_raises():
     values = {next(iter(external)): 1.0}
     with pytest.raises(TypeError, match="no Python fallback"):
         discover(compiled.ordered_nodes, external, values, by_var)
+
+
+def test_fused_mode_resolution():
+    g = _diamond_graph()
+    ck = compile_kernel(g, ["variables.u", "variables.a"], cache=False)
+    assert ck.partition is None
+    early = ck.kernel                      # resolver grabbed before first call
+    assert not isinstance(early, Dispatcher)
+    assert early(100) == (326.5, 126)
+    assert ck.partition is not None
+    assert ck.partition.mode == "fused"
+    (seg,) = ck.partition.segments
+    assert seg.kind == "jit"
+    assert seg.nodes == ("variables.x", "variables.a", "variables.b", "variables.u")
+    assert seg.inputs == ("basket.y",)
+    assert seg.outputs == ("variables.u", "variables.a")
+    assert seg.source == ck.source and seg.reasons == {}
+    assert isinstance(ck.kernel, Dispatcher)
+    assert ck.kernel(100) == (326.5, 126)
+    assert early(100) == (326.5, 126)      # early ref still valid post-resolution
