@@ -145,6 +145,20 @@ def _body(i, profile):
     return f"{a_forms[i % len(a_forms)]} + {b_forms[i % len(b_forms)]}"
 
 
+def python_node_indices(n_nodes, k):
+    """Indices of the ``k`` evenly-spaced interior nodes to make non-jittable.
+
+    ``i * (n_nodes // (k + 1))`` for ``i = 1..k``; empty when ``k <= 0``. Each
+    such node's formula gains a ``json.dumps`` first statement that numba cannot
+    type, so ``compile_kernel`` demotes it to a Python step and the surrounding
+    jit nodes fuse into separate segments around it.
+    """
+    if k <= 0:
+        return frozenset()
+    step = n_nodes // (k + 1)
+    return frozenset(i * step for i in range(1, k + 1))
+
+
 _FORMULAS_CACHE = {}
 
 
@@ -170,7 +184,7 @@ def _formulas_dir():
     return d
 
 
-def load_formulas(n_nodes, profile):
+def load_formulas(n_nodes, profile, python_nodes=frozenset()):
     """Return ``[f0 .. f{n-1}]``: N genuinely-distinct arithmetic formulas.
 
     Generated into a real importable module (one function per source line, so
@@ -178,15 +192,27 @@ def load_formulas(n_nodes, profile):
     module path is content-addressed by ``(profile, n_nodes)`` so subprocess
     workers in the compile report regenerate an identical module -> stable
     cross-process cache.
+
+    ``python_nodes`` (a set of node indices) makes those nodes non-jittable:
+    their body keeps the same arithmetic but is prefixed with a ``json.dumps``
+    call numba cannot compile, so ``compile_kernel`` runs them as Python steps.
+    Empty (the default) reproduces the original all-jittable module byte for
+    byte, including its name, so the two paths never share a stale cache.
     """
-    cached = _FORMULAS_CACHE.get((profile, n_nodes))
+    cache_key = (profile, n_nodes, python_nodes)
+    cached = _FORMULAS_CACHE.get(cache_key)
     if cached is not None:
         return cached
-    lines = ["import numpy", "", ""]
+    lines = (["import json", "import numpy", "", ""] if python_nodes
+             else ["import numpy", "", ""])
     for i in range(n_nodes):
-        lines += [f"def f{i}(a, b):", f"    return {_body(i, profile)}", "", ""]
+        lines.append(f"def f{i}(a, b):")
+        if i in python_nodes:
+            lines.append('    json.dumps({"k": 1})')   # untypeable -> Python step
+        lines += [f"    return {_body(i, profile)}", "", ""]
     text = "\n".join(lines)
-    mod_name = f"_ck_bench_formulas_{profile}_{n_nodes}"
+    suffix = "_py" + "-".join(map(str, sorted(python_nodes))) if python_nodes else ""
+    mod_name = f"_ck_bench_formulas_{profile}_{n_nodes}{suffix}"
     path = _formulas_dir() / f"{mod_name}.py"
     # Only (re)write when content actually changes: rewriting bumps the file's
     # mtime, which invalidates numba's source-stamp and defeats the cross-process
@@ -198,7 +224,7 @@ def load_formulas(n_nodes, profile):
     sys.modules[mod_name] = module
     spec.loader.exec_module(module)
     funcs = [getattr(module, f"f{i}") for i in range(n_nodes)]
-    _FORMULAS_CACHE[(profile, n_nodes)] = funcs
+    _FORMULAS_CACHE[cache_key] = funcs
     return funcs
 
 
@@ -212,18 +238,26 @@ def make_formula(fn, kind):
     raise ValueError(kind)
 
 
-def build_graph(n_nodes, kind, formulas):
-    """Chain of ``n_nodes`` distinct nodes; returns ``(graph, required_qual)``."""
+def build_graph(n_nodes, kind, formulas, python_nodes=frozenset()):
+    """Chain of ``n_nodes`` distinct nodes; returns ``(graph, required_qual)``.
+
+    Nodes in ``python_nodes`` keep their plain-Python formula (no ``njit``
+    wrap), so a non-jittable body runs in Python under both CompiledGraph and
+    compile_kernel's discovery. Empty (the default) wraps every node per
+    ``kind``, unchanged.
+    """
+    def formula_for(i):
+        return formulas[i] if i in python_nodes else make_formula(formulas[i], kind)
     specs = [{
         "name": "v0",
         "inputs": {"a": "ext", "b": "ext"},
-        "formula": make_formula(formulas[0], kind),
+        "formula": formula_for(0),
     }]
     for i in range(1, n_nodes):
         specs.append({
             "name": f"v{i}",
             "inputs": {f"v{i - 1}": "vars", "b": "ext"},
-            "formula": make_formula(formulas[i], kind),
+            "formula": formula_for(i),
         })
     graph = Graph({"vars": specs}, external_source_names=["ext"])
     return graph, f"vars.v{n_nodes - 1}"
@@ -307,6 +341,68 @@ def run_perf(n_nodes, size, repeats, profile):
         print(f"  {name:<26}{best / 1e3:10.2f}{med / 1e3:10.2f}{best / fused_best:9.2f}x")
 
 
+# --- segmented orchestration report (the --python-nodes mode) ----------------
+# Injects K evenly-spaced non-jittable nodes into the N-node chain. compile_kernel
+# can no longer fuse the whole graph: its first call discovers the non-jittable
+# nodes and builds a plan of fused @njit segments with Python steps between them.
+# This reports the discovery (first-call) cost and the steady-state per-node cost
+# of the segmented plan against CompiledGraph on the same graph.
+
+def run_python_nodes_mode(n_nodes, size, repeats, profile, k):
+    py_idx = python_node_indices(n_nodes, k)
+    formulas = load_formulas(n_nodes, profile, py_idx)
+    a, b = make_externals(size)
+    ref = reference_numpy(formulas, a, b)
+    assert numpy.all(numpy.isfinite(ref)), "chain diverged -- a formula is amplifying"
+
+    graph, required = build_graph(n_nodes, "njit", formulas, py_idx)
+
+    print(f"compiling segmented kernel for N={n_nodes} nodes, K={k} python nodes "
+          f"at {sorted(py_idx)} (cold cache is slow)...", flush=True)
+    t0 = time.perf_counter()
+    ck = compile_kernel(graph, required)
+    t_compile = time.perf_counter() - t0
+
+    # First call IS discovery: warm-up + probe that resolves the partition and
+    # builds the segmented plan. Every later call runs that plan.
+    t0 = time.perf_counter()
+    first = ck.kernel(a, b)
+    t_first = time.perf_counter() - t0
+
+    rep = ck.partition
+    n_seg = len([s for s in rep.segments if s.kind == "jit"])
+    n_py = len(rep.python_nodes)
+
+    # Correctness: segmented kernel and CompiledGraph must match pure numpy.
+    compiled = graph.compile([required])
+    last_var = {n.variable.qual_name(): n.variable
+                for n in compiled.ordered_nodes}[required]
+    vs0 = Values()
+    compiled.execute({"ext": {"a": a, "b": b}}, vs0)
+    assert numpy.max(numpy.abs(first[0] - ref)) < 1e-9, "segmented kernel mismatch"
+    assert numpy.max(numpy.abs(vs0.get(last_var).value - ref)) < 1e-9, "CompiledGraph mismatch"
+
+    rows = [
+        ("segmented kernel", best_median(lambda: ck.kernel(a, b), repeats)),
+        ("cg_execute", best_median(
+            lambda: compiled.execute({"ext": {"a": a, "b": b}}, Values()), repeats)),
+        ("numpy", best_median(lambda: reference_numpy(formulas, a, b), repeats)),
+    ]
+    seg_best = rows[0][1][0]
+
+    print(f"\nsegmented orchestration, profile={profile}, N={n_nodes} nodes, "
+          f"K={k} python nodes, array size S={size}:")
+    print(f"  mode                   {rep.mode}")
+    print(f"  jit segments           {n_seg}")
+    print(f"  python nodes           {n_py}")
+    print(f"  compile_kernel()       {t_compile:.3f}s")
+    print(f"  first call (discovery) {t_first:.3f}s")
+    print(f"\nhot path, best of {repeats} (microseconds/call):")
+    print(f"  {'path':<26}{'best':>10}{'median':>10}{'vs segmented':>14}")
+    for name, (best, med) in rows:
+        print(f"  {name:<26}{best / 1e3:10.2f}{med / 1e3:10.2f}{best / seg_best:13.2f}x")
+
+
 # --- compile / cache report (his CPUDispatcher-vs-proxy question) ------------
 # Each measurement runs in a fresh subprocess with an isolated NUMBA_CACHE_DIR so
 # the cache is clean and measurable; the same process re-runs warm to show the
@@ -380,6 +476,10 @@ def main():
                         "is dispatch-bound (big fusion win); 'expensive' compute-bound")
     p.add_argument("--compile-report", action="store_true",
                    help="also run the CPUDispatcher-vs-proxy compile/cache comparison")
+    p.add_argument("--python-nodes", type=int, default=0,
+                   help="inject K evenly-spaced non-jittable nodes and run the "
+                        "segmented-orchestration report instead of the fused perf "
+                        "run (default 0: unchanged fused perf run)")
     p.add_argument("--_worker", help=argparse.SUPPRESS)  # internal: one compile measurement
     args = p.parse_args()
 
@@ -392,7 +492,11 @@ def main():
         _compile_worker(args.nodes, args._worker, args.profile)
         return
 
-    run_perf(args.nodes, args.size, args.repeats, args.profile)
+    if args.python_nodes > 0:
+        run_python_nodes_mode(args.nodes, args.size, args.repeats, args.profile,
+                              args.python_nodes)
+    else:
+        run_perf(args.nodes, args.size, args.repeats, args.profile)
     if args.compile_report:
         run_compile_report(args.nodes, args.profile)
 
