@@ -405,6 +405,9 @@ class CompiledKernel:
     @property
     def kernel(self):
         if self._mode == "fused":
+            # Fused is permanent: later signatures go through numba's own
+            # dispatch, and a typing failure there raises as in v1 -- no
+            # segmentation fallback from fused mode.
             return self._fused
         if self._mode == "segmented":
             return self._run_segmented
@@ -442,6 +445,10 @@ class CompiledKernel:
         try:
             return self._plan.run(args)
         except NumbaError:
+            # Deliberately broad: a segment failing to compile for new input
+            # types triggers re-discovery. A NumbaError raised inside a
+            # python-step formula re-raises from re-discovery's own Python
+            # evaluation of the same args, so nothing is masked.
             return self._discover_and_run(args)
 
     def _discover_and_run(self, args):
