@@ -1506,8 +1506,8 @@ def test_plan_replacement_on_new_signature():
     assert ck.kernel(7.0) == ((((7.0 + 1.0) * 2.0 * 3.0) - 4.0) / 2.0,)
 
 
-_SEGMENT_CACHE_SCRIPT = textwrap.dedent("""
-    import json, sys
+_SEGMENT_CACHE_SCRIPT = """
+    import json
     from numbox.core.variable.compile_kernel import compile_kernel
     from numbox.core.variable.variable import Graph
 
@@ -1528,28 +1528,20 @@ _SEGMENT_CACHE_SCRIPT = textwrap.dedent("""
     out = ck.kernel(7.0)
     assert out == (((7.0 + 1.0) * 2.0 * 3.0) - 4.0,), out
     assert ck.partition.mode == "segmented", ck.partition.mode
-    sys.exit(0)
-""")
+    print(out[0])
+"""
 
 
 def test_segment_cache_survives_subprocess_roundtrip(tmp_path):
-    env = {**os.environ, "NUMBA_CACHE_DIR": str(tmp_path / "nbcache")}
-    saved = None
-    for attempt in ("save", "load"):
-        proc = subprocess.run(
-            [sys.executable, "-c", _SEGMENT_CACHE_SCRIPT],
-            capture_output=True, text=True, env=env,
-        )
-        assert proc.returncode == 0, f"{attempt}: {proc.stderr}"
-        nbc = list((tmp_path / "nbcache").rglob("*.nbc"))
-        if attempt == "save":
-            assert nbc, "segment compile produced no cache entries"
-            saved = len(nbc)
-        else:
-            assert len(nbc) == saved, "second process recompiled instead of loading"
+    expected = (((7.0 + 1.0) * 2.0 * 3.0) - 4.0)
+    assert_njit_cache_survives_subprocess_roundtrip(
+        tmp_path,
+        _SEGMENT_CACHE_SCRIPT,
+        [repr(expected)],
+    )
 
 
-def test_shared_digest_identical_segments():
+def test_identical_shape_segments_compile_and_run():
     def n3(v):
         json.dumps({"k": 1})
         return v + 0.0
