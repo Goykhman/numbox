@@ -1100,3 +1100,97 @@ def test_fingerprint_raising_repr_callable_degrades_not_crashes():
     fp, ok = _formula_fingerprint(BoomRepr())   # must not raise
     assert not ok
     assert isinstance(fp, str) and "repr-failed" in fp
+
+
+def _nodes_from(graph, required):
+    compiled = graph.compile(required)
+    external = {v for vs in compiled.required_external_variables.values() for v in vs.values()}
+    return [n for n in compiled.ordered_nodes if n.variable not in external], external
+
+
+def _parallel_chains_graph():
+    # py-chain p1->p2 and jit-chain j1->j2 from one external, joined by jit sink.
+    return Graph(
+        variables_lists={"variables": [
+            {"name": "p1", "inputs": {"x": "ext"}, "formula": lambda x: x + 1.0},
+            {"name": "p2", "inputs": {"p1": "variables"}, "formula": lambda p1: p1 * 2.0},
+            {"name": "j1", "inputs": {"x": "ext"}, "formula": lambda x: x - 1.0},
+            {"name": "j2", "inputs": {"j1": "variables"}, "formula": lambda j1: j1 * 3.0},
+            {"name": "out", "inputs": {"p2": "variables", "j2": "variables"},
+             "formula": lambda p2, j2: p2 + j2},
+        ]},
+        external_source_names=["ext"],
+    )
+
+
+def test_linearize_minimizes_runs_on_parallel_chains():
+    from numbox.core.variable._kernel_partition import build_runs, linearize
+    g = _parallel_chains_graph()
+    nodes, external = _nodes_from(g, ["variables.out"])
+    demoted = {n.variable for n in nodes if n.variable.name in ("p1", "p2")}
+    order = linearize(nodes, demoted)
+    runs = build_runs(order, demoted)
+    assert [kind for kind, _ in runs] == ["python", "jit"]  # 2 runs, not 3
+    # dependencies respected
+    pos = {n.variable.qual_name(): i for i, n in enumerate(order)}
+    for n in order:
+        for inp in n.inputs:
+            if inp.qual_name() in pos:
+                assert pos[inp.qual_name()] < pos[n.variable.qual_name()]
+
+
+def test_linearize_deterministic():
+    from numbox.core.variable._kernel_partition import linearize
+    g = _parallel_chains_graph()
+    nodes, _ = _nodes_from(g, ["variables.out"])
+    demoted = {n.variable for n in nodes if n.variable.name == "j1"}
+    first = [n.variable.qual_name() for n in linearize(nodes, demoted)]
+    second = [n.variable.qual_name() for n in linearize(nodes, demoted)]
+    assert first == second
+
+
+def test_liveness_and_runs():
+    from numbox.core.variable._kernel_partition import build_runs, linearize, segment_liveness
+    g = _parallel_chains_graph()
+    nodes, external = _nodes_from(g, ["variables.out"])
+    by_name = {n.variable.name: n.variable for n in nodes}
+    demoted = {by_name["p1"], by_name["p2"]}
+    order = linearize(nodes, demoted)
+    runs = build_runs(order, demoted)
+    required_vars = [by_name["out"]]
+    jit_run = next(r for kind, r in runs if kind == "jit")
+    live_in, live_out = segment_liveness(jit_run, set(external), required_vars, order)
+    in_names = [v.qual_name() for v in live_in]
+    out_names = [v.qual_name() for v in live_out]
+    assert in_names == sorted(in_names) and out_names == sorted(out_names)
+    assert "ext.x" in in_names and "variables.p2" in in_names
+    assert out_names == ["variables.out"]  # only the required sink escapes
+
+
+def test_plan_run_threads_values():
+    from numbox.core.variable._kernel_partition import _JitStep, _Plan, _PyStep
+    ax = Variable(name="x", source="ext")
+    av = Variable(name="v", source="calc")
+    aw = Variable(name="w", source="calc")
+    plan = _Plan(
+        steps=(
+            _JitStep(dispatcher=lambda x: (x + 1.0,), in_vars=(ax,), out_vars=(av,)),
+            _PyStep(var=aw, py_callable=lambda v: v * 10.0, in_vars=(av,)),
+        ),
+        external_vars=(ax,),
+        output_vars=(aw, av),
+    )
+    assert plan.run((2.0,)) == (30.0, 3.0)
+
+
+def test_partition_report_str_and_python_nodes():
+    from numbox.core.variable._kernel_partition import PartitionReport, Segment
+    rep = PartitionReport(mode="segmented", segments=(
+        Segment(kind="jit", nodes=("calc.a",), inputs=("ext.x",), outputs=("calc.a",),
+                source="def _kernel(x):\n    return (x,)\n", reasons={}),
+        Segment(kind="python", nodes=("calc.b",), inputs=("calc.a",), outputs=("calc.b",),
+                source=None, reasons={"calc.b": "TypingError: nope"}),
+    ))
+    assert rep.python_nodes == {"calc.b"}
+    text = str(rep)
+    assert "segmented" in text and "calc.b" in text and "TypingError: nope" in text
