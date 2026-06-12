@@ -174,8 +174,15 @@ _REASON_LIMIT = 200
 
 
 def _error_reason(exc):
-    first = str(exc).splitlines()[0] if str(exc) else ""
-    return f"{type(exc).__name__}: {first[:_REASON_LIMIT]}"
+    """First informative line of a numba error -- numba prefixes typing
+    failures with a generic pipeline line, which would make every reason
+    in a PartitionReport read identically."""
+    lines = [ln.strip() for ln in str(exc).splitlines() if ln.strip()]
+    informative = next(
+        (ln for ln in lines if not ln.startswith("Failed in nopython mode pipeline")),
+        lines[0] if lines else "",
+    )
+    return f"{type(exc).__name__}: {informative[:_REASON_LIMIT]}"
 
 
 def _untypeable_reason(node, values):

@@ -6,7 +6,7 @@ import textwrap
 
 import numpy as np
 import pytest
-from numba import njit
+from numba import njit, cfunc, vectorize
 from numba.core.dispatcher import Dispatcher
 from numba.core.errors import TypingError
 from numba.core.types import float64
@@ -1325,9 +1325,14 @@ def test_discover_runtime_error_propagates():
         discover(compiled.ordered_nodes, external, values, by_var)
 
 
-def test_discover_exotic_cres_via_shim():
+@pytest.mark.parametrize("make_formula", [
+    lambda: cres(float64(float64))(lambda x: x * 5.0),
+    lambda: cfunc(float64(float64))(lambda x: x * 5.0),
+    lambda: vectorize(["float64(float64)"])(lambda x: x * 5.0),
+], ids=["cres", "cfunc", "dufunc"])
+def test_discover_exotic_via_shim(make_formula):
     from numbox.core.variable._kernel_partition import discover
-    fn = cres(float64(float64))(lambda x: x * 5.0)
+    fn = make_formula()
     g = Graph(
         variables_lists={"calc": [
             {"name": "a", "inputs": {"x": "ext"}, "formula": fn},
@@ -1340,3 +1345,41 @@ def test_discover_exotic_cres_via_shim():
     assert demoted == {}
     by_name = {n.variable.qual_name(): n.variable for n in compiled.ordered_nodes}
     assert values[by_name["calc.a"]] == 15.0
+
+
+def test_discover_reason_informative_for_typing_failure():
+    from numbox.core.variable._kernel_partition import discover
+
+    def probe_fails(v):
+        return v.hex() and 0.0 or 3.0
+
+    g = Graph(
+        variables_lists={"calc": [
+            {"name": "a", "inputs": {"x": "ext"}, "formula": probe_fails},
+        ]},
+        external_source_names=["ext"],
+    )
+    compiled, external, by_var = _bindings_by_var(g, ["calc.a"])
+    values = {next(iter(external)): 2.0}
+    demoted = discover(compiled.ordered_nodes, external, values, by_var)
+    reasons = {v.qual_name(): r for v, r in demoted.items()}
+    assert set(reasons) == {"calc.a"}
+    assert not reasons["calc.a"].endswith("(step: nopython frontend)")
+    by_name = {n.variable.qual_name(): n.variable for n in compiled.ordered_nodes}
+    assert values[by_name["calc.a"]] == 3.0
+
+
+def test_discover_exotic_untypeable_input_raises():
+    from numbox.core.variable._kernel_partition import discover
+    fn = cres(float64(float64))(lambda v: v * 2.0)
+    g = Graph(
+        variables_lists={"calc": [
+            {"name": "a", "inputs": {"x": "ext"}, "formula": lambda x: _Opaque(x)},
+            {"name": "b", "inputs": {"a": "calc"}, "formula": fn},
+        ]},
+        external_source_names=["ext"],
+    )
+    compiled, external, by_var = _bindings_by_var(g, ["calc.b"])
+    values = {next(iter(external)): 1.0}
+    with pytest.raises(TypeError, match="no Python fallback"):
+        discover(compiled.ordered_nodes, external, values, by_var)
