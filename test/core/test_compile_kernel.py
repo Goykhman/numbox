@@ -1232,3 +1232,15 @@ def test_generate_segment_body():
     assert [p[2] for p in params] == ["basket_y"]
     assert outputs == ["variables.a", "variables.x"]
     assert set(bindings) == {"f_variables_x", "f_variables_a"}
+
+
+def test_generate_segment_body_empty_run():
+    from numbox.core.variable.compile_kernel import _generate_segment_body
+    g = _diamond_graph()
+    compiled = g.compile(["variables.u"])
+    idents = _assign_identifiers([n.variable for n in compiled.ordered_nodes])
+    external = {v for vs in compiled.required_external_variables.values() for v in vs.values()}
+    y = next(iter(external))
+    source, bindings, params, outputs = _generate_segment_body([], (y,), (y,), idents)
+    assert source == f"def _kernel({idents[y]}):\n    return ({idents[y]},)\n"
+    assert bindings == {}

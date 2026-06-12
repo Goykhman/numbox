@@ -225,8 +225,18 @@ def _check_formula_arity(formula, n_inputs, qual_name):
         ) from None
 
 
+def _assemble_source(params, lines, out_ids):
+    """Assemble the canonical kernel source; both the fused kernel and every
+    segment must share this exact shape so cache digests cannot drift."""
+    sig = ", ".join(ident for _, _, ident in params)
+    ret = f"    return ({', '.join(out_ids)},)"
+    body = ("\n".join(lines) + "\n") if lines else ""
+    return f"def _kernel({sig}):\n{body}{ret}\n"
+
+
 def _emit_lines(nodes, skip, idents, bindings):
-    """Emit one body line per node (excluding `skip`), filling `bindings`."""
+    """Emit one body line per node (excluding `skip`), filling `bindings`;
+    raises on a missing formula, a non-callable formula, or an arity mismatch."""
     lines = []
     for node in nodes:
         var = node.variable
@@ -262,10 +272,7 @@ def _generate_segment_body(run_nodes, live_in, live_out, idents):
     lines = _emit_lines(run_nodes, set(), idents, bindings)
     outputs = [v.qual_name() for v in live_out]
     out_ids = [idents[v] for v in live_out]
-    sig = ", ".join(ident for _, _, ident in params)
-    ret = f"    return ({', '.join(out_ids)},)"
-    body = ("\n".join(lines) + "\n") if lines else ""
-    source = f"def _kernel({sig}):\n{body}{ret}\n"
+    source = _assemble_source(params, lines, out_ids)
     return source, bindings, params, outputs
 
 
@@ -307,10 +314,7 @@ def _generate_body(compiled, required, idents):
         outputs.append(q)
         out_ids.append(idents[var])
 
-    sig = ", ".join(ident for _, _, ident in params)
-    ret = f"    return ({', '.join(out_ids)},)"
-    body = ("\n".join(lines) + "\n") if lines else ""
-    source = f"def _kernel({sig}):\n{body}{ret}\n"
+    source = _assemble_source(params, lines, out_ids)
     return source, bindings, params, outputs
 
 
