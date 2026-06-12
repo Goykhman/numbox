@@ -1,16 +1,24 @@
-"""Compile a `core.variable` Variable graph into one fused @njit kernel.
+"""Compile a `core.variable` Variable graph into fused @njit kernel(s).
 
 Alongside `core.work` (a structref graph), this turns a `Graph`/`CompiledGraph`
-into a single straight-line @njit function whose interior nodes are SSA
-temporaries. No per-node type info is needed: numba infers every interior type
-from the kernel's runtime argument types, provided each formula is njit-able
-(plain-Python formulas are auto-wrapped with njit()).
+into JIT-compiled straight-line code. When every formula is njit-able the
+whole graph becomes a single fused @njit function whose interior nodes are SSA
+temporaries (no per-node type info needed: numba infers every interior type
+from the kernel's runtime argument types). When some formulas are not
+njit-able, the first call detects them automatically -- numba compile errors
+demote a node to plain Python, runtime errors always propagate -- and a Python
+master orchestrates fused @njit segments around the demoted nodes, with a
+fusion-maximizing linearization choosing the segment boundaries. The resulting
+partition is described by `CompiledKernel.partition` (a PartitionReport with
+per-node demotion reasons); formulas with no Python fallback
+(cres/CompileResultWAP, CFunc, DUFunc) are always treated as jittable.
 
-The on-disk cache is content-addressed: the digest fingerprints each formula's
-code, constants, default arguments, closure-cell values, referenced globals,
-and the kernel's effective jit flags, so a stale binary is never reused and two
-distinct kernels never collide. A formula with no canonical fingerprint forces
-the kernel uncached (no anchor, no numba cache) -- never reused, never wrong.
+The on-disk cache is content-addressed per compiled unit (the fused kernel, or
+each jit segment): the digest fingerprints each formula's code, constants,
+default arguments, closure-cell values, referenced globals, and the kernel's
+effective jit flags, so a stale binary is never reused and two distinct
+kernels never collide. A formula with no canonical fingerprint forces its unit
+uncached (no anchor, no numba cache) -- never reused, never wrong.
 """
 import hashlib
 import inspect
@@ -548,6 +556,23 @@ def compile_kernel(graph, required, *, jit_options=None, cache=None):
     stale. When caching is enabled, a content-addressed anchor `.py` file is
     written under numba's cache directory; with caching off (or the cache
     dir unwritable, which warns and degrades) nothing is written.
+
+    Non-jittable formulas: the first call resolves the execution mode. If the
+    fully fused kernel cannot be typed for the actual argument types, each
+    node is probed against the real intermediate values; nodes whose formulas
+    fail to *compile* (or whose input values numba cannot type) run in plain
+    Python, and the jittable remainder is fused into segments orchestrated
+    from Python. `CompiledKernel.partition` describes the result, including
+    per-node demotion reasons; it is `None` before the first call. Runtime
+    errors never demote -- they propagate. `CompiledKernel.kernel` is the
+    hot-path callable: the bare @njit dispatcher once the graph resolves
+    fully fused, the Python master when segmented. A later call whose types
+    break a segment re-learns and replaces the partition (one active plan);
+    once fully fused, fused is permanent (a later-signature typing failure
+    raises, as in v1). The discovery call computes jit-node values through
+    per-node dispatchers while later calls use fused segments -- identical
+    under default IEEE semantics, but non-default jit_options such as
+    fastmath could in principle differ across fusion boundaries.
     """
     required = [required] if isinstance(required, str) else list(required)
     for entry in required:

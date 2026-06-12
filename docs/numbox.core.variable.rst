@@ -226,24 +226,28 @@ Overview
 Alongside :meth:`numbox.core.variable.variable.Graph.compile` (which produces a
 :class:`numbox.core.variable.variable.CompiledGraph` evaluated node-by-node in pure Python),
 :func:`numbox.core.variable.compile_kernel.compile_kernel` compiles a `Graph` into
-*one* fused ``@njit`` kernel for a requested set of variables. It does not replace
-`core.work` or `CompiledGraph`; it is an additional, fully-JIT'ed evaluation path.
+fused ``@njit`` kernel code for a requested set of variables. It does not replace
+`core.work` or `CompiledGraph`; it is an additional, JIT'ed evaluation path.
 
-The fused kernel takes the required external inputs as positional arguments and returns
-the requested variables as a tuple, with every interior graph node lowered to an SSA
-temporary inside the single compiled function. No per-node type information needs to be
-supplied: numba infers every interior type from the runtime argument types, provided each
-`formula` is njit-able. Plain-Python formulas are auto-wrapped with ``njit()``.
+When every `formula` is njit-able the graph fuses into *one* ``@njit`` kernel that takes
+the required external inputs as positional arguments and returns the requested variables
+as a tuple, with every interior graph node lowered to an SSA temporary inside the single
+compiled function. No per-node type information needs to be supplied: numba infers every
+interior type from the runtime argument types. Plain-Python formulas are auto-wrapped with
+``njit()``. When some formulas are not njit-able for the actual argument types, the first
+call detects them and the graph is split into ``@njit`` segments orchestrated from Python
+(see :ref:`compile_kernel_non_jittable` below).
 
 The call returns a :class:`numbox.core.variable.compile_kernel.CompiledKernel`. It exposes
-the raw ``.kernel`` (the bare numba dispatcher — positional in, tuple out — for the
-zero-overhead hot path) and a dict-in / dict-out ``.execute`` convenience that mirrors
+``.kernel`` (the hot-path callable — positional in, tuple out: the bare numba dispatcher
+once the graph resolves fully fused, the Python master when the graph is segmented around
+non-jittable nodes) and a dict-in / dict-out ``.execute`` convenience that mirrors
 :meth:`numbox.core.variable.variable.CompiledGraph.execute`. The qualified names of the
 kernel's positional inputs and tuple outputs are available as ``.params`` and ``.outputs``,
 the generated kernel text as ``.source``, and the per-variable temporary identifiers as
 ``.identifiers``.
 
-This is a v1 fused path with two deliberate limitations: it does not honor the
+This fused path has two deliberate limitations: it does not honor the
 `cacheable` memoization of individual nodes, and it offers no incremental recompute of
 only the affected nodes. Use :class:`numbox.core.variable.variable.CompiledGraph` (or the
 `core.work` graph) when either of those is needed.
@@ -297,8 +301,54 @@ A graph can be compiled to a fused kernel as follows:
     assert ck.kernel(100) == (126,)
 
 Here the dict-in / dict-out ``ck.execute`` looks up the required external value
-``basket.y`` and returns the requested ``variables.u``, while the bare ``ck.kernel``
+``basket.y`` and returns the requested ``variables.u``, while ``ck.kernel``
 is called positionally with the external input and returns the output tuple directly.
+
+.. _compile_kernel_non_jittable:
+
+Graphs with non-jittable nodes
+******************************
+
+``compile_kernel`` detects non-jittable formulas automatically at the first
+call: it first tries to compile the fully fused kernel for the actual
+argument types; if that fails, it probes each node against the real
+intermediate values, runs the offenders in plain Python, and fuses the
+jittable remainder into as few ``@njit`` segments as a greedy linearization
+allows. A Python master then threads values between segments and Python
+nodes. Compile-time failures demote a node; runtime errors always propagate.
+
+.. code-block:: python
+
+    import json
+
+    from numbox.core.variable.compile_kernel import compile_kernel
+    from numbox.core.variable.variable import Graph
+
+    def n3(v):
+        json.dumps({"k": 1})    # no nopython lowering for the json module
+        return v * 3.0
+
+    graph = Graph(
+        variables_lists={"calc": [
+            {"name": "n1", "inputs": {"x": "ext"}, "formula": lambda x: x + 1.0},
+            {"name": "n2", "inputs": {"n1": "calc"}, "formula": lambda n1: n1 * 2.0},
+            {"name": "n3", "inputs": {"n2": "calc"}, "formula": n3},
+            {"name": "n4", "inputs": {"n3": "calc"}, "formula": lambda n3: n3 - 4.0},
+            {"name": "n5", "inputs": {"n4": "calc"}, "formula": lambda n4: n4 / 2.0},
+        ]},
+        external_source_names=["ext"],
+    )
+    ck = compile_kernel(graph, "calc.n5")
+    ck.kernel(7.0)              # first call: probes, partitions, still correct
+    print(str(ck.partition))    # 2 jit segments around the python n3, with reasons
+
+``ck.partition`` is ``None`` until the first call resolves the mode; a fully
+fused graph reports a single jit segment. Each jit segment is cached
+content-addressed on disk exactly like a v1 kernel; the learned partition
+itself is per-process. If a later call's types break a segment, the partition
+is re-learned for those values and replaces the previous plan — workloads
+alternating between type families whose partitions differ re-pay discovery on
+each alternation.
 
 .. automodule:: numbox.core.variable.compile_kernel
    :members:
