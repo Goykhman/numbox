@@ -9,6 +9,10 @@ only numba interaction is Dispatcher.compile probes and typeof.
 from bisect import insort
 from dataclasses import dataclass, field
 
+from numba import njit, typeof
+from numba.core.dispatcher import Dispatcher
+from numba.core.errors import NumbaError
+
 
 @dataclass(frozen=True)
 class Segment:
@@ -164,3 +168,75 @@ def segment_liveness(run_nodes, external, required_vars, order):
     live_out = {v for v in produced if v in after or v in set(required_vars)}
     key = lambda v: v.qual_name()   # noqa: E731 - tiny local sort key
     return tuple(sorted(live_in, key=key)), tuple(sorted(live_out, key=key))
+
+
+_REASON_LIMIT = 200
+
+
+def _error_reason(exc):
+    first = str(exc).splitlines()[0] if str(exc) else ""
+    return f"{type(exc).__name__}: {first[:_REASON_LIMIT]}"
+
+
+def _untypeable_reason(node, values):
+    for inp in node.inputs:
+        try:
+            typeof(values[inp])
+        except (ValueError, TypeError):
+            return (
+                f"input '{inp.qual_name()}' value of type "
+                f"{type(values[inp]).__name__} is not numba-typeable"
+            )
+    return None
+
+
+def _call_exotic(binding, args, arg_types):
+    """Evaluate a CompileResultWAP/CFunc/DUFunc formula through a one-line
+    @njit shim (the same global-binding shape segments use). No Python
+    fallback exists for these, so a NumbaError here propagates."""
+    names = ", ".join(f"a{i}" for i in range(len(args)))
+    ns = {"_formula": binding}
+    exec(f"def _shim({names}):\n    return _formula({names})\n", ns)  # nosec B102
+    shim = njit(ns["_shim"])
+    shim.compile(arg_types)
+    return shim(*args)
+
+
+def discover(ordered_nodes, external, values, bindings_by_var):
+    """One-pass warm-up + probe.
+
+    Mutates `values` ({Variable: value}, pre-seeded with externals) to hold
+    every node's value; returns {Variable: reason} for demoted nodes.
+    Numba *compile* errors demote; runtime errors propagate.
+    """
+    demoted = {}
+    for node in ordered_nodes:
+        var = node.variable
+        if var in external:
+            continue
+        args = [values[inp] for inp in node.inputs]
+        binding = bindings_by_var[var]
+        reason = _untypeable_reason(node, values)
+        arg_types = None
+        if reason is None:
+            arg_types = tuple(typeof(a) for a in args)
+            if isinstance(binding, Dispatcher):
+                try:
+                    binding.compile(arg_types)
+                except NumbaError as e:
+                    reason = _error_reason(e)
+            else:
+                values[var] = _call_exotic(binding, args, arg_types)
+                continue
+        elif not isinstance(binding, Dispatcher):
+            raise TypeError(
+                f"{var.qual_name()!r}: formula {binding!r} has no Python fallback "
+                f"and {reason}"
+            )
+        if reason is None:
+            values[var] = binding(*args)
+        else:
+            demoted[var] = reason
+            py = getattr(var.formula, "py_func", var.formula)
+            values[var] = py(*args)
+    return demoted

@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -1244,3 +1245,98 @@ def test_generate_segment_body_empty_run():
     source, bindings, params, outputs = _generate_segment_body([], (y,), (y,), idents)
     assert source == f"def _kernel({idents[y]}):\n    return ({idents[y]},)\n"
     assert bindings == {}
+
+
+class _Opaque:
+    """A value numba.typeof cannot type; arithmetic works in Python."""
+    def __init__(self, v):
+        self.v = v
+
+
+def _bindings_by_var(graph, required):
+    compiled = graph.compile(required)
+    external = {v for vs in compiled.required_external_variables.values() for v in vs.values()}
+    idents = _assign_identifiers([n.variable for n in compiled.ordered_nodes])
+    _, bindings, _, _ = _generate_body(compiled, required, idents)
+    by_var = {
+        n.variable: bindings["f_" + idents[n.variable]]
+        for n in compiled.ordered_nodes if n.variable not in external
+    }
+    return compiled, external, by_var
+
+
+def test_discover_demotes_unjittable_and_keeps_values():
+    from numbox.core.variable._kernel_partition import discover
+
+    def uses_json(v):
+        json.dumps({"k": 1})
+        return v * 3.0
+
+    g = Graph(
+        variables_lists={"calc": [
+            {"name": "a", "inputs": {"x": "ext"}, "formula": lambda x: x + 1.0},
+            {"name": "b", "inputs": {"a": "calc"}, "formula": uses_json},
+            {"name": "c", "inputs": {"b": "calc"}, "formula": lambda b: b - 0.5},
+        ]},
+        external_source_names=["ext"],
+    )
+    compiled, external, by_var = _bindings_by_var(g, ["calc.c"])
+    ext_x = next(iter(external))
+    values = {ext_x: 2.0}
+    demoted = discover(compiled.ordered_nodes, external, values, by_var)
+    reasons = {v.qual_name(): r for v, r in demoted.items()}
+    assert set(reasons) == {"calc.b"}
+    assert reasons["calc.b"].startswith("TypingError:")
+    by_name = {n.variable.qual_name(): n.variable for n in compiled.ordered_nodes}
+    assert values[by_name["calc.c"]] == (2.0 + 1.0) * 3.0 - 0.5
+
+
+def test_discover_demotes_object_chain():
+    from numbox.core.variable._kernel_partition import discover
+    g = Graph(
+        variables_lists={"calc": [
+            {"name": "a", "inputs": {"x": "ext"}, "formula": lambda x: _Opaque(x)},
+            {"name": "b", "inputs": {"a": "calc"}, "formula": lambda a: a.v * 2.0},
+            {"name": "c", "inputs": {"b": "calc"}, "formula": lambda b: b + 1.0},
+        ]},
+        external_source_names=["ext"],
+    )
+    compiled, external, by_var = _bindings_by_var(g, ["calc.c"])
+    values = {next(iter(external)): 4.0}
+    demoted = discover(compiled.ordered_nodes, external, values, by_var)
+    reasons = {v.qual_name(): r for v, r in demoted.items()}
+    assert set(reasons) == {"calc.a", "calc.b"}
+    assert "is not numba-typeable" in reasons["calc.b"]
+    by_name = {n.variable.qual_name(): n.variable for n in compiled.ordered_nodes}
+    assert values[by_name["calc.c"]] == 4.0 * 2.0 + 1.0
+
+
+def test_discover_runtime_error_propagates():
+    from numbox.core.variable._kernel_partition import discover
+    g = Graph(
+        variables_lists={"calc": [
+            {"name": "a", "inputs": {"x": "ext"}, "formula": lambda x: x / 0},
+        ]},
+        external_source_names=["ext"],
+    )
+    compiled, external, by_var = _bindings_by_var(g, ["calc.a"])
+    values = {next(iter(external)): 1}
+    with pytest.raises(ZeroDivisionError):
+        discover(compiled.ordered_nodes, external, values, by_var)
+
+
+def test_discover_exotic_cres_via_shim():
+    from numbox.core.variable._kernel_partition import discover
+    fn = cres(float64(float64))(lambda x: x * 5.0)
+    g = Graph(
+        variables_lists={"calc": [
+            {"name": "a", "inputs": {"x": "ext"}, "formula": fn},
+        ]},
+        external_source_names=["ext"],
+    )
+    compiled, external, by_var = _bindings_by_var(g, ["calc.a"])
+    values = {next(iter(external)): 3.0}
+    demoted = discover(compiled.ordered_nodes, external, values, by_var)
+    assert demoted == {}
+    by_name = {n.variable.qual_name(): n.variable for n in compiled.ordered_nodes}
+    assert values[by_name["calc.a"]] == 15.0
