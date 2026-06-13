@@ -116,13 +116,16 @@ def _linearize_from(nodes, demoted, start_jit):
 
 
 def linearize(nodes, demoted):
-    """Topological order clustering same-color nodes into few long runs.
+    """Topological order clustering same-color nodes into minimal runs.
 
     Greedy color-sticky Kahn (drain the current color while possible,
     deterministic qual_name tie-break), evaluated from both possible
     starting colors; the candidate with fewer runs wins (jit-start on a
-    tie). Exact run-count minimization is NP-hard; this is the documented
-    heuristic.
+    tie). For two colors this is exactly optimal: starting from color c,
+    run i holds precisely the nodes whose longest color-alternating
+    ancestor chain spans i runs, so the run count meets the lower bound
+    of 1 + the maximum number of color alternations along any directed
+    path.
     """
     jit_first = _linearize_from(nodes, demoted, start_jit=True)
     py_first = _linearize_from(nodes, demoted, start_jit=False)

@@ -313,9 +313,11 @@ Graphs with non-jittable nodes
 call: it first tries to compile the fully fused kernel for the actual
 argument types; if that fails, it probes each node against the real
 intermediate values, runs the offenders in plain Python, and fuses the
-jittable remainder into as few ``@njit`` segments as a greedy linearization
-allows. A Python master then threads values between segments and Python
-nodes. Compile-time failures demote a node; runtime errors always propagate.
+jittable remainder into the minimal number of ``@njit`` segments any
+topological order permits (one plus the maximum number of jit/Python
+alternations along a dependency path). A Python master then threads values
+between segments and Python nodes. Compile-time failures demote a node;
+runtime errors always propagate.
 
 .. code-block:: python
 

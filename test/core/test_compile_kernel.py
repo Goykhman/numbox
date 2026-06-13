@@ -13,7 +13,7 @@ from numbox.core.variable.compile_kernel import (
     _sanitize, _assign_identifiers, _wrap_formula, _generate_body, _compile,
     compile_kernel, CompiledKernel,
 )
-from numbox.core.variable.variable import Variable, Graph, Values
+from numbox.core.variable.variable import CompiledNode, Variable, Graph, Values
 from numbox.utils.highlevel import cres
 from test.auxiliary_utils import assert_njit_cache_survives_subprocess_roundtrip
 
@@ -1557,3 +1557,31 @@ def test_identical_shape_segments_compile_and_run():
     ck = compile_kernel(g, "calc.b", cache=False)
     assert ck.kernel(3.0) == (3.0 * 2.0 * 2.0,)
     assert ck.kernel(3.0) == (3.0 * 2.0 * 2.0,)
+
+
+def test_linearize_run_count_is_optimal_bruteforce():
+    import itertools
+    import random
+
+    from numbox.core.variable._kernel_partition import build_runs, linearize
+
+    rng = random.Random(11)
+    for _ in range(300):
+        n = rng.randint(2, 6)
+        edges = [(u, v) for u in range(n) for v in range(u + 1, n) if rng.random() < 0.3]
+        colors = [rng.randint(0, 1) for _ in range(n)]
+        vars_ = [Variable(name=f"v{i}", source="s") for i in range(n)]
+        nodes = [
+            CompiledNode(variable=vars_[i], inputs=[vars_[u] for u, v in edges if v == i])
+            for i in range(n)
+        ]
+        demoted = {vars_[i] for i in range(n) if colors[i] == 1}
+        greedy_runs = len(build_runs(linearize(nodes, demoted), demoted))
+        best = None
+        for perm in itertools.permutations(range(n)):
+            pos = {v: i for i, v in enumerate(perm)}
+            if any(pos[u] > pos[v] for u, v in edges):
+                continue
+            runs = 1 + sum(1 for a, b in zip(perm, perm[1:]) if colors[a] != colors[b])
+            best = runs if best is None else min(best, runs)
+        assert greedy_runs == best, (edges, colors, greedy_runs, best)
