@@ -73,34 +73,6 @@ The variable specification for `inputs` (if any) includes both the names of the 
 required to calculate the given variable via the function given by the `formula`,
 as well as the namespaces where these variables are going to be looked for in.
 
-Graph end nodes, located at the edge of the graph (a.k.a., leaf nodes) have neither `inputs`
-nor `formula` in their specifications. Specifying `formula` without `inputs`
-will not result in an exception, accommodating for the case of a function
-that computes and returns a value independent of any input parameters.
-It is also possible to specify `inputs`
-but no formula, which technically defines the placement of the node
-on the graph but leaves it up to the developer to defer specifying the node's calculation
-logic until later in the runtime.
-
-The variable can be specified as `cacheable` if its value calculated for the given tuple of
-arguments can be cached and later retrieved without re-calculation provided
-the arguments have not changed. The arguments types of the corresponding `formula` then need to be hashable -
-custom type sub-classing with its own `__hash__` might be needed in certain cases, thereby providing the definition
-of the identity of the arguments' values.
-When `cacheable=True` (by default it is `False`), the graph will avoid recalculation of the
-value provided the inputs haven't changed. It is not recommended to abuse the cache, especially
-for the continuous or large-cardinality spaces of identities of the parameters of the node's `formula`.
-
-It is worth noting here that the `cacheable` key is a rather brute force way
-to avoid identical re-computations.
-It is completely unrelated to the graph's dependency structure.
-On the other hand, the graph's `recompute`
-method, discussed below, only recomputes the values of variables that are dependent on the nodes
-that have been updated. That is, the strategy of the `recompute` method
-is determined by the graph's topology only
-and is independent of the `cacheable` specifications of the nodes'
-variables.
-
 Names of the 'external' sources (of data values) need to be given to the `Graph` as well,
 via the `external_source_names` argument.
 When the :class:`numbox.core.variable.variable.Graph` is compiled

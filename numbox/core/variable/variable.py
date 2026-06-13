@@ -64,7 +64,6 @@ class VarSpec(VarSpecBase, total=False):
     inputs: dict[str, str]
     formula: Callable
     metadata: str
-    cacheable: bool
 
 
 VarValue: TypeAlias = Any
@@ -155,18 +154,12 @@ class Variable:
     value of this `Variable` from its inputs.
     :param metadata: any possible metadata associated with
     this variable.
-    :param cacheable: (default `False`) when `True`, the
-    corresponding `Value` (see below) will be cached during
-    calculation. When attempting to recompute with the same
-    inputs, cached value will be returned instead.
-    Use sparingly!
     """
     name: str
     source: str = field(default="")
     inputs: Mapping[str, str] = field(default_factory=lambda: {})
     formula: Callable = field(default=None)
     metadata: str | None = field(default=None)
-    cacheable: bool = field(default=False)
 
     def __hash__(self):
         return hash((self.source, self.name))
@@ -351,20 +344,15 @@ class CompiledGraph:
         for node in nodes:
             if node.variable.formula is None:
                 continue
-            args = tuple(values.get(input_).value for input_ in node.inputs)
-            if any(arg is _null for arg in args):
-                raise RuntimeError(f"Uninitialized input for {node.variable}, args = {args}")
-            cacheable = node.variable.cacheable
-            if cacheable:
-                cache_key = (node.variable, args)
-                if cache_key in values.cache:
-                    values.get(node.variable).value = values.cache[cache_key]
-                    continue
+            args = [_null] * len(node.inputs)
+            for i, input_ in enumerate(node.inputs):
+                arg = values.get(input_).value
+                if arg is _null:
+                    raise RuntimeError(f"Uninitialized input for {node.variable}")
+                args[i] = arg
             if self.debug:
                 print(f"Calculating {node}\nwith metadata\n{node.variable.metadata}", file=sys.stderr)
             result = node.variable.formula(*args)
-            if cacheable:
-                values.cache[cache_key] = result  # noqa
             values.get(node.variable).value = result
 
     def recompute(self, changed: dict[str, dict[str, VarValue]], values: Storage):
