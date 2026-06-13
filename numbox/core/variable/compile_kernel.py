@@ -398,7 +398,8 @@ class CompiledKernel:
                     the first call resolves the mode).
     """
 
-    def __init__(self, kernel, params, outputs, source, identifiers, ctx=None):
+    def __init__(self, kernel, params, outputs, source, identifiers, ctx,
+                 required_vars, external_vars):
         self._fused = kernel
         self._mode = "virgin"
         self._plan = None
@@ -409,6 +410,8 @@ class CompiledKernel:
         self.outputs = list(outputs)
         self.source = source
         self.identifiers = identifiers
+        self._required_vars = required_vars
+        self._external_vars = external_vars
 
     @property
     def kernel(self):
@@ -610,16 +613,15 @@ def compile_kernel(graph, required, *, jit_options=None, cache=None):
         n.variable: bindings["f_" + idents[n.variable]]
         for n in compiled.ordered_nodes if n.variable not in external
     }
-    required_vars = [
-        next(n.variable for n in compiled.ordered_nodes if n.variable.qual_name() == q)
-        for q in outputs
-    ]
+
+    def _registry_var(qual):
+        src, _, name = qual.rpartition(QUAL_SEP)
+        return graph.registry[src][name]
+
+    required_vars = [_registry_var(q) for q in outputs]
+    external_vars = [graph.registry[src][name] for src, name, _ in params]
     ctx = (compiled, idents, bindings_by_var, jit_options, cache, external)
     identifiers = {v.qual_name(): ident for v, ident in idents.items()}
-    ck = CompiledKernel(kernel, params, outputs, source, identifiers, ctx)
-    ck._required_vars = required_vars
-    ck._external_vars = [
-        next(v for v in external if v.source == src and v.name == name)
-        for src, name in ck._param_keys
-    ]
-    return ck
+    return CompiledKernel(
+        kernel, params, outputs, source, identifiers, ctx, required_vars, external_vars
+    )
