@@ -26,8 +26,10 @@ class Namespace(ABC):
     def __contains__(self, key: str) -> bool:
         """
         :param key: un-qualified name of the `Variable`
-        It is qualified with `self.name` - the name of this
-        `Namespace` namespace that the `Variable` belongs to.
+        searched for in this namespace.
+        If `in` thereby returns True, it means that the
+        found `Variable` is qualified with `self.name`,
+        the name of this `Namespace` namespace.
         """
         return key in self._variables
 
@@ -41,7 +43,6 @@ class Namespace(ABC):
 
 class Storage(Protocol):
     _values: dict['Variable', 'Value']
-    cache: dict[tuple['Variable', tuple[Any, ...]], 'VarValue']
 
     def get(self, variable: 'Variable') -> 'Value':
         """
@@ -62,7 +63,6 @@ class VarSpec(VarSpecBase, total=False):
     inputs: dict[str, str]
     formula: Callable
     metadata: str
-    cacheable: bool
 
 
 VarValue: TypeAlias = Any
@@ -150,20 +150,15 @@ class Variable:
     inputs (which are names of other `Variable` instances) to
     names of their `Namespace`s.
     :param formula: (optional) function that calculates the
-    value of this `Variable` from its sources.
+    value of this `Variable` from its inputs.
     :param metadata: any possible metadata associated with
     this variable.
-    :param cacheable: (default `False`) when `True`, the
-    corresponding `Value` (see below) will be cached during
-    calculation. When attempting to recompute with the same
-    inputs, cached value will be returned instead. Use sparingly!
     """
     name: str
     source: str = field(default="")
     inputs: Mapping[str, str] = field(default_factory=lambda: {})
     formula: Callable = field(default=None)
     metadata: str | None = field(default=None)
-    cacheable: bool = field(default=False)
 
     def __hash__(self):
         return hash((self.source, self.name))
@@ -216,7 +211,7 @@ class Value:
     `Values` storage.
     """
     variable: Variable
-    value: VarValue | _Null = field(default_factory=lambda: _null)
+    value: VarValue | _Null = field(default=_null)
 
 
 class Values:
@@ -224,7 +219,6 @@ class Values:
     will be held here. """
     def __init__(self):
         self._values: dict[Variable, Value] = {}
-        self.cache: dict[tuple['Variable', tuple[Any, ...]], VarValue] = {}
 
     def get(self, variable: Variable) -> Value:
         if variable not in self._values:
@@ -257,6 +251,7 @@ class CompiledGraph:
     required_external_variables: dict[str, dict[str, Variable]]
     debug: bool = False
     dependents: dict[Variable, list[CompiledNode]] = field(default_factory=lambda: {})
+    affected_cache: dict[frozenset[Variable], list[CompiledNode]] = field(default_factory=lambda: {})
 
     def __post_init__(self):
         for node in self.ordered_nodes:
@@ -296,7 +291,7 @@ class CompiledGraph:
         to dictionary from names of external `Variable`s to their values
         that are needed for the given calculation.
         :param values: an instance of `Values` storage of all calculated
-        values.
+        and external values.
         """
         for source_name, variables in self.required_external_variables.items():
             provided = external_values.get(source_name)
@@ -316,6 +311,10 @@ class CompiledGraph:
         affected by `changed_vars`, in the same order as in the
         `self.ordered_nodes`.
         """
+        key = frozenset(changed_vars)
+        cached = self.affected_cache.get(key)
+        if cached is not None:
+            return cached
         affected = set()
         stack = list(changed_vars)
         while stack:
@@ -324,42 +323,41 @@ class CompiledGraph:
                 if node not in affected:
                     affected.add(node)
                     stack.append(node.variable)
-        return [node for node in self.ordered_nodes if node in affected]
+        affected_list = [node for node in self.ordered_nodes if node in affected]
+        self.affected_cache[key] = affected_list
+        return affected_list
 
     def _calculate(self, nodes: list[CompiledNode], values: Storage):
         """
-        Calculate the values of the `Variable`s using their own `formula`
+        Calculate values of the `Variable`s using their own `formula`
         by evaluating them as functions of the values of the specified
         inputs.
 
         All inputs need to be calculated first (i.e., to be non-`_null`)
         before the value of the given `Variable` can be `_calculate`d.
         This is possible because the `Variable`s in the list `nodes` are
-        supplied as a topologically ordered list `self.ordered_variables`,
+        supplied as a topologically ordered list `self.ordered_nodes`,
         or as an ordered sub-set thereof (see, e.g., `recompute`).
         """
         for node in nodes:
             if node.variable.formula is None:
                 continue
-            args = tuple(values.get(input_).value for input_ in node.inputs)
-            if any(arg is _null for arg in args):
-                raise RuntimeError(f"Uninitialized input for {node.variable}, args = {args}")
-            cache_key = (node.variable, args)
-            if node.variable.cacheable and cache_key in values.cache:
-                values.get(node.variable).value = values.cache[cache_key]
-                continue
+            args = [_null] * len(node.inputs)
+            for i, input_ in enumerate(node.inputs):
+                arg = values.get(input_).value
+                if arg is _null:
+                    raise RuntimeError(f"Uninitialized input {input_.qual_name()} for {node.variable}")
+                args[i] = arg
             if self.debug:
                 print(f"Calculating {node}\nwith metadata\n{node.variable.metadata}", file=sys.stderr)
             result = node.variable.formula(*args)
-            if node.variable.cacheable:
-                values.cache[cache_key] = result
             values.get(node.variable).value = result
 
     def recompute(self, changed: dict[str, dict[str, VarValue]], values: Storage):
         """
         :param changed: dict of sources to names to new values of changed
         `Variable`s coming from either `External` or `Variables` source.
-        :param values: storage of all the `Variable` values.
+        :param values: storage of all `Variable` values.
         """
         changed_vars = set()
         for src, vals in changed.items():
@@ -388,8 +386,8 @@ class Graph:
     ):
         """
         :param variables_lists: mapping of names of `Variables`
-        namespaces to the lists of `Variable` instances to be
-        added to those namespaces.
+        namespaces to the lists of specifications of `Variable`
+        instances to be added to these namespaces.
         :param external_source_names: list of names of possible
         `External` sources from which `Variable` inputs might
         be coming from.
@@ -448,7 +446,7 @@ class Graph:
             return variables_source
         raise KeyError(f"Unknown source {source_name}")
 
-    def _topological_order(self, required: list[str] | tuple[str] | str):
+    def _topological_order(self, required: list[str]) -> tuple[list[Variable], set[Variable]]:
         """
         :param required: qualified name(s) of `Variable` instance(s)
         for which a topological ordering of a DAG is to be determined.
