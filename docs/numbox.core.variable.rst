@@ -73,6 +73,15 @@ The variable specification for `inputs` (if any) includes both the names of the 
 required to calculate the given variable via the function given by the `formula`,
 as well as the namespaces where these variables are going to be looked for in.
 
+Graph end nodes, located at the edge of the graph (a.k.a., leaf nodes) have neither `inputs`
+nor `formula` in their specifications. Specifying `formula` without `inputs`
+will not result in an exception, accommodating for the case of a function
+that computes and returns a value independent of any input parameters.
+It is also possible to specify `inputs`
+but no formula, which technically defines the placement of the node
+on the graph but leaves it up to the developer to defer specifying the node's calculation
+logic until later in the runtime.
+
 Names of the 'external' sources (of data values) need to be given to the `Graph` as well,
 via the `external_source_names` argument.
 When the :class:`numbox.core.variable.variable.Graph` is compiled

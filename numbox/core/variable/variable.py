@@ -43,7 +43,6 @@ class Namespace(ABC):
 
 class Storage(Protocol):
     _values: dict['Variable', 'Value']
-    cache: dict[tuple['Variable', tuple[Any, ...]], 'VarValue']
 
     def get(self, variable: 'Variable') -> 'Value':
         """
@@ -220,7 +219,6 @@ class Values:
     will be held here. """
     def __init__(self):
         self._values: dict[Variable, Value] = {}
-        self.cache: dict[tuple['Variable', tuple[Any, ...]], VarValue] = {}
 
     def get(self, variable: Variable) -> Value:
         if variable not in self._values:
@@ -338,7 +336,7 @@ class CompiledGraph:
         All inputs need to be calculated first (i.e., to be non-`_null`)
         before the value of the given `Variable` can be `_calculate`d.
         This is possible because the `Variable`s in the list `nodes` are
-        supplied as a topologically ordered list `self.ordered_variables`,
+        supplied as a topologically ordered list `self.ordered_nodes`,
         or as an ordered sub-set thereof (see, e.g., `recompute`).
         """
         for node in nodes:
@@ -348,7 +346,7 @@ class CompiledGraph:
             for i, input_ in enumerate(node.inputs):
                 arg = values.get(input_).value
                 if arg is _null:
-                    raise RuntimeError(f"Uninitialized input for {node.variable}")
+                    raise RuntimeError(f"Uninitialized input {input_.qual_name()} for {node.variable}")
                 args[i] = arg
             if self.debug:
                 print(f"Calculating {node}\nwith metadata\n{node.variable.metadata}", file=sys.stderr)
@@ -448,7 +446,7 @@ class Graph:
             return variables_source
         raise KeyError(f"Unknown source {source_name}")
 
-    def _topological_order(self, required: list[str] | tuple[str] | str) -> tuple[list[Variable], set[Variable]]:
+    def _topological_order(self, required: list[str]) -> tuple[list[Variable], set[Variable]]:
         """
         :param required: qualified name(s) of `Variable` instance(s)
         for which a topological ordering of a DAG is to be determined.
