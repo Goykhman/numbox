@@ -2,7 +2,7 @@ name: numbox_ci
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "numba-0.66.0rc1" ]
   pull_request:
     branches: [ "main" ]
 
