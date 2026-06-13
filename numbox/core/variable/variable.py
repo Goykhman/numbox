@@ -260,6 +260,7 @@ class CompiledGraph:
     required_external_variables: dict[str, dict[str, Variable]]
     debug: bool = False
     dependents: dict[Variable, list[CompiledNode]] = field(default_factory=lambda: {})
+    affected_cache: dict[frozenset[Variable], list[CompiledNode]] = field(default_factory=lambda: {})
 
     def __post_init__(self):
         for node in self.ordered_nodes:
@@ -319,6 +320,10 @@ class CompiledGraph:
         affected by `changed_vars`, in the same order as in the
         `self.ordered_nodes`.
         """
+        key = frozenset(changed_vars)
+        cached = self.affected_cache.get(key)
+        if cached is not None:
+            return cached
         affected = set()
         stack = list(changed_vars)
         while stack:
@@ -327,7 +332,9 @@ class CompiledGraph:
                 if node not in affected:
                     affected.add(node)
                     stack.append(node.variable)
-        return [node for node in self.ordered_nodes if node in affected]
+        affected_list = [node for node in self.ordered_nodes if node in affected]
+        self.affected_cache[key] = affected_list
+        return affected_list
 
     def _calculate(self, nodes: list[CompiledNode], values: Storage):
         """
