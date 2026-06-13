@@ -1442,7 +1442,7 @@ def _compiled_graph_result(graph, required, external_values):
     return {q: values.get(by_qual[q]).value for q in required}
 
 
-def test_goykhman_example_two_segments():
+def test_python_middle_node_two_segments():
     g = _chain_graph_with_python_middle()
     ck = compile_kernel(g, "calc.n5", cache=False)
     expected = _compiled_graph_result(
