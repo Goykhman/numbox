@@ -383,12 +383,10 @@ def test_compile_kernel_newline_in_name_is_safe():
     assert ck.execute({"e": {"a\nx": 10}}) == {"v.o": 11}
 
 
-def test_compile_kernel_duplicate_required_deduped():
+def test_compile_kernel_duplicate_required_raises():
     g = _diamond_graph()
-    ck = compile_kernel(g, ["variables.u", "variables.u"])
-    assert ck.outputs == ["variables.u"]
-    assert ck.execute({"basket": {"y": 100}}) == {"variables.u": 326.5}
-    assert ck.kernel(100) == (326.5,)
+    with pytest.raises(ValueError, match="duplicate entries"):
+        compile_kernel(g, ["variables.u", "variables.u"])
 
 
 def test_fingerprint_fallback_is_per_object():
@@ -922,14 +920,19 @@ def test_required_validation_messages():
         compile_kernel(g2, "calc.y")
 
 
-def test_external_typo_warns_but_compiles():
+def test_external_typo_compiles_to_phantom_input():
+    # External mints any requested name, so a typo'd external becomes a new
+    # kernel input rather than an error. It surfaces at execute time as a clear
+    # missing-value KeyError when the real name is provided instead.
     def f(x):
         return x
 
     g = Graph({"calc": [{"name": "y", "inputs": {"x": "ext"}, "formula": f}]}, ["ext"])
-    with pytest.warns(UserWarning, match="did not exist before compilation"):
-        ck = compile_kernel(g, ["ext.tpyo"])
+    ck = compile_kernel(g, ["ext.tpyo"])
+    assert ck.params == ["ext.tpyo"]
     assert ck.execute({"ext": {"tpyo": 5.0}}) == {"ext.tpyo": 5.0}
+    with pytest.raises(KeyError, match="Missing external value"):
+        ck.execute({"ext": {"x": 5.0}})
 
 
 def test_external_variable_with_formula_rejected():
@@ -984,8 +987,7 @@ def test_compile_kernel_cache_save_side(tmp_path):
 
 def test_external_only_output_end_to_end():
     g = Graph({"calc": []}, ["ext"])
-    with pytest.warns(UserWarning, match="did not exist before compilation"):
-        ck = compile_kernel(g, "ext.x")
+    ck = compile_kernel(g, "ext.x")
     assert ck.params == ["ext.x"]
     assert ck.execute({"ext": {"x": 5.5}}) == {"ext.x": 5.5}
 
@@ -995,8 +997,7 @@ def test_mixed_outputs_end_to_end():
         return x * 10.0
 
     g = Graph({"calc": [{"name": "y", "inputs": {"x": "ext"}, "formula": f}]}, ["ext"])
-    with pytest.warns(UserWarning, match="did not exist before compilation"):
-        ck = compile_kernel(g, ["calc.y", "ext.x"])
+    ck = compile_kernel(g, ["calc.y", "ext.x"])
     assert ck.outputs == ["calc.y", "ext.x"]
     assert ck.execute({"ext": {"x": 2.0}}) == {"calc.y": 20.0, "ext.x": 2.0}
 

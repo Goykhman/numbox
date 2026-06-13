@@ -531,9 +531,11 @@ def compile_kernel(graph, required, *, jit_options=None, cache=None):
 
     :param graph: a `Graph`; its dependency structure and formulas are fused
         into one straight-line @njit function (see `CompiledKernel`).
-    :param required: qualified name or list of qualified names. Duplicates are
-        removed; order is preserved (first occurrence wins) and fixes the order of
-        `CompiledKernel.outputs` / the kernel's return tuple.
+    :param required: qualified name or list of qualified names. Order is
+        preserved and fixes the order of `CompiledKernel.outputs` / the
+        kernel's return tuple; a duplicate entry raises `ValueError` (each
+        output is requested once -- the return tuple is positional, so a
+        repeat carries no information).
     :param jit_options: merged over numbox's defaults
         (`NUMBOX_JIT_OPTIONS` env) and passed to @njit. All options except
         `cache` participate in the content-addressed digest.
@@ -582,8 +584,12 @@ def compile_kernel(graph, required, *, jit_options=None, cache=None):
             raise ValueError(
                 f"required entry {entry!r} is not qualified (expected 'source{QUAL_SEP}name')"
             )
-    required = list(dict.fromkeys(required))  # dedupe, preserve first-seen order
-    pre_existing = {src: set(ns.keys()) for src, ns in graph.external.items()}
+    dupes = sorted({entry for entry in required if required.count(entry) > 1})
+    if dupes:
+        raise ValueError(
+            f"required has duplicate entries {dupes}; each requested output must "
+            f"appear once (the kernel's return tuple is positional)"
+        )
     try:
         compiled = graph.compile(required)
     except KeyError as e:
@@ -596,16 +602,6 @@ def compile_kernel(graph, required, *, jit_options=None, cache=None):
             f"({sys.getrecursionlimit()}); the traversal needs roughly one stack frame "
             f"per chained node - raise sys.setrecursionlimit(...) before compile_kernel"
         ) from None
-    for entry in required:
-        src, _, name = entry.rpartition(QUAL_SEP)
-        if src in pre_existing and name not in pre_existing[src] and name in graph.external[src]:
-            # fires only on the compile that creates the name; later compiles see it pre-existing
-            warnings.warn(
-                f"required entry {entry!r} did not exist before compilation; External "
-                f"namespaces create variables on first lookup, so a typo silently "
-                f"becomes a new kernel input",
-                stacklevel=2,
-            )
     idents = _assign_identifiers([n.variable for n in compiled.ordered_nodes])
     source, bindings, params, outputs = _generate_body(compiled, required, idents)
     kernel = _compile(source, bindings, jit_options, cache)
