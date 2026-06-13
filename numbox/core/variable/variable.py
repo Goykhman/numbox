@@ -26,8 +26,10 @@ class Namespace(ABC):
     def __contains__(self, key: str) -> bool:
         """
         :param key: un-qualified name of the `Variable`
-        It is qualified with `self.name` - the name of this
-        `Namespace` namespace that the `Variable` belongs to.
+        searched for in this namespace.
+        If `in` thereby returns True, it means that the
+        found `Variable` is qualified with `self.name`,
+        the name of this `Namespace` namespace.
         """
         return key in self._variables
 
@@ -150,13 +152,14 @@ class Variable:
     inputs (which are names of other `Variable` instances) to
     names of their `Namespace`s.
     :param formula: (optional) function that calculates the
-    value of this `Variable` from its sources.
+    value of this `Variable` from its inputs.
     :param metadata: any possible metadata associated with
     this variable.
     :param cacheable: (default `False`) when `True`, the
     corresponding `Value` (see below) will be cached during
     calculation. When attempting to recompute with the same
-    inputs, cached value will be returned instead. Use sparingly!
+    inputs, cached value will be returned instead.
+    Use sparingly!
     """
     name: str
     source: str = field(default="")
@@ -216,7 +219,7 @@ class Value:
     `Values` storage.
     """
     variable: Variable
-    value: VarValue | _Null = field(default_factory=lambda: _null)
+    value: VarValue | _Null = field(default=_null)
 
 
 class Values:
@@ -296,7 +299,7 @@ class CompiledGraph:
         to dictionary from names of external `Variable`s to their values
         that are needed for the given calculation.
         :param values: an instance of `Values` storage of all calculated
-        values.
+        and external values.
         """
         for source_name, variables in self.required_external_variables.items():
             provided = external_values.get(source_name)
@@ -328,7 +331,7 @@ class CompiledGraph:
 
     def _calculate(self, nodes: list[CompiledNode], values: Storage):
         """
-        Calculate the values of the `Variable`s using their own `formula`
+        Calculate values of the `Variable`s using their own `formula`
         by evaluating them as functions of the values of the specified
         inputs.
 
@@ -344,22 +347,24 @@ class CompiledGraph:
             args = tuple(values.get(input_).value for input_ in node.inputs)
             if any(arg is _null for arg in args):
                 raise RuntimeError(f"Uninitialized input for {node.variable}, args = {args}")
-            cache_key = (node.variable, args)
-            if node.variable.cacheable and cache_key in values.cache:
-                values.get(node.variable).value = values.cache[cache_key]
-                continue
+            cacheable = node.variable.cacheable
+            if cacheable:
+                cache_key = (node.variable, args)
+                if cache_key in values.cache:
+                    values.get(node.variable).value = values.cache[cache_key]
+                    continue
             if self.debug:
                 print(f"Calculating {node}\nwith metadata\n{node.variable.metadata}", file=sys.stderr)
             result = node.variable.formula(*args)
-            if node.variable.cacheable:
-                values.cache[cache_key] = result
+            if cacheable:
+                values.cache[cache_key] = result  # noqa
             values.get(node.variable).value = result
 
     def recompute(self, changed: dict[str, dict[str, VarValue]], values: Storage):
         """
         :param changed: dict of sources to names to new values of changed
         `Variable`s coming from either `External` or `Variables` source.
-        :param values: storage of all the `Variable` values.
+        :param values: storage of all `Variable` values.
         """
         changed_vars = set()
         for src, vals in changed.items():
@@ -388,8 +393,8 @@ class Graph:
     ):
         """
         :param variables_lists: mapping of names of `Variables`
-        namespaces to the lists of `Variable` instances to be
-        added to those namespaces.
+        namespaces to the lists of specifications of `Variable`
+        instances to be added to these namespaces.
         :param external_source_names: list of names of possible
         `External` sources from which `Variable` inputs might
         be coming from.
@@ -448,7 +453,7 @@ class Graph:
             return variables_source
         raise KeyError(f"Unknown source {source_name}")
 
-    def _topological_order(self, required: list[str] | tuple[str] | str):
+    def _topological_order(self, required: list[str] | tuple[str] | str) -> tuple[list[Variable], set[Variable]]:
         """
         :param required: qualified name(s) of `Variable` instance(s)
         for which a topological ordering of a DAG is to be determined.
