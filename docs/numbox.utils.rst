@@ -120,6 +120,14 @@ numbox.utils.digest
    :show-inheritance:
    :undoc-members:
 
+numbox.utils.fingerprint
+------------------------
+
+.. automodule:: numbox.utils.fingerprint
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 numbox.utils.lowlevel
 ---------------------
 
