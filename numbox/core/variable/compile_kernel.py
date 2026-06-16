@@ -391,9 +391,10 @@ class CompiledKernel:
         # re-stamping _last_args (the first call already captured the seeding args).
         if self._mode == "fused":
             return self._fused(*args)
+        result = self._fused(*args)
         self._last_args = args
         self._mode = "fused"
-        return self._fused(*args)
+        return result
 
     def _fused_report(self) -> PartitionReport:
         compiled, _, _, _, _, external = self._ctx
@@ -409,7 +410,6 @@ class CompiledKernel:
     def _resolve_and_call(self, *args) -> tuple:
         if self._mode != "virgin":
             return self.kernel(*args)
-        self._last_args = args
         try:
             arg_types = tuple(typeof(a) for a in args)
         except (ValueError, TypeError):
@@ -418,17 +418,21 @@ class CompiledKernel:
             try:
                 self._fused.compile(arg_types)
             except NumbaError:
-                return self._discover_and_run(args)
+                result = self._discover_and_run(args)
+                self._last_args = args
+                return result
             self._mode = "fused"
             self.partition = self._fused_report()
-            return self._fused(*args)
-        return self._discover_and_run(args)
+            result = self._fused(*args)
+            self._last_args = args
+            return result
+        result = self._discover_and_run(args)
+        self._last_args = args
+        return result
 
     def _run_segmented(self, *args) -> tuple:
-        if self._last_args is None:
-            self._last_args = args
         try:
-            return self._plan.run(args)
+            result = self._plan.run(args)
         except NumbaError:
             # Deliberately broad: a segment failing to compile for new input
             # types triggers re-discovery. A NumbaError raised inside a
@@ -438,7 +442,10 @@ class CompiledKernel:
             # _demoted); an off-contract input re-raises instead.
             if self.is_declared:
                 raise
-            return self._discover_and_run(args)
+            result = self._discover_and_run(args)
+        if self._last_args is None:
+            self._last_args = args
+        return result
 
     def _discover_and_run(self, args: tuple) -> tuple:
         compiled, idents, bindings_by_var, jit_options, cache, external = self._ctx
@@ -541,9 +548,14 @@ class CompiledKernel:
                         warnings.warn(f"{qual} is not in the calculation path, update has no effect.")
                         continue
                 if self.is_declared and _is_typed(var):
-                    if self._fused.typingctx.can_convert(typeof(val), var.params.type) is None:
+                    try:
+                        got = typeof(val)
+                        ok = self._fused.typingctx.can_convert(got, var.params.type) is not None
+                    except (ValueError, TypeError):
+                        ok, got = False, type(val).__name__
+                    if not ok:
                         raise ValueError(
-                            f"declared type {var.params.type}, got {typeof(val)} for {var.qual_name()}")
+                            f"declared type {var.params.type}, got {got} for {var.qual_name()}")
                 resolved.append((var, val, is_external))
         # Second pass: writes, changed_vars, and interior-override bookkeeping.
         changed_vars = set()

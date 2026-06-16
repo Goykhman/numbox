@@ -325,6 +325,47 @@ def test_declared_recompute_off_contract_type_raises_crisp():
         ck.recompute({"e": {"x": 3j}})  # complex where float64 declared
 
 
+def test_declared_recompute_non_typeable_value_raises_crisp():
+    # A value numba cannot type at all must still produce the crisp contract
+    # error, not a raw typeof exception.
+    ck = compile_kernel(_graph_all_jittable(), "c.b")
+    ck.kernel(3.0)
+    with pytest.raises(ValueError, match="declared type"):
+        ck.recompute({"e": {"x": object()}})
+
+
+def test_failed_first_fused_call_leaves_kernel_unseeded():
+    # A first call that raises must not record _last_args or flip mode, so a
+    # later recompute refuses instead of running on un-seeded state.
+    g = Graph({"c": [
+        {"name": "a", "inputs": {"x": "e"}, "formula": lambda x: 100 // x, "params": Params(type=int64)},
+    ]}, ["e"])
+    g.external["e"].declare("x", Params(type=int64))
+    ck = compile_kernel(g, "c.a")
+    with pytest.raises(ZeroDivisionError):
+        ck.kernel(0)
+    assert ck._last_args is None
+    with pytest.raises(RuntimeError, match="requires a prior full call"):
+        ck.recompute({"e": {"x": 5}})
+
+
+def test_failed_first_segmented_call_leaves_kernel_unseeded():
+    # Same invariant on the segmented path: a raising first call leaves the
+    # kernel un-seeded so recompute refuses.
+    g = Graph({"c": [
+        {"name": "a", "inputs": {"x": "e"}, "formula": lambda x: 100 // x, "params": Params(type=int64)},
+        {"name": "b", "inputs": {"a": "c"}, "formula": lambda a: a + 1,
+         "params": Params(jitable=False, type=int64)},
+    ]}, ["e"])
+    g.external["e"].declare("x", Params(type=int64))
+    ck = compile_kernel(g, "c.b")
+    with pytest.raises(ZeroDivisionError):
+        ck.kernel(0)
+    assert ck._last_args is None
+    with pytest.raises(RuntimeError, match="requires a prior full call"):
+        ck.recompute({"e": {"x": 5}})
+
+
 def test_case_a_fused_recompute_still_works():
     ck = compile_kernel(_graph_all_jittable(), "c.b")
     assert ck.kernel(3.0) == (8.0,)
