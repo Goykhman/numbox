@@ -15,6 +15,7 @@ from typing import Callable
 from numba import njit
 from numba.core.ccallback import CFunc
 from numba.core.dispatcher import Dispatcher
+from numba.core.types import Array
 from numba.core.types.function_type import CompileResultWAP
 from numba.np.ufunc.dufunc import DUFunc
 
@@ -70,6 +71,62 @@ def _wrap_formula(formula: Callable, flags: dict | None = None) -> Dispatcher | 
     if not callable(formula):
         raise TypeError(f"formula {formula!r} is not callable")
     return njit(**(flags or {}))(formula)
+
+
+def _strip_cache(flags: dict | None) -> dict:
+    """Inner formulas must never be cached (a cached inner stale-hits on a
+    numeric-literal edit and inlines a stale body into the fused kernel)."""
+    return {k: v for k, v in (flags or {}).items() if k != "cache"}
+
+
+def _validate_declared_return(formula, input_types: tuple, declared, flags: dict | None = None) -> None:
+    """Raise if the formula's NATURAL return type at `input_types` differs from
+    `declared`.
+
+    njit(sig) silently coerces every convertible scalar mismatch (int<->float,
+    narrowing, sign), so the declared return cannot be trusted to fail fast. The
+    natural type is read by:
+    - CFunc: `_sig.return_type` (data already present).
+    - cres (CompileResultWAP): `signature().return_type` (no `_sig` attribute).
+    - DUFunc (@vectorize): no single return type; probe via an unconstrained
+      @njit shim applying the DUFunc at the declared input types.
+    - plain Python: an unconstrained @njit probe over the declared input types.
+
+    The comparison is equality (no coercion allowed) so the guard truly fires,
+    except that array layout is ignored: an elementwise formula naturally yields a
+    C-contiguous array, while a declared `float64[:]` is layout 'A', and numba freely
+    assigns one to the other -- a layout difference is not a declared-type violation.
+    """
+    opts = _strip_cache(flags)
+    if isinstance(formula, CFunc):
+        natural = formula._sig.return_type
+    elif isinstance(formula, CompileResultWAP):
+        natural = formula.signature().return_type
+    elif isinstance(formula, DUFunc):
+        names = ", ".join(f"a{i}" for i in range(len(input_types)))
+        ns = {"_f": formula}
+        exec(f"def _shim({names}):\n    return _f({names})\n", ns)  # nosec B102
+        probe = njit(**opts)(ns["_shim"])
+        probe.compile(input_types)
+        natural = probe.nopython_signatures[-1].return_type
+    elif isinstance(formula, Dispatcher):
+        formula.compile(input_types)
+        natural = formula.overloads[input_types].signature.return_type
+    else:
+        probe = njit(**opts)(formula)
+        probe.compile(input_types)
+        natural = probe.nopython_signatures[-1].return_type
+    if isinstance(natural, Array) and isinstance(declared, Array):
+        # Normalize both to layout 'A' so only dtype/ndim/readonly mismatches count
+        # (numba assigns C<->A freely).
+        mismatch = natural.copy(layout="A") != declared.copy(layout="A")
+    else:
+        mismatch = natural != declared
+    if mismatch:
+        raise ValueError(
+            f"declared type {declared} but formula yields {natural} at "
+            f"input types {input_types}"
+        )
 
 
 def _check_formula_arity(formula, n_inputs: int, qual_name: str) -> None:

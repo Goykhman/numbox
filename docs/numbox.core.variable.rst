@@ -219,6 +219,23 @@ interior type from the runtime argument types. Plain-Python formulas are auto-wr
 call detects them and the graph is split into ``@njit`` segments orchestrated from Python
 (see :ref:`compile_kernel_non_jittable` below).
 
+Per-node type information is *optional*. Each `Variable` may carry a
+``params`` (a ``Params(jitable, type)``) declaring whether its formula is
+jittable and the numba type of its value. A node with no ``params`` behaves
+exactly as above -- jitability is *discovered* at the first call. When every
+node in the required cone is declared and every consumed external is typed,
+``compile_kernel`` resolves the execution mode at *build* time instead: an
+all-jittable graph compiles eagerly into one fused kernel; a declared
+jittable/non-jittable mix compiles eagerly into a static segment plan with no
+probing; and ``CompiledKernel.partition`` is populated at build, inspectable
+before any call. Declaring types moves type errors to build time: a coercible
+but wrong ``params.type`` (for instance declaring ``int64`` over a body that
+naturally returns ``float64``) raises at ``compile_kernel`` rather than silently
+truncating, because it is caught by an explicit unconstrained return-type probe
+of the formula -- not by binding the formula to the declared signature, which
+numba would silently coerce. A graph that declares nothing is byte-for-byte the
+behavior described above.
+
 The call returns a :class:`numbox.core.variable.compile_kernel.CompiledKernel`. It exposes
 ``.kernel`` (the hot-path callable — positional in, tuple out: the bare numba dispatcher
 once the graph resolves fully fused, the Python master when the graph is segmented around
@@ -239,9 +256,14 @@ state (bytecode, constants, default values, closure-cell values, referenced
 module-level globals including helper functions, defining module), and the
 effective jit flags. Changing any of these recompiles instead of reusing a
 stale binary; cosmetic edits that do not change behavior (comments, local
-renames) do not. Formulas whose state cannot be fingerprinted -- a
-``cres``-compiled callable, or a value with no canonical form -- make that
-one kernel uncacheable: always recompiled per process, never wrong. The
+renames) do not. The generated source never mentions types, so a declared
+graph's signatures are folded into the digest as well (the consumed external
+signature for an eager fused kernel, each segment's live-in/out signature for
+an eager segment): two declared-type variants of one type-free graph therefore
+get distinct cache anchors and never reuse each other's binary. Formulas whose
+state cannot be fingerprinted -- a ``cres``-compiled callable, or a value with
+no canonical form -- make that one kernel uncacheable: always recompiled per
+process, never wrong. The
 ``cache`` keyword is tri-state: ``None`` (the default) defers to
 ``jit_options["cache"]``, then the ``NUMBOX_JIT_OPTIONS`` environment
 default, then ``True``; an explicit ``True``/``False`` wins. Two costs are
@@ -346,6 +368,14 @@ store seeded by a prior full call. It mirrors
 resolve to an interior node, in which case its value is overridden and only its downstream
 cone recomputes. Do not interleave input-changing throughput ``kernel(...)`` calls between
 ``recompute`` calls -- the store is seeded once and a throughput call does not update it.
+
+For an undeclared graph a changed value of a different numba type triggers a
+one-time flush-and-reseed recovery. A declared kernel enforces a contract
+instead: a changed value is checked for numba assignability to the node's
+declared type, so a value numba cannot assign raises a crisp ``declared type X,
+got Y`` error, while a benign difference numba accepts -- a C-contiguous array
+against an ``'A'``-layout array declaration, or a safe scalar promotion -- is
+accepted. The check is convertibility, not type identity.
 
 .. code-block:: python
 
