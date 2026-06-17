@@ -67,7 +67,7 @@ class VarSpecBase(TypedDict):
 class Params:
     """Optional per-`Variable` declaration driving static jitability in
     `compile_kernel`. `jitable=False` declares a deliberately plain-Python
-    node; `type` is the numba `Type` instance of the variable's value
+    node; `type` is the variable's numba `Type`
     (None means undeclared).
 
     Like `formula`, `params` must be attached to a node BEFORE the first

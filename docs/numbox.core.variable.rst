@@ -221,7 +221,7 @@ call detects them and the graph is split into ``@njit`` segments orchestrated fr
 
 Per-node type information is *optional*. Each `Variable` may carry a
 ``params`` (a ``Params(jitable, type)``) declaring whether its formula is
-jittable and the numba type of its value. A node with no ``params`` behaves
+jittable and the variable's numba type. A node with no ``params`` behaves
 exactly as above -- jitability is *discovered* at the first call. When every
 node in the required cone is declared and every consumed external is typed,
 ``compile_kernel`` resolves the execution mode at *build* time instead: an
