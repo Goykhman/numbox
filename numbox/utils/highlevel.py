@@ -120,9 +120,9 @@ class {struct_name}(StructRefProxy):
     def {method_name}_{method_hash}({params_str}):
         return {self_name}.{method_name}({names_params_str_wo_self})
 """)
-            method_header = re.findall(r"^\s*def\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*:[^\n]*", method_source, re.MULTILINE)
+            method_header = re.findall(r"^\s*def\s+[a-zA-Z_]\w*\s*\(([^)]*)\)\s*:[^\n]*", method_source, re.MULTILINE)
             assert len(method_header) == 1, method_header
-            method_name, params_str_ = method_header[0]
+            params_str_ = method_header[0]
             assert params_str == params_str_, (params_str, params_str_)
             method_source = re.sub(r"\bdef\s+([a-zA-Z_]\w*)\b", "def _", method_source)
             methods_code_txt.write(f"""
@@ -181,7 +181,8 @@ def make_structref(
     struct_type_class: type | Type,
     *,
     struct_methods: Optional[dict[str, Callable]] = None,
-    jit_options: Optional[dict] = None
+    jit_options: Optional[dict] = None,
+    ns: Optional[dict] = None
 ):
     """
     Makes structure type with `struct_name` and `struct_fields` from the StructRef type class.
@@ -214,7 +215,9 @@ def make_structref(
     )
     if jit_options is None:
         jit_options = jit_options_
+    ns = ns or {}
     ns = {
+        **ns,
         **getmodule(_file_anchor).__dict__,
         **{
             "fields": struct_fields,

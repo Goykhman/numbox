@@ -114,10 +114,10 @@ class S3(StructRefProxy):
         return self.calculate_1(z, w)
 
     def calculate_2(self):
-        return self.calculate_2_81b5823ed107b9478f23165e8f88211d7795d11f8e0cabe3dd3b8e96481f3f2e()
+        return self.calculate_2_fab97c51f1b4a572251c56be8e4326cd39d00f328b4f85e3174b2b3d3fcff3f0()
 
     @njit(**jit_options)
-    def calculate_2_81b5823ed107b9478f23165e8f88211d7795d11f8e0cabe3dd3b8e96481f3f2e(self):
+    def calculate_2_fab97c51f1b4a572251c56be8e4326cd39d00f328b4f85e3174b2b3d3fcff3f0(self):
         return self.calculate_2()
 
 define_boxing(S3TypeClass, S3)
@@ -151,7 +151,7 @@ def ol_calculate_1(self, z, w=1):
 @overload_method(S3TypeClass, "calculate_2", jit_options=jit_options)
 def ol_calculate_2(self):
     def _(self):
-        return self.y * 3
+        return self.y * 3 + aux()
 
     return _
 """
@@ -161,11 +161,15 @@ def test_make_structref_3():
     def calculate_1(self, z, w=1):
         return self.x + z * w
 
-    def calculate_2(self):
-        return self.y * 3
-    m1 = {"calculate_1": calculate_1, "calculate_2": calculate_2}
+    @njit
+    def aux():
+        return 0.0
+
+    def calculate_impl(self):
+        return self.y * 3 + aux()
+    m1 = {"calculate_1": calculate_1, "calculate_2": calculate_impl}
     assert make_structref_code_txt("S3", ("x", "y"), S3TypeClass, struct_methods=m1)[0] == ref_s3_code_txt
-    make_s3 = make_structref("S3", ("x", "y"), S3TypeClass, struct_methods=m1)
+    make_s3 = make_structref("S3", ("x", "y"), S3TypeClass, struct_methods=m1, ns={"aux": aux})
     s1 = make_s3(2.17, 3.14)
 
     ref = 2.17 + 5 * 6
