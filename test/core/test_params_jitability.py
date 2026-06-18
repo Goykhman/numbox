@@ -8,7 +8,7 @@ from numba.core.errors import NumbaError
 from numbox.core.variable.variable import (
     Graph, Params, Variable, Variables, External,
 )
-from numbox.core.variable.compile_kernel import _classify, _validate_externals, compile_kernel
+from numbox.core.variable.compile_kernel import _classify, compile_kernel
 from numbox.core.variable._kernel_partition import _evaluate as _evaluate_fn
 from numbox.core.variable.utils import _validate_declared_return
 from numbox.utils.highlevel import cres
@@ -28,11 +28,6 @@ def test_variable_params_roundtrip_and_identity_unchanged():
     bare = Variable(name="a", source="m")
     assert a == bare and hash(a) == hash(bare)  # params not part of identity
     assert {a, bare} == {a}  # dedup by (source, name)
-
-
-def test_dict_params_rejected():
-    with pytest.raises(TypeError, match="params must be a Params instance"):
-        Variable(name="a", source="m", params={"jitable": True})
 
 
 def test_varspec_params_passthrough():
@@ -88,14 +83,6 @@ def test_classify_case_c_untyped_python_boundary():
     compiled = g.compile(["c.d"])
     case, _, _ = _classify(compiled)
     assert case == "C"
-
-
-def test_validate_externals_rejects_formula_bearing():
-    g = Graph({"c": [{"name": "a", "inputs": {"x": "e"}, "formula": lambda x: x + 1.0}]}, ["e"])
-    g.external["e"].update("x", Variable(name="x", source="e", formula=lambda: 1.0))
-    compiled = g.compile(["c.a"])
-    with pytest.raises(ValueError, match="external but carries a formula"):
-        _validate_externals(compiled)
 
 
 def test_njit_probe_reads_natural_return_type():
@@ -271,12 +258,22 @@ def test_case_b_recompute():
     assert out == (11.0,)                       # ((4+1)*2)+1
 
 
-def test_case_b_formula_bearing_external_raises():
-    g = _declared_mix()
-    g.external["e"].update("x", Variable(name="x", source="e", formula=lambda: 1.0,
-                                         params=Params(type=float64)))
-    with pytest.raises(ValueError, match="external but carries a formula"):
-        compile_kernel(g, "c.d")
+def test_declared_return_validation_is_memoized(monkeypatch):
+    import numbox.core.variable.compile_kernel as ck_mod
+    ck_mod._validated_returns.clear()
+    calls = []
+    orig = ck_mod._validate_declared_return
+
+    def spy(*a, **k):
+        calls.append(1)
+        return orig(*a, **k)
+
+    monkeypatch.setattr(ck_mod, "_validate_declared_return", spy)
+    compile_kernel(_graph_all_jittable(), "c.b")
+    first = len(calls)
+    assert first > 0
+    compile_kernel(_graph_all_jittable(), "c.b")  # identical formula content -> memo hit, no re-probe
+    assert len(calls) == first
 
 
 def test_declared_type_variants_get_distinct_anchors():
@@ -404,32 +401,6 @@ def test_eager_kernel_no_silent_rediscover_off_contract():
     with pytest.raises(ValueError, match="declared type"):
         ck.recompute({"e": {"x": 3j}})
     assert ck._demoted == demoted_before
-
-
-def test_namespace_update_busts_compiled_graph_cache():
-    g = _graph_all_jittable()
-    # make c.b undeclared so the graph is Case C (partition None until first call)
-    g.registry["c"].update("b", Variable(name="b", source="c", inputs={"a": "c"},
-                                         formula=lambda a: a * 2.0))
-    ck1 = compile_kernel(g, "c.b")
-    assert ck1.partition is None  # Case C: unresolved until a call
-    # now declare c.b and recompile the SAME required set
-    g.registry["c"].update("b", Variable(name="b", source="c", inputs={"a": "c"},
-                                         formula=lambda a: a * 2.0, params=Params(type=float64)))
-    ck2 = compile_kernel(g, "c.b")
-    assert ck2.partition is not None and ck2.partition.mode == "fused"  # not the stale Case-C kernel
-
-
-def test_external_declare_after_compile_busts_cache():
-    g = Graph({"c": [{"name": "a", "inputs": {"x": "e"},
-                      "formula": lambda x: x + 1.0, "params": Params(type=float64)}]}, ["e"])
-    # first compile WITHOUT declaring external x -> x untyped -> consumer UNKNOWN -> Case C
-    ck1 = compile_kernel(g, "c.a")
-    assert ck1.partition is None
-    # declare the external type AFTER first compile, recompile SAME required set
-    g.external["e"].declare("x", Params(type=float64))
-    ck2 = compile_kernel(g, "c.a")
-    assert ck2.partition is not None and ck2.partition.mode == "fused"
 
 
 def test_shared_dispatcher_multi_overload_validation():

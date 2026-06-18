@@ -315,10 +315,15 @@ def _evaluate(
     flags: dict | None,
     demoted: set[Variable] | dict[Variable, str],
 ) -> None:
-    """Populate `values` for every interior node using a FIXED `demoted` set
+    """Populate `values` for every interior node using a fixed `demoted` set
     (no probing). Demoted nodes run their py_func; exotic bindings run via the
-    @njit shim; the rest run their Dispatcher. Used by the declared (eager)
-    path where demotions come from declarations, not discovery."""
+    @njit shim; the rest run their Dispatcher.
+
+    Invoked by `CompiledKernel._ensure_store` to seed the value store on the
+    first `recompute()` of a declared kernel -- the declarations supply the
+    demotion set directly, so no discovery/probing is needed. (This is not a
+    NumbaError fallback: the NumbaError-driven re-discovery path is
+    `_run_segmented`/`discover`, which a declared kernel deliberately skips.)"""
     for node in ordered_nodes:
         var = node.variable
         if var in external:

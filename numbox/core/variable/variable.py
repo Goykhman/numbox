@@ -22,10 +22,6 @@ class Namespace(ABC):
         `Variable`s.
         """
         self._variables[key] = var
-        graph = getattr(self, "_graph", None)
-        if graph is not None:
-            graph.compiled_graphs.clear()
-            graph.reverse_dependencies = None
 
     def __contains__(self, key: str) -> bool:
         """
@@ -70,10 +66,9 @@ class Params:
     node; `type` is the variable's numba `Type`
     (None means undeclared).
 
-    Like `formula`, `params` must be attached to a node BEFORE the first
-    `compile()` of any required set containing that node; attaching it after
-    is honored only because `Namespace.update` busts the owning `Graph`'s
-    `compiled_graphs` cache."""
+    Like `formula`, `params` must be attached to a node before the first
+    `compile()` of any required set containing that node: a `Graph` caches its
+    compiled result, so a `params` attached afterward is not picked up."""
     jitable: bool = True
     type: Any = None
 
@@ -188,13 +183,6 @@ class Variable:
     formula: Callable = field(default=None)
     metadata: str | None = field(default=None)
     params: Params | None = field(default=None)
-
-    def __post_init__(self):
-        if self.params is not None and not isinstance(self.params, Params):
-            raise TypeError(
-                f"{make_qual_name(self.source, self.name)!r}: params must be a "
-                f"Params instance, not {type(self.params).__name__} (a dict is not accepted)"
-            )
 
     def __hash__(self):
         return hash((self.source, self.name))
@@ -445,8 +433,6 @@ class Graph:
             self.registry[external_name] = external_
         self.compiled_graphs = {}
         self.reverse_dependencies = None
-        for ns in self.registry.values():
-            ns._graph = self
 
     def compile(self, required: list[str] | str, debug: bool = False) -> CompiledGraph:
         """

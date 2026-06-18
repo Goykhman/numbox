@@ -13,18 +13,18 @@ partition is described by `CompiledKernel.partition` (a PartitionReport with
 per-node demotion reasons); formulas with no Python fallback
 (cres/CompileResultWAP, CFunc, DUFunc) are always treated as jittable.
 
-Jitability may be either DISCOVERED at the first call (above) or DECLARED up
-front. Each `Variable` carries an OPTIONAL `params` (`Params(jitable, type)`).
+Jitability may be either discovered at the first call (above) or declared up
+front. Each `Variable` carries an optional `params` (`Params(jitable, type)`).
 A node with no `params` is discovered exactly as before -- byte-for-byte the
 same behavior. When every node in the required cone is declared (and every
 consumed external is typed), `compile_kernel()` resolves the execution mode at
-BUILD time instead of at the first call: an all-jittable graph compiles eagerly
+build time instead of at the first call: an all-jittable graph compiles eagerly
 into one fused kernel ("fused"), a declared jit/Python mix compiles eagerly into
 a static segment plan ("segmented") with no probing, and `CompiledKernel.partition`
 is populated at build (inspectable before any call). A declared `params.type`
 that the formula does not naturally yield is caught at build by an explicit
-unconstrained return-type probe -- NOT by binding the formula to the declared
-signature, which would silently COERCE a convertible-but-wrong scalar type (a
+unconstrained return-type probe -- not by binding the formula to the declared
+signature, which would silently coerce a convertible-but-wrong scalar type (a
 node declared int64 over a float-returning body would otherwise return a
 truncated value). Any node left undeclared (or only partially typed) keeps the
 runtime-discovery path; a graph that declares nothing behaves exactly as today.
@@ -117,18 +117,9 @@ def _formula_fingerprint(formula) -> tuple[str, bool]:
         return f"{_safe_repr(formula)} @{id(formula)}", False
 
 
-def _validate_externals(compiled: CompiledGraph) -> set:
-    """Raise ValueError if any external variable carries a formula (a fused
-    kernel treats externals as plain inputs). Returns the full external set."""
-    external = {v for vs in compiled.required_external_variables.values() for v in vs.values()}
-    for var in sorted(external, key=lambda v: v.qual_name()):
-        if var.formula is not None:
-            raise ValueError(
-                f"{var.qual_name()!r} is external but carries a formula; CompiledGraph "
-                f"computes such a variable while a fused kernel treats it as a plain "
-                f"input. Move it into a Variables namespace or drop the formula."
-            )
-    return external
+# Build-time return-type validations are memoized by (formula fingerprint,
+# input types, declared type) so repeated compile_kernel() calls do not re-probe.
+_validated_returns: set = set()
 
 
 def _is_typed(var: Variable) -> bool:
@@ -376,8 +367,8 @@ class CompiledKernel:
     def kernel(self) -> Callable:
         if self._mode == "fused":
             # Fused is permanent: later signatures go through numba's own
-            # dispatch, and a typing failure there raises as in v1 -- no
-            # segmentation fallback from fused mode.
+            # dispatch, and a typing failure there raises -- no segmentation
+            # fallback from fused mode.
             return self._fused
         if self._mode == "fused-pending":
             return self._fused_pending_call
@@ -438,7 +429,7 @@ class CompiledKernel:
             # types triggers re-discovery. A NumbaError raised inside a
             # python-step formula re-raises from re-discovery's own Python
             # evaluation of the same args, so nothing is masked. Declared
-            # kernels do NOT re-discover (that would overwrite the authoritative
+            # kernels do not re-discover (that would overwrite the authoritative
             # _demoted); an off-contract input re-raises instead.
             if self.is_declared:
                 raise
@@ -519,7 +510,7 @@ class CompiledKernel:
         # persisted-node closure instead is a possible future optimization.
         values = dict(zip(self._external_vars, self._last_args))
         if self.is_declared:
-            # Seed interior values with the FROZEN declared demotion set; re-running
+            # Seed interior values with the frozen declared demotion set; re-running
             # discover would re-probe and could disagree with the declarations.
             _evaluate(compiled.ordered_nodes, external, values, bindings_by_var, flags, self._demoted)
         else:
@@ -591,7 +582,7 @@ class CompiledKernel:
 
     def _cone_live_in_type(self, v: Variable):
         """The numba type to compile a cone jit-segment live-in against. For a
-        declared kernel whose live-in declares a type, use the DECLARED type (so the
+        declared kernel whose live-in declares a type, use the declared type (so the
         cone matches the eager build's signature); otherwise fall back to the stored
         value's runtime type, as the undeclared path always does."""
         if self.is_declared and _is_typed(v):
@@ -774,21 +765,21 @@ def compile_kernel(
 
     Error timing: structural problems raise here (unknown or malformed
     `required` entries, non-callable formulas, arity mismatches against the
-    declared inputs, formula-bearing external variables, graphs deeper than
-    the recursion limit). For an UNDECLARED (or partially-declared) graph,
-    numba typing problems surface at the kernel's first call (auto-njit of
-    plain-Python formulas is lazy). For a FULLY-DECLARED graph (every node
-    carries `params`, every consumed external is typed) the mode resolves
-    eagerly here, so type errors move to build time: a formula whose natural
-    return at the declared input types is non-convertible to the declared type,
-    a cross-node type mismatch, and -- crucially -- a coercible-but-wrong
-    `params.type`. The last is caught by an explicit unconstrained return-type
-    probe that compares the formula's NATURALLY inferred return type against the
-    declaration; binding the formula to the declared signature does NOT catch
-    it, because numba silently coerces a convertible scalar (declaring int64
-    over a `x * 1.5` body would otherwise compute 7, not 7.5). Fully-declared
-    graphs thus fail fast at build; any-undeclared graph fails at the first
-    call, exactly as today. Runtime errors never demote -- they propagate.
+    declared inputs, graphs deeper than the recursion limit). For an undeclared
+    (or partially-declared) graph, numba typing problems surface at the kernel's
+    first call (auto-njit of plain-Python formulas is lazy). For a fully-declared
+    graph (every node carries `params`, every consumed external is typed) the
+    mode resolves eagerly here, so type errors move to build time: a formula
+    whose natural return at the declared input types is non-convertible to the
+    declared type, a cross-node type mismatch, and -- crucially -- a
+    coercible-but-wrong `params.type`. The last is caught by an explicit
+    unconstrained return-type probe that compares the formula's naturally
+    inferred return type against the declaration; binding the formula to the
+    declared signature does not catch it, because numba silently coerces a
+    convertible scalar (declaring int64 over a `x * 1.5` body would otherwise
+    compute 7, not 7.5). Fully-declared graphs thus fail fast at build;
+    any-undeclared graph fails at the first call, exactly as today. Runtime
+    errors never demote -- they propagate.
 
     Caching: the kernel digest fingerprints each formula's bytecode,
     constants, default values, closure-cell values, referenced module-level
@@ -820,14 +811,14 @@ def compile_kernel(
     hot-path callable: the bare @njit dispatcher once the graph resolves fully
     fused, the Python master when segmented. For an undeclared graph a later
     call whose types break a segment re-learns and replaces the partition (one
-    active plan); a declared kernel does NOT re-discover. The crisp
+    active plan); a declared kernel does not re-discover. The crisp
     `declared type X, got Y` contract is enforced at build time and on
-    `recompute()` (`can_convert` against each declared type), NOT on the
+    `recompute()` (`can_convert` against each declared type), not on the
     throughput `kernel(...)` path: throughput retains numba's polymorphic
     widening across calls, and a later `kernel(...)` whose off-contract type
     breaks a jit segment raises numba's own typing error (the declared `_demoted`
     is left untouched -- no silent re-discovery). Once fully fused, fused is
-    permanent (a later-signature typing failure raises, as in v1). The discovery call computes
+    permanent (a later-signature typing failure raises). The discovery call computes
     jit-node values through per-node dispatchers while later calls use fused
     segments -- identical under default IEEE semantics, but non-default
     jit_options such as fastmath could in principle differ across fusion
@@ -855,7 +846,7 @@ def compile_kernel(
         ) from e
     except RecursionError:
         raise RecursionError("Consider raising recursion limit.") from None
-    external = _validate_externals(compiled)
+    external = {v for vs in compiled.required_external_variables.values() for v in vs.values()}
     case, dispositions, consumed = _classify(compiled)
     idents = _assign_identifiers([n.variable for n in compiled.ordered_nodes])
     flags = _effective_flags(jit_options)
@@ -865,7 +856,13 @@ def compile_kernel(
             if var in external or dispositions.get(var) != "STATIC_JIT":
                 continue
             in_types = tuple(i.params.type for i in node.inputs)
+            fp, fingerprintable = _formula_fingerprint(var.formula)
+            key = (fp, in_types, var.params.type)
+            if fingerprintable and key in _validated_returns:
+                continue
             _validate_declared_return(var.formula, in_types, var.params.type, flags)
+            if fingerprintable:
+                _validated_returns.add(key)
     source, bindings, params, outputs = _generate_body(compiled, required, idents, flags)
 
     def _registry_var(qual):

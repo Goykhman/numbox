@@ -236,7 +236,7 @@ of the formula -- not by binding the formula to the declared signature, which
 numba would silently coerce. A graph that declares nothing is byte-for-byte the
 behavior described above.
 
-The call returns a :class:`numbox.core.variable.compile_kernel.CompiledKernel`. It exposes
+The call to ``compile_kernel`` returns a :class:`numbox.core.variable.compile_kernel.CompiledKernel`. It exposes
 ``.kernel`` (the hot-path callable — positional in, tuple out: the bare numba dispatcher
 once the graph resolves fully fused, the Python master when the graph is segmented around
 non-jittable nodes) and a dict-in / dict-out ``.execute`` convenience that mirrors
@@ -349,7 +349,7 @@ runtime errors always propagate.
 
 ``ck.partition`` is ``None`` until the first call resolves the mode; a fully
 fused graph reports a single jit segment. Each jit segment is cached
-content-addressed on disk exactly like a v1 kernel; the learned partition
+content-addressed on disk the same way the fused kernel is; the learned partition
 itself is per-process. If a later call's types break a segment, the partition
 is re-learned for those values and replaces the previous plan — workloads
 alternating between type families whose partitions differ re-pay discovery on

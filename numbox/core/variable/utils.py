@@ -74,8 +74,10 @@ def _wrap_formula(formula: Callable, flags: dict | None = None) -> Dispatcher | 
 
 
 def _strip_cache(flags: dict | None) -> dict:
-    """Inner formulas must never be cached (a cached inner stale-hits on a
-    numeric-literal edit and inlines a stale body into the fused kernel)."""
+    """Drop `cache` from the flags used for the transient return-type probe in
+    `_validate_declared_return`: the probe is a throwaway compile, so it must not
+    read or write numba's on-disk cache. (Fused-kernel staleness is handled
+    separately, by folding each formula's digest into the kernel name.)"""
     return {k: v for k, v in (flags or {}).items() if k != "cache"}
 
 
