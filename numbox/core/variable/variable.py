@@ -59,10 +59,25 @@ class VarSpecBase(TypedDict):
     name: str
 
 
+@dataclass(frozen=True)
+class Params:
+    """Optional per-`Variable` declaration driving static jitability in
+    `compile_kernel`. `jitable=False` declares a deliberately plain-Python
+    node; `type` is the variable's numba `Type`
+    (None means undeclared).
+
+    Like `formula`, `params` must be attached to a node before the first
+    `compile()` of any required set containing that node: a `Graph` caches its
+    compiled result, so a `params` attached afterward is not picked up."""
+    jitable: bool = True
+    type: Any = None
+
+
 class VarSpec(VarSpecBase, total=False):
     inputs: dict[str, str]
     formula: Callable
     metadata: str
+    params: Params
 
 
 VarValue: TypeAlias = Any
@@ -123,6 +138,14 @@ class External(Namespace):
             self._variables[name] = variable
         return variable
 
+    def declare(self, name: str, params: Params) -> 'Variable':
+        """Pre-seed a typed external before compile (the only supported route
+        to attach params to an external, which is otherwise auto-created
+        untyped on lookup)."""
+        variable = Variable(name=name, source=self.name, params=params)
+        self.update(name, variable)
+        return variable
+
 
 @dataclass(frozen=True)
 class Variable:
@@ -159,6 +182,7 @@ class Variable:
     inputs: Mapping[str, str] = field(default_factory=lambda: {})
     formula: Callable = field(default=None)
     metadata: str | None = field(default=None)
+    params: Params | None = field(default=None)
 
     def __hash__(self):
         return hash((self.source, self.name))

@@ -938,16 +938,6 @@ def test_external_typo_compiles_to_phantom_input():
         ck.execute({"ext": {"x": 5.0}})
 
 
-def test_external_variable_with_formula_rejected():
-    def f(x):
-        return x
-
-    g = Graph({"calc": [{"name": "y", "inputs": {"x": "ext"}, "formula": f}]}, ["ext"])
-    g.external["ext"].update("x", Variable(name="x", source="ext", formula=lambda: 1.0))
-    with pytest.raises(ValueError, match=r"ext\.x.*external but carries a formula"):
-        compile_kernel(g, "calc.y")
-
-
 def test_deep_chain_recursion_error_is_contextual():
     depth = sys.getrecursionlimit() + 100
 

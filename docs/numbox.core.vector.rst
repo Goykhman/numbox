@@ -24,7 +24,7 @@ Modules
 numbox.core.vector.vector
 -----------------------------
 
-.. automodule:: numbox.core.variable.variable
+.. automodule:: numbox.core.vector.vector
    :members:
    :show-inheritance:
    :undoc-members:

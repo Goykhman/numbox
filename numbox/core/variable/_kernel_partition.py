@@ -307,6 +307,39 @@ def compute_boundary(
     return boundary
 
 
+def _evaluate(
+    ordered_nodes: list[CompiledNode],
+    external: set[Variable],
+    values: dict[Variable, Any],
+    bindings_by_var: dict[Variable, Any],
+    flags: dict | None,
+    demoted: set[Variable] | dict[Variable, str],
+) -> None:
+    """Populate `values` for every interior node using a fixed `demoted` set
+    (no probing). Demoted nodes run their py_func; exotic bindings run via the
+    @njit shim; the rest run their Dispatcher.
+
+    Invoked by `CompiledKernel._ensure_store` to seed the value store on the
+    first `recompute()` of a declared kernel -- the declarations supply the
+    demotion set directly, so no discovery/probing is needed. (This is not a
+    NumbaError fallback: the NumbaError-driven re-discovery path is
+    `_run_segmented`/`discover`, which a declared kernel deliberately skips.)"""
+    for node in ordered_nodes:
+        var = node.variable
+        if var in external:
+            continue
+        args = [values[inp] for inp in node.inputs]
+        binding = bindings_by_var[var]
+        if not isinstance(binding, Dispatcher):
+            arg_types = tuple(typeof(a) for a in args)
+            values[var] = _call_exotic(binding, args, arg_types, flags)
+        elif var in demoted:
+            py = getattr(var.formula, "py_func", var.formula)
+            values[var] = py(*args)
+        else:
+            values[var] = binding(*args)
+
+
 def discover(
     ordered_nodes: list[CompiledNode],
     external: set[Variable],
