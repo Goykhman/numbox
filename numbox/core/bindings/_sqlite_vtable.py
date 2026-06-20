@@ -1,7 +1,7 @@
-"""Expose a numpy array as a read-only SQLite virtual table (register_table).
+"""Expose a numpy array or a mapping of 1-D arrays as a read-only SQLite virtual table (register_table).
 
 A single generic sqlite3_module (built once at import) serves every table; the
-per-table base pointer / strides / dtype tags / schema live in a numpy
+per-column base pointers / strides / dtype tags / schema live in a numpy
 structured-array descriptor whose data pointer is passed as pClientData.
 
 The sqlite3_vtab and sqlite3_vtab_cursor that our xCreate/xOpen callbacks
@@ -10,6 +10,7 @@ our own members after it. Each is modelled as a numpy structured dtype with that
 base nested as field 'base'. See https://www.sqlite.org/vtab.html.
 """
 import ctypes
+from collections.abc import Mapping
 
 import numpy as np
 from numba import carray, cfunc, njit, types
@@ -20,6 +21,7 @@ from numba.core.types import (
 
 from numbox.core.bindings import (
     SQLITE_OK, SQLITE_STATIC, SQLITE_TRANSIENT, SQLITE_ERROR, SQLITE_NOMEM,
+    SQLITE_FLOAT,
     SQLITE_INDEX_CONSTRAINT_EQ, SQLITE_INDEX_CONSTRAINT_GT,
     SQLITE_INDEX_CONSTRAINT_GE, SQLITE_INDEX_CONSTRAINT_LT,
     SQLITE_INDEX_CONSTRAINT_LE,
@@ -28,7 +30,7 @@ from numbox.core.bindings import (
     sqlite3_errmsg, sqlite3_free, sqlite3_malloc,
     sqlite3_result_int64, sqlite3_result_double,
     sqlite3_result_text, sqlite3_result_blob, sqlite3_result_error,
-    sqlite3_value_double, sqlite3_value_int64,
+    sqlite3_value_double, sqlite3_value_int64, sqlite3_value_numeric_type,
 )
 from numbox.core.bindings._sqlite_typemap import (
     _TAG_I8, _TAG_I16, _TAG_I32, _TAG_I64, _TAG_U8, _TAG_U16, _TAG_U32, _TAG_U64,
@@ -55,11 +57,11 @@ load_lib("sqlite3")
 # padding after the i4 ncols so every i8 field stays 8-aligned.
 _DESC_DTYPE = np.dtype([
     ("nrows", "i8"), ("ncols", "i4"),
-    ("row_stride", "i8"), ("data_base", "i8"),
-    ("col_offsets", "i8"), ("col_tags", "i8"), ("col_widths", "i8"),
+    ("col_bases", "i8"), ("col_strides", "i8"),
+    ("col_tags", "i8"), ("col_widths", "i8"),
     ("schema_ptr", "i8"), ("scratch_bytes", "i8"),
 ], align=True)
-assert _DESC_DTYPE.itemsize == 72
+assert _DESC_DTYPE.itemsize == 64
 
 # struct sqlite3_vtab { const sqlite3_module *pModule; int nRef; char *zErrMsg; }
 # https://www.sqlite.org/c3ref/vtab.html -- SQLite owns/sets these fields.
@@ -149,21 +151,50 @@ def sqlite3_declare_vtab(db, z_sql):
 
 
 class _BuiltDescriptor:
-    """The numpy structured-array descriptor plus every buffer whose pointer it holds."""
-    __slots__ = ("c", "offsets", "tags", "widths", "schema",
-                 "nrows", "ncols", "row_stride", "scratch_bytes", "arr")
+    """Keep-alive for the descriptor array, the buffers it points into, and the
+    underlying column data array(s). The C descriptor ``c`` is the source of
+    truth; nothing here is read by the cfuncs."""
+    __slots__ = ("c", "bases", "strides", "tags", "widths", "schema",
+                 "nrows", "ncols", "scratch_bytes", "arrays")
 
-    def __init__(self, c, offsets, tags, widths, schema, arr):
+    def __init__(self, c, bases, strides, tags, widths, schema, arrays):
         self.c = c
-        self.offsets = offsets
+        self.bases = bases
+        self.strides = strides
         self.tags = tags
         self.widths = widths
         self.schema = schema
-        self.arr = arr
+        self.arrays = arrays
         self.nrows = int(c["nrows"][0])
         self.ncols = int(c["ncols"][0])
-        self.row_stride = int(c["row_stride"][0])
         self.scratch_bytes = int(c["scratch_bytes"][0])
+
+
+def _finalize_descriptor(nrows, col_names, tags, widths, bases, strides, arrays):
+    """Build the _DESC_DTYPE descriptor + keep-alive from per-column layout."""
+    if not col_names:
+        raise ValueError("table must have at least one column")
+    for n in col_names:
+        if not isinstance(n, str):
+            raise TypeError("column name must be a string, got %r" % (type(n),))
+    scratch = max((w + 1 for w, t in zip(widths, tags) if t == _TAG_U), default=0)
+    bases_buf = np.array(bases, dtype=np.int64)
+    strides_buf = np.array(strides, dtype=np.int64)
+    tags_buf = np.array(tags, dtype=tags_buf_t)
+    widths_buf = np.array(widths, dtype=np.int64)
+    cols_sql = ", ".join('"%s" %s' % (n.replace('"', '""'), _SQL_TYPE[t]) for n, t in zip(col_names, tags))
+    schema = ("CREATE TABLE x(%s)" % cols_sql).encode("utf-8") + b"\x00"
+
+    c = np.zeros(1, _DESC_DTYPE)
+    c["nrows"] = int(nrows)
+    c["ncols"] = len(col_names)
+    c["col_bases"] = bases_buf.ctypes.data
+    c["col_strides"] = strides_buf.ctypes.data
+    c["col_tags"] = tags_buf.ctypes.data
+    c["col_widths"] = widths_buf.ctypes.data
+    c["schema_ptr"] = ctypes.cast(ctypes.c_char_p(schema), ctypes.c_void_p).value
+    c["scratch_bytes"] = int(scratch)
+    return _BuiltDescriptor(c, bases_buf, strides_buf, tags_buf, widths_buf, schema, tuple(arrays))
 
 
 def _build_descriptor(arr, columns, text_as_blob):
@@ -188,29 +219,39 @@ def _build_descriptor(arr, columns, text_as_blob):
         sub = [arr.dtype] * arr.shape[1]
         offs = [j * arr.strides[1] for j in range(arr.shape[1])]
 
-    if not col_names:
-        raise ValueError("array must have at least one column")
     tags = [_col_tag(dt, text_as_blob) for dt in sub]
     widths = [int(dt.itemsize) for dt in sub]
-    scratch = max([w + 1 for w, t in zip(widths, tags) if t == _TAG_U], default=0)
+    base = arr.ctypes.data
+    row_stride = int(arr.strides[0])
+    bases = [base + int(o) for o in offs]
+    strides = [row_stride] * len(col_names)
+    return _finalize_descriptor(arr.shape[0], col_names, tags, widths, bases, strides, (arr,))
 
-    offsets_buf = np.array(offs, dtype=np.int64)
-    tags_buf = np.array(tags, dtype=tags_buf_t)
-    widths_buf = np.array(widths, dtype=np.int64)
-    cols_sql = ", ".join('"%s" %s' % (n.replace('"', '""'), _SQL_TYPE[t]) for n, t in zip(col_names, tags))
-    schema = ("CREATE TABLE x(%s)" % cols_sql).encode("utf-8") + b"\x00"
 
-    c = np.zeros(1, _DESC_DTYPE)
-    c["nrows"] = int(arr.shape[0])
-    c["ncols"] = len(col_names)
-    c["row_stride"] = int(arr.strides[0])
-    c["data_base"] = arr.ctypes.data
-    c["col_offsets"] = offsets_buf.ctypes.data
-    c["col_tags"] = tags_buf.ctypes.data
-    c["col_widths"] = widths_buf.ctypes.data
-    c["schema_ptr"] = ctypes.cast(ctypes.c_char_p(schema), ctypes.c_void_p).value
-    c["scratch_bytes"] = int(scratch)
-    return _BuiltDescriptor(c, offsets_buf, tags_buf, widths_buf, schema, arr)
+def _build_descriptor_columnar(mapping, text_as_blob):
+    names = list(mapping.keys())
+    if not names:
+        raise ValueError("mapping must have at least one column")
+    bases, strides, tags, widths = [], [], [], []
+    col_arrays = []
+    nrows = None
+    for n in names:
+        col = mapping[n]
+        if not isinstance(col, np.ndarray):
+            raise TypeError("column %r must be a 1-D numpy array, got %r" % (n, type(col)))
+        if col.ndim != 1:
+            raise ValueError("column %r must be 1-D, got ndim=%d" % (n, col.ndim))
+        if nrows is None:
+            nrows = int(col.shape[0])
+        elif int(col.shape[0]) != nrows:
+            raise ValueError("column %r length %d != %d" % (n, col.shape[0], nrows))
+        tags.append(_col_tag(col.dtype, text_as_blob))
+        widths.append(int(col.dtype.itemsize))
+        bases.append(col.ctypes.data)
+        strides.append(int(col.strides[0]))
+        col_arrays.append(col)
+    cols = tuple(col_arrays)
+    return _finalize_descriptor(nrows, names, tags, widths, bases, strides, cols)
 
 
 @cfunc(types.int32(types.intp, types.intp, types.int32, types.intp, types.intp, types.intp), cache=_CACHE)
@@ -369,11 +410,10 @@ def _cell_value_f64(d, rowid, col):
     ladder (same addr math, same load_unaligned widths). xBestIndex only
     claims tags up to _TAG_BOOL; the string/blob tags fall through to 0."""
     ncols = d[0].ncols
-    base = d[0].data_base
-    row_stride = d[0].row_stride
-    offsets = carray(_cast_int_to_void_p(d[0].col_offsets), (ncols,), dtype=np.int64)
+    bases = carray(_cast_int_to_void_p(d[0].col_bases), (ncols,), dtype=np.int64)
+    strides = carray(_cast_int_to_void_p(d[0].col_strides), (ncols,), dtype=np.int64)
     tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=tags_buf_t)
-    addr = base + rowid * row_stride + offsets[col]
+    addr = bases[col] + rowid * strides[col]
     tag = tags[col]
     if tag == _TAG_I8:
         return float64(load_unaligned(addr, int8))
@@ -405,11 +445,10 @@ def _cell_value_i64(d, rowid, col):
     """Read an integer cell at (rowid, col) as int64, mirroring _xcolumn's
     sqlite3_result_int64 (uint64 wrapped to the same int64 SQLite sees)."""
     ncols = d[0].ncols
-    base = d[0].data_base
-    row_stride = d[0].row_stride
-    offsets = carray(_cast_int_to_void_p(d[0].col_offsets), (ncols,), dtype=np.int64)
+    bases = carray(_cast_int_to_void_p(d[0].col_bases), (ncols,), dtype=np.int64)
+    strides = carray(_cast_int_to_void_p(d[0].col_strides), (ncols,), dtype=np.int64)
     tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=tags_buf_t)
-    addr = base + rowid * row_stride + offsets[col]
+    addr = bases[col] + rowid * strides[col]
     tag = tags[col]
     if tag == _TAG_I8:
         return int64(load_unaligned(addr, int8))
@@ -451,6 +490,44 @@ def _cmp(op, cv, rv):
 
 
 @njit(**jit_options)
+def _int_float_cmp(i, r):
+    """Exact sign of (i - r) for an int64 cell i vs a REAL constraint r, mirroring
+    SQLite's sqlite3IntFloatCompare. Compares without widening i to f64 (which is
+    lossy above 2**53), so an int column constrained by a REAL literal is never
+    mis-pruned at any magnitude. Returns -1, 0, or +1."""
+    if r < -9.223372036854775808e18:   # r < INT64_MIN -> i > r
+        return 1
+    if r >= 9.223372036854775808e18:   # r >= 2**63 > INT64_MAX -> i < r
+        return -1
+    y = int64(r)                       # truncates toward zero; r is in [INT64_MIN, 2**63)
+    if i < y:
+        return -1
+    if i > y:
+        return 1
+    s = float64(i)                     # i == y here, so s == r exactly in every reachable case
+    if s < r:
+        return -1
+    if s > r:
+        return 1
+    return 0
+
+
+@njit(**jit_options)
+def _cmp_if(op, i, r):
+    """Truth of (int64 cell i) OP (REAL constraint r), via the exact _int_float_cmp."""
+    c = _int_float_cmp(i, r)
+    if op == SQLITE_INDEX_CONSTRAINT_EQ:
+        return c == 0
+    elif op == SQLITE_INDEX_CONSTRAINT_GT:
+        return c > 0
+    elif op == SQLITE_INDEX_CONSTRAINT_GE:
+        return c >= 0
+    elif op == SQLITE_INDEX_CONSTRAINT_LT:
+        return c < 0
+    return c <= 0
+
+
+@njit(**jit_options)
 def _row_matches(cur):
     c = carray(_cast_int_to_void_p(cur), (1,), dtype=_CUR_DTYPE)
     if c[0].n_pred == 0:
@@ -459,10 +536,13 @@ def _row_matches(cur):
     preds = carray(_cast_int_to_void_p(c[0].pred_p), (c[0].n_pred,), dtype=_PRED_DTYPE)
     for k in range(c[0].n_pred):
         op = preds[k].op
-        if preds[k].is_int != 0:
+        mode = preds[k].is_int
+        if mode == 1:
             ok = _cmp(op, _cell_value_i64(d, c[0].rowid, preds[k].col), preds[k].ival)
-        else:
+        elif mode == 0:
             ok = _cmp(op, _cell_value_f64(d, c[0].rowid, preds[k].col), preds[k].fval)
+        else:
+            ok = _cmp_if(op, _cell_value_i64(d, c[0].rowid, preds[k].col), preds[k].fval)
         if not ok:
             return False
     return True
@@ -470,6 +550,8 @@ def _row_matches(cur):
 
 @njit(**jit_options)
 def _seek_match(cur):
+    # No try/except: pure pointer arithmetic + bounded loads (0 <= col < ncols,
+    # rowid bounded by nrows), no NRT-managed allocation that could raise.
     c = carray(_cast_int_to_void_p(cur), (1,), dtype=_CUR_DTYPE)
     d = carray(_cast_int_to_void_p(c[0].descriptor), (1,), dtype=_DESC_DTYPE)
     while c[0].rowid < d[0].nrows and not _row_matches(cur):
@@ -503,10 +585,23 @@ def _xfilter(cur, idx_num, idx_str, argc, argv):
                 col = spec[k].col
                 preds[k].col = col
                 preds[k].op = spec[k].op
+                # Route by the RHS value's numeric type, not just the column tag:
+                # an int column constrained by a REAL literal must compare without
+                # int64 truncation of the threshold, else rows the omit=0 re-check
+                # can never resurface get pruned.
                 if _is_int_tag(col_tags[col]):
-                    preds[k].is_int = 1
-                    preds[k].ival = sqlite3_value_int64(vals[k])
-                    preds[k].fval = 0.0
+                    if sqlite3_value_numeric_type(vals[k]) == SQLITE_FLOAT:
+                        # int column vs a REAL literal: compare EXACTLY (mode 2),
+                        # never via int64 truncation (drops rows for fractional /
+                        # out-of-range RHS) nor via f64 widening of the cell (drops
+                        # rows for integer-valued RHS above 2**53).
+                        preds[k].is_int = 2
+                        preds[k].ival = 0
+                        preds[k].fval = sqlite3_value_double(vals[k])
+                    else:
+                        preds[k].is_int = 1
+                        preds[k].ival = sqlite3_value_int64(vals[k])
+                        preds[k].fval = 0.0
                 else:
                     preds[k].is_int = 0
                     preds[k].ival = 0
@@ -522,6 +617,8 @@ def _xfilter(cur, idx_num, idx_str, argc, argv):
 
 @cfunc(types.int32(types.intp), cache=_CACHE)
 def _xnext(cur):
+    # No try/except: pure pointer arithmetic + bounded loads (0 <= col < ncols,
+    # rowid bounded by nrows), no NRT-managed allocation that could raise.
     c = carray(_cast_int_to_void_p(cur), (1,), dtype=_CUR_DTYPE)
     c[0].rowid = c[0].rowid + 1
     _seek_match(cur)
@@ -530,6 +627,8 @@ def _xnext(cur):
 
 @cfunc(types.int32(types.intp), cache=_CACHE)
 def _xeof(cur):
+    # No try/except: pure pointer arithmetic + bounded loads (0 <= col < ncols,
+    # rowid bounded by nrows), no NRT-managed allocation that could raise.
     c = carray(_cast_int_to_void_p(cur), (1,), dtype=_CUR_DTYPE)
     d = carray(_cast_int_to_void_p(c[0].descriptor), (1,), dtype=_DESC_DTYPE)
     if c[0].rowid >= d[0].nrows:
@@ -539,6 +638,8 @@ def _xeof(cur):
 
 @cfunc(types.int32(types.intp, types.intp), cache=_CACHE)
 def _xrowid(cur, p_rowid):
+    # No try/except: pure pointer arithmetic + bounded loads (0 <= col < ncols,
+    # rowid bounded by nrows), no NRT-managed allocation that could raise.
     c = carray(_cast_int_to_void_p(cur), (1,), dtype=_CUR_DTYPE)
     store_at(p_rowid, c[0].rowid)
     return SQLITE_OK
@@ -551,12 +652,11 @@ def _xcolumn(cur, ctx, j):
         rowid = c[0].rowid
         d = carray(_cast_int_to_void_p(c[0].descriptor), (1,), dtype=_DESC_DTYPE)
         ncols = d[0].ncols
-        base = d[0].data_base
-        row_stride = d[0].row_stride
-        offsets = carray(_cast_int_to_void_p(d[0].col_offsets), (ncols,), dtype=np.int64)
+        bases = carray(_cast_int_to_void_p(d[0].col_bases), (ncols,), dtype=np.int64)
+        strides = carray(_cast_int_to_void_p(d[0].col_strides), (ncols,), dtype=np.int64)
         tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=tags_buf_t)
         widths = carray(_cast_int_to_void_p(d[0].col_widths), (ncols,), dtype=np.int64)
-        addr = base + rowid * row_stride + offsets[j]
+        addr = bases[j] + rowid * strides[j]
         tag = tags[j]
         if tag == _TAG_I8:
             sqlite3_result_int64(ctx, int64(load_unaligned(addr, int8)))
@@ -646,32 +746,39 @@ def _raise_rc(db, name, rc):
     raise RuntimeError("registration failed for %r (rc=%d)%s" % (name, rc, detail))
 
 
-def register_table(db, name, arr, columns=None, *, text_as_blob=False):
-    """Expose a numpy array as a read-only eponymous SQLite virtual table
+def register_table(db, name, data, columns=None, *, text_as_blob=False):
+    """Expose tabular data as a read-only eponymous SQLite virtual table
     (queryable directly as ``name`` with no CREATE VIRTUAL TABLE, since the
     module's xCreate is its xConnect).
 
-    The registration's keep-alive lives in the module-level ``_DATA_ANCHOR``
-    and is released by SQLite via ``xDestroy`` (on connection close
-    or re-registration of the same name). The caller must not
-    mutate or resize the array while the table is registered -- the view is
-    zero-copy, so queries read the array's buffer directly (numeric reads
-    alias it, and ``'S'``/BLOB values are handed to SQLite as
-    ``SQLITE_STATIC`` pointers into it).
+    ``data`` may be:
 
-    Registering a second table under an existing name follows SQLite's
-    module-registration semantics: the later registration replaces the earlier one
-    (it does not raise). Column names may be any string (they are quoted in the
-    generated schema).
+    - a 1-D numpy **structured array** (row-major; column names from the dtype,
+      optionally renamed by ``columns`` (column order always follows the dtype
+      field order; to reorder, reindex the array or pass a mapping));
+    - a 2-D numpy **array** (row-major; ``columns`` required, one name per column);
+    - a **mapping** (e.g. a ``dict``) of column-name -> 1-D numpy array (columnar;
+      all arrays must share one length; the keys name the columns, so passing
+      ``columns`` raises ``ValueError`` -- rename/reorder by building the mapping
+      with the desired keys and order before calling). Mapping values must already
+      be ``numpy.ndarray`` (no coercion); a non-array value raises ``TypeError`` and
+      a non-1-D array raises ``ValueError``.
+
+    The registration's keep-alive lives in the module-level ``_DATA_ANCHOR`` and is
+    released by SQLite via ``xDestroy`` (on connection close or re-registration of
+    the same name). The caller must not mutate or resize the array(s) while the
+    table is registered -- the view is zero-copy, so queries read each column's
+    buffer directly (numeric reads alias it, and ``'S'``/BLOB values are handed to
+    SQLite as ``SQLITE_STATIC`` pointers into it).
 
     Value semantics:
 
     - ``uint64`` values >= 2**63 are stored as SQLite's signed INTEGER and
       therefore wrap to negative.
-    - Floats pass through as REAL, including +/-inf -- EXCEPT NaN: SQLite coerces
-      a NaN ``REAL`` to SQL NULL (via ``sqlite3IsNaN``), so a NaN cell reads back
-      as NULL, not as a REAL NaN. There is no other source of SQL NULL (numpy has
-      no missing value), so every non-NaN cell is non-NULL.
+    - Floats pass through as REAL, including +/-inf -- EXCEPT NaN: SQLite coerces a
+      NaN ``REAL`` to SQL NULL (via ``sqlite3IsNaN``), so a NaN cell reads back as
+      NULL. numpy has no missing value, so every non-NaN cell is non-NULL. Masked
+      arrays are unsupported: the mask is ignored.
 
     String columns:
 
@@ -682,10 +789,19 @@ def register_table(db, name, arr, columns=None, *, text_as_blob=False):
     - Fixed-width ``'S'``/``'U'`` columns are NUL-padded by numpy; trailing NUL
       padding is trimmed on read while interior NULs are preserved.
     - A TEXT value with an interior NUL is stored faithfully (an explicit byte
-      length is passed), but C-string readers and most SQL text functions
-      truncate at the first NUL; read it via ``sqlite3_column_bytes`` + the
-      text/blob pointer, or use ``text_as_blob=True`` for full fidelity.
+      length is passed), but C-string readers and most SQL text functions truncate
+      at the first NUL; read it via ``sqlite3_column_bytes`` + the text/blob
+      pointer, or use ``text_as_blob=True`` for full fidelity.
     """
-    built = _build_descriptor(arr, columns, text_as_blob)
+    if isinstance(data, np.ndarray):
+        built = _build_descriptor(data, columns, text_as_blob)
+    elif isinstance(data, Mapping):
+        if columns is not None:
+            raise ValueError("columns must be omitted when data is a mapping; "
+                             "the dict keys name the columns")
+        built = _build_descriptor_columnar(data, text_as_blob)
+    else:
+        raise TypeError("data must be a numpy.ndarray or a mapping of name -> 1-D array, "
+                        "got %r" % (type(data),))
     handle = _VTableHandle(built)
     _register_with_destroy(db, name, _THE_MODULE_P, built.c.ctypes.data, handle)

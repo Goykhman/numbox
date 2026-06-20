@@ -5,6 +5,7 @@ import sys
 import textwrap
 from ctypes import addressof, c_int64, cast, c_char_p, string_at
 
+import sqlite3
 import pytest
 import numpy as np
 from numbox.utils.cstrings import c_string
@@ -15,9 +16,18 @@ from numbox.core.bindings import (
     sqlite3_column_int64, sqlite3_column_double,
     sqlite3_column_text, sqlite3_column_blob, sqlite3_column_bytes,
 )
+from numbox.core.bindings import query_to_array
+from numbox.core.bindings._sqlite_conn import sqlite3_libversion
+from numbox.utils.pysqlite_bridge import extract_connection_ptr
 from numbox.core.bindings._sqlite_vtable import utf32_to_utf8, _nul_trimmed_len
 from numbox.core.bindings._sqlite_vtable import _build_descriptor, _TAG_I64, _TAG_F64, _TAG_U
 from numbox.utils.lowlevel import array_data_p
+
+
+def _libraries_coordinated():
+    """True if numbox's bindings and Python's sqlite3 use the same libsqlite3."""
+    numbox_version = c_char_p(sqlite3_libversion()).value.decode()
+    return numbox_version == sqlite3.sqlite_version
 
 
 def test_imports():
@@ -77,10 +87,30 @@ def test_nul_trimmed_len_keeps_interior():
 def test_descriptor_2d_int64():
     a = np.arange(6, dtype=np.int64).reshape(3, 2)
     d = _build_descriptor(a, ["a", "b"], False)
-    assert (d.nrows, d.ncols, d.row_stride) == (3, 2, a.strides[0])
-    assert list(d.offsets) == [0, 8]
+    assert (d.nrows, d.ncols) == (3, 2)
+    assert list(d.strides) == [a.strides[0], a.strides[0]]
+    assert [b - a.ctypes.data for b in d.bases] == [0, 8]
     assert list(d.tags) == [_TAG_I64, _TAG_I64]
     assert d.schema == b'CREATE TABLE x("a" INTEGER, "b" INTEGER)\x00'
+
+
+def test_descriptor_columnar_layout():
+    from numbox.core.bindings._sqlite_vtable import _build_descriptor_columnar
+    a = np.arange(3, dtype=np.int64)
+    b = np.arange(3, dtype=np.float64)
+    d = _build_descriptor_columnar({"a": a, "b": b}, False)
+    assert (d.nrows, d.ncols) == (3, 2)
+    assert list(d.tags) == [_TAG_I64, _TAG_F64]
+    assert [base for base in d.bases] == [a.ctypes.data, b.ctypes.data]
+    assert list(d.strides) == [8, 8]
+    assert d.schema == b'CREATE TABLE x("a" INTEGER, "b" REAL)\x00'
+
+
+def test_descriptor_structured_columns_rename_length_mismatch():
+    dt = np.dtype([("x", "i8"), ("y", "f8"), ("z", "i4")])
+    a = np.zeros(2, dtype=dt)
+    with pytest.raises(ValueError):
+        _build_descriptor(a, ["a", "b"], False)
 
 
 def test_descriptor_structured_mixed():
@@ -89,7 +119,7 @@ def test_descriptor_structured_mixed():
     d = _build_descriptor(a, None, False)
     assert d.ncols == 3
     assert list(d.tags) == [_TAG_U, _TAG_I64, _TAG_F64]
-    assert list(d.offsets) == [dt.fields["t"][1], dt.fields["q"][1], dt.fields["p"][1]]
+    assert [b - a.ctypes.data for b in d.bases] == [dt.fields["t"][1], dt.fields["q"][1], dt.fields["p"][1]]
     assert d.scratch_bytes == 6 * 4 + 1
     assert d.schema == b'CREATE TABLE x("t" TEXT, "q" INTEGER, "p" REAL)\x00'
 
@@ -120,7 +150,7 @@ def test_widest_unicode_width_accepted():
 
 def test_descriptor_dtype_itemsize():
     from numbox.core.bindings._sqlite_vtable import _DESC_DTYPE
-    assert _DESC_DTYPE.itemsize == 72
+    assert _DESC_DTYPE.itemsize == 64
 
 
 def test_index_info_offsets_match_c_abi():
@@ -159,6 +189,44 @@ def test_xbestindex_sets_cardinality():
     view = ii.view(_IDX_INFO_DTYPE)[0]
     assert int(view["estimatedRows"]) == 4
     assert float(view["estimatedCost"]) == 4.0
+
+
+def test_xbestindex_estimates_bound_branch():
+    # With nbound usable EQ constraints on numeric columns, estimatedRows is the
+    # heuristic nrows // (nbound + 1) + 1 and estimatedCost is float(nrows).
+    from numbox.core.bindings._sqlite_vtable import (
+        _xbestindex, _build_descriptor, _VTAB_DTYPE, _VTAB_SIZE, _IDX_INFO_DTYPE,
+        _CONSTRAINT_DTYPE, _USAGE_DTYPE,
+    )
+    from numbox.core.bindings import SQLITE_INDEX_CONSTRAINT_EQ, sqlite3_free
+    nrows = 10
+    arr = np.arange(nrows * 3, dtype=np.int64).reshape(nrows, 3)
+    built = _build_descriptor(arr, ["a", "b", "c"], False)
+    vtab = np.zeros(_VTAB_SIZE // 8, dtype=np.int64)
+    vtab.view(_VTAB_DTYPE)[0]["descriptor"] = built.c.ctypes.data
+
+    nbound = 2
+    cons = np.zeros(nbound, dtype=_CONSTRAINT_DTYPE)
+    for i in range(nbound):
+        cons[i]["iColumn"] = i
+        cons[i]["op"] = SQLITE_INDEX_CONSTRAINT_EQ
+        cons[i]["usable"] = 1
+    usage = np.zeros(nbound, dtype=_USAGE_DTYPE)
+    ii = np.zeros(1, dtype=_IDX_INFO_DTYPE)
+    ii[0]["nConstraint"] = nbound
+    ii[0]["aConstraint"] = cons.ctypes.data
+    ii[0]["aConstraintUsage"] = usage.ctypes.data
+    rc = _xbestindex.ctypes(int(vtab.ctypes.data), int(ii.ctypes.data))
+    assert rc == 0
+    view = ii.view(_IDX_INFO_DTYPE)[0]
+    assert int(view["idxNum"]) == nbound
+    assert usage["argvIndex"].tolist() == [1, 2]
+    assert int(view["estimatedRows"]) == nrows // (nbound + 1) + 1
+    assert float(view["estimatedCost"]) == float(nrows)
+    # xBestIndex handed the serialised (col, op) idxStr to SQLite; free it here
+    # since no real connection owns it in this direct-call harness.
+    if int(view["needToFreeIdxStr"]):
+        sqlite3_free(int(view["idxStr"]))
 
 
 _SQLITE_ROW = 100
@@ -276,6 +344,21 @@ def test_structured_text_and_unicode():
     sqlite3_close(db)
 
 
+def test_structured_columns_rename():
+    db = _open_memory()
+    dt = np.dtype([("x", "i8"), ("y", "f8")])
+    a = np.array([(1, 10.5), (2, 20.5), (3, 30.5)], dtype=dt)
+    register_table(db, "t", a, columns=["id", "price"])
+    assert _fetchall(db, "SELECT id, price FROM t ORDER BY id") == [(1, 10.5), (2, 20.5), (3, 30.5)]
+    sqlite3_close(db)
+
+
+def test_columns_rename_rejects_non_string():
+    a = np.array([[1, 2]], dtype=np.int64)
+    with pytest.raises(TypeError):
+        register_table(0, "t", a, columns=[1, 2])
+
+
 def test_two_unicode_columns_single_cursor():
     # Both U columns of a row are decoded into the SAME per-cursor scratch
     # buffer, so SQLite must copy the first result before the second xColumn
@@ -368,6 +451,22 @@ def test_join_two_tables():
     h2 = register_table(db, "rhs", b, columns=["id", "w"])  # noqa: F841
     got = _fetchall(db, "SELECT lhs.v, rhs.w FROM lhs JOIN rhs ON lhs.id = rhs.id ORDER BY lhs.id")
     assert got == [(100, 7), (200, 9)]
+    sqlite3_close(db)
+
+
+def test_join_refilters_inner_cursor_per_outer_row():
+    # A nested-loop join re-invokes xFilter on the inner vtable cursor once per
+    # outer row, each time with a DIFFERENT bound value on the join key. This
+    # exercises the per-xFilter free+realloc of pred_p and the rowid reset; a
+    # correct joined result across multiple distinct outer keys demonstrates it.
+    db = _open_memory()
+    outer = np.array([[1], [2], [3], [2]], dtype=np.int64)
+    inner = np.array([[1, 10], [2, 20], [2, 21], [3, 30]], dtype=np.int64)
+    h1 = register_table(db, "o", outer, columns=["k"])  # noqa: F841
+    h2 = register_table(db, "i", inner, columns=["k", "v"])  # noqa: F841
+    got = sorted(_fetchall(db, "SELECT o.k, i.v FROM o JOIN i ON i.k = o.k"))
+    exp = sorted((ok, iv) for (ok,) in outer.tolist() for (ik, iv) in inner.tolist() if ik == ok)
+    assert got == exp, (got, exp)
     sqlite3_close(db)
 
 
@@ -677,6 +776,50 @@ def test_pushdown_explain_uses_index():
     sqlite3_close(db)
 
 
+def test_text_column_where_not_pushed_down():
+    # String/text columns are non-numeric, so xBestIndex never claims a WHERE on
+    # them: the plan stays at idxNum 0 (full scan) and the omit=0 re-check filters
+    # the surfaced rows -- the full-scan fallback must still return correct rows.
+    db = _open_memory()
+    dt = np.dtype([("name", "U4"), ("a", "i8")])
+    a = np.array([("foo", 1), ("bar", 2), ("foo", 3)], dtype=dt)
+    register_table(db, "t", a)
+    plan = _fetchall(db, "EXPLAIN QUERY PLAN SELECT a FROM t WHERE name = 'foo'")
+    text = " ".join(str(field) for row in plan for field in row).upper()
+    assert "INDEX 0" in text, text
+    assert sorted(_select_col0(db, "SELECT a FROM t WHERE name = 'foo'")) == [1, 3]
+    sqlite3_close(db)
+
+
+def test_rowid_constraint_not_pushed_down():
+    # The 0 <= col < ncols guard in xBestIndex excludes the iColumn == -1 rowid
+    # sentinel, so a rowid constraint is never claimed (idxNum stays 0). rowid is
+    # the 0-based scan position; the full-scan fallback must still be correct.
+    db = _open_memory()
+    a = np.array([[10], [20], [30]], dtype=np.int64)
+    h = register_table(db, "t", a, columns=["a"])  # noqa: F841
+    assert _fetchall(db, "SELECT a FROM t WHERE rowid >= 1 ORDER BY a") == [(20,), (30,)]
+    assert _fetchall(db, "SELECT a FROM t WHERE rowid = 2") == [(30,)]
+    plan = _fetchall(db, "EXPLAIN QUERY PLAN SELECT a FROM t WHERE rowid >= 1")
+    text = " ".join(str(field) for row in plan for field in row).upper()
+    assert "INDEX 0" in text, text
+    sqlite3_close(db)
+
+
+@pytest.mark.parametrize("dt", [np.int32, np.uint16, np.float32])
+def test_pushdown_smaller_dtypes_match_fullscan(dt):
+    # EQ + a range op pushed down on the smaller numeric dtypes, cross-checked
+    # against a full-scan (stdlib-equivalent) expectation.
+    db = _open_memory()
+    vals = [3, 5, 7, 5, 9, 1, 5]
+    a = np.array([[v] for v in vals], dtype=dt)
+    h = register_table(db, "t", a, columns=["c"])  # noqa: F841
+    typed = [dt(v).item() for v in vals]
+    assert sorted(_select_col0(db, "SELECT c FROM t WHERE c = 5")) == sorted(v for v in typed if v == 5)
+    assert sorted(_select_col0(db, "SELECT c FROM t WHERE c >= 5")) == sorted(v for v in typed if v >= 5)
+    sqlite3_close(db)
+
+
 def test_pushdown_bool_column():
     # A bool column maps to SQLite INTEGER and the cursor reads/compares it, so
     # an eq constraint must be pushed down (non-zero idxNum), not full-scanned.
@@ -740,6 +883,94 @@ def test_pushdown_int64_above_2_53_range():
     sqlite3_close(db)
 
 
+def test_pushdown_int_column_fractional_rhs_match_stdlib():
+    # Int columns constrained by a fractional REAL literal must compare in the
+    # float domain: sqlite3_value_int64 would truncate the threshold toward zero
+    # (4.5 -> 4, -4.5 -> -4) and drop rows the omit=0 re-check never resurfaces.
+    # Cross-check signed int dtypes against stdlib sqlite3 on identical data.
+    import sqlite3 as pysqlite
+    cases = [
+        (np.int8, [3, 4, 5]),
+        (np.int8, [-5, -4, -3]),
+        (np.int32, [3, 4, 5]),
+        (np.int32, [-5, -4, -3]),
+        (np.int64, [3, 4, 5]),
+        (np.int64, [-5, -4, -3]),
+    ]
+    for dtype, vals in cases:
+        ref = pysqlite.connect(":memory:")
+        ref.execute("CREATE TABLE t(c INTEGER)")
+        ref.executemany("INSERT INTO t VALUES (?)", [(int(v),) for v in vals])
+        db = _open_memory()
+        a = np.array([[v] for v in vals], dtype=dtype)
+        register_table(db, "t", a, columns=["c"])
+        for op in ("<", "<=", ">", ">="):
+            for rhs in ("4.5", "-4.5", "0.5", "-0.5"):
+                sql = "SELECT c FROM t WHERE c %s %s" % (op, rhs)
+                exp = sorted(r[0] for r in ref.execute(sql))
+                assert sorted(_select_col0(db, sql)) == exp, (dtype, sql)
+        # prove the fractional predicate is actually pushed to xFilter, not just
+        # caught by SQLite's omit=0 re-check of surfaced rows
+        plan = _fetchall(db, "EXPLAIN QUERY PLAN SELECT c FROM t WHERE c < 4.5")
+        text = " ".join(str(field) for row in plan for field in row).upper()
+        assert "VIRTUAL TABLE INDEX 1:" in text, text
+        ref.close()
+        sqlite3_close(db)
+
+
+def test_pushdown_int64_out_of_range_real_rhs_match_stdlib():
+    # An out-of-int64-range REAL literal (~1e23) must compare in the float
+    # domain: sqlite3_value_int64 clamps it to INT64_MAX, turning "c < clamp"
+    # into "c < INT64_MAX" which wrongly drops the INT64_MAX row.
+    import sqlite3 as pysqlite
+    INT64_MAX = (1 << 63) - 1
+    vals = [-5, 0, 5, INT64_MAX]
+    ref = pysqlite.connect(":memory:")
+    ref.execute("CREATE TABLE t(c INTEGER)")
+    ref.executemany("INSERT INTO t VALUES (?)", [(int(v),) for v in vals])
+    db = _open_memory()
+    a = np.array([[v] for v in vals], dtype=np.int64)
+    register_table(db, "t", a, columns=["c"])
+    sql = "SELECT c FROM t WHERE c < 99999999999999999999999"
+    exp = sorted(r[0] for r in ref.execute(sql))
+    assert sorted(_select_col0(db, sql)) == exp, (sql, exp)
+    ref.close()
+    sqlite3_close(db)
+
+
+def test_pushdown_int64_integer_valued_real_rhs_match_stdlib():
+    # An int column constrained by an INTEGER-VALUED REAL literal at high
+    # magnitude must compare EXACTLY: widening the int64 cell to f64 (the old
+    # float-domain path) is lossy above 2**53, so (2**53+1) collapses to 2**53
+    # and "c > 2**53.0" wrongly drops the 2**53+1 row. Cross-check against stdlib
+    # sqlite3 on identical data, both above +2**53 and below -2**53.
+    import sqlite3 as pysqlite
+    base = 1 << 53
+    cases = [
+        ([base, base + 1, base + 2, base + 3, base + 4], ">", "9007199254740992.0"),
+        ([base, base + 1, base + 2, base + 3, base + 4], ">=", "9007199254740994.0"),
+        ([-base - 4, -base - 3, -base - 2, -base - 1, -base], "<", "-9007199254740992.0"),
+        ([-base - 4, -base - 3, -base - 2, -base - 1, -base], "<=", "-9007199254740994.0"),
+    ]
+    for vals, op, rhs in cases:
+        ref = pysqlite.connect(":memory:")
+        ref.execute("CREATE TABLE t(c INTEGER)")
+        ref.executemany("INSERT INTO t VALUES (?)", [(int(v),) for v in vals])
+        db = _open_memory()
+        a = np.array([[v] for v in vals], dtype=np.int64)
+        register_table(db, "t", a, columns=["c"])
+        sql = "SELECT c FROM t WHERE c %s %s" % (op, rhs)
+        exp = sorted(r[0] for r in ref.execute(sql))
+        assert sorted(_select_col0(db, sql)) == exp, (sql, exp)
+        # prove the REAL-RHS predicate is actually pushed to xFilter, not just
+        # caught by SQLite's omit=0 re-check of surfaced rows
+        plan = _fetchall(db, "EXPLAIN QUERY PLAN " + sql)
+        text = " ".join(str(field) for row in plan for field in row).upper()
+        assert "VIRTUAL TABLE INDEX 1:" in text, text
+        ref.close()
+        sqlite3_close(db)
+
+
 def test_pushdown_uint64_high_magnitude_consistent():
     db = _open_memory()
     vals = [(1 << 63), (1 << 63) + 5, (1 << 63) + 1]
@@ -783,3 +1014,186 @@ def test_xdestroy_deferred_while_statement_open():
     assert sqlite3_close(db.value) == 0  # now it closes and fires xDestroy
     assert len(v._DATA_ANCHOR) == n_before - 1
     del h
+
+
+# ---- columnar (mapping) overload ----
+
+def test_columnar_int64_roundtrip():
+    db = _open_memory()
+    cols = {"a": np.array([1, 2, 3], dtype=np.int64),
+            "b": np.array([10, 20, 30], dtype=np.int64)}
+    register_table(db, "t", cols)
+    assert _fetchall(db, "SELECT a, b FROM t ORDER BY a") == [(1, 10), (2, 20), (3, 30)]
+    sqlite3_close(db)
+
+
+def test_columnar_mixed_dtypes():
+    db = _open_memory()
+    cols = {"i": np.array([1, 2], dtype=np.int32),
+            "f": np.array([1.5, 2.5], dtype=np.float64),
+            "b": np.array([True, False], dtype=np.bool_)}
+    register_table(db, "t", cols)
+    assert _fetchall(db, "SELECT i, f, b FROM t ORDER BY i") == [(1, 1.5, 1), (2, 2.5, 0)]
+    sqlite3_close(db)
+
+
+def test_columnar_pushdown_eq_range():
+    db = _open_memory()
+    cols = {"a": np.array([1, 2, 3, 4], dtype=np.int64),
+            "b": np.array([10, 20, 30, 40], dtype=np.int64)}
+    register_table(db, "t", cols)
+    assert _fetchall(db, "SELECT b FROM t WHERE a = 3") == [(30,)]
+    assert _fetchall(db, "SELECT b FROM t WHERE a >= 3 ORDER BY a") == [(30,), (40,)]
+    sqlite3_close(db)
+
+
+def test_columnar_unicode_and_bytes():
+    db = _open_memory()
+    cols = {"u": np.array(["foo", "héllo"], dtype="U6"),
+            "s": np.array([b"ab", b"cde"], dtype="S4")}
+    register_table(db, "t", cols)
+    assert _fetchall(db, "SELECT u, s FROM t ORDER BY u") == [("foo", "ab"), ("héllo", "cde")]
+    sqlite3_close(db)
+
+
+def test_columnar_text_as_blob():
+    db = _open_memory()
+    cols = {"s": np.array([b"\xff\xfe", b"\x01\x02"], dtype="S2")}
+    register_table(db, "t", cols, text_as_blob=True)
+    assert _fetchall(db, "SELECT s FROM t") == [(b"\xff\xfe",), (b"\x01\x02",)]
+    sqlite3_close(db)
+
+
+def test_columnar_uint64_wraps_signed():
+    db = _open_memory()
+    cols = {"x": np.array([2 ** 63], dtype=np.uint64)}
+    register_table(db, "t", cols)
+    assert _fetchall(db, "SELECT x FROM t") == [(-(2 ** 63),)]
+    sqlite3_close(db)
+
+
+def test_columnar_nan_reads_as_null():
+    db = _open_memory()
+    cols = {"x": np.array([1.0, np.nan, 3.0], dtype=np.float64)}
+    register_table(db, "t", cols)
+    assert _fetchall(db, "SELECT x FROM t") == [(1.0,), (None,), (3.0,)]
+    sqlite3_close(db)
+
+
+def test_columnar_join_two_tables():
+    db = _open_memory()
+    left = {"id": np.array([1, 2, 3], dtype=np.int64),
+            "v": np.array([10, 20, 30], dtype=np.int64)}
+    right = {"id": np.array([2, 3, 4], dtype=np.int64),
+             "w": np.array([200, 300, 400], dtype=np.int64)}
+    register_table(db, "lhs", left)
+    register_table(db, "rhs", right)
+    got = _fetchall(db, "SELECT lhs.id, v, w FROM lhs JOIN rhs ON lhs.id = rhs.id ORDER BY lhs.id")
+    assert got == [(2, 20, 200), (3, 30, 300)]
+    sqlite3_close(db)
+
+
+def test_columnar_strided_column():
+    db = _open_memory()
+    backing = np.array([1, 99, 2, 99, 3, 99], dtype=np.int64)
+    strided = backing[::2]            # values 1,2,3; stride 16 bytes; non-contiguous
+    assert not strided.flags["C_CONTIGUOUS"]
+    cols = {"a": strided, "b": np.array([10, 20, 30], dtype=np.int64)}
+    register_table(db, "t", cols)
+    assert _fetchall(db, "SELECT a, b FROM t ORDER BY a") == [(1, 10), (2, 20), (3, 30)]
+    sqlite3_close(db)
+
+
+def test_columnar_strided_string_column():
+    db = _open_memory()
+    backing = np.array(["aa", "zz", "bb", "zz", "cc", "zz"], dtype="U6")
+    strided = backing[::2]            # "aa","bb","cc"; non-contiguous (stride 2*itemsize)
+    assert not strided.flags["C_CONTIGUOUS"]
+    cols = {"s": strided, "n": np.array([1, 2, 3], dtype=np.int64)}
+    register_table(db, "t", cols)
+    assert _fetchall(db, "SELECT s, n FROM t ORDER BY s") == [("aa", 1), ("bb", 2), ("cc", 3)]
+    sqlite3_close(db)
+
+
+def test_columnar_negative_stride_column():
+    backing = np.array([10, 20, 30, 40], dtype=np.int64)
+    rev = backing[::-1]            # negative stride; rev.ctypes.data is the physical-last element
+    assert rev.strides[0] < 0
+    db = _open_memory()
+    register_table(db, "t", {"a": rev})
+    assert _fetchall(db, "SELECT a FROM t") == [(40,), (30,), (20,), (10,)]
+    assert _fetchall(db, "SELECT a FROM t WHERE a > 15 ORDER BY a") == [(20,), (30,), (40,)]
+    sqlite3_close(db)
+
+
+def test_columnar_rejects_non_string_key():
+    with pytest.raises(TypeError):
+        register_table(0, "t", {1: np.array([1, 2], dtype=np.int64)})
+
+
+def test_columnar_rejects_columns_kwarg():
+    with pytest.raises(ValueError):
+        register_table(0, "t", {"a": np.array([1], dtype=np.int64)}, columns=["a"])
+
+
+def test_columnar_rejects_non_array_value():
+    with pytest.raises(TypeError):
+        register_table(0, "t", {"a": [1, 2, 3]})
+
+
+def test_columnar_rejects_non_1d_value():
+    with pytest.raises(ValueError):
+        register_table(0, "t", {"a": np.zeros((2, 2), dtype=np.int64)})
+
+
+def test_columnar_rejects_unequal_lengths():
+    with pytest.raises(ValueError):
+        register_table(0, "t", {"a": np.array([1, 2], dtype=np.int64),
+                                "b": np.array([1], dtype=np.int64)})
+
+
+def test_columnar_rejects_empty_mapping():
+    with pytest.raises(ValueError):
+        register_table(0, "t", {})
+
+
+def test_columnar_rejects_object_dtype():
+    with pytest.raises(TypeError):
+        register_table(0, "t", {"a": np.array(["x", "y"], dtype=object)})
+
+
+def test_columnar_zero_rows():
+    db = _open_memory()
+    cols = {"a": np.array([], dtype=np.int64),
+            "b": np.array([], dtype=np.float64)}
+    register_table(db, "t", cols)
+    assert _fetchall(db, "SELECT a, b FROM t") == []
+    sqlite3_close(db)
+
+
+def test_columnar_on_stdlib_connection():
+    if not _libraries_coordinated():
+        pytest.skip("uncoordinated libsqlite3 (see numbox.utils.pysqlite_bridge)")
+    conn = sqlite3.connect(":memory:")
+    try:
+        cols = {"id": np.array([1, 2, 3], dtype=np.int64),
+                "px": np.array([100.0, 250.0, 50.0], dtype=np.float64)}
+        register_table(extract_connection_ptr(conn), "trades", cols)
+        rows = conn.execute("SELECT id FROM trades WHERE px > 100 ORDER BY id").fetchall()
+        assert rows == [(2,)]
+    finally:
+        conn.close()
+
+
+def test_columnar_query_to_array():
+    db = _open_memory()
+    cols = {"id": np.array([1, 2, 3], dtype=np.int64),
+            "px": np.array([100.0, 250.0, 50.0], dtype=np.float64)}
+    register_table(db, "trades", cols)
+    out_dtype = np.dtype([("id", "i8"), ("px", "f8")])
+    with c_string("SELECT id, px FROM trades WHERE px > 100 ORDER BY id") as sql_p:
+        out = query_to_array(db, sql_p, out_dtype)
+    assert out.dtype == out_dtype
+    assert out["id"].tolist() == [2]
+    assert out["px"].tolist() == [250.0]
+    sqlite3_close(db)
