@@ -17,17 +17,10 @@ from numbox.core.bindings import (
     sqlite3_column_text, sqlite3_column_blob, sqlite3_column_bytes,
 )
 from numbox.core.bindings import query_to_array
-from numbox.core.bindings._sqlite_conn import sqlite3_libversion
-from numbox.utils.pysqlite_bridge import extract_connection_ptr
+from numbox.utils.pysqlite_bridge import extract_connection_ptr, libraries_coordinated
 from numbox.core.bindings._sqlite_vtable import utf32_to_utf8, _nul_trimmed_len
 from numbox.core.bindings._sqlite_vtable import _build_descriptor, _TAG_I64, _TAG_F64, _TAG_U
 from numbox.utils.lowlevel import array_data_p
-
-
-def _libraries_coordinated():
-    """True if numbox's bindings and Python's sqlite3 use the same libsqlite3."""
-    numbox_version = c_char_p(sqlite3_libversion()).value.decode()
-    return numbox_version == sqlite3.sqlite_version
 
 
 def test_imports():
@@ -1172,7 +1165,7 @@ def test_columnar_zero_rows():
 
 
 def test_columnar_on_stdlib_connection():
-    if not _libraries_coordinated():
+    if not libraries_coordinated():
         pytest.skip("uncoordinated libsqlite3 (see numbox.utils.pysqlite_bridge)")
     conn = sqlite3.connect(":memory:")
     try:

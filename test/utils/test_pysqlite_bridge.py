@@ -4,14 +4,8 @@ from platform import system
 
 import pytest
 
-from numbox.utils.pysqlite_bridge import extract_connection_ptr
+from numbox.utils.pysqlite_bridge import extract_connection_ptr, libraries_coordinated
 from numbox.core.bindings._sqlite_conn import sqlite3_changes, sqlite3_libversion
-
-
-def _libraries_coordinated():
-    """True if numbox's bindings and Python's sqlite3 use the same libsqlite3."""
-    numbox_version = ctypes.c_char_p(sqlite3_libversion()).value.decode()
-    return numbox_version == sqlite3.sqlite_version
 
 
 def test_numbox_and_python_use_same_libsqlite3():
@@ -37,8 +31,17 @@ def test_numbox_and_python_use_same_libsqlite3():
         )
 
 
+def test_libraries_coordinated_reflects_version_match(monkeypatch):
+    """:func:`libraries_coordinated` is a plain version-equality predicate."""
+    numbox_version = ctypes.c_char_p(sqlite3_libversion()).value.decode()
+    monkeypatch.setattr(sqlite3, "sqlite_version", numbox_version)
+    assert libraries_coordinated() is True
+    monkeypatch.setattr(sqlite3, "sqlite_version", "0.0.0-mismatch")
+    assert libraries_coordinated() is False
+
+
 def test_extract_connection_ptr_memory_db():
-    if not _libraries_coordinated():
+    if not libraries_coordinated():
         pytest.skip("uncoordinated libraries — extract_connection_ptr guards against use")
     conn = sqlite3.connect(":memory:")
     try:
@@ -50,7 +53,7 @@ def test_extract_connection_ptr_memory_db():
 
 
 def test_extract_connection_ptr_file_db(tmp_path):
-    if not _libraries_coordinated():
+    if not libraries_coordinated():
         pytest.skip("uncoordinated libraries — extract_connection_ptr guards against use")
     db_path = tmp_path / "test.db"
     conn = sqlite3.connect(str(db_path))
@@ -93,7 +96,7 @@ def test_extracted_pointer_usable_with_numbox_bindings(tmp_path):
     different sqlite instance would segfault (see the
     :mod:`numbox.utils.pysqlite_bridge` docstring for the macOS workaround).
     """
-    if not _libraries_coordinated():
+    if not libraries_coordinated():
         pytest.skip(
             "numbox and Python use different libsqlite3 instances — "
             "see numbox.utils.pysqlite_bridge docstring for workaround"
