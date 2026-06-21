@@ -90,6 +90,23 @@ class _PysqliteConnection(ctypes.Structure):
     _fields_ = _pyobject_head_fields() + [("db", ctypes.c_void_p)]
 
 
+def libraries_coordinated():
+    """True if numbox's ``@njit`` bindings and Python's ``sqlite3`` resolve to the same libsqlite3.
+
+    Compares :func:`~numbox.core.bindings._sqlite_conn.sqlite3_libversion` (what numbox's bindings
+    link against) with ``sqlite3.sqlite_version`` (what Python's ``sqlite3`` module links against).
+    When they differ — the macOS shared-cache situation described in the module docstring — passing a
+    connection pointer across the two is unsafe, and :func:`extract_connection_ptr` raises rather than
+    proceed.
+
+    Returns
+    -------
+    bool
+    """
+    numbox_version = ctypes.c_char_p(sqlite3_libversion()).value.decode()
+    return numbox_version == sqlite3.sqlite_version
+
+
 def extract_connection_ptr(conn):
     """Return the raw ``sqlite3*`` underlying a Python ``sqlite3.Connection``.
 
@@ -99,12 +116,11 @@ def extract_connection_ptr(conn):
     :func:`~numbox.core.bindings._sqlite_conn.sqlite3_errmsg` (a
     healthy connection returns ``"not an error"``).
 
-    Before reading the pointer, checks that numbox's bindings and Python's
-    ``sqlite3`` module resolve to the same libsqlite3 (by comparing
-    :func:`~numbox.core.bindings._sqlite_conn.sqlite3_libversion` against
-    ``sqlite3.sqlite_version``).  If they differ — the macOS shared-cache
-    situation in the module docstring — it raises rather than pass the
-    pointer to a mismatched library, which could segfault.
+    Before reading the pointer, checks (via :func:`libraries_coordinated`) that
+    numbox's bindings and Python's ``sqlite3`` module resolve to the same
+    libsqlite3.  If they differ — the macOS shared-cache situation in the module
+    docstring — it raises rather than pass the pointer to a mismatched library,
+    which could segfault.
 
     Parameters
     ----------
@@ -128,8 +144,8 @@ def extract_connection_ptr(conn):
         raise TypeError(
             f"expected sqlite3.Connection, got {type(conn).__name__}"
         )
-    numbox_version = ctypes.c_char_p(sqlite3_libversion()).value.decode()
-    if numbox_version != sqlite3.sqlite_version:
+    if not libraries_coordinated():
+        numbox_version = ctypes.c_char_p(sqlite3_libversion()).value.decode()
         raise RuntimeError(
             f"numbox's @njit bindings resolve libsqlite3 {numbox_version!r}, but Python's "
             f"sqlite3 module uses {sqlite3.sqlite_version!r}.  Passing this connection "
