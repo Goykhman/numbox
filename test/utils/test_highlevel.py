@@ -1,5 +1,6 @@
 import os
 import time
+from typing import Callable
 
 import pytest
 from numba import njit, typeof
@@ -177,6 +178,40 @@ def test_make_structref_3():
     assert isclose(aux_1(s1), ref), (aux_1(s1), ref)
 
     assert isclose(s1.calculate_2(), 9.42)
+
+
+def test_make_structref_method_param_edge_cases():
+    """COR-4 / task 8: make_structref must accept method signatures whose source
+    spelling differs from repr() of the default (1_000, 0x10, quote style), drops
+    annotations, or contains a nested ')'. The old regex cross-check assert in
+    make_structref_code_txt rejected these. Codegen-only (no numba needed)."""
+    def m_underscore(self, n=1_000):
+        return self.x + n
+
+    def m_hex(self, n=0x10):
+        return self.x + n
+
+    def m_str_comma(self, s="a, b"):
+        return self.x
+
+    def factory():
+        return 0
+
+    def m_factory(self, x=factory()):
+        return self.x + x
+
+    def m_callable(self, f: Callable[[int], int] = None):
+        return self.x
+
+    for name, method in [
+        ("m_underscore", m_underscore),
+        ("m_hex", m_hex),
+        ("m_str_comma", m_str_comma),
+        ("m_factory", m_factory),
+        ("m_callable", m_callable),
+    ]:
+        code = make_structref_code_txt("S3", ("x", "y"), S3TypeClass, struct_methods={name: method})[0]
+        assert isinstance(code, str) and f"def {name}(" in code, name
 
 
 ref_s4_code_txt = """
