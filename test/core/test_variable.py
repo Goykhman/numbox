@@ -243,5 +243,39 @@ vars_.output--vars_.quantity--configs.s
                                              buffer.storage"""
 
 
+def test_recompute_honors_variables_source_override():
+    """COR-2: an explicit Variables-source override must be honored, not recomputed
+    from a co-changed upstream input."""
+    def derive_b(a_):
+        return 10 * a_
+
+    def derive_c(b_):
+        return b_ + 1
+
+    def _spec(name, inputs, formula):
+        return {"name": name, "inputs": inputs, "formula": formula,
+                "metadata": dedent(getsource(formula))}
+
+    graph = Graph(
+        variables_lists={"vars_": [
+            _spec("b", {"a": "ext"}, derive_b),
+            _spec("c", {"b": "vars_"}, derive_c),
+        ]},
+        external_source_names=["ext"],
+    )
+    compiled = graph.compile(["vars_.c"])
+    values = Values()
+    b = graph.registry["vars_"]["b"]
+    c = graph.registry["vars_"]["c"]
+
+    compiled.execute({"ext": {"a": 1}}, values)
+    assert values.get(b).value == 10
+    assert values.get(c).value == 11
+
+    compiled.recompute({"ext": {"a": 2}, "vars_": {"b": 999}}, values)
+    assert values.get(b).value == 999
+    assert values.get(c).value == 1000
+
+
 if __name__ == "__main__":
     collect_and_run_tests(__name__)

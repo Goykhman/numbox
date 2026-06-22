@@ -1878,3 +1878,22 @@ def test_recompute_external_and_interior_yield_distinct_keys():
     assert len({k[0] for k in keys}) == 2             # cone node-sets differ ({a,b,u} vs {x,a,b,u})
     assert len({k[1] for k in keys}) == 2             # live-ins differ ({variables.x} vs {basket.y})
     assert out == _interp_recompute_sequence(g, req, ext, changes)
+
+
+def test_recompute_honors_interior_override():
+    """COR-2b: CompiledKernel.recompute must honor an interior override even when the
+    node is downstream of a co-changed input (its formula must not be re-run)."""
+    g = Graph(
+        variables_lists={"vars_": [
+            {"name": "b", "inputs": {"a": "ext"}, "formula": njit(lambda a: 10 * a)},
+            {"name": "c", "inputs": {"b": "vars_"}, "formula": njit(lambda b: b + 1)},
+        ]},
+        external_source_names=["ext"],
+    )
+    ck = compile_kernel(g, ["vars_.b", "vars_.c"])
+    b = g.registry["vars_"]["b"]
+    c = g.registry["vars_"]["c"]
+    assert ck.execute({"ext": {"a": 1}}) == {"vars_.b": 10, "vars_.c": 11}
+    ck.recompute({"ext": {"a": 2}, "vars_": {"b": 999}})
+    assert ck._store[b] == 999
+    assert ck._store[c] == 1000
