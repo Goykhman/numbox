@@ -51,6 +51,13 @@ class Storage(Protocol):
         invoked for the given variable.
         """
 
+    def pop(self, variable: 'Variable') -> None:
+        """
+        If the wrapped storage is the only pin on the
+        stored data, this might be useful to help release
+        the memory sooner.
+        """
+
     def __iter__(self) -> Iterator['Variable']:
         pass
 
@@ -179,7 +186,7 @@ class Variable:
     """
     name: str
     source: str = field(default="")
-    inputs: Mapping[str, str] = field(default_factory=lambda: {})
+    inputs: Mapping[str, str] = field(default_factory=dict)
     formula: Callable = field(default=None)
     metadata: str | None = field(default=None)
     params: Params | None = field(default=None)
@@ -249,6 +256,9 @@ class Values:
             self._values[variable] = Value(variable=variable)
         return self._values[variable]
 
+    def pop(self, variable: Variable) -> None:
+        self._values.pop(variable, None)
+
     def __iter__(self) -> Iterator[Variable]:
         return iter(self._values.keys())
 
@@ -257,6 +267,7 @@ class Values:
 class CompiledNode:
     variable: Variable
     inputs: list[Variable]
+    id: int | None = field(default=None)
 
     def __hash__(self):
         return hash((self.variable.source, self.variable.name))
@@ -273,14 +284,20 @@ class CompiledNode:
 class CompiledGraph:
     ordered_nodes: list[CompiledNode]
     required_external_variables: dict[str, dict[str, Variable]]
+    requested_variables: set[Variable] = field(default_factory=set)
     debug: bool = False
-    dependents: dict[Variable, list[CompiledNode]] = field(default_factory=lambda: {})
-    affected_cache: dict[frozenset[Variable], list[CompiledNode]] = field(default_factory=lambda: {})
+    dependents: dict[Variable, list[CompiledNode]] = field(default_factory=dict)
+    affected_cache: dict[frozenset[Variable], tuple[list[CompiledNode], frozenset[Variable]]] = field(
+        default_factory=dict
+    )
+    last_used: dict[Variable, int] = field(default_factory=dict)
 
     def __post_init__(self):
-        for node in self.ordered_nodes:
+        for node_idx, node in enumerate(self.ordered_nodes):
+            node_idx = node.id
             for inp in node.inputs:
                 self.dependents.setdefault(inp, []).append(node)
+                self.last_used[inp] = node_idx
 
     def execute(
         self,
@@ -329,11 +346,14 @@ class CompiledGraph:
                 var_value = provided[var_name]
                 values.get(variable).value = var_value
 
-    def _collect_affected(self, changed_vars: set[Variable]) -> list[CompiledNode]:
+    def _collect_affected(
+        self, changed_vars: set[Variable]
+    ) -> tuple[list[CompiledNode], frozenset[Variable]]:
         """
         Return subset of `self.ordered_nodes` consisting of nodes
         affected by `changed_vars`, in the same order as in the
-        `self.ordered_nodes`.
+        `self.ordered_nodes`. Return the set of the corresponding
+        `Variable` instances as well.
         """
         key = frozenset(changed_vars)
         cached = self.affected_cache.get(key)
@@ -344,14 +364,22 @@ class CompiledGraph:
         while stack:
             var = stack.pop()
             for node in self.dependents.get(var, []):
-                if node not in affected:
-                    affected.add(node)
-                    stack.append(node.variable)
-        affected_list = [node for node in self.ordered_nodes if node in affected]
-        self.affected_cache[key] = affected_list
-        return affected_list
+                node_var = node.variable
+                if node_var not in affected:
+                    affected.add(node_var)
+                    stack.append(node_var)
+        affected_list = [node for node in self.ordered_nodes if node.variable in affected]
+        affected = frozenset(affected)
+        self.affected_cache[key] = affected_list, affected
+        return affected_list, affected
 
-    def _calculate(self, nodes: list[CompiledNode], values: Storage):
+    def _calculate(
+        self,
+        nodes: list[CompiledNode],
+        values: Storage,
+        clean_storage: bool = False,
+        affected: frozenset[Variable] = None
+    ):
         """
         Calculate values of the `Variable`s using their own `formula`
         by evaluating them as functions of the values of the specified
@@ -363,25 +391,42 @@ class CompiledGraph:
         supplied as a topologically ordered list `self.ordered_nodes`,
         or as an ordered sub-set thereof (see, e.g., `recompute`).
         """
+        if clean_storage and not isinstance(affected, frozenset):
+            raise ValueError(f"affected should be a set of Variable instances, got {affected}")
         for node in nodes:
-            if node.variable.formula is None:
+            node_variable = node.variable
+            if node_variable.formula is None:
                 continue
             args = [_null] * len(node.inputs)
-            for i, input_ in enumerate(node.inputs):
-                arg = values.get(input_).value
+            to_free = set()
+            for i, input_variable in enumerate(node.inputs):
+                arg = values.get(input_variable).value
                 if arg is _null:
-                    raise RuntimeError(f"Uninitialized input {input_.qual_name()} for {node.variable}")
+                    raise RuntimeError(f"Uninitialized input {input_variable.qual_name()} for {node_variable}")
                 args[i] = arg
+                if clean_storage and input_variable in affected and input_variable not in self.requested_variables:
+                    last_used_inp = self.last_used[input_variable]
+                    if last_used_inp == node.id:
+                        to_free.add(input_variable)
+            for variable in to_free:
+                values.pop(variable)
             if self.debug:
-                print(f"Calculating {node}\nwith metadata\n{node.variable.metadata}", file=sys.stderr)
-            result = node.variable.formula(*args)
-            values.get(node.variable).value = result
+                print(f"Calculating {node}\nwith metadata\n{node_variable.metadata}", file=sys.stderr)
+            result = node_variable.formula(*args)
+            values.get(node_variable).value = result
 
-    def recompute(self, changed: dict[str, dict[str, VarValue]], values: Storage):
+    def recompute(
+        self,
+        changed: dict[str, dict[str, VarValue]],
+        values: Storage,
+        clean_storage: bool = False
+    ):
         """
         :param changed: dict of sources to names to new values of changed
         `Variable`s coming from either `External` or `Variables` source.
         :param values: storage of all `Variable` values.
+        :param clean_storage: pop any intermediate (non-requested) values
+        from the storage once they are no longer needed.
         """
         changed_vars = set()
         for src, vals in changed.items():
@@ -396,10 +441,10 @@ class CompiledGraph:
                         continue
                 values.get(variable).value = val
                 changed_vars.add(variable)
-        affected_nodes = self._collect_affected(changed_vars)
+        affected_nodes, affected = self._collect_affected(changed_vars)
         for node in affected_nodes:
             values.get(node.variable).value = _null
-        self._calculate(affected_nodes, values)
+        self._calculate(affected_nodes, values, clean_storage, affected)
 
 
 class Graph:
@@ -448,13 +493,18 @@ class Graph:
         ordered_nodes = [
             CompiledNode(
                 variable=var,
-                inputs=[self.registry[var.inputs[input_name]][input_name] for input_name in var.inputs.keys()]
-            ) for var in ordered_variables
+                inputs=[self.registry[var.inputs[input_name]][input_name] for input_name in var.inputs.keys()],
+                id=i
+            ) for i, var in enumerate(ordered_variables)
         ]
         required_external_variables = self._required_external_variables(used_external_vars)
+        requested_variables = {
+            self.registry[src][name] for src, name in (qual_name.rsplit(QUAL_SEP, 1) for qual_name in required)
+        }
         compiled = CompiledGraph(
             ordered_nodes=ordered_nodes,
             required_external_variables=required_external_variables,
+            requested_variables=requested_variables,
             debug=debug
         )
         self.compiled_graphs[required_tup] = compiled
