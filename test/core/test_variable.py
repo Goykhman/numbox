@@ -353,5 +353,50 @@ def test_execute_clears_voided_so_storage_heals():
     assert values.get(n_var).value == 321                               # X=101, M=220
 
 
+def test_execute_clean_storage_frees_non_requested_intermediates():
+    graph, compiled = _uaf_graph()
+    values = Values()
+    n_var = graph.registry["vars"]["N"]
+    x_var = graph.registry["vars"]["X"]
+    m_var = graph.registry["vars"]["M"]
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values, clean_storage=True)
+    assert values.get(n_var).value == 303          # requested output computed
+    assert n_var in values._values                 # requested output retained
+    assert x_var not in values._values             # non-requested intermediates freed at last use
+    assert m_var not in values._values
+
+
+def test_execute_clean_storage_marks_storage_terminal():
+    graph, compiled = _uaf_graph()
+    values = Values()
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values, clean_storage=True)
+    assert values._voided                          # storage records what it evicted
+    # a later recompute that would read an evicted intermediate raises rather than reading a stale value
+    with pytest.raises(RuntimeError, match="evicted"):
+        compiled.recompute({"ext": {"b": 20}}, values)
+
+
+def test_execute_clean_storage_is_rerunnable():
+    graph, compiled = _uaf_graph()
+    values = Values()
+    n_var = graph.registry["vars"]["N"]
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values, clean_storage=True)
+    assert values.get(n_var).value == 303
+    # re-running execute (the "one more go" path) re-derives everything from the externals
+    compiled.execute(external_values={"ext": {"a": 10, "b": 2}}, values=values, clean_storage=True)
+    assert values.get(n_var).value == 312          # X=110, M=202
+
+
+def test_execute_without_clean_storage_retains_all_values():
+    graph, compiled = _uaf_graph()
+    values = Values()
+    n_var = graph.registry["vars"]["N"]
+    x_var = graph.registry["vars"]["X"]
+    m_var = graph.registry["vars"]["M"]
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values)
+    assert {x_var, m_var, n_var} <= set(values._values)   # default execute keeps every value
+    assert values._voided == set()
+
+
 if __name__ == "__main__":
     collect_and_run_tests(__name__)

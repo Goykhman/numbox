@@ -303,6 +303,7 @@ class CompiledGraph:
         self,
         external_values: dict[str, dict[str, VarValue]],
         values: Storage,
+        clean_storage: bool = False,
     ):
         """
         Main entry point to calculate values of nodes of the compiled
@@ -315,12 +316,22 @@ class CompiledGraph:
         source to the variable's actual value.
         :param values: runtime storage of all values, e.g., an instance
         of `Values`.
+        :param clean_storage: when True, evict each non-requested value from
+        `values` as soon as its last consumer in the full ordered pass has run,
+        capping peak storage at the graph's maximum simultaneous liveness. The
+        evicted entries are recorded on the storage, which makes it terminal: a
+        subsequent `recompute` that would read an evicted value raises rather
+        than reading a stale one. Re-running `execute` repopulates everything
+        from the externals, so a cleaned storage can be executed again.
         """
         self._assign_external_values(external_values, values)
-        self._calculate(self.ordered_nodes, values)
+        affected = frozenset(self.last_used) if clean_storage else frozenset()
+        freed = self._calculate(self.ordered_nodes, values, clean_storage, affected)
         voided = getattr(values, "_voided", None)
         if voided is not None:
             voided.clear()
+            if clean_storage:
+                voided |= freed
 
     def _assign_external_values(
         self,
