@@ -43,6 +43,7 @@ class Namespace(ABC):
 
 class Storage(Protocol):
     _values: dict['Variable', 'Value']
+    _voided: set['Variable']  # entries evicted by clean_storage; required for clean_storage=True
 
     def get(self, variable: 'Variable') -> 'Value':
         """
@@ -55,7 +56,8 @@ class Storage(Protocol):
         """
         If the wrapped storage is the only pin on the
         stored data, this might be useful to help release
-        the memory sooner.
+        the memory sooner. Raises `KeyError` if `variable`
+        is not present.
         """
 
     def __iter__(self) -> Iterator['Variable']:
@@ -319,12 +321,20 @@ class CompiledGraph:
         :param clean_storage: when True, evict each non-requested value from
         `values` as soon as its last consumer in the full ordered pass has run,
         capping peak storage at the graph's maximum simultaneous liveness. The
-        evicted entries are recorded on the storage, which makes it terminal: a
-        subsequent `recompute` that would read an evicted value raises rather
-        than reading a stale one. Re-running `execute` repopulates everything
-        from the externals, so a cleaned storage can be executed again.
+        evicted entries are recorded on the storage so a later `recompute` that
+        would read an evicted value it does not itself recompute raises rather
+        than reading a stale one (a recompute whose affected cone re-derives the
+        value, or which supplies it as a changed input, still works). Re-running
+        `execute` repopulates everything from the externals. Requires a storage
+        exposing a `_voided` set (e.g. `Values`); a `TypeError` is raised
+        otherwise.
         """
         self._assign_external_values(external_values, values)
+        if clean_storage and getattr(values, "_voided", None) is None:
+            raise TypeError(
+                f"clean_storage=True requires a storage exposing a '_voided' set "
+                f"for eviction tracking; got {type(values).__name__}"
+            )
         affected = frozenset(self.last_used) if clean_storage else frozenset()
         freed = self._calculate(self.ordered_nodes, values, clean_storage, affected)
         voided = getattr(values, "_voided", None)
@@ -451,10 +461,15 @@ class CompiledGraph:
         affected consumer has run, to release memory sooner. Eviction is tracked per storage:
         a later `recompute` that would read an evicted intermediate it does not itself recompute
         (one neither in the new affected cone nor supplied as a changed input) is rejected;
-        `execute()` repopulates the storage and clears the tracking. Applies only to this
-        interpreted `CompiledGraph.recompute` path, not to `execute()` or the fused
-        `CompiledKernel.recompute` fast path.
+        `execute()` repopulates the storage and clears the tracking. Applies to the interpreted
+        `CompiledGraph` paths (`execute` and `recompute`), not the fused `CompiledKernel`
+        fast path. Requires a storage exposing a `_voided` set; a `TypeError` is raised otherwise.
         """
+        if clean_storage and getattr(values, "_voided", None) is None:
+            raise TypeError(
+                f"clean_storage=True requires a storage exposing a '_voided' set "
+                f"for eviction tracking; got {type(values).__name__}"
+            )
         changed_vars = set()
         for src, vals in changed.items():
             for name, val in vals.items():
