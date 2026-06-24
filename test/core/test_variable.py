@@ -2,7 +2,9 @@ from inspect import getsource
 from textwrap import dedent
 from typing import Any
 
-from numbox.core.variable.variable import CompiledGraph, Graph, Values, Variables, Variable
+import pytest
+
+from numbox.core.variable.variable import CompiledGraph, Graph, Value, Values, Variables, Variable
 from numbox.core.variable.node import make_node
 from numbox.core.work.print_tree import make_image
 
@@ -241,6 +243,300 @@ vars_.output--vars_.quantity--configs.s
                                              configs.init_quantity
                                              |
                                              buffer.storage"""
+
+
+def _uaf_graph():
+    # N = f(X, M); X = g(a); M = h(b); only N requested.
+    def derive_X(a_):
+        return a_ + 100
+
+    def derive_M(b_):
+        return b_ + 200
+
+    def derive_N(X_, M_):
+        return X_ + M_
+
+    all_vars = {
+        "X": {"name": "X", "inputs": {"a": "ext"}, "formula": derive_X},
+        "M": {"name": "M", "inputs": {"b": "ext"}, "formula": derive_M},
+        "N": {"name": "N", "inputs": {"X": "vars", "M": "vars"}, "formula": derive_N},
+    }
+    graph = Graph(
+        variables_lists={"vars": [all_vars["X"], all_vars["M"], all_vars["N"]]},
+        external_source_names=["ext"],
+    )
+    compiled = graph.compile(["vars.N"])
+    return graph, compiled
+
+
+def test_clean_storage_single_pass_frees_non_requested_intermediate():
+    graph, compiled = _uaf_graph()
+    values = Values()
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values)
+    n_var = graph.registry["vars"]["N"]
+    x_var = graph.registry["vars"]["X"]
+    assert values.get(n_var).value == 303
+
+    compiled.recompute({"ext": {"a": 10}}, values, clean_storage=True)
+    assert values.get(n_var).value == 312
+    assert n_var in values._values
+    assert x_var not in values._values
+
+
+def test_recompute_reading_an_evicted_intermediate_raises():
+    graph, compiled = _uaf_graph()
+    values = Values()
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values)
+    compiled.recompute({"ext": {"a": 10}}, values, clean_storage=True)  # evicts X
+    # a recompute on {b} reads evicted X (X not in cone({b})) -> clear error, not a stale read
+    with pytest.raises(RuntimeError, match="evicted") as exc:
+        compiled.recompute({"ext": {"b": 20}}, values)
+    assert "Uninitialized input" not in str(exc.value)
+
+
+def test_values_pop_is_strict_on_missing_key():
+    values = Values()
+    absent = Variable(name="absent", source="vars")
+    with pytest.raises(KeyError):
+        values.pop(absent)
+
+
+def test_voided_state_is_scoped_to_storage():
+    graph, compiled = _uaf_graph()
+    n_var = graph.registry["vars"]["N"]
+    values1 = Values()
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values1)
+    compiled.recompute({"ext": {"a": 10}}, values1, clean_storage=True)
+    with pytest.raises(RuntimeError, match="evicted"):
+        compiled.recompute({"ext": {"b": 20}}, values1)
+    # a fresh storage on the SAME cached compiled graph is unaffected
+    values2 = Values()
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values2)
+    compiled.recompute({"ext": {"a": 10}}, values2)
+    assert values2.get(n_var).value == 312
+
+
+def test_values_initializes_with_empty_voided():
+    assert Values()._voided == set()
+
+
+def test_clean_storage_allows_same_changed_set_repeat():
+    graph, compiled = _uaf_graph()
+    n_var = graph.registry["vars"]["N"]
+    values = Values()
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values)
+    compiled.recompute({"ext": {"a": 10}}, values, clean_storage=True)   # X=110, N=312, X voided
+    compiled.recompute({"ext": {"a": 20}}, values, clean_storage=True)   # same cone re-derives X
+    assert values.get(n_var).value == 322                                # X=120, M=202
+
+
+def test_clean_storage_allows_superset_changed_set():
+    graph, compiled = _uaf_graph()
+    n_var = graph.registry["vars"]["N"]
+    values = Values()
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values)
+    compiled.recompute({"ext": {"a": 10}}, values, clean_storage=True)   # voids X
+    compiled.recompute({"ext": {"a": 5, "b": 7}}, values)                # {a,b} re-derives X in cone
+    assert values.get(n_var).value == 312                               # X=105, M=207
+
+
+def test_execute_clears_voided_so_storage_heals():
+    graph, compiled = _uaf_graph()
+    n_var = graph.registry["vars"]["N"]
+    x_var = graph.registry["vars"]["X"]
+    values = Values()
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values)
+    compiled.recompute({"ext": {"a": 10}}, values, clean_storage=True)   # voids X
+    assert values._voided == {x_var}                                     # only X is voided
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values)  # repopulate + clear
+    assert values._voided == set()
+    compiled.recompute({"ext": {"b": 20}}, values)                       # now safe; X present
+    assert values.get(n_var).value == 321                               # X=101, M=220
+
+
+def test_execute_clean_storage_frees_non_requested_intermediates():
+    graph, compiled = _uaf_graph()
+    values = Values()
+    n_var = graph.registry["vars"]["N"]
+    x_var = graph.registry["vars"]["X"]
+    m_var = graph.registry["vars"]["M"]
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values, clean_storage=True)
+    assert values.get(n_var).value == 303          # requested output computed
+    assert n_var in values._values                 # requested output retained
+    assert x_var not in values._values             # non-requested intermediates freed at last use
+    assert m_var not in values._values
+
+
+def test_execute_clean_storage_marks_storage_terminal():
+    graph, compiled = _uaf_graph()
+    values = Values()
+    x_var = graph.registry["vars"]["X"]
+    m_var = graph.registry["vars"]["M"]
+    n_var = graph.registry["vars"]["N"]
+    a_ext = compiled.required_external_variables["ext"]["a"]
+    b_ext = compiled.required_external_variables["ext"]["b"]
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values, clean_storage=True)
+    assert values._voided == {x_var, m_var, a_ext, b_ext}   # exactly the non-requested values
+    assert n_var not in values._voided                      # requested output never voided
+    # a later recompute that would read an evicted intermediate raises rather than reading a stale value
+    with pytest.raises(RuntimeError, match="evicted"):
+        compiled.recompute({"ext": {"b": 20}}, values)
+
+
+def test_execute_clean_storage_is_rerunnable():
+    graph, compiled = _uaf_graph()
+    values = Values()
+    n_var = graph.registry["vars"]["N"]
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values, clean_storage=True)
+    assert values.get(n_var).value == 303
+    # re-running execute (the "one more go" path) re-derives everything from the externals
+    compiled.execute(external_values={"ext": {"a": 10, "b": 2}}, values=values, clean_storage=True)
+    assert values.get(n_var).value == 312          # X=110, M=202
+
+
+def test_execute_without_clean_storage_retains_all_values():
+    graph, compiled = _uaf_graph()
+    values = Values()
+    n_var = graph.registry["vars"]["N"]
+    x_var = graph.registry["vars"]["X"]
+    m_var = graph.registry["vars"]["M"]
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values)
+    assert {x_var, m_var, n_var} <= set(values._values)   # default execute keeps every value
+    assert values._voided == set()
+
+
+class _NoVoidStorage:
+    """A minimal Storage conforming to get/pop/__iter__ but lacking the _voided
+    eviction-tracking set, used to exercise the clean_storage contract guard."""
+    def __init__(self):
+        self._values = {}
+
+    def get(self, variable):
+        if variable not in self._values:
+            self._values[variable] = Value(variable=variable)
+        return self._values[variable]
+
+    def pop(self, variable):
+        self._values.pop(variable)
+
+    def __iter__(self):
+        return iter(self._values.keys())
+
+
+def test_execute_clean_storage_requires_voided_storage():
+    graph, compiled = _uaf_graph()
+    storage = _NoVoidStorage()
+    with pytest.raises(TypeError, match="_voided"):
+        compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=storage, clean_storage=True)
+
+
+def test_execute_without_clean_storage_works_on_minimal_storage():
+    graph, compiled = _uaf_graph()
+    n_var = graph.registry["vars"]["N"]
+    storage = _NoVoidStorage()
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=storage)
+    assert storage.get(n_var).value == 303
+
+
+class _RecordingValues(Values):
+    """Values that tracks the peak number of simultaneously-resident entries."""
+    def __init__(self):
+        super().__init__()
+        self.peak = 0
+
+    def get(self, variable):
+        value = super().get(variable)
+        self.peak = max(self.peak, len(self._values))
+        return value
+
+
+def _chain_graph(length=4):
+    # ext.a -> v0 -> v1 -> ... -> v{length-1}; only the last is requested
+    def make_f(k):
+        def f(x):
+            return x + k
+        return f
+    specs = []
+    prev_name, prev_src = "a", "ext"
+    for i in range(length):
+        specs.append({"name": f"v{i}", "inputs": {prev_name: prev_src}, "formula": make_f(i + 1)})
+        prev_name, prev_src = f"v{i}", "vars"
+    graph = Graph(variables_lists={"vars": specs}, external_source_names=["ext"])
+    compiled = graph.compile([f"vars.v{length - 1}"])
+    return graph, compiled
+
+
+def _diamond_graph():
+    # ext.c feeds both L and R; both feed requested D (c has two consumers)
+    def derive_L(c_):
+        return c_ + 10
+
+    def derive_R(c_):
+        return c_ + 20
+
+    def derive_D(L_, R_):
+        return L_ + R_
+    specs = [
+        {"name": "L", "inputs": {"c": "ext"}, "formula": derive_L},
+        {"name": "R", "inputs": {"c": "ext"}, "formula": derive_R},
+        {"name": "D", "inputs": {"L": "vars", "R": "vars"}, "formula": derive_D},
+    ]
+    graph = Graph(variables_lists={"vars": specs}, external_source_names=["ext"])
+    compiled = graph.compile(["vars.D"])
+    return graph, compiled
+
+
+def test_execute_clean_storage_caps_peak_residency():
+    graph, compiled = _chain_graph(length=4)
+    out_var = graph.registry["vars"]["v3"]
+
+    clean = _RecordingValues()
+    compiled.execute(external_values={"ext": {"a": 10}}, values=clean, clean_storage=True)
+    assert clean.get(out_var).value == 20          # v0=11, v1=13, v2=16, v3=20
+
+    full = _RecordingValues()
+    compiled.execute(external_values={"ext": {"a": 10}}, values=full)
+    # the headline property: mid-pass eviction caps peak well below retaining everything
+    assert clean.peak <= 2
+    assert clean.peak < full.peak
+
+
+def test_execute_clean_storage_diamond_frees_at_last_consumer():
+    graph, compiled = _diamond_graph()
+    d_var = graph.registry["vars"]["D"]
+    values = Values()
+    # c has two consumers; were last_used to pick the earlier one, the later consumer would
+    # read a freed c and raise "Uninitialized input" -- a clean run succeeding proves eviction
+    # waits for the LAST consumer.
+    compiled.execute(external_values={"ext": {"c": 5}}, values=values, clean_storage=True)
+    assert values.get(d_var).value == 40           # L=15, R=25
+
+
+def test_execute_clean_storage_all_requested_frees_only_externals():
+    def derive_X(a_):
+        return a_ + 100
+
+    def derive_M(b_):
+        return b_ + 200
+
+    def derive_N(X_, M_):
+        return X_ + M_
+    specs = [
+        {"name": "X", "inputs": {"a": "ext"}, "formula": derive_X},
+        {"name": "M", "inputs": {"b": "ext"}, "formula": derive_M},
+        {"name": "N", "inputs": {"X": "vars", "M": "vars"}, "formula": derive_N},
+    ]
+    graph = Graph(variables_lists={"vars": specs}, external_source_names=["ext"])
+    compiled = graph.compile(["vars.X", "vars.M", "vars.N"])
+    values = Values()
+    compiled.execute(external_values={"ext": {"a": 1, "b": 2}}, values=values, clean_storage=True)
+    x_var = graph.registry["vars"]["X"]
+    m_var = graph.registry["vars"]["M"]
+    n_var = graph.registry["vars"]["N"]
+    a_ext = compiled.required_external_variables["ext"]["a"]
+    b_ext = compiled.required_external_variables["ext"]["b"]
+    assert {x_var, m_var, n_var} <= set(values._values)   # all requested -> no intermediate freed
+    assert values._voided == {a_ext, b_ext}               # only the externals are evicted
 
 
 if __name__ == "__main__":
