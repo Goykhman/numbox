@@ -43,7 +43,6 @@ class Namespace(ABC):
 
 class Storage(Protocol):
     _values: dict['Variable', 'Value']
-    _voided: set['Variable']  # entries evicted by clean_storage; required for clean_storage=True
 
     def get(self, variable: 'Variable') -> 'Value':
         """
@@ -252,7 +251,6 @@ class Values:
     will be held here. """
     def __init__(self):
         self._values: dict[Variable, Value] = {}
-        self._voided: set[Variable] = set()
 
     def get(self, variable: Variable) -> Value:
         if variable not in self._values:
@@ -290,9 +288,7 @@ class CompiledGraph:
     requested_variables: set[Variable] = field(default_factory=set)
     debug: bool = False
     dependents: dict[Variable, list[CompiledNode]] = field(default_factory=dict)
-    affected_cache: dict[frozenset[Variable], tuple[list[CompiledNode], frozenset[Variable]]] = field(
-        default_factory=dict
-    )
+    affected_cache: dict[frozenset[Variable], list[CompiledNode]] = field(default_factory=dict)
     last_used: dict[Variable, int | None] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -320,28 +316,10 @@ class CompiledGraph:
         of `Values`.
         :param clean_storage: when True, evict each non-requested value from
         `values` as soon as its last consumer in the full ordered pass has run,
-        capping peak storage at the graph's maximum simultaneous liveness. The
-        evicted entries are recorded on the storage so a later `recompute` that
-        would read an evicted value it does not itself recompute raises rather
-        than reading a stale one (a recompute whose affected cone re-derives the
-        value, or which supplies it as a changed input, still works). Re-running
-        `execute` repopulates everything from the externals. Requires a storage
-        exposing a `_voided` set (e.g. `Values`); a `TypeError` is raised
-        otherwise.
+        capping peak storage at the graph's maximum simultaneous liveness.
         """
         self._assign_external_values(external_values, values)
-        if clean_storage and getattr(values, "_voided", None) is None:
-            raise TypeError(
-                f"clean_storage=True requires a storage exposing a '_voided' set "
-                f"for eviction tracking; got {type(values).__name__}"
-            )
-        affected = frozenset(self.last_used) if clean_storage else frozenset()
-        freed = self._calculate(self.ordered_nodes, values, clean_storage, affected)
-        voided = getattr(values, "_voided", None)
-        if voided is not None:
-            voided.clear()
-            if clean_storage:
-                voided |= freed
+        self._calculate(self.ordered_nodes, values, clean_storage)
 
     def _assign_external_values(
         self,
@@ -370,14 +348,11 @@ class CompiledGraph:
                 var_value = provided[var_name]
                 values.get(variable).value = var_value
 
-    def _collect_affected(
-        self, changed_vars: set[Variable]
-    ) -> tuple[list[CompiledNode], frozenset[Variable]]:
+    def _collect_affected(self, changed_vars: set[Variable]) -> list[CompiledNode]:
         """
         Return subset of `self.ordered_nodes` consisting of nodes
         affected by `changed_vars`, in the same order as in the
-        `self.ordered_nodes`. Return the set of the corresponding
-        `Variable` instances as well.
+        `self.ordered_nodes`.
         """
         key = frozenset(changed_vars)
         cached = self.affected_cache.get(key)
@@ -393,17 +368,15 @@ class CompiledGraph:
                     affected.add(node_var)
                     stack.append(node_var)
         affected_list = [node for node in self.ordered_nodes if node.variable in affected]
-        affected = frozenset(affected)
-        self.affected_cache[key] = affected_list, affected
-        return affected_list, affected
+        self.affected_cache[key] = affected_list
+        return affected_list
 
     def _calculate(
         self,
         nodes: list[CompiledNode],
         values: Storage,
-        clean_storage: bool = False,
-        affected: frozenset[Variable] = frozenset()
-    ) -> set[Variable]:
+        clean_storage: bool = False
+    ):
         """
         Calculate values of the `Variable`s using their own `formula`
         by evaluating them as functions of the values of the specified
@@ -415,14 +388,9 @@ class CompiledGraph:
         supplied as a topologically ordered list `self.ordered_nodes`,
         or as an ordered sub-set thereof (see, e.g., `recompute`).
 
-        :param clean_storage: when True, evict each non-requested affected input from
-        `values` after its last affected consumer runs (see `recompute`).
-        :param affected: the frozenset of affected `Variable`s from `_collect_affected`
-        (may be empty); consulted only when `clean_storage` is True.
-        :returns: the set of `Variable`s evicted from `values` during this pass (empty
-        unless `clean_storage` is True).
+        When `clean_storage` is True, evict each non-requested input
+        from `values` after its last consumer runs.
         """
-        freed = set()
         for node in nodes:
             node_variable = node.variable
             if node_variable.formula is None:
@@ -434,42 +402,27 @@ class CompiledGraph:
                 if arg is _null:
                     raise RuntimeError(f"Uninitialized input {input_variable.qual_name()} for {node_variable}")
                 args[i] = arg
-                if clean_storage and input_variable in affected and input_variable not in self.requested_variables:
+                if clean_storage and input_variable not in self.requested_variables:
                     last_used_inp = self.last_used[input_variable]
                     if node.id is not None and last_used_inp == node.id:
                         to_free.add(input_variable)
-            for variable in to_free:
-                values.pop(variable)
-            freed |= to_free
             if self.debug:
                 print(f"Calculating {node}\nwith metadata\n{node_variable.metadata}", file=sys.stderr)
             result = node_variable.formula(*args)
             values.get(node_variable).value = result
-        return freed
+            for variable in to_free:
+                values.pop(variable)
 
     def recompute(
         self,
         changed: dict[str, dict[str, VarValue]],
-        values: Storage,
-        clean_storage: bool = False
+        values: Storage
     ):
         """
         :param changed: dict of sources to names to new values of changed
         `Variable`s coming from either `External` or `Variables` source.
         :param values: storage of all `Variable` values.
-        :param clean_storage: pop each non-requested intermediate from `values` once its last
-        affected consumer has run, to release memory sooner. Eviction is tracked per storage:
-        a later `recompute` that would read an evicted intermediate it does not itself recompute
-        (one neither in the new affected cone nor supplied as a changed input) is rejected;
-        `execute()` repopulates the storage and clears the tracking. Applies to the interpreted
-        `CompiledGraph` paths (`execute` and `recompute`), not the fused `CompiledKernel`
-        fast path. Requires a storage exposing a `_voided` set; a `TypeError` is raised otherwise.
         """
-        if clean_storage and getattr(values, "_voided", None) is None:
-            raise TypeError(
-                f"clean_storage=True requires a storage exposing a '_voided' set "
-                f"for eviction tracking; got {type(values).__name__}"
-            )
         changed_vars = set()
         for src, vals in changed.items():
             for name, val in vals.items():
@@ -483,28 +436,10 @@ class CompiledGraph:
                         continue
                 values.get(variable).value = val
                 changed_vars.add(variable)
-        affected_nodes, affected = self._collect_affected(changed_vars)
-        voided = getattr(values, "_voided", None)
-        if voided:
-            for node in affected_nodes:
-                for input_variable in node.inputs:
-                    if (
-                        input_variable in voided
-                        and input_variable not in affected
-                        and input_variable not in changed_vars
-                    ):
-                        raise RuntimeError(
-                            f"recompute would read evicted intermediate {input_variable.qual_name()}, freed by a "
-                            f"previous clean_storage=True recompute and not recomputed by this pass — re-execute "
-                            f"or use a fresh storage, or change inputs that recompute it"
-                        )
+        affected_nodes = self._collect_affected(changed_vars)
         for node in affected_nodes:
             values.get(node.variable).value = _null
-        freed = self._calculate(affected_nodes, values, clean_storage, affected)
-        if voided is not None:
-            voided -= affected
-            voided -= changed_vars
-            voided |= freed
+        self._calculate(affected_nodes, values)
 
 
 class Graph:

@@ -708,7 +708,7 @@ class CompiledKernel:
             return tuple(self._store[v] for v in self._required_vars)
         compiled = self._ctx[0]
         self._ensure_boundary()
-        affected = compiled._collect_affected(changed_vars)[0]
+        affected = compiled._collect_affected(changed_vars)
         if not affected:
             return tuple(self._store[v] for v in self._required_vars)
         plan = self._cone_plan_cached(affected)
@@ -724,7 +724,7 @@ class CompiledKernel:
                 raise
             self._flush_and_reseed()
             self._apply_changes(changed)
-            affected = compiled._collect_affected(changed_vars)[0]
+            affected = compiled._collect_affected(changed_vars)
             plan = self._cone_plan_cached(affected)
             plan.run_into(self._store)
         return tuple(self._store[v] for v in self._required_vars)
