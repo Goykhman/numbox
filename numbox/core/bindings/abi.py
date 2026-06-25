@@ -80,20 +80,48 @@ def _classify(ty):
     return _CLASS_STRUCT_SMALL if size <= 16 else _CLASS_STRUCT_LARGE
 
 
+def _align_up(n, alignment):
+    return (n + alignment - 1) // alignment * alignment
+
+
+def _basetuple_layout(ty):
+    """Natural-alignment C layout for a ``BaseTuple`` of scalar fields.
+
+    numba lowers a tuple to a *non-packed* LLVM struct, so each field sits at
+    the next offset aligned up to its own size and the total is padded up to
+    the largest field's alignment — exactly the layout of the equivalent
+    ``Record`` (verified against ``get_data_type`` / ``get_abi_sizeof``). A
+    plain ``sum(bitwidth)`` bit-packed model under-counts the size and mislocates
+    fields, which corrupts both the SMALL/LARGE classification and the eightbyte
+    split. Returns ``(total_size, [(offset, size, is_float), ...])``.
+    """
+    offset = 0
+    max_align = 1
+    fields = []
+    for ft in ty.types:
+        size = ft.bitwidth // 8
+        align = size  # primitive scalar fields: alignment == size
+        offset = _align_up(offset, align)
+        fields.append((offset, size, isinstance(ft, nb_types.Float)))
+        offset += size
+        max_align = max(max_align, align)
+    return _align_up(offset, max_align), fields
+
+
 def _struct_bytes(ty, fn_name):
     """Compute struct size in bytes for a numba struct-shaped type.
 
     Supports ``types.Record`` (via ``.size``) and ``types.BaseTuple``
     subclasses — ``types.Tuple``, ``types.UniTuple``, and
-    ``types.NamedTuple`` — via ``.types`` (a tuple of scalar field
-    types with ``.bitwidth``). Anything else raises a clean
-    ``TypingError`` naming the caller so a misuse doesn't surface as a
-    cryptic ``AttributeError`` / ``KeyError``.
+    ``types.NamedTuple`` — via natural-alignment layout (see
+    ``_basetuple_layout``). Anything else raises a clean ``TypingError``
+    naming the caller so a misuse doesn't surface as a cryptic
+    ``AttributeError`` / ``KeyError``.
     """
     if isinstance(ty, nb_types.Record):
         return ty.size
     if isinstance(ty, nb_types.BaseTuple):
-        return sum(t.bitwidth for t in ty.types) // 8
+        return _basetuple_layout(ty)[0]
     raise TypingError(
         f"{fn_name}: expected a struct-shaped type (Record, Tuple, "
         f"UniTuple, or NamedTuple), got {ty!r}."
@@ -112,17 +140,14 @@ def _iter_struct_fields(ty, fn_name):
     ``_classify_eightbytes``). Size is needed to detect fields that
     span the 8-byte eightbyte boundary.
 
-    For ``BaseTuple`` the fields are bit-packed sequentially with no
-    padding (mirrors ``_struct_bytes``'s ``sum(bitwidth)`` model). For
-    ``Record`` each ``_RecordField`` carries an explicit ``offset``
-    that already accounts for any C-layout padding gaps.
+    For ``BaseTuple`` the fields follow the natural-alignment layout (see
+    ``_basetuple_layout``, mirroring ``_struct_bytes``), so padded gaps match
+    the non-packed LLVM struct numba lowers tuples to. For ``Record`` each
+    ``_RecordField`` carries an explicit ``offset`` that already accounts for
+    any C-layout padding gaps.
     """
     if isinstance(ty, nb_types.BaseTuple):
-        offset = 0
-        for ft in ty.types:
-            size = ft.bitwidth // 8
-            yield offset, size, isinstance(ft, nb_types.Float)
-            offset += size
+        yield from _basetuple_layout(ty)[1]
         return
     if isinstance(ty, nb_types.Record):
         for fld in ty.fields.values():
