@@ -184,6 +184,15 @@ class Variable:
     metadata: str | None = field(default=None)
     params: Params | None = field(default=None)
 
+    def __post_init__(self):
+        for label, value in (("name", self.name), ("source", self.source)):
+            if QUAL_SEP in value:
+                raise ValueError(
+                    f"Variable {label} {value!r} contains the reserved qualified-name "
+                    f"separator {QUAL_SEP!r}; names and sources must not contain it "
+                    f"(qualified names are decomposed via rsplit({QUAL_SEP!r}, 1))."
+                )
+
     def __hash__(self):
         return hash((self.source, self.name))
 

@@ -2,6 +2,8 @@ from inspect import getsource
 from textwrap import dedent
 from typing import Any
 
+import pytest
+
 from numbox.core.variable.variable import CompiledGraph, Graph, Values, Variables, Variable
 from numbox.core.variable.node import make_node
 from numbox.core.work.print_tree import make_image
@@ -275,6 +277,16 @@ def test_recompute_honors_variables_source_override():
     compiled.recompute({"ext": {"a": 2}, "vars_": {"b": 999}}, values)
     assert values.get(b).value == 999
     assert values.get(c).value == 1000
+
+
+def test_variable_name_with_qual_sep_is_rejected():
+    # '.' is the qualified-name separator (source.name), decomposed via
+    # rsplit('.', 1); a '.' in name or source breaks that round-trip and would
+    # mis-resolve or KeyError. Construction must reject it with a clear error.
+    with pytest.raises(ValueError, match="reserved"):
+        Variable(name="a.b", source="s")
+    with pytest.raises(ValueError, match="reserved"):
+        Variable(name="b", source="a.b")
 
 
 if __name__ == "__main__":
