@@ -7,7 +7,7 @@ import numpy
 import pytest
 
 from numba import from_dtype
-from numba.core.types import Array, float32, float64, int16, int64, unicode_type
+from numba.core.types import Array, float32, float64, int16, int32, int64, unicode_type
 from numba.typed.typeddict import Dict
 from numpy import isclose
 
@@ -533,6 +533,29 @@ def test_make_graph_distinct_types_dispatch(tmp_path):
     ri = _run_typed_driver(tmp_path, cache, "i")     # warm dir: int overload, same _make name
     assert rf == ["RESULT", "f", "3.0", "float"]
     assert ri == ["RESULT", "i", "3", "int"]
+
+
+def test_make_graph_kernel_name_depends_on_declared_type(monkeypatch):
+    # Two graphs identical except an explicit End ty must produce different
+    # _make_<hash> kernel names; otherwise cache=True reuses a stale cached
+    # kernel that builds Work nodes of the wrong data type. The kernel name
+    # folds each node's declared type via _kernel_fingerprint.
+    import numbox.core.work.builder as builder_mod
+    captured = []
+    orig = builder_mod._kernel_fingerprint
+
+    def spy(*args, **kwargs):
+        h = orig(*args, **kwargs)
+        captured.append(h)
+        return h
+    monkeypatch.setattr(builder_mod, "_kernel_fingerprint", spy)
+
+    reg32, reg64 = {}, {}
+    make_graph(End(name="x", init_value=7, ty=int32, registry=reg32), registry=reg32)
+    make_graph(End(name="x", init_value=7, ty=int64, registry=reg64), registry=reg64)
+
+    assert len(captured) == 2
+    assert captured[0] != captured[1]
 
 
 if __name__ == "__main__":
