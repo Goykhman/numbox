@@ -178,9 +178,10 @@ def _classify_eightbytes(ty):
 
     Returns ``(class_lo, class_hi)`` where each is
     ``_EIGHTBYTE_CLASS_INTEGER`` (ints / pointers) or
-    ``_EIGHTBYTE_CLASS_SSE`` (float / double). The SysV-flavoured
-    per-eightbyte rule applies: if any field in an eightbyte is SSE
-    (float / double), the whole eightbyte is SSE; otherwise INTEGER.
+    ``_EIGHTBYTE_CLASS_SSE`` (float / double). The SysV merge rule
+    applies per eightbyte: an eightbyte is SSE only if every field that
+    touches it is float / double; if it holds *any* integer field it is
+    INTEGER (SSE + INTEGER -> INTEGER, i.e. passed in a GP register).
     The class names are SysV-flavoured but the helper drives the
     repack path on both SysV x86-64 and AAPCS64. (The full SysV ABI
     has X87 / NO_CLASS / etc.; our scope is fixed-size 16-byte
@@ -203,20 +204,29 @@ def _classify_eightbytes(ty):
             f"_classify_eightbytes: expected a 16-byte struct, got "
             f"{size}-byte ({ty!r})."
         )
-    cls_lo = _EIGHTBYTE_CLASS_INTEGER
-    cls_hi = _EIGHTBYTE_CLASS_INTEGER
+    lo_has_int = hi_has_int = False
+    lo_has_float = hi_has_float = False
     for offset, size, is_float in _iter_struct_fields(
             ty, "_classify_eightbytes"):
-        if not is_float:
-            continue
-        # SysV per-eightbyte rule: if any SSE field touches an
-        # eightbyte (even partially via a boundary span), the whole
-        # eightbyte is SSE. So a field at offsets [4, 12) makes BOTH
-        # eightbytes SSE -- not just one or the other.
-        if offset < 8:
-            cls_lo = _EIGHTBYTE_CLASS_SSE
-        if offset + size > 8:
-            cls_hi = _EIGHTBYTE_CLASS_SSE
+        # A field spanning the 8-byte boundary touches both eightbytes.
+        touches_lo = offset < 8
+        touches_hi = offset + size > 8
+        if is_float:
+            lo_has_float |= touches_lo
+            hi_has_float |= touches_hi
+        else:
+            lo_has_int |= touches_lo
+            hi_has_int |= touches_hi
+    # SysV merge rule: an eightbyte holding any integer field is INTEGER
+    # (passed in a GP register), even if it also holds a float -- SSE +
+    # INTEGER -> INTEGER. Only an all-float eightbyte is SSE. This is the
+    # rule llvmlite does not model (it would otherwise lower a mixed
+    # int/float eightbyte through SSE and drop the integer field), which is
+    # exactly why the int/int repack in call.py exists.
+    cls_lo = (_EIGHTBYTE_CLASS_SSE if (lo_has_float and not lo_has_int)
+              else _EIGHTBYTE_CLASS_INTEGER)
+    cls_hi = (_EIGHTBYTE_CLASS_SSE if (hi_has_float and not hi_has_int)
+              else _EIGHTBYTE_CLASS_INTEGER)
     return cls_lo, cls_hi
 
 

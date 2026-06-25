@@ -88,20 +88,59 @@ def test_classify_eightbytes_sse_int():
     )
 
 
-def test_classify_eightbytes_mixed_lo_eightbyte_is_sse():
-    """SysV rule: if any field in an eightbyte is SSE, the whole
-    eightbyte is SSE. `Tuple([int32, float32, int64])` has int+float
-    in lo → lo eightbyte is SSE."""
+def test_classify_eightbytes_mixed_lo_eightbyte_is_integer():
+    """SysV merge rule: SSE + INTEGER -> INTEGER. `Tuple([int32, float32,
+    int64])` has an int and a float in the lo eightbyte, so that eightbyte
+    is passed in a GP register (INTEGER), NOT SSE. Verified against GCC,
+    which reads the lo eightbyte from %rdi for this struct."""
     from numba.core import types
     from numbox.core.bindings.abi import (
-        _EIGHTBYTE_CLASS_INTEGER, _EIGHTBYTE_CLASS_SSE,
-        _classify_eightbytes,
+        _EIGHTBYTE_CLASS_INTEGER, _classify_eightbytes,
     )
 
     ty = types.Tuple([types.int32, types.float32, types.int64])
     assert _classify_eightbytes(ty) == (
-        _EIGHTBYTE_CLASS_SSE, _EIGHTBYTE_CLASS_INTEGER,
+        _EIGHTBYTE_CLASS_INTEGER, _EIGHTBYTE_CLASS_INTEGER,
     )
+
+
+def test_classify_eightbytes_mixed_both_eightbytes_integer():
+    """`Tuple([float32, int32, float32, int32])` packs a float+int into each
+    eightbyte; both merge to INTEGER (two GP registers), matching GCC."""
+    from numba.core import types
+    from numbox.core.bindings.abi import (
+        _EIGHTBYTE_CLASS_INTEGER, _classify_eightbytes,
+    )
+
+    ty = types.Tuple([types.float32, types.int32, types.float32, types.int32])
+    assert _classify_eightbytes(ty) == (
+        _EIGHTBYTE_CLASS_INTEGER, _EIGHTBYTE_CLASS_INTEGER,
+    )
+
+
+def test_mixed_int_float_eightbyte_triggers_repack():
+    """Consumer-level regression for the SSE+INTEGER->INTEGER fix: a 16-byte
+    struct whose eightbytes each mix an int and a float must be repacked to
+    {i64, i64}. Before the fix the mixed eightbyte was mis-classified SSE,
+    the repack was skipped, and llvmlite dropped the float field by-value
+    (silent corruption). Both mixed shapes must now classify (INTEGER,
+    INTEGER) and request the repack on SysV / AAPCS64."""
+    from numba.core import types
+    from numbox.core.bindings.call import (
+        _needs_int_int_eightbyte_repack, _current_platform,
+    )
+
+    plat = _current_platform()
+    if plat not in ("sysv_x86_64", "aapcs64"):
+        pytest.skip(f"eightbyte repack is SysV/AAPCS64-only (plat={plat})")
+    for ty in (
+        types.Tuple([types.int32, types.float32, types.int64]),
+        types.Tuple([types.float32, types.int32, types.float32, types.int32]),
+    ):
+        assert _needs_int_int_eightbyte_repack(ty, plat), ty
+    # A pure-float (HFA-style) 16-byte struct must NOT be repacked.
+    assert not _needs_int_int_eightbyte_repack(
+        types.UniTuple(types.float64, 2), plat)
 
 
 def test_classify_padded_tuple_double_is_aligned_not_spanning():
