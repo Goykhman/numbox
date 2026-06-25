@@ -16,6 +16,7 @@ from numbox.core.bindings._sqlite_vtable import (
 )
 from numbox.core.bindings._sqlite_constants import (
     SQLITE_OK, SQLITE_CONSTRAINT, SQLITE_INDEX_CONSTRAINT_EQ, SQLITE_ROW,
+    SQLITE_ERROR, SQLITE_DONE,
 )
 
 _OUT = np.dtype([("n", "i8")])
@@ -214,21 +215,40 @@ def test_tvf_non_numeric_arg_type_raises():
 @njit
 def _raises(start, stop):
     # raise explicitly: numba's default boundscheck is off, so an OOB index would
-    # corrupt rather than raise. The @cfunc boundary swallows this -> 0 rows.
+    # corrupt rather than raise.
     out = np.empty(stop - start, _OUT)
     if start < stop:
         raise ValueError("boom")
     return out
 
 
+def _step_rc(db, sql):
+    """Prepare `sql`, step once, return that step's result code (after finalize)."""
+    stmt = c_int64(0)
+    with c_string(sql) as p:
+        assert sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0) == SQLITE_OK
+    rc = sqlite3_step(stmt.value)
+    sqlite3_finalize(stmt.value)
+    return rc
+
+
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
-def test_tvf_user_fn_raises_yields_no_rows():
-    # the @cfunc boundary swallows the user fn's exception (surfaced as an
-    # unraisable exception); the observable contract is just "no rows".
+def test_tvf_user_fn_raises_yields_error():
+    # a raising user fn must surface as a query error (xFilter returns
+    # SQLITE_ERROR), not a silently-empty but successful result.
     db = _open()
     h = register_tvf(db.value, "boom", (np.int64, np.int64), _OUT, _raises)
-    _, rows = _select_int(db, "SELECT n FROM boom(2, 5)")
-    assert rows == []
+    assert _step_rc(db, "SELECT n FROM boom(2, 5)") == SQLITE_ERROR
+    sqlite3_close(db.value)
+    del h
+
+
+def test_tvf_empty_return_is_success_not_error():
+    # a legitimately-empty TVF must still complete successfully (DONE), so the
+    # error path above does not turn empty results into spurious failures.
+    db = _open()
+    h = register_tvf(db.value, "series", (np.int64, np.int64), _OUT, _series_empty)
+    assert _step_rc(db, "SELECT n FROM series(5, 5)") == SQLITE_DONE
     sqlite3_close(db.value)
     del h
 
