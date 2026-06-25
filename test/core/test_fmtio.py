@@ -1135,3 +1135,59 @@ def test_python_printf_strips_extended_length_modifiers(modifier, capfd):
     out, _ = capfd.readouterr()
     assert out == "42\n", repr(out)
     assert rc == 3
+
+
+def test_printf_too_few_args_for_specifiers_raises():
+    # "%d %d" needs two args; passing one reads an unpushed varargs slot
+    # (garbage / info-disclosure / crash). The literal-format specifier count
+    # must match the argument count at typing time.
+    @njit
+    def caller(x):
+        return printf("%d %d\n", x)
+
+    with pytest.raises(TypingError, match=r"printf.*specifier"):
+        caller(1)
+
+
+def test_printf_percent_s_with_non_pointer_int_raises():
+    # %s with a non-pointer-width integer would make libc deref it as char*.
+    # (intp == int64, so a pointer-width int can't be told apart from a real
+    # char* pointer; a narrower int like int32 is unambiguously wrong.)
+    @njit
+    def caller(x):
+        return printf("%s\n", x)
+
+    with pytest.raises(TypingError, match=r"printf.*specifier.*str"):
+        caller(np.int32(5))
+
+
+def test_printf_percent_d_with_float_arg_raises():
+    # %d reads a GP register but a float is passed in an SSE register -> silent
+    # wrong result. Reject the type mismatch at typing time.
+    @njit
+    def caller(x):
+        return printf("%d\n", x)
+
+    with pytest.raises(TypingError, match=r"printf.*specifier.*int"):
+        caller(3.5)
+
+
+@pytest.mark.skipif(
+    platform_ == "Windows",
+    reason="capfd does not reliably capture C-level stdio writes on Windows",
+)
+def test_printf_matched_spec_and_args_compiles_both_modes(capfd):
+    # correct spec/arg combos must still compile and print identically in
+    # @njit and pure-Python modes.
+    @njit
+    def jit_caller(n, ratio):
+        rc = printf("n=%d r=%.2f\n", n, ratio)
+        fflush(stdout())
+        return rc
+
+    jit_caller(7, 3.5)
+    out_jit, _ = capfd.readouterr()
+    printf("n=%d r=%.2f\n", 7, 3.5)
+    out_py, _ = capfd.readouterr()
+    assert out_jit == "n=7 r=3.50\n", repr(out_jit)
+    assert out_py == out_jit
