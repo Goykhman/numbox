@@ -22,7 +22,7 @@ Bindings module conventions
 Every binding in the ``numbox.core.bindings`` family (``_c``, ``_math``,
 ``_sqlite_conn`` / ``_stmt`` / ``_bind`` / ``_column`` / ``_exec`` /
 ``_blob`` / ``_hooks`` / ``_constants`` / ``_sqlite_value`` / ``_sqlite_result`` /
-``_sqlite_udf`` / ``_sqlite_query`` / ``_sqlite_tvf``, ``_stdio``, ``_errno``,
+``_sqlite_udf`` / ``_sqlite_query`` / ``_sqlite_tvf`` / ``_sqlite_typemap``, ``_stdio``, ``_errno``,
 ``_strerror``, ``_fmtio``) uses
 extern-symbol references via
 :func:`~numbox.core.bindings.call._call_lib_func`, so the ABI dispatch is
@@ -620,6 +620,14 @@ numbox.core.bindings._sqlite_tvf
 --------------------------------
 
 .. automodule:: numbox.core.bindings._sqlite_tvf
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+numbox.core.bindings._sqlite_typemap
+------------------------------------
+
+.. automodule:: numbox.core.bindings._sqlite_typemap
    :members:
    :show-inheritance:
    :undoc-members:
