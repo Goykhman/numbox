@@ -5,6 +5,7 @@ from numba.core.errors import NumbaError
 from numba.core.types import Array, float64, int64
 
 from numbox.core.work.work import make_work
+from numbox.core.work.explain import explain
 from numbox.utils.highlevel import cres
 from test.auxiliary_utils import collect_and_run_tests
 
@@ -232,6 +233,23 @@ def test_get_input_rejects_negative_index():
     w3 = make_work("w3", 0.0, sources=(w1, w2), derive=derive_w3)
     with pytest.raises(NumbaError):
         w3.get_input(-1)
+
+
+def test_explain_on_make_work_graph_uses_fallback():
+    # a derive built via make_work (not builder.make_graph) is not registered in
+    # _derive_funcs, so explain() can't recover its source. It must degrade to a
+    # defined fallback line, not raise AttributeError on None.__name__.
+    w1 = make_work("w1", 3.14)
+    w2 = make_work("w2", 2)
+
+    @cres(float64(float64, int64))
+    def derive_w3(w1_, w2_):
+        return w1_ + w2_
+    w3 = make_work("w3", 0.0, sources=(w1, w2), derive=derive_w3)
+    text = explain(w3)
+    assert "w1: end node" in text
+    assert "w3:" in text
+    assert "outside builder.make_graph" in text
 
 
 if __name__ == "__main__":
