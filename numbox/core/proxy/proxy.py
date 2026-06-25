@@ -88,7 +88,16 @@ def {func_proxy_name}({func_args_str}):
         njit_lineno_in_txt = next(
             i + 1 for i, line in enumerate(code_lines) if line.startswith('@njit(')
         )
-        prepend = max(0, func.__code__.co_firstlineno - njit_lineno_in_txt)
+        co_firstlineno = func.__code__.co_firstlineno
+        if co_firstlineno < njit_lineno_in_txt:
+            raise ValueError(
+                f"@proxy function {func.__name__!r} is defined at line {co_firstlineno} of "
+                f"{inspect.getfile(func)}, above the cache anchor's minimum line "
+                f"{njit_lineno_in_txt}; the generated @njit cannot be anchored to its "
+                f"co_firstlineno (a negative prepend would mis-anchor it). Move the "
+                f"function further down in the file."
+            )
+        prepend = co_firstlineno - njit_lineno_in_txt
         prefixed = '\n' * prepend + code_txt
         code = compile(prefixed, inspect.getfile(func), mode='exec')
         exec(code, ns)  # nosec B102 - JIT codegen of internal source

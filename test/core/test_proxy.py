@@ -1,5 +1,7 @@
+import importlib
 import math
 import re
+import sys
 
 import numpy as np
 import pytest
@@ -172,6 +174,28 @@ def test_proxy_if_available_missing_symbol_returns_stub():
     assert not hasattr(nonexistent_fn, "as_func")
     with pytest.raises(NotImplementedError, match="nonexistent_fn is not available"):
         nonexistent_fn(1.0)
+
+
+def test_proxy_function_above_anchor_line_raises_clear_error(tmp_path):
+    # The cache anchor prepends blank lines so the generated @njit lands at the
+    # function's co_firstlineno; a function defined above that line can't be
+    # anchored (a negative prepend was silently clamped to 0, mis-anchoring it).
+    # Decorating such a function must raise a clear error, not mis-anchor.
+    mod = tmp_path / "top_proxy_mod.py"
+    mod.write_text(
+        "from numba import float64\n"
+        "from numbox.core.proxy.proxy import proxy\n"
+        "@proxy(float64(float64))\n"
+        "def top_fn(x):\n"
+        "    return 3.14 * x\n"
+    )
+    sys.path.insert(0, str(tmp_path))
+    try:
+        with pytest.raises(ValueError, match="anchor"):
+            importlib.import_module("top_proxy_mod")
+    finally:
+        sys.path.remove(str(tmp_path))
+        sys.modules.pop("top_proxy_mod", None)
 
 
 if __name__ == "__main__":
