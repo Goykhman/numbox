@@ -1,3 +1,4 @@
+import pytest
 from numba.core.errors import NumbaError
 from numbox.core.work.node import make_node
 from test.auxiliary_utils import ansi_escape, collect_and_run_tests
@@ -19,6 +20,15 @@ def test():
     assert n1.get_inputs_names() == []
     assert n4.get_inputs_names() == ["n2", "n3"]
     assert n4.all_inputs_names() == ["n2", "n1", "n3"]
+
+
+def test_get_input_rejects_negative_index():
+    # a negative index must be out-of-range, not silently honored as Python
+    # negative indexing into the inputs List (which would return a wrong node).
+    n1 = make_node("n1")
+    n2 = make_node("n2", (n1,))
+    with pytest.raises(NumbaError):
+        n2.get_input(-1)
 
 
 if __name__ == "__main__":

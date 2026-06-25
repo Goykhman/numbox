@@ -357,7 +357,7 @@ def ol_combine(work_ty, data_ty: DictType, harvested_ty=NoneType):
 def ol_get_input(self_ty, i_ty):
     def _(self, i):
         num_inputs = len(self.inputs)
-        if i >= num_inputs:
+        if i < 0 or i >= num_inputs:
             raise NumbaError(f"Requested input {i} while the node has {num_inputs} inputs")
         inputs_vector = self.make_inputs_vector()
         return _cast(inputs_vector[i], NodeType)
