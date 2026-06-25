@@ -250,5 +250,47 @@ def test_c_env(_getenv_test_var):
     )
 
 
+def test_resolve_lib_path_windows_sqlite3_never_falls_back(monkeypatch):
+    # On Windows sqlite3 MUST resolve to the CPython-bundled DLL and NEVER fall
+    # back to find_library: a PATH-resident third-party sqlite3.dll (AWS CLI v2)
+    # writes to NULL inside sqlite3_open from a foreign process. Pure logic, so
+    # it runs on any host by monkeypatching the platform + candidate check.
+    import ctypes.util as _ctypes_util
+    from numbox.core.bindings import utils
+
+    monkeypatch.setattr(utils, "platform_", "Windows")
+    # find_msvcrt is Windows-only; inject it so the Windows branch imports on any host
+    monkeypatch.setattr(_ctypes_util, "find_msvcrt", lambda: "C:\\msvcrt.dll", raising=False)
+    find_library_calls = []
+    monkeypatch.setattr(
+        utils, "find_library",
+        lambda n: find_library_calls.append(n) or f"C:\\PATH\\{n}.dll")
+
+    monkeypatch.setattr(utils, "_windows_bundled_dll_path", lambda n: "C:\\Py\\DLLs\\sqlite3.dll")
+    assert utils._resolve_lib_path("sqlite3") == "C:\\Py\\DLLs\\sqlite3.dll"
+    assert find_library_calls == []
+
+    monkeypatch.setattr(utils, "_windows_bundled_dll_path", lambda n: None)
+    assert utils._resolve_lib_path("sqlite3") is None
+    assert find_library_calls == []
+
+
+def test_resolve_lib_path_windows_nonsqlite_prefers_bundled(monkeypatch):
+    # For a non-sqlite3 name the bundled DLL is preferred over find_library when
+    # both exist; find_library is the last resort only when no bundled DLL.
+    import ctypes.util as _ctypes_util
+    from numbox.core.bindings import utils
+
+    monkeypatch.setattr(utils, "platform_", "Windows")
+    monkeypatch.setattr(_ctypes_util, "find_msvcrt", lambda: "C:\\msvcrt.dll", raising=False)
+    monkeypatch.setattr(utils, "find_library", lambda n: f"C:\\PATH\\{n}.dll")
+
+    monkeypatch.setattr(utils, "_windows_bundled_dll_path", lambda n: "C:\\Py\\DLLs\\foo.dll")
+    assert utils._resolve_lib_path("foo") == "C:\\Py\\DLLs\\foo.dll"
+
+    monkeypatch.setattr(utils, "_windows_bundled_dll_path", lambda n: None)
+    assert utils._resolve_lib_path("foo") == "C:\\PATH\\foo.dll"
+
+
 if __name__ == "__main__":
     collect_and_run_tests(__name__)
