@@ -42,7 +42,7 @@ Because the format is a literal, the ``@njit`` writers also cross-check it
 against the arguments at typing time (like a C compiler's ``-Wformat``): the
 conversion-specifier count must equal the argument count, and each specifier's
 class must match its arg (``%d``/``%x``/… → Integer/Boolean, ``%f``/``%g``/… →
-Float, ``%s`` → unicode or an ``intp`` pointer, ``%p`` → ``intp``). A mismatch
+Float, ``%s`` → unicode or an ``intp``/``uintp`` pointer, ``%p`` → ``intp``/``uintp``). A mismatch
 raises ``TypingError`` instead of reading an unpushed varargs slot, dereferencing
 an int as ``char*``, or reading a GP register for an SSE-passed float. Caveat:
 numba's ``intp`` is ``int64``, so a pointer-width int passed for ``%s``/``%p``
@@ -131,7 +131,7 @@ from numba.core import cgutils
 from numba.core.cgutils import get_or_insert_function
 from numba.core.errors import TypingError
 from numba.core.types import (
-    BaseTuple, Boolean, Float, Integer, UnicodeType, int32, intp,
+    BaseTuple, Boolean, Float, Integer, UnicodeType, int32, intp, uintp,
     unliteral,
 )
 from numba.extending import intrinsic, overload
@@ -289,7 +289,7 @@ def _validate_format_vs_args(name, fmt_str, args_ty):
     - the specifier count must equal the argument count, and
     - each specifier's class must match its arg
       (``%d/%i/%u/%o/%x/%X/%c`` → Integer/Boolean; ``%e/%f/%g/...`` → Float;
-      ``%s`` → unicode or an ``intp`` pointer; ``%p`` → ``intp``).
+      ``%s`` → unicode or an ``intp``/``uintp`` pointer; ``%p`` → ``intp``/``uintp``).
 
     Each ``*`` dynamic width/precision consumes a preceding Integer arg.
 
@@ -327,9 +327,9 @@ def _validate_format_vs_args(name, fmt_str, args_ty):
         elif cls == 'float':
             ok = isinstance(uty, Float)
         elif cls == 'str':
-            ok = isinstance(uty, UnicodeType) or uty == intp
+            ok = isinstance(uty, UnicodeType) or uty in (intp, uintp)
         else:  # 'ptr'
-            ok = uty == intp
+            ok = uty in (intp, uintp)
         if not ok:
             raise TypingError(
                 f"{name}: format specifier #{i + 1} in {fmt_str!r} expects "

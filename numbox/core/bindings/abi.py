@@ -84,7 +84,7 @@ def _align_up(n, alignment):
     return (n + alignment - 1) // alignment * alignment
 
 
-def _basetuple_layout(ty):
+def _basetuple_layout(ty, fn_name):
     """Natural-alignment C layout for a ``BaseTuple`` of scalar fields.
 
     numba lowers a tuple to a *non-packed* LLVM struct, so each field sits at
@@ -94,11 +94,21 @@ def _basetuple_layout(ty):
     plain ``sum(bitwidth)`` bit-packed model under-counts the size and mislocates
     fields, which corrupts both the SMALL/LARGE classification and the eightbyte
     split. Returns ``(total_size, [(offset, size, is_float), ...])``.
+
+    A field with no fixed ``bitwidth`` (a pointer / function / other non-scalar
+    type) raises a clean ``TypingError`` naming ``fn_name`` rather than a cryptic
+    ``AttributeError`` — raw pointers are expected to be passed as ``intp``.
     """
     offset = 0
     max_align = 1
     fields = []
     for ft in ty.types:
+        if not hasattr(ft, "bitwidth"):
+            raise TypingError(
+                f"{fn_name}: tuple field {ft!r} has no fixed bitwidth; only "
+                f"fixed-width scalar fields (Integer, Float) are supported "
+                f"(pointers must be passed as intp)."
+            )
         size = ft.bitwidth // 8
         align = size  # primitive scalar fields: alignment == size
         offset = _align_up(offset, align)
@@ -121,7 +131,7 @@ def _struct_bytes(ty, fn_name):
     if isinstance(ty, nb_types.Record):
         return ty.size
     if isinstance(ty, nb_types.BaseTuple):
-        return _basetuple_layout(ty)[0]
+        return _basetuple_layout(ty, fn_name)[0]
     raise TypingError(
         f"{fn_name}: expected a struct-shaped type (Record, Tuple, "
         f"UniTuple, or NamedTuple), got {ty!r}."
@@ -147,7 +157,7 @@ def _iter_struct_fields(ty, fn_name):
     any C-layout padding gaps.
     """
     if isinstance(ty, nb_types.BaseTuple):
-        yield from _basetuple_layout(ty)[1]
+        yield from _basetuple_layout(ty, fn_name)[1]
         return
     if isinstance(ty, nb_types.Record):
         for fld in ty.fields.values():

@@ -1191,3 +1191,12 @@ def test_printf_matched_spec_and_args_compiles_both_modes(capfd):
     out_py, _ = capfd.readouterr()
     assert out_jit == "n=7 r=3.50\n", repr(out_jit)
     assert out_py == out_jit
+
+
+def test_validate_format_accepts_uintp_for_string_and_pointer():
+    # uintp (unsigned pointer-width int) is a valid pointer value for %s and %p,
+    # not just intp -- validation must accept it without raising.
+    from numba.core.types import Tuple, uintp
+    from numbox.core.bindings._fmtio import _validate_format_vs_args
+
+    _validate_format_vs_args("printf", "%s %p", Tuple([uintp, uintp]))

@@ -282,6 +282,17 @@ def test_struct_bytes_rejects_non_struct_type():
         _struct_bytes(types.int32, "_call_lib_func_byval")
 
 
+def test_struct_bytes_rejects_tuple_with_non_bitwidth_field():
+    """A tuple field with no fixed bitwidth (e.g. a raw pointer) raises a clean
+    TypingError naming the caller, not a cryptic AttributeError."""
+    from numba.core import types
+    from numba.core.errors import TypingError
+    from numbox.core.bindings.abi import _struct_bytes
+
+    with pytest.raises(TypingError, match="bitwidth"):
+        _struct_bytes(types.Tuple([types.intp, types.voidptr]), "_call_lib_func_byval")
+
+
 def test_call_lib_func_lldiv_via_unified():
     """End-to-end: call libc ``lldiv(10, 3)`` via the unified intrinsic
     and validate the 16-byte ``lldiv_t`` return value.
