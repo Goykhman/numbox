@@ -270,6 +270,32 @@ def _reject_percent_n_or_raise(name, fmt_str):
         )
 
 
+# A directive whose flag run contains the glibc ``'`` (thousands-grouping)
+# flag. Operates on the ``%%``-masked format string.
+_GROUPING_FLAG_RE = re.compile(r"%[-+0# ']*'")
+
+
+def _reject_grouping_flag_or_raise(name, fmt_str):
+    """Raise ``TypingError`` if ``fmt_str`` uses the glibc ``'`` grouping flag.
+
+    ``'`` (thousands grouping) is a legal glibc printf flag but is absent from
+    C99 and unsupported by Python's ``%`` operator, so honoring it would
+    diverge between the @njit and pure-Python paths. It is also not recognized
+    by ``_FMT_SPEC_RE``: a ``%'d`` directive would not match at all, so the
+    specifier count would be silently under-counted and a following directive
+    would read an unpushed varargs slot (garbage / info-disclosure / crash) —
+    the exact hazard ``_validate_format_vs_args`` exists to prevent. Reject it
+    cleanly in both modes, mirroring ``%n`` handling.
+    """
+    stripped = fmt_str.replace('%%', '\x00\x00')
+    if _GROUPING_FLAG_RE.search(stripped):
+        raise TypingError(
+            f"{name}: the ' (thousands-grouping) flag in format string "
+            f"{fmt_str!r} is not supported (glibc-only, absent from C99 and "
+            f"Python's % operator). Remove it or group the digits yourself."
+        )
+
+
 _FMT_SPEC_RE = re.compile(
     r'%[-+0# ]*'                          # flags
     r'(?:\*|[0-9]*)'                       # field width (number or '*')
@@ -389,6 +415,7 @@ def _printf_intrinsic(typingctx, fmt_ty, args_ty):
     """libc printf via a tuple-of-args. Internal; user code calls printf()."""
     fmt_str = extract_literal_str("printf", fmt_ty, field="format string")
     _reject_percent_n_or_raise("printf", fmt_str)
+    _reject_grouping_flag_or_raise("printf", fmt_str)
     if not isinstance(args_ty, BaseTuple):
         raise TypingError(f"printf: args must be a tuple, got {args_ty!r}")
     for i, ty in enumerate(tuple(args_ty)):
@@ -409,6 +436,7 @@ def _fprintf_intrinsic(typingctx, fp_ty, fmt_ty, args_ty):
     """libc fprintf via a tuple-of-args. Internal; user code calls fprintf()."""
     fmt_str = extract_literal_str("fprintf", fmt_ty, field="format string")
     _reject_percent_n_or_raise("fprintf", fmt_str)
+    _reject_grouping_flag_or_raise("fprintf", fmt_str)
     if not isinstance(args_ty, BaseTuple):
         raise TypingError(f"fprintf: args must be a tuple, got {args_ty!r}")
     if fp_ty != intp:
@@ -435,6 +463,7 @@ def _snprintf_intrinsic(typingctx, buf_ty, size_ty, fmt_ty, args_ty):
     """libc snprintf via a tuple-of-args. Internal; user code calls snprintf()."""
     fmt_str = extract_literal_str("snprintf", fmt_ty, field="format string")
     _reject_percent_n_or_raise("snprintf", fmt_str)
+    _reject_grouping_flag_or_raise("snprintf", fmt_str)
     if not isinstance(args_ty, BaseTuple):
         raise TypingError(f"snprintf: args must be a tuple, got {args_ty!r}")
     if buf_ty != intp:
@@ -599,6 +628,22 @@ def _reject_percent_n_in_python(name, fmt):
         )
 
 
+def _reject_grouping_flag_in_python(name, fmt):
+    """Pure-Python equivalent of ``_reject_grouping_flag_or_raise``: raise
+    ``ValueError`` if the glibc ``'`` grouping flag appears in ``fmt``.
+    Python's ``%`` operator would itself raise on ``%'d`` (unsupported
+    format character), but the message is generic; this gives users the
+    same clear error in both Python and @njit modes.
+    """
+    stripped = fmt.replace('%%', '\x00\x00')
+    if _GROUPING_FLAG_RE.search(stripped):
+        raise ValueError(
+            f"{name}: the ' (thousands-grouping) flag in format string "
+            f"{fmt!r} is not supported (glibc-only, absent from C99 and "
+            f"Python's % operator). Remove it or group the digits yourself."
+        )
+
+
 def printf(fmt, *args):
     """C-style ``printf(fmt, *args)`` — dual-mode (plain Python AND @njit).
 
@@ -615,6 +660,7 @@ def printf(fmt, *args):
     Returns the number of bytes written (or written-equivalent), as int32.
     """
     _reject_percent_n_in_python("printf", fmt)
+    _reject_grouping_flag_in_python("printf", fmt)
     text = _python_fmt_compat(fmt) % args
     sys.stdout.write(text)
     sys.stdout.flush()
@@ -625,6 +671,7 @@ def printf(fmt, *args):
 def _overload_printf(fmt, *args):
     fmt_str = extract_literal_str("printf", fmt, field="format string")
     _reject_percent_n_or_raise("printf", fmt_str)
+    _reject_grouping_flag_or_raise("printf", fmt_str)
     for i, ty in enumerate(args):
         _validate_writer_arg_type("printf", i, ty)
     impl = _build_overload_impl(
@@ -649,6 +696,7 @@ def fprintf(fp, fmt, *args):
     From @njit: routes to ``_fprintf_intrinsic`` with str auto-conversion.
     """
     _reject_percent_n_in_python("fprintf", fmt)
+    _reject_grouping_flag_in_python("fprintf", fmt)
     _ensure_py_stream_cache()
     py_stream = _PY_STREAM_BY_FP.get(int(fp))
     if py_stream is None:
@@ -667,6 +715,7 @@ def fprintf(fp, fmt, *args):
 def _overload_fprintf(fp, fmt, *args):
     fmt_str = extract_literal_str("fprintf", fmt, field="format string")
     _reject_percent_n_or_raise("fprintf", fmt_str)
+    _reject_grouping_flag_or_raise("fprintf", fmt_str)
     if fp != intp:
         raise TypingError(
             f"fprintf: fp must be intp (FILE* as pointer-as-int), got {fp!r}"
@@ -694,6 +743,7 @@ def snprintf(buf_p, size, fmt, *args):
     MSVCRT ``_snprintf`` which returns ``-1`` on truncation).
     """
     _reject_percent_n_in_python("snprintf", fmt)
+    _reject_grouping_flag_in_python("snprintf", fmt)
     text_bytes = (_python_fmt_compat(fmt) % args).encode('utf-8')
     n_would_have = len(text_bytes)
     if size > 0:
@@ -712,6 +762,7 @@ def snprintf(buf_p, size, fmt, *args):
 def _overload_snprintf(buf_p, size, fmt, *args):
     fmt_str = extract_literal_str("snprintf", fmt, field="format string")
     _reject_percent_n_or_raise("snprintf", fmt_str)
+    _reject_grouping_flag_or_raise("snprintf", fmt_str)
     if buf_p != intp:
         raise TypingError(
             f"snprintf: buf must be intp (pointer-as-int), got {buf_p!r}"

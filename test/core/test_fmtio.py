@@ -1036,6 +1036,67 @@ def test_njit_writer_rejects_percent_n(fn):
             ns["k"](out)
 
 
+def test_njit_printf_grouping_flag_prevents_varargs_misread():
+    """Regression: the glibc ``'`` grouping flag is not matched by
+    ``_FMT_SPEC_RE``, so ``"%'d %d"`` counted as ONE specifier and silently
+    accepted a single arg — the second ``%d`` then read an unpushed varargs
+    slot (garbage / info-disclosure / crash). Now rejected at typing time."""
+    @njit
+    def k(x):
+        printf("%'d %d\n", x)
+    with pytest.raises(TypingError, match="grouping"):
+        k(1000000)
+
+
+@pytest.mark.parametrize(
+    "fmt", ["%'d", "%-'d", "%0'8d", "%'i", "%'u", "%'x", "%'f",
+            "total %'d items", "%'n", "%d %'d"]
+)
+def test_njit_printf_rejects_grouping_flag(fmt):
+    """The ``'`` (thousands-grouping) flag is glibc-only, absent from C99 and
+    unsupported by Python's ``%``; reject it at typing time (mirrors %n
+    handling). ``%'n`` also slips past the %n guard, so this catches it too."""
+    src = f"""
+from numbox.core.bindings import printf
+@njit
+def k(x):
+    printf({fmt!r}, x)
+"""
+    ns = {"njit": njit}
+    exec(src, ns)
+    with pytest.raises(TypingError, match="grouping"):
+        ns["k"](1000000)
+
+
+@pytest.mark.parametrize("fn", ["printf", "fprintf", "snprintf"])
+def test_njit_writer_rejects_grouping_flag(fn):
+    if fn == "printf":
+        src = "from numbox.core.bindings import printf\n" \
+              "@njit\ndef k(x): printf(\"%'d\", x)\n"
+    elif fn == "fprintf":
+        src = "from numbox.core.bindings import fprintf, stdout\n" \
+              "@njit\ndef k(x): fprintf(stdout(), \"%'d\", x)\n"
+    else:
+        src = "from numbox.core.bindings import snprintf\n" \
+              "from numbox.utils.lowlevel import array_data_p\n" \
+              "@njit\ndef k(buf, x): snprintf(array_data_p(buf), buf.size, \"%'d\", x)\n"
+    ns = {"njit": njit}
+    exec(src, ns)
+    with pytest.raises(TypingError, match="grouping"):
+        if fn == "snprintf":
+            ns["k"](np.zeros(32, dtype=np.uint8), 1000000)
+        else:
+            ns["k"](1000000)
+
+
+def test_pure_python_printf_rejects_grouping_flag():
+    """Dual-mode parity: the pure-Python path raises a clear ValueError on a
+    ``'`` grouping flag (matching the @njit TypingError), rather than Python's
+    generic 'unsupported format character'."""
+    with pytest.raises(ValueError, match="grouping"):
+        printf("%'d\n", 1000000)
+
+
 def test_njit_sscanf_accepts_percent_n():
     """``%n`` is legitimately useful in sscanf — it returns the read
     position (how many characters were consumed so far), not a write
