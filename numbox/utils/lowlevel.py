@@ -7,7 +7,7 @@ from numba.core.cgutils import int32_t, intp_t, is_not_null as cgutils_is_not_nu
 from numba.experimental.jitclass.base import imp_dtor
 from numba.experimental.structref import _Utils
 from numba.core.types import (
-    boolean, FunctionType, intp, StructRef, TypeRef, Tuple, char,
+    boolean, FunctionType, intp, StructRef, TypeRef, Tuple, uint8,
     UnicodeType, unicode_type, uintp, UniTuple, void, voidptr
 )
 from numba.core.types.misc import unliteral
@@ -249,10 +249,14 @@ def get_ll_func_sig(context: BaseContext, func_ty: FunctionType):
 @njit(unicode_type(intp), **jit_options)
 def get_str_from_p_as_int(p):
     """ Given pointer to null-terminated array of characters as an integer `p`,
-    return unicode string object copying the original string's data """
+    return unicode string object copying the original string's data.
+
+    Bytes are read through an unsigned 8-bit view, so each byte maps to its own
+    codepoint 0..255 (per-byte Latin-1). A multi-byte UTF-8 payload is returned
+    byte-for-byte, not decoded to its Unicode text. """
     void_p = _cast_int_to_void_p(p)
     s = ""
-    mem_view = carray(void_p, shape=(MAX_STR_LENGTH,), dtype=char)
+    mem_view = carray(void_p, shape=(MAX_STR_LENGTH,), dtype=uint8)
     for char_as_code_p in mem_view:
         if char_as_code_p == 0:
             return s
