@@ -111,3 +111,16 @@ def test_extracted_pointer_usable_with_numbox_bindings(tmp_path):
         assert sqlite3_changes(p) == 3
     finally:
         conn.close()
+
+
+def test_pyobject_head_fields_handles_debug_build(monkeypatch):
+    # On a Py_DEBUG build sys.gettotalrefcount exists and CPython prepends the
+    # _ob_next / _ob_prev trace pointers to PyObject_HEAD; _pyobject_head_fields
+    # must include them so the db-field offset stays correct. A release build
+    # lacks the attribute, so simulate a debug build by adding it.
+    import sys
+    from numbox.utils.pysqlite_bridge import _pyobject_head_fields
+
+    monkeypatch.setattr(sys, "gettotalrefcount", lambda: 0, raising=False)
+    names = [name for name, _ in _pyobject_head_fields()]
+    assert names[:2] == ["_ob_next", "_ob_prev"]

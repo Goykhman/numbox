@@ -207,18 +207,18 @@ numbox's JIT-callable SQLite bindings::
 Mirrors the pattern in
 `numbduck.pybridge <https://github.com/Goykhman/numbduck/blob/main/numbduck/pybridge.py>`_.
 
-**Import order matters on macOS.** macOS python.org framework builds
-link the stdlib ``_sqlite3`` extension against Homebrew's libsqlite3,
-not the system ``/usr/lib/libsqlite3.dylib`` that
-``ctypes.util.find_library("sqlite3")`` returns. Importing
-``numbox.utils.pysqlite_bridge`` preloads Python's libsqlite3 with
-``RTLD_GLOBAL`` so subsequent numba JIT compiles resolve sqlite3
-symbols to the same library. Import this module **before** anything
-that touches ``numbox.core.bindings._sqlite_*``.
+**Build configurations are handled at runtime.** The ``sqlite3 *db`` field
+offset is computed by ``_pyobject_head_fields()``, which adapts to the running
+interpreter: ``Py_DEBUG`` builds (detected via ``sys.gettotalrefcount``)
+prepend the ``_ob_next`` / ``_ob_prev`` trace pointers, and free-threaded
+builds (``Py_GIL_DISABLED``) use the no-GIL object header — so release, debug,
+and free-threaded builds all read the field at the correct offset.
 
-Assumes a release Python build; ``Py_DEBUG`` builds shift the
-``sqlite3 *db`` field by 16 bytes for refcount tracing and are not
-supported.
+The macOS shared-cache caveat and its ``DYLD_INSERT_LIBRARIES`` workaround are
+described in the module docstring below; :func:`extract_connection_ptr` also
+validates (via :func:`libraries_coordinated`) that numbox's bindings and
+Python's ``sqlite3`` resolve to the same libsqlite3 before returning a pointer,
+raising rather than handing back a pointer to a mismatched library.
 
 .. automodule:: numbox.utils.pysqlite_bridge
    :members:
