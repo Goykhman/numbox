@@ -523,8 +523,8 @@ One option to build a graph manager would be via the constructor such as::
 
     from numba.core.errors import NumbaError
     from numbox.core.configurations import jit_options
+    from numbox.core.work.lowlevel_work_utils import ll_make_work
     from numbox.core.work.node import NodeType
-    from numbox.core.work.work import make_work
     from numbox.utils.lowlevel import _cast
     from work_registry import _get_global, registry_type
 
@@ -536,12 +536,14 @@ One option to build a graph manager would be via the constructor such as::
         registry_ = _get_global(registry_type, "_work_registry")
         if name in registry_:
             raise NumbaError(f"{name} is already registered")
-        work_ = make_work(name, data, sources, derive)
+        work_ = ll_make_work(name, data, sources, derive)
         registry_[name] = _cast(work_, NodeType)
         return work_
 
-Here :func:`numbox.core.work.work.make_work` is the `Work` constructor,
-while the utility registry module can be defined as
+Here :func:`numbox.core.work.lowlevel_work_utils.ll_make_work` is the intrinsic
+`Work` constructor — it inlines directly into the calling jitted scope, whereas
+:func:`numbox.core.work.work.make_work` is the convenience ``@njit`` wrapper around it.
+The utility registry module can be defined as
 
 .. literalinclude:: ./_static/work_registry.py
    :language: python
