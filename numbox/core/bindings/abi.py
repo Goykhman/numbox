@@ -87,11 +87,12 @@ def _align_up(n, alignment):
 def _basetuple_layout(ty, fn_name):
     """Natural-alignment C layout for a ``BaseTuple`` of scalar fields.
 
-    numba lowers a tuple to a *non-packed* LLVM struct, so each field sits at
-    the next offset aligned up to its own size and the total is padded up to
-    the largest field's alignment — exactly the layout of the equivalent
-    ``Record`` (verified against ``get_data_type`` / ``get_abi_sizeof``). A
-    plain ``sum(bitwidth)`` bit-packed model under-counts the size and mislocates
+    numba lowers a tuple through its ``StructModel`` (the tuple data model) to a
+    literal LLVM struct, which llvmlite emits *non-packed* (padded) by default, so
+    each field sits at the next offset aligned up to its own size and the total is
+    padded up to the largest field's alignment — exactly the layout of the
+    equivalent ``Record`` (verified against ``get_data_type`` / ``get_abi_sizeof``).
+    A plain ``sum(bitwidth)`` bit-packed model under-counts the size and mislocates
     fields, which corrupts both the SMALL/LARGE classification and the eightbyte
     split. Returns ``(total_size, [(offset, size, is_float), ...])``.
 
