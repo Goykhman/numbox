@@ -683,7 +683,9 @@ class CompiledKernel:
         Interior overrides: a `changed` name may resolve to an interior (computed) node
         rather than an external input -- mirroring the interpreted path. Its value is
         overridden in the store and only its downstream cone recomputes; the overridden
-        node's own formula is *not* re-run. The first override of a not-yet-seen interior
+        node's own formula is *not* re-run -- unless the node is itself downstream of
+        another changed input in the same call, in which case graph priority applies and
+        it is recomputed from its formula. The first override of a not-yet-seen interior
         node expands the change-source set and rebuilds the persisted-node boundary (and
         invalidates cached cone plans, whose boundaries have shifted).
 
@@ -718,7 +720,7 @@ class CompiledKernel:
             return tuple(self._store[v] for v in self._required_vars)
         compiled = self._ctx.compiled
         self._ensure_boundary()
-        affected = [n for n in compiled._collect_affected(changed_vars) if n.variable not in changed_vars]
+        affected = compiled._collect_affected(changed_vars)
         if not affected:
             return tuple(self._store[v] for v in self._required_vars)
         plan = self._cone_plan_cached(affected)
@@ -734,7 +736,7 @@ class CompiledKernel:
                 raise
             self._flush_and_reseed()
             self._apply_changes(changed)
-            affected = [n for n in compiled._collect_affected(changed_vars) if n.variable not in changed_vars]
+            affected = compiled._collect_affected(changed_vars)
             plan = self._cone_plan_cached(affected)
             plan.run_into(self._store)
         return tuple(self._store[v] for v in self._required_vars)

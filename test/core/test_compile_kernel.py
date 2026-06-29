@@ -1880,9 +1880,9 @@ def test_recompute_external_and_interior_yield_distinct_keys():
     assert out == _interp_recompute_sequence(g, req, ext, changes)
 
 
-def test_recompute_honors_interior_override():
-    """COR-2b: CompiledKernel.recompute must honor an interior override even when the
-    node is downstream of a co-changed input (its formula must not be re-run)."""
+def test_recompute_graph_priority_over_co_changed_interior_override():
+    """CompiledKernel.recompute takes priority: an interior value supplied alongside a
+    co-changed upstream input is recomputed from the graph, not held."""
     g = Graph(
         variables_lists={"vars_": [
             {"name": "b", "inputs": {"a": "ext"}, "formula": njit(lambda a: 10 * a)},
@@ -1894,6 +1894,7 @@ def test_recompute_honors_interior_override():
     b = g.registry["vars_"]["b"]
     c = g.registry["vars_"]["c"]
     assert ck.execute({"ext": {"a": 1}}) == {"vars_.b": 10, "vars_.c": 11}
+    # b supplied 999 but downstream of co-changed ext.a; graph priority recomputes it.
     ck.recompute({"ext": {"a": 2}, "vars_": {"b": 999}})
-    assert ck._store[b] == 999
-    assert ck._store[c] == 1000
+    assert ck._store[b] == 20
+    assert ck._store[c] == 21

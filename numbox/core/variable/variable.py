@@ -392,10 +392,10 @@ class CompiledGraph:
             `Variable` instances coming from either `External` or `Variables` source.
         :param values: storage of all `Variable` values.
 
-        An explicitly-supplied value is honored: a changed `Variable` is held at the
-        given value and not recomputed from its formula, even when it is downstream of
-        another changed input. Only affected nodes not given an explicit value are
-        recomputed.
+        Recompute takes priority: each node in the affected downstream cone is reset and
+        recomputed from its formula, so the graph structure decides the final values. A
+        supplied value persists only for a node not downstream of any other change; a
+        co-changed downstream value is recomputed, not held.
         """
         changed_vars = set()
         for src, vals in changed.items():
@@ -410,7 +410,7 @@ class CompiledGraph:
                         continue
                 values.get(variable).value = val
                 changed_vars.add(variable)
-        affected_nodes = [n for n in self._collect_affected(changed_vars) if n.variable not in changed_vars]
+        affected_nodes = self._collect_affected(changed_vars)
         for node in affected_nodes:
             values.get(node.variable).value = _null
         self._calculate(affected_nodes, values)
