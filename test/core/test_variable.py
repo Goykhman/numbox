@@ -281,14 +281,14 @@ def test_recompute_graph_priority_over_co_changed_override():
     assert values.get(c).value == 21
 
 
-def test_variable_name_with_qual_sep_is_rejected():
-    # '.' is the qualified-name separator (source.name), decomposed via
-    # rsplit('.', 1); a '.' in name or source breaks that round-trip and would
-    # mis-resolve or KeyError. Construction must reject it with a clear error.
+def test_variable_name_rejects_qual_sep_but_source_allows_it():
+    # '.' is the qualified-name separator (source.name), decomposed via rsplit('.', 1).
+    # A '.' in the name breaks that round-trip, so a dotted name is rejected; a '.' in
+    # the source/namespace round-trips (rsplit binds only the final '.') and is allowed.
     with pytest.raises(ValueError, match="reserved"):
         Variable(name="a.b", source="s")
-    with pytest.raises(ValueError, match="reserved"):
-        Variable(name="b", source="a.b")
+    v = Variable(name="b", source="a.b")
+    assert v.qual_name() == "a.b.b"
 
 
 if __name__ == "__main__":

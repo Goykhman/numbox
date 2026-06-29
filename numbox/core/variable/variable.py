@@ -185,13 +185,16 @@ class Variable:
     params: Params | None = field(default=None)
 
     def __post_init__(self):
-        for label, value in (("name", self.name), ("source", self.source)):
-            if QUAL_SEP in value:
-                raise ValueError(
-                    f"Variable {label} {value!r} contains the reserved qualified-name "
-                    f"separator {QUAL_SEP!r}; names and sources must not contain it "
-                    f"(qualified names are decomposed via rsplit({QUAL_SEP!r}, 1))."
-                )
+        # Only the variable name is restricted: qualified names compose as
+        # source.name and decode via rsplit(QUAL_SEP, 1), which binds only the
+        # final separator -- so a dotted source/namespace round-trips, while a
+        # dotted name would be ambiguous.
+        if QUAL_SEP in self.name:
+            raise ValueError(
+                f"Variable name {self.name!r} contains the reserved qualified-name "
+                f"separator {QUAL_SEP!r}; variable names must not contain it "
+                f"(qualified names are decomposed via rsplit({QUAL_SEP!r}, 1))."
+            )
 
     def __hash__(self):
         return hash((self.source, self.name))
