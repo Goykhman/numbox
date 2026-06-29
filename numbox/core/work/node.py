@@ -82,7 +82,7 @@ def ol_node(name_ty, inputs_ty):
 def ol_get_input(self_ty, i_ty):
     def _(self, i):
         num_inputs = len(self.inputs)
-        if i >= num_inputs:
+        if i < 0 or i >= num_inputs:
             raise NumbaError(f"Requested input {i} while the node has {num_inputs} inputs")
         return self.inputs[i]
     return _

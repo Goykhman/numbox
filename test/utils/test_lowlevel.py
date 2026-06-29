@@ -171,6 +171,29 @@ def test_get_str_from_p_as_int():
     assert s1 == s1_
 
 
+def test_get_str_from_p_as_int_high_bytes():
+    """Bytes 0x80-0xFF must read back as their unsigned codepoint, not crash.
+    Decode contract is per-byte Latin-1 (one codepoint per byte), so a UTF-8
+    payload comes back byte-for-byte rather than decoded."""
+    raw = "é".encode("utf-8") + b"A"  # b'\xc3\xa9A'
+    buf = c_char_p(raw)
+    p = c_void_p.from_buffer(buf).value
+    assert get_str_from_p_as_int(p) == raw.decode("latin-1")
+
+
+def test_get_str_from_p_as_int_all_high_bytes():
+    raw = b"\x80\xff\xc0"
+    buf = c_char_p(raw)
+    p = c_void_p.from_buffer(buf).value
+    assert get_str_from_p_as_int(p) == raw.decode("latin-1")
+
+
+def test_get_str_from_p_as_int_empty():
+    buf = c_char_p(b"")
+    p = c_void_p.from_buffer(buf).value
+    assert get_str_from_p_as_int(p) == ""
+
+
 def test_populate_structref():
     @numba.njit
     def make_s4():

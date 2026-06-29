@@ -9,12 +9,15 @@ notably the errmsg buffer from sqlite3_exec's out-param, and the result of
 sqlite3_expanded_sql. sqlite3_malloc is its allocation counterpart (used by the
 virtual-table machinery to allocate the vtab and cursor structs).
 
-Callback shape (informational):
+Callback shape (informational)::
+
     int (*sqlite3_exec_callback)(void *ctx, int ncol,
                                  char **col_values, char **col_names)
+
 Return 0 to continue, nonzero to abort with SQLITE_ABORT.
 
-Produce the callback address from Python via:
+Produce the callback address from Python via::
+
     @cfunc(int32(voidptr, int32, intp, intp))
     def my_row_cb(ctx, n, values_pp, names_pp): ...
     sqlite3_exec(db, sql, my_row_cb.address, ctx_p, errmsg_pp)

@@ -6,7 +6,14 @@ from numbox.core.work.work import Work
 
 
 def get_func_code(derive_func_p_):
+    """Return ``(name, indented source)`` for a derive function registered by
+    ``builder.make_graph``, or ``(None, None)`` if it was built outside the
+    builder (e.g. via ``make_work`` / ``ll_make_work``) and so isn't in
+    ``_derive_funcs`` -- those carry only a function pointer, not the Python
+    object explain() would need to recover the source."""
     derive_func_ = _derive_funcs.get(derive_func_p_)
+    if derive_func_ is None:
+        return None, None
     return derive_func_.__name__, indent(getsource(derive_func_), "    ")
 
 
@@ -23,7 +30,12 @@ def _explain(work: Work, derivation_: list, derived_: set):
         inputs_names.append(source.name)
     derive_func_ptrs = work.derive
     derive_func_name, derive_func_code = get_func_code(derive_func_ptrs[1])
-    derivation_.append(f"""{work.name}: {derive_func_name}({", ".join(inputs_names)})
+    if derive_func_name is None:
+        derivation_.append(
+            f"{work.name}: <derive built outside builder.make_graph>"
+            f"({', '.join(inputs_names)})\n")
+    else:
+        derivation_.append(f"""{work.name}: {derive_func_name}({", ".join(inputs_names)})
 
 {derive_func_code}""")
     derived_.add(work.name)

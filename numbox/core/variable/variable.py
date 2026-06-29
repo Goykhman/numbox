@@ -19,7 +19,7 @@ class Namespace(ABC):
     def update(self, key: str, var: 'Variable') -> None:
         """
         Post-initialization update for dynamically generated
-        `Variable`s.
+        `Variable` instances.
         """
         self._variables[key] = var
 
@@ -168,14 +168,14 @@ class Variable:
 
     :param name: name of the `Variable` instance.
     :param source: name of the `Namespace` instance  which is
-    the namespace / source of this `Variable`.
+        the namespace / source of this `Variable`.
     :param inputs: (optional) map from names of the `Variable`
-    inputs (which are names of other `Variable` instances) to
-    names of their `Namespace`s.
+        inputs (which are names of other `Variable` instances) to
+        names of their `Namespace` instances.
     :param formula: (optional) function that calculates the
-    value of this `Variable` from its inputs.
+        value of this `Variable` from its inputs.
     :param metadata: any possible metadata associated with
-    this variable.
+        this variable.
     """
     name: str
     source: str = field(default="")
@@ -183,6 +183,18 @@ class Variable:
     formula: Callable = field(default=None)
     metadata: str | None = field(default=None)
     params: Params | None = field(default=None)
+
+    def __post_init__(self):
+        # Only the variable name is restricted: qualified names compose as
+        # source.name and decode via rsplit(QUAL_SEP, 1), which binds only the
+        # final separator -- so a dotted source/namespace round-trips, while a
+        # dotted name would be ambiguous.
+        if QUAL_SEP in self.name:
+            raise ValueError(
+                f"Variable name {self.name!r} contains the reserved qualified-name "
+                f"separator {QUAL_SEP!r}; variable names must not contain it "
+                f"(qualified names are decomposed via rsplit({QUAL_SEP!r}, 1))."
+            )
 
     def __hash__(self):
         return hash((self.source, self.name))
@@ -239,7 +251,7 @@ class Value:
 
 
 class Values:
-    """ Values of all `Variable`s, computed and external,
+    """ Values of all `Variable` instances, computed and external,
     will be held here. """
     def __init__(self):
         self._values: dict[Variable, Value] = {}
@@ -292,12 +304,12 @@ class CompiledGraph:
         graph. Calculation requires the following inputs:
 
         :param external_values: actual values of all required external
-        variables, this can be a superset of what is really needed for
-        the calculation. The map is first from the name of the external
-        namespace and then from the name of the variable within that
-        source to the variable's actual value.
+            variables, this can be a superset of what is really needed for
+            the calculation. The map is first from the name of the external
+            namespace and then from the name of the variable within that
+            source to the variable's actual value.
         :param values: runtime storage of all values, e.g., an instance
-        of `Values`.
+            of `Values`.
         """
         self._assign_external_values(external_values, values)
         self._calculate(self.ordered_nodes, values)
@@ -380,8 +392,13 @@ class CompiledGraph:
     def recompute(self, changed: dict[str, dict[str, VarValue]], values: Storage):
         """
         :param changed: dict of sources to names to new values of changed
-        `Variable`s coming from either `External` or `Variables` source.
+            `Variable` instances coming from either `External` or `Variables` source.
         :param values: storage of all `Variable` values.
+
+        Recompute takes priority: each node in the affected downstream cone is reset and
+        recomputed from its formula, so the graph structure decides the final values. A
+        supplied value persists only for a node not downstream of any other change; a
+        co-changed downstream value is recomputed, not held.
         """
         changed_vars = set()
         for src, vals in changed.items():
@@ -566,8 +583,8 @@ class Graph:
 
         :param qual_name: qualified name of the `Variable`.
         :param right_to_left: when `True` (default), begin explanation
-        with `qual_name`. That is, move towards the ends of the
-        graph.
+            with `qual_name`. That is, move towards the ends of the
+            graph.
         """
         derived = set()
         derivation = []

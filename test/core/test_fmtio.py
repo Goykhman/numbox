@@ -1036,6 +1036,67 @@ def test_njit_writer_rejects_percent_n(fn):
             ns["k"](out)
 
 
+def test_njit_printf_grouping_flag_prevents_varargs_misread():
+    """Regression: the glibc ``'`` grouping flag is not matched by
+    ``_FMT_SPEC_RE``, so ``"%'d %d"`` counted as ONE specifier and silently
+    accepted a single arg — the second ``%d`` then read an unpushed varargs
+    slot (garbage / info-disclosure / crash). Now rejected at typing time."""
+    @njit
+    def k(x):
+        printf("%'d %d\n", x)
+    with pytest.raises(TypingError, match="grouping"):
+        k(1000000)
+
+
+@pytest.mark.parametrize(
+    "fmt", ["%'d", "%-'d", "%0'8d", "%'i", "%'u", "%'x", "%'f",
+            "total %'d items", "%'n", "%d %'d"]
+)
+def test_njit_printf_rejects_grouping_flag(fmt):
+    """The ``'`` (thousands-grouping) flag is glibc-only, absent from C99 and
+    unsupported by Python's ``%``; reject it at typing time (mirrors %n
+    handling). ``%'n`` also slips past the %n guard, so this catches it too."""
+    src = f"""
+from numbox.core.bindings import printf
+@njit
+def k(x):
+    printf({fmt!r}, x)
+"""
+    ns = {"njit": njit}
+    exec(src, ns)
+    with pytest.raises(TypingError, match="grouping"):
+        ns["k"](1000000)
+
+
+@pytest.mark.parametrize("fn", ["printf", "fprintf", "snprintf"])
+def test_njit_writer_rejects_grouping_flag(fn):
+    if fn == "printf":
+        src = "from numbox.core.bindings import printf\n" \
+              "@njit\ndef k(x): printf(\"%'d\", x)\n"
+    elif fn == "fprintf":
+        src = "from numbox.core.bindings import fprintf, stdout\n" \
+              "@njit\ndef k(x): fprintf(stdout(), \"%'d\", x)\n"
+    else:
+        src = "from numbox.core.bindings import snprintf\n" \
+              "from numbox.utils.lowlevel import array_data_p\n" \
+              "@njit\ndef k(buf, x): snprintf(array_data_p(buf), buf.size, \"%'d\", x)\n"
+    ns = {"njit": njit}
+    exec(src, ns)
+    with pytest.raises(TypingError, match="grouping"):
+        if fn == "snprintf":
+            ns["k"](np.zeros(32, dtype=np.uint8), 1000000)
+        else:
+            ns["k"](1000000)
+
+
+def test_pure_python_printf_rejects_grouping_flag():
+    """Dual-mode parity: the pure-Python path raises a clear ValueError on a
+    ``'`` grouping flag (matching the @njit TypingError), rather than Python's
+    generic 'unsupported format character'."""
+    with pytest.raises(ValueError, match="grouping"):
+        printf("%'d\n", 1000000)
+
+
 def test_njit_sscanf_accepts_percent_n():
     """``%n`` is legitimately useful in sscanf — it returns the read
     position (how many characters were consumed so far), not a write
@@ -1135,3 +1196,68 @@ def test_python_printf_strips_extended_length_modifiers(modifier, capfd):
     out, _ = capfd.readouterr()
     assert out == "42\n", repr(out)
     assert rc == 3
+
+
+def test_printf_too_few_args_for_specifiers_raises():
+    # "%d %d" needs two args; passing one reads an unpushed varargs slot
+    # (garbage / info-disclosure / crash). The literal-format specifier count
+    # must match the argument count at typing time.
+    @njit
+    def caller(x):
+        return printf("%d %d\n", x)
+
+    with pytest.raises(TypingError, match=r"printf.*specifier"):
+        caller(1)
+
+
+def test_printf_percent_s_with_non_pointer_int_raises():
+    # %s with a non-pointer-width integer would make libc deref it as char*.
+    # (intp == int64, so a pointer-width int can't be told apart from a real
+    # char* pointer; a narrower int like int32 is unambiguously wrong.)
+    @njit
+    def caller(x):
+        return printf("%s\n", x)
+
+    with pytest.raises(TypingError, match=r"printf.*specifier.*str"):
+        caller(np.int32(5))
+
+
+def test_printf_percent_d_with_float_arg_raises():
+    # %d reads a GP register but a float is passed in an SSE register -> silent
+    # wrong result. Reject the type mismatch at typing time.
+    @njit
+    def caller(x):
+        return printf("%d\n", x)
+
+    with pytest.raises(TypingError, match=r"printf.*specifier.*int"):
+        caller(3.5)
+
+
+@pytest.mark.skipif(
+    platform_ == "Windows",
+    reason="capfd does not reliably capture C-level stdio writes on Windows",
+)
+def test_printf_matched_spec_and_args_compiles_both_modes(capfd):
+    # correct spec/arg combos must still compile and print identically in
+    # @njit and pure-Python modes.
+    @njit
+    def jit_caller(n, ratio):
+        rc = printf("n=%d r=%.2f\n", n, ratio)
+        fflush(stdout())
+        return rc
+
+    jit_caller(7, 3.5)
+    out_jit, _ = capfd.readouterr()
+    printf("n=%d r=%.2f\n", 7, 3.5)
+    out_py, _ = capfd.readouterr()
+    assert out_jit == "n=7 r=3.50\n", repr(out_jit)
+    assert out_py == out_jit
+
+
+def test_validate_format_accepts_uintp_for_string_and_pointer():
+    # uintp (unsigned pointer-width int) is a valid pointer value for %s and %p,
+    # not just intp -- validation must accept it without raising.
+    from numba.core.types import Tuple, uintp
+    from numbox.core.bindings._fmtio import _validate_format_vs_args
+
+    _validate_format_vs_args("printf", "%s %p", Tuple([uintp, uintp]))

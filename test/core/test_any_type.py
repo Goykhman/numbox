@@ -155,6 +155,9 @@ def test_10():
     assert get_nrt_refcount(s1) == 2, "`any` now holds another ref to `s1` via its `_Content` member"
     assert any.get_as(S1Type).x2 == 432
     any.reset(11)
+    assert get_nrt_refcount(s1) == 1, \
+        "resetting onto a different value released `any`'s ref to the old `s1` payload exactly once " \
+        "(== 2 would be a leak, == 0 a double-free)"
 
 
 if __name__ == '__main__':

@@ -129,7 +129,19 @@ def extract_connection_ptr(conn):
     Returns
     -------
     int
-        ``sqlite3*`` as a Python int (``intp``-compatible).
+        ``sqlite3*`` as a Python int (``intp``-compatible). The pointer is
+        **borrowed** from *conn*: it is owned by the Python ``Connection`` and
+        stays valid only while *conn* is alive and open. An ``int`` cannot keep
+        *conn* referenced, so the keep-alive is the caller's responsibility.
+
+    Warning
+    -------
+    The caller must retain *conn* for the entire lifetime of any ``@njit`` use
+    of the returned pointer, and must not use the pointer after ``conn.close()``
+    or after *conn* is garbage-collected — doing so is a use-after-free
+    (dereferencing a dangling ``sqlite3*``). This mirrors the ``SQLITE_STATIC``
+    ownership contract on ``bind_text`` / ``bind_blob``: the borrowed memory
+    must outlive every use.
 
     Raises
     ------

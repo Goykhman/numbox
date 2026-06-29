@@ -80,20 +80,59 @@ def _classify(ty):
     return _CLASS_STRUCT_SMALL if size <= 16 else _CLASS_STRUCT_LARGE
 
 
+def _align_up(n, alignment):
+    return (n + alignment - 1) // alignment * alignment
+
+
+def _basetuple_layout(ty, fn_name):
+    """Natural-alignment C layout for a ``BaseTuple`` of scalar fields.
+
+    numba lowers a tuple through its ``StructModel`` (the tuple data model) to a
+    literal LLVM struct, which llvmlite emits *non-packed* (padded) by default, so
+    each field sits at the next offset aligned up to its own size and the total is
+    padded up to the largest field's alignment — exactly the layout of the
+    equivalent ``Record`` (verified against ``get_data_type`` / ``get_abi_sizeof``).
+    A plain ``sum(bitwidth)`` bit-packed model under-counts the size and mislocates
+    fields, which corrupts both the SMALL/LARGE classification and the eightbyte
+    split. Returns ``(total_size, [(offset, size, is_float), ...])``.
+
+    A field with no fixed ``bitwidth`` (a pointer / function / other non-scalar
+    type) raises a clean ``TypingError`` naming ``fn_name`` rather than a cryptic
+    ``AttributeError`` — raw pointers are expected to be passed as ``intp``.
+    """
+    offset = 0
+    max_align = 1
+    fields = []
+    for ft in ty.types:
+        if not hasattr(ft, "bitwidth"):
+            raise TypingError(
+                f"{fn_name}: tuple field {ft!r} has no fixed bitwidth; only "
+                f"fixed-width scalar fields (Integer, Float) are supported "
+                f"(pointers must be passed as intp)."
+            )
+        size = ft.bitwidth // 8
+        align = size  # primitive scalar fields: alignment == size
+        offset = _align_up(offset, align)
+        fields.append((offset, size, isinstance(ft, nb_types.Float)))
+        offset += size
+        max_align = max(max_align, align)
+    return _align_up(offset, max_align), fields
+
+
 def _struct_bytes(ty, fn_name):
     """Compute struct size in bytes for a numba struct-shaped type.
 
     Supports ``types.Record`` (via ``.size``) and ``types.BaseTuple``
     subclasses — ``types.Tuple``, ``types.UniTuple``, and
-    ``types.NamedTuple`` — via ``.types`` (a tuple of scalar field
-    types with ``.bitwidth``). Anything else raises a clean
-    ``TypingError`` naming the caller so a misuse doesn't surface as a
-    cryptic ``AttributeError`` / ``KeyError``.
+    ``types.NamedTuple`` — via natural-alignment layout (see
+    ``_basetuple_layout``). Anything else raises a clean ``TypingError``
+    naming the caller so a misuse doesn't surface as a cryptic
+    ``AttributeError`` / ``KeyError``.
     """
     if isinstance(ty, nb_types.Record):
         return ty.size
     if isinstance(ty, nb_types.BaseTuple):
-        return sum(t.bitwidth for t in ty.types) // 8
+        return _basetuple_layout(ty, fn_name)[0]
     raise TypingError(
         f"{fn_name}: expected a struct-shaped type (Record, Tuple, "
         f"UniTuple, or NamedTuple), got {ty!r}."
@@ -112,17 +151,14 @@ def _iter_struct_fields(ty, fn_name):
     ``_classify_eightbytes``). Size is needed to detect fields that
     span the 8-byte eightbyte boundary.
 
-    For ``BaseTuple`` the fields are bit-packed sequentially with no
-    padding (mirrors ``_struct_bytes``'s ``sum(bitwidth)`` model). For
-    ``Record`` each ``_RecordField`` carries an explicit ``offset``
-    that already accounts for any C-layout padding gaps.
+    For ``BaseTuple`` the fields follow the natural-alignment layout (see
+    ``_basetuple_layout``, mirroring ``_struct_bytes``), so padded gaps match
+    the non-packed LLVM struct numba lowers tuples to. For ``Record`` each
+    ``_RecordField`` carries an explicit ``offset`` that already accounts for
+    any C-layout padding gaps.
     """
     if isinstance(ty, nb_types.BaseTuple):
-        offset = 0
-        for ft in ty.types:
-            size = ft.bitwidth // 8
-            yield offset, size, isinstance(ft, nb_types.Float)
-            offset += size
+        yield from _basetuple_layout(ty, fn_name)[1]
         return
     if isinstance(ty, nb_types.Record):
         for fld in ty.fields.values():
@@ -143,9 +179,10 @@ def _classify_eightbytes(ty):
 
     Returns ``(class_lo, class_hi)`` where each is
     ``_EIGHTBYTE_CLASS_INTEGER`` (ints / pointers) or
-    ``_EIGHTBYTE_CLASS_SSE`` (float / double). The SysV-flavoured
-    per-eightbyte rule applies: if any field in an eightbyte is SSE
-    (float / double), the whole eightbyte is SSE; otherwise INTEGER.
+    ``_EIGHTBYTE_CLASS_SSE`` (float / double). The SysV merge rule
+    applies per eightbyte: an eightbyte is SSE only if every field that
+    touches it is float / double; if it holds *any* integer field it is
+    INTEGER (SSE + INTEGER -> INTEGER, i.e. passed in a GP register).
     The class names are SysV-flavoured but the helper drives the
     repack path on both SysV x86-64 and AAPCS64. (The full SysV ABI
     has X87 / NO_CLASS / etc.; our scope is fixed-size 16-byte
@@ -168,20 +205,29 @@ def _classify_eightbytes(ty):
             f"_classify_eightbytes: expected a 16-byte struct, got "
             f"{size}-byte ({ty!r})."
         )
-    cls_lo = _EIGHTBYTE_CLASS_INTEGER
-    cls_hi = _EIGHTBYTE_CLASS_INTEGER
+    lo_has_int = hi_has_int = False
+    lo_has_float = hi_has_float = False
     for offset, size, is_float in _iter_struct_fields(
             ty, "_classify_eightbytes"):
-        if not is_float:
-            continue
-        # SysV per-eightbyte rule: if any SSE field touches an
-        # eightbyte (even partially via a boundary span), the whole
-        # eightbyte is SSE. So a field at offsets [4, 12) makes BOTH
-        # eightbytes SSE -- not just one or the other.
-        if offset < 8:
-            cls_lo = _EIGHTBYTE_CLASS_SSE
-        if offset + size > 8:
-            cls_hi = _EIGHTBYTE_CLASS_SSE
+        # A field spanning the 8-byte boundary touches both eightbytes.
+        touches_lo = offset < 8
+        touches_hi = offset + size > 8
+        if is_float:
+            lo_has_float |= touches_lo
+            hi_has_float |= touches_hi
+        else:
+            lo_has_int |= touches_lo
+            hi_has_int |= touches_hi
+    # SysV merge rule: an eightbyte holding any integer field is INTEGER
+    # (passed in a GP register), even if it also holds a float -- SSE +
+    # INTEGER -> INTEGER. Only an all-float eightbyte is SSE. This is the
+    # rule llvmlite does not model (it would otherwise lower a mixed
+    # int/float eightbyte through SSE and drop the integer field), which is
+    # exactly why the int/int repack in call.py exists.
+    cls_lo = (_EIGHTBYTE_CLASS_SSE if (lo_has_float and not lo_has_int)
+              else _EIGHTBYTE_CLASS_INTEGER)
+    cls_hi = (_EIGHTBYTE_CLASS_SSE if (hi_has_float and not hi_has_int)
+              else _EIGHTBYTE_CLASS_INTEGER)
     return cls_lo, cls_hi
 
 

@@ -38,6 +38,17 @@ format-checked printf call. A runtime-built ``unicode`` raises a clean
 ``TypingError`` at call typing time. In pure-Python mode the format
 string can of course be any str.
 
+Because the format is a literal, the ``@njit`` writers also cross-check it
+against the arguments at typing time (like a C compiler's ``-Wformat``): the
+conversion-specifier count must equal the argument count, and each specifier's
+class must match its arg (``%d``/``%x``/… → Integer/Boolean, ``%f``/``%g``/… →
+Float, ``%s`` → unicode or an ``intp``/``uintp`` pointer, ``%p`` → ``intp``/``uintp``). A mismatch
+raises ``TypingError`` instead of reading an unpushed varargs slot, dereferencing
+an int as ``char*``, or reading a GP register for an SSE-passed float. Caveat:
+numba's ``intp`` is ``int64``, so a pointer-width int passed for ``%s``/``%p``
+cannot be told apart from a real pointer (narrower ints, floats and booleans
+are still rejected).
+
 Format string encoding: UTF-8
 -----------------------------
 
@@ -120,7 +131,7 @@ from numba.core import cgutils
 from numba.core.cgutils import get_or_insert_function
 from numba.core.errors import TypingError
 from numba.core.types import (
-    BaseTuple, Boolean, Float, Integer, UnicodeType, int32, intp,
+    BaseTuple, Boolean, Float, Integer, UnicodeType, int32, intp, uintp,
     unliteral,
 )
 from numba.extending import intrinsic, overload
@@ -259,6 +270,99 @@ def _reject_percent_n_or_raise(name, fmt_str):
         )
 
 
+# A directive whose flag run contains the glibc ``'`` (thousands-grouping)
+# flag. Operates on the ``%%``-masked format string.
+_GROUPING_FLAG_RE = re.compile(r"%[-+0# ']*'")
+
+
+def _reject_grouping_flag_or_raise(name, fmt_str):
+    """Raise ``TypingError`` if ``fmt_str`` uses the glibc ``'`` grouping flag.
+
+    ``'`` (thousands grouping) is a legal glibc printf flag but is absent from
+    C99 and unsupported by Python's ``%`` operator, so honoring it would
+    diverge between the @njit and pure-Python paths. It is also not recognized
+    by ``_FMT_SPEC_RE``: a ``%'d`` directive would not match at all, so the
+    specifier count would be silently under-counted and a following directive
+    would read an unpushed varargs slot (garbage / info-disclosure / crash) —
+    the exact hazard ``_validate_format_vs_args`` exists to prevent. Reject it
+    cleanly in both modes, mirroring ``%n`` handling.
+    """
+    stripped = fmt_str.replace('%%', '\x00\x00')
+    if _GROUPING_FLAG_RE.search(stripped):
+        raise TypingError(
+            f"{name}: the ' (thousands-grouping) flag in format string "
+            f"{fmt_str!r} is not supported (glibc-only, absent from C99 and "
+            f"Python's % operator). Remove it or group the digits yourself."
+        )
+
+
+_FMT_SPEC_RE = re.compile(
+    r'%[-+0# ]*'                          # flags
+    r'(?:\*|[0-9]*)'                       # field width (number or '*')
+    r'(?:\.(?:\*|[0-9]*))?'               # .precision (number or '*')
+    r'(?:hh|ll|h|l|L|j|z|t|q|I32|I64)?'   # length modifier
+    r'([diouxXeEfFgGaAcsp])'              # conversion (group 1); 'n' is rejected
+)                                          # separately, '%%' is masked first
+
+_CONV_INT = set("diouxXc")
+_CONV_FLOAT = set("eEfFgGaA")
+
+
+def _validate_format_vs_args(name, fmt_str, args_ty):
+    """Cross-check the literal format's conversion specifiers against the arg
+    types at typing time (what a C compiler's ``-Wformat`` does):
+
+    - the specifier count must equal the argument count, and
+    - each specifier's class must match its arg
+      (``%d/%i/%u/%o/%x/%X/%c`` → Integer/Boolean; ``%e/%f/%g/...`` → Float;
+      ``%s`` → unicode or an ``intp``/``uintp`` pointer; ``%p`` → ``intp``/``uintp``).
+
+    Each ``*`` dynamic width/precision consumes a preceding Integer arg.
+
+    Without this, ``printf('%d %d', x)`` reads an unpushed varargs slot
+    (garbage / info-disclosure / crash), ``printf('%s', 5)`` makes libc
+    dereference an int as ``char*``, and ``printf('%d', 3.5)`` reads a GP
+    register for an SSE-passed float (silent wrong result). Note ``intp`` is
+    ``int64`` in numba, so a pointer-width int passed for ``%s``/``%p`` cannot
+    be distinguished from a real pointer; narrower ints, floats and booleans
+    for those specifiers ARE rejected.
+    """
+    stripped = fmt_str.replace('%%', '\x00\x00')
+    expected = []
+    for m in _FMT_SPEC_RE.finditer(stripped):
+        expected.extend(['int'] * m.group(0).count('*'))
+        conv = m.group(1)
+        if conv in _CONV_INT:
+            expected.append('int')
+        elif conv in _CONV_FLOAT:
+            expected.append('float')
+        elif conv == 's':
+            expected.append('str')
+        else:  # 'p'
+            expected.append('ptr')
+    arg_types = tuple(args_ty)
+    if len(expected) != len(arg_types):
+        raise TypingError(
+            f"{name}: format {fmt_str!r} has {len(expected)} conversion "
+            f"specifier(s) but {len(arg_types)} argument(s) were passed"
+        )
+    for i, (cls, ty) in enumerate(zip(expected, arg_types)):
+        uty = unliteral(ty)
+        if cls == 'int':
+            ok = isinstance(uty, (Integer, Boolean))
+        elif cls == 'float':
+            ok = isinstance(uty, Float)
+        elif cls == 'str':
+            ok = isinstance(uty, UnicodeType) or uty in (intp, uintp)
+        else:  # 'ptr'
+            ok = uty in (intp, uintp)
+        if not ok:
+            raise TypingError(
+                f"{name}: format specifier #{i + 1} in {fmt_str!r} expects "
+                f"{cls}, but arg {i} has type {ty!r}"
+            )
+
+
 def _unpack_args_tuple(builder, args_ty, args_pack):
     """Extract individual LLVM values from a tuple-of-args LLVM aggregate."""
     arg_types = tuple(args_ty)
@@ -311,10 +415,12 @@ def _printf_intrinsic(typingctx, fmt_ty, args_ty):
     """libc printf via a tuple-of-args. Internal; user code calls printf()."""
     fmt_str = extract_literal_str("printf", fmt_ty, field="format string")
     _reject_percent_n_or_raise("printf", fmt_str)
+    _reject_grouping_flag_or_raise("printf", fmt_str)
     if not isinstance(args_ty, BaseTuple):
         raise TypingError(f"printf: args must be a tuple, got {args_ty!r}")
     for i, ty in enumerate(tuple(args_ty)):
         _validate_writer_arg_type("printf", i, ty)
+    _validate_format_vs_args("printf", fmt_str, args_ty)
 
     def codegen(context, builder, sig, llvm_args):
         _, args_pack = llvm_args
@@ -330,6 +436,7 @@ def _fprintf_intrinsic(typingctx, fp_ty, fmt_ty, args_ty):
     """libc fprintf via a tuple-of-args. Internal; user code calls fprintf()."""
     fmt_str = extract_literal_str("fprintf", fmt_ty, field="format string")
     _reject_percent_n_or_raise("fprintf", fmt_str)
+    _reject_grouping_flag_or_raise("fprintf", fmt_str)
     if not isinstance(args_ty, BaseTuple):
         raise TypingError(f"fprintf: args must be a tuple, got {args_ty!r}")
     if fp_ty != intp:
@@ -338,6 +445,7 @@ def _fprintf_intrinsic(typingctx, fp_ty, fmt_ty, args_ty):
         )
     for i, ty in enumerate(tuple(args_ty)):
         _validate_writer_arg_type("fprintf", i, ty)
+    _validate_format_vs_args("fprintf", fmt_str, args_ty)
 
     def codegen(context, builder, sig, llvm_args):
         i8p = llir.IntType(8).as_pointer()
@@ -355,6 +463,7 @@ def _snprintf_intrinsic(typingctx, buf_ty, size_ty, fmt_ty, args_ty):
     """libc snprintf via a tuple-of-args. Internal; user code calls snprintf()."""
     fmt_str = extract_literal_str("snprintf", fmt_ty, field="format string")
     _reject_percent_n_or_raise("snprintf", fmt_str)
+    _reject_grouping_flag_or_raise("snprintf", fmt_str)
     if not isinstance(args_ty, BaseTuple):
         raise TypingError(f"snprintf: args must be a tuple, got {args_ty!r}")
     if buf_ty != intp:
@@ -367,6 +476,7 @@ def _snprintf_intrinsic(typingctx, buf_ty, size_ty, fmt_ty, args_ty):
         )
     for i, ty in enumerate(tuple(args_ty)):
         _validate_writer_arg_type("snprintf", i, ty)
+    _validate_format_vs_args("snprintf", fmt_str, args_ty)
 
     def codegen(context, builder, sig, llvm_args):
         i8p = llir.IntType(8).as_pointer()
@@ -518,6 +628,22 @@ def _reject_percent_n_in_python(name, fmt):
         )
 
 
+def _reject_grouping_flag_in_python(name, fmt):
+    """Pure-Python equivalent of ``_reject_grouping_flag_or_raise``: raise
+    ``ValueError`` if the glibc ``'`` grouping flag appears in ``fmt``.
+    Python's ``%`` operator would itself raise on ``%'d`` (unsupported
+    format character), but the message is generic; this gives users the
+    same clear error in both Python and @njit modes.
+    """
+    stripped = fmt.replace('%%', '\x00\x00')
+    if _GROUPING_FLAG_RE.search(stripped):
+        raise ValueError(
+            f"{name}: the ' (thousands-grouping) flag in format string "
+            f"{fmt!r} is not supported (glibc-only, absent from C99 and "
+            f"Python's % operator). Remove it or group the digits yourself."
+        )
+
+
 def printf(fmt, *args):
     """C-style ``printf(fmt, *args)`` — dual-mode (plain Python AND @njit).
 
@@ -534,6 +660,7 @@ def printf(fmt, *args):
     Returns the number of bytes written (or written-equivalent), as int32.
     """
     _reject_percent_n_in_python("printf", fmt)
+    _reject_grouping_flag_in_python("printf", fmt)
     text = _python_fmt_compat(fmt) % args
     sys.stdout.write(text)
     sys.stdout.flush()
@@ -544,6 +671,7 @@ def printf(fmt, *args):
 def _overload_printf(fmt, *args):
     fmt_str = extract_literal_str("printf", fmt, field="format string")
     _reject_percent_n_or_raise("printf", fmt_str)
+    _reject_grouping_flag_or_raise("printf", fmt_str)
     for i, ty in enumerate(args):
         _validate_writer_arg_type("printf", i, ty)
     impl = _build_overload_impl(
@@ -568,6 +696,7 @@ def fprintf(fp, fmt, *args):
     From @njit: routes to ``_fprintf_intrinsic`` with str auto-conversion.
     """
     _reject_percent_n_in_python("fprintf", fmt)
+    _reject_grouping_flag_in_python("fprintf", fmt)
     _ensure_py_stream_cache()
     py_stream = _PY_STREAM_BY_FP.get(int(fp))
     if py_stream is None:
@@ -586,6 +715,7 @@ def fprintf(fp, fmt, *args):
 def _overload_fprintf(fp, fmt, *args):
     fmt_str = extract_literal_str("fprintf", fmt, field="format string")
     _reject_percent_n_or_raise("fprintf", fmt_str)
+    _reject_grouping_flag_or_raise("fprintf", fmt_str)
     if fp != intp:
         raise TypingError(
             f"fprintf: fp must be intp (FILE* as pointer-as-int), got {fp!r}"
@@ -613,6 +743,7 @@ def snprintf(buf_p, size, fmt, *args):
     MSVCRT ``_snprintf`` which returns ``-1`` on truncation).
     """
     _reject_percent_n_in_python("snprintf", fmt)
+    _reject_grouping_flag_in_python("snprintf", fmt)
     text_bytes = (_python_fmt_compat(fmt) % args).encode('utf-8')
     n_would_have = len(text_bytes)
     if size > 0:
@@ -631,6 +762,7 @@ def snprintf(buf_p, size, fmt, *args):
 def _overload_snprintf(buf_p, size, fmt, *args):
     fmt_str = extract_literal_str("snprintf", fmt, field="format string")
     _reject_percent_n_or_raise("snprintf", fmt_str)
+    _reject_grouping_flag_or_raise("snprintf", fmt_str)
     if buf_p != intp:
         raise TypingError(
             f"snprintf: buf must be intp (pointer-as-int), got {buf_p!r}"

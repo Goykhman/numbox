@@ -10,6 +10,7 @@ Modules
 ++++++++
 
 .. _builder:
+
 numbox.core.work.builder
 ------------------------
 
@@ -338,7 +339,7 @@ paradigm that manages memory-allocated
 payload via smart pointer (pointer to numba's meminfo object) reference counting.
 This allows users to reference the desired
 memory location via a 'void' structref type, such as,
-:class:`numbox.core.any.erased_type.ErasedType`, or :class:`numbox.core.utils.void_type.VoidType`,
+:class:`numbox.core.any.erased_type.ErasedType`, or :class:`numbox.utils.void_type.VoidType`,
 or base structref type, such as, :class:`numbox.core.work.node_base.NodeBaseType`,
 and dereference its payload accordingly when needed via the appropriate :func:`numbox.utils.lowlevel.cast`.
 
@@ -521,13 +522,13 @@ is worth the performance tradeoff).
 One option to build a graph manager would be via the constructor such as::
 
     from numba.core.errors import NumbaError
-    from numbox.core.configurations import default_jit_options
+    from numbox.core.configurations import jit_options
+    from numbox.core.work.lowlevel_work_utils import ll_make_work
     from numbox.core.work.node import NodeType
-    from numbox.core.work.work import _make_work
     from numbox.utils.lowlevel import _cast
     from work_registry import _get_global, registry_type
 
-    @njit(**default_jit_options)
+    @njit(**jit_options)
     def make_registered_work(name, data, sources=(), derive=None):
         """ Optional graph manager. Consider using `make_work`
         where performance is more critical and name clashes are
@@ -535,12 +536,14 @@ One option to build a graph manager would be via the constructor such as::
         registry_ = _get_global(registry_type, "_work_registry")
         if name in registry_:
             raise NumbaError(f"{name} is already registered")
-        work_ = _make_work(name, data, sources, derive)
+        work_ = ll_make_work(name, data, sources, derive)
         registry_[name] = _cast(work_, NodeType)
         return work_
 
-Here :func:`numbox.core.work.work.ol_make_work` is the original `Work` constructor overload,
-while the utility registry module can be defined as
+Here :func:`numbox.core.work.lowlevel_work_utils.ll_make_work` is the intrinsic
+`Work` constructor — it inlines directly into the calling jitted scope, whereas
+:func:`numbox.core.work.work.make_work` is the convenience ``@njit`` wrapper around it.
+The utility registry module can be defined as
 
 .. literalinclude:: ./_static/work_registry.py
    :language: python

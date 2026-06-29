@@ -88,40 +88,77 @@ def test_classify_eightbytes_sse_int():
     )
 
 
-def test_classify_eightbytes_mixed_lo_eightbyte_is_sse():
-    """SysV rule: if any field in an eightbyte is SSE, the whole
-    eightbyte is SSE. `Tuple([int32, float32, int64])` has int+float
-    in lo → lo eightbyte is SSE."""
+def test_classify_eightbytes_mixed_lo_eightbyte_is_integer():
+    """SysV merge rule: SSE + INTEGER -> INTEGER. `Tuple([int32, float32,
+    int64])` has an int and a float in the lo eightbyte, so that eightbyte
+    is passed in a GP register (INTEGER), NOT SSE. Verified against GCC,
+    which reads the lo eightbyte from %rdi for this struct."""
     from numba.core import types
     from numbox.core.bindings.abi import (
-        _EIGHTBYTE_CLASS_INTEGER, _EIGHTBYTE_CLASS_SSE,
-        _classify_eightbytes,
+        _EIGHTBYTE_CLASS_INTEGER, _classify_eightbytes,
     )
 
     ty = types.Tuple([types.int32, types.float32, types.int64])
     assert _classify_eightbytes(ty) == (
-        _EIGHTBYTE_CLASS_SSE, _EIGHTBYTE_CLASS_INTEGER,
+        _EIGHTBYTE_CLASS_INTEGER, _EIGHTBYTE_CLASS_INTEGER,
     )
 
 
-def test_classify_eightbytes_field_spans_eightbyte_boundary():
-    """An SSE field that straddles the 8-byte boundary makes BOTH
-    eightbytes SSE. ``Tuple([int32, float64, int32])`` has the
-    ``float64`` at offsets [4, 12) — touching both lo and hi
-    eightbytes — so the result is SSE/SSE per the SysV any-SSE-wins
-    rule, not SSE/INT. (Bytes 0–3 are i32 INTEGER but the SSE field
-    touching bytes 4–7 makes lo SSE; bytes 8–11 are part of the same
-    SSE field, making hi SSE; bytes 12–15 are i32 INTEGER but hi is
-    already SSE.)"""
+def test_classify_eightbytes_mixed_both_eightbytes_integer():
+    """`Tuple([float32, int32, float32, int32])` packs a float+int into each
+    eightbyte; both merge to INTEGER (two GP registers), matching GCC."""
     from numba.core import types
     from numbox.core.bindings.abi import (
-        _EIGHTBYTE_CLASS_SSE, _classify_eightbytes,
+        _EIGHTBYTE_CLASS_INTEGER, _classify_eightbytes,
+    )
+
+    ty = types.Tuple([types.float32, types.int32, types.float32, types.int32])
+    assert _classify_eightbytes(ty) == (
+        _EIGHTBYTE_CLASS_INTEGER, _EIGHTBYTE_CLASS_INTEGER,
+    )
+
+
+def test_mixed_int_float_eightbyte_triggers_repack():
+    """Consumer-level regression for the SSE+INTEGER->INTEGER fix: a 16-byte
+    struct whose eightbytes each mix an int and a float must be repacked to
+    {i64, i64}. Before the fix the mixed eightbyte was mis-classified SSE,
+    the repack was skipped, and llvmlite dropped the float field by-value
+    (silent corruption). Both mixed shapes must now classify (INTEGER,
+    INTEGER) and request the repack on SysV / AAPCS64."""
+    from numba.core import types
+    from numbox.core.bindings.call import (
+        _needs_int_int_eightbyte_repack, _current_platform,
+    )
+
+    plat = _current_platform()
+    if plat not in ("sysv_x86_64", "aapcs64"):
+        pytest.skip(f"eightbyte repack is SysV/AAPCS64-only (plat={plat})")
+    for ty in (
+        types.Tuple([types.int32, types.float32, types.int64]),
+        types.Tuple([types.float32, types.int32, types.float32, types.int32]),
+    ):
+        assert _needs_int_int_eightbyte_repack(ty, plat), ty
+    # A pure-float (HFA-style) 16-byte struct must NOT be repacked.
+    assert not _needs_int_int_eightbyte_repack(
+        types.UniTuple(types.float64, 2), plat)
+
+
+def test_classify_padded_tuple_double_is_aligned_not_spanning():
+    """Natural alignment keeps an SSE field off the eightbyte boundary.
+    ``Tuple([int32, float64, int32])`` places the ``float64`` at offset 8
+    (4 bytes of padding after the leading ``int32``), making the struct 24
+    bytes — so it is LARGE and never reaches eightbyte classification. A
+    naturally-aligned scalar field can never straddle the 8-byte boundary."""
+    from numba.core import types
+    from numbox.core.bindings.abi import (
+        _struct_bytes, _iter_struct_fields, _classify, _CLASS_STRUCT_LARGE,
     )
 
     ty = types.Tuple([types.int32, types.float64, types.int32])
-    assert _classify_eightbytes(ty) == (
-        _EIGHTBYTE_CLASS_SSE, _EIGHTBYTE_CLASS_SSE,
-    )
+    assert _struct_bytes(ty, "t") == 24
+    # float64 lands at offset 8, fully inside the hi eightbyte (not [4, 12)).
+    assert list(_iter_struct_fields(ty, "t")) == [(0, 4, False), (8, 8, True), (16, 4, False)]
+    assert _classify(ty) == _CLASS_STRUCT_LARGE
 
 
 def test_classify_eightbytes_record_with_padding():
@@ -224,10 +261,54 @@ def test_struct_bytes_supports_all_struct_types():
 
     MyNT = collections.namedtuple("MyNT", ["a", "b"])
     assert _struct_bytes(
-        types.NamedTuple([types.int32, types.int64], MyNT), "t") == 12
+        types.NamedTuple([types.int32, types.int64], MyNT), "t") == 16  # 4 + 4 pad + 8
 
     rec = types.Record.make_c_struct([("a", types.int32), ("b", types.int64)])
     assert _struct_bytes(rec, "t") == 16  # 4 + 4 pad + 8
+
+
+def test_struct_bytes_tuple_matches_record_with_padding():
+    """A tuple's ABI size must account for natural-alignment padding, so it
+    agrees with the Record of the same fields (numba lowers both to a
+    non-packed, naturally-aligned LLVM struct)."""
+    from numba.core import types
+    from numbox.core.bindings.abi import _struct_bytes
+
+    for fields in (
+        [types.int32, types.int64],          # 4 + 4 pad + 8 = 16
+        [types.int32, types.float64],         # 4 + 4 pad + 8 = 16
+        [types.int32, types.float64, types.int32],  # 4 + 4 pad + 8 + 4 pad = 24
+        [types.int8, types.int64],            # 1 + 7 pad + 8 = 16
+    ):
+        rec = types.Record.make_c_struct(
+            [(chr(ord("a") + i), t) for i, t in enumerate(fields)])
+        assert _struct_bytes(types.Tuple(fields), "t") == _struct_bytes(rec, "t")
+
+
+def test_classify_padded_tuple_is_struct_large():
+    """`Tuple([int32, double, int32])` bit-packs to 16 but is really 24 bytes
+    (int32, pad, double, int32, pad), so it must classify LARGE (sret), not
+    SMALL (in-register)."""
+    from numba.core import types
+    from numbox.core.bindings.abi import _classify, _CLASS_STRUCT_LARGE
+
+    ty = types.Tuple([types.int32, types.float64, types.int32])
+    assert _classify(ty) == _CLASS_STRUCT_LARGE
+
+
+def test_classify_eightbytes_int_double_honors_padding():
+    """`Tuple([int32, double])` is 16 bytes with the double at offset 8 (not 4):
+    lo eightbyte is pure INTEGER, hi is SSE. The bit-packed model wrongly put
+    the double at offset 4, spanning both eightbytes and marking both SSE."""
+    from numba.core import types
+    from numbox.core.bindings.abi import (
+        _EIGHTBYTE_CLASS_INTEGER, _EIGHTBYTE_CLASS_SSE, _classify_eightbytes,
+    )
+
+    ty = types.Tuple([types.int32, types.float64])
+    assert _classify_eightbytes(ty) == (
+        _EIGHTBYTE_CLASS_INTEGER, _EIGHTBYTE_CLASS_SSE,
+    )
 
 
 def test_struct_bytes_rejects_non_struct_type():
@@ -238,6 +319,17 @@ def test_struct_bytes_rejects_non_struct_type():
 
     with pytest.raises(TypingError, match="struct-shaped type"):
         _struct_bytes(types.int32, "_call_lib_func_byval")
+
+
+def test_struct_bytes_rejects_tuple_with_non_bitwidth_field():
+    """A tuple field with no fixed bitwidth (e.g. a raw pointer) raises a clean
+    TypingError naming the caller, not a cryptic AttributeError."""
+    from numba.core import types
+    from numba.core.errors import TypingError
+    from numbox.core.bindings.abi import _struct_bytes
+
+    with pytest.raises(TypingError, match="bitwidth"):
+        _struct_bytes(types.Tuple([types.intp, types.voidptr]), "_call_lib_func_byval")
 
 
 def test_call_lib_func_lldiv_via_unified():

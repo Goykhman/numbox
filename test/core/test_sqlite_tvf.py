@@ -1,4 +1,4 @@
-from ctypes import addressof, c_int64
+from ctypes import addressof, c_char_p, c_int64, cast
 
 import pytest
 import numpy as np
@@ -9,6 +9,7 @@ from numbox.core.bindings import (
     sqlite3_open, sqlite3_close, register_tvf,
     sqlite3_prepare_v2, sqlite3_step, sqlite3_finalize,
     sqlite3_column_int64, sqlite3_column_double,
+    sqlite3_column_text, sqlite3_column_type, sqlite3_column_count,
 )
 from numbox.core.bindings._sqlite_tvf import _make_xbestindex, _TVF_DESC_DTYPE
 from numbox.core.bindings._sqlite_vtable import (
@@ -16,6 +17,7 @@ from numbox.core.bindings._sqlite_vtable import (
 )
 from numbox.core.bindings._sqlite_constants import (
     SQLITE_OK, SQLITE_CONSTRAINT, SQLITE_INDEX_CONSTRAINT_EQ, SQLITE_ROW,
+    SQLITE_ERROR, SQLITE_DONE, SQLITE_INTEGER, SQLITE_TEXT,
 )
 
 _OUT = np.dtype([("n", "i8")])
@@ -214,21 +216,40 @@ def test_tvf_non_numeric_arg_type_raises():
 @njit
 def _raises(start, stop):
     # raise explicitly: numba's default boundscheck is off, so an OOB index would
-    # corrupt rather than raise. The @cfunc boundary swallows this -> 0 rows.
+    # corrupt rather than raise.
     out = np.empty(stop - start, _OUT)
     if start < stop:
         raise ValueError("boom")
     return out
 
 
+def _step_rc(db, sql):
+    """Prepare `sql`, step once, return that step's result code (after finalize)."""
+    stmt = c_int64(0)
+    with c_string(sql) as p:
+        assert sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0) == SQLITE_OK
+    rc = sqlite3_step(stmt.value)
+    sqlite3_finalize(stmt.value)
+    return rc
+
+
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
-def test_tvf_user_fn_raises_yields_no_rows():
-    # the @cfunc boundary swallows the user fn's exception (surfaced as an
-    # unraisable exception); the observable contract is just "no rows".
+def test_tvf_user_fn_raises_yields_error():
+    # a raising user fn must surface as a query error (xFilter returns
+    # SQLITE_ERROR), not a silently-empty but successful result.
     db = _open()
     h = register_tvf(db.value, "boom", (np.int64, np.int64), _OUT, _raises)
-    _, rows = _select_int(db, "SELECT n FROM boom(2, 5)")
-    assert rows == []
+    assert _step_rc(db, "SELECT n FROM boom(2, 5)") == SQLITE_ERROR
+    sqlite3_close(db.value)
+    del h
+
+
+def test_tvf_empty_return_is_success_not_error():
+    # a legitimately-empty TVF must still complete successfully (DONE), so the
+    # error path above does not turn empty results into spurious failures.
+    db = _open()
+    h = register_tvf(db.value, "series", (np.int64, np.int64), _OUT, _series_empty)
+    assert _step_rc(db, "SELECT n FROM series(5, 5)") == SQLITE_DONE
     sqlite3_close(db.value)
     del h
 
@@ -295,3 +316,72 @@ def test_tvf_xbestindex_accepts_all_args_bound_with_duplicate_eq():
     rc, usage = _call_xbestindex(2, 3, [(2, EQ, 1), (2, EQ, 1), (3, EQ, 1), (4, EQ, 1)])
     assert rc == SQLITE_OK, rc
     assert [int(usage[i]["argvIndex"]) for i in range(4)] == [1, 1, 2, 3]
+
+
+def _fetchall_text(db, sql):
+    """Step `sql`, decoding INTEGER and TEXT columns (text via the NUL-terminated
+    C string from sqlite3_column_text)."""
+    stmt = c_int64(0)
+    with c_string(sql) as p:
+        assert sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0) == SQLITE_OK
+    rows = []
+    while sqlite3_step(stmt.value) == SQLITE_ROW:
+        row = []
+        for i in range(sqlite3_column_count(stmt.value)):
+            t = sqlite3_column_type(stmt.value, i)
+            if t == SQLITE_INTEGER:
+                row.append(sqlite3_column_int64(stmt.value, i))
+            elif t == SQLITE_TEXT:
+                row.append(cast(sqlite3_column_text(stmt.value, i), c_char_p).value.decode("utf-8"))
+            else:
+                row.append(None)
+        rows.append(tuple(row))
+    sqlite3_finalize(stmt.value)
+    return rows
+
+
+_STR_OUT = np.dtype([("n", "i8"), ("u", "U6"), ("s", "S4")])
+# A TVF fn can't assign U/S structured-array fields inside @njit (numba can't
+# cast a unicode literal to a fixed-width unichr field), so it returns a slice of
+# a Python-built array -- enough to drive the column-emit path.
+_STR_ROWS = np.array([(0, "héllo", b"ab"), (1, "\U0001F600", b"cd")], dtype=_STR_OUT)
+
+
+@njit
+def _str_series(start, stop):
+    return _STR_ROWS[start:stop]
+
+
+def test_tvf_string_and_unicode_output_columns():
+    # Exercises _tvf_xcolumn's string branches that the int/float-only tests
+    # never reach: _TAG_U decodes a 'U' column into the per-cursor scratch via
+    # utf32_to_utf8 (here a multibyte 'héllo' and an astral emoji), and _TAG_S
+    # emits an 'S' column as TEXT. register_tvf has no text_as_blob parameter, so
+    # 'S' is always TEXT and the _TAG_BLOB branch is unreachable from this API.
+    db = _open()
+    h = register_tvf(db.value, "strs", (np.int64, np.int64), _STR_OUT, _str_series)
+    rows = _fetchall_text(db, "SELECT n, u, s FROM strs(0, 2)")
+    assert rows == [(0, "héllo", "ab"), (1, "\U0001F600", "cd")]
+    sqlite3_close(db.value)
+    del h
+
+
+def test_tvf_two_unicode_columns_share_cursor_scratch():
+    # Both 'U' columns of a row decode into the SAME per-cursor scratch buffer,
+    # so the _TAG_U result must be TRANSIENT (SQLite copies before the next
+    # xColumn overwrites the scratch). A STATIC choice would corrupt the first.
+    db = _open()
+    h = register_tvf(db.value, "twou", (np.int64, np.int64), _TWO_U_OUT, _two_u_series)
+    rows = _fetchall_text(db, "SELECT a, b FROM twou(0, 2)")
+    assert rows == [("αβ", "héllo"), ("😀", "wörld")]
+    sqlite3_close(db.value)
+    del h
+
+
+_TWO_U_OUT = np.dtype([("a", "U6"), ("b", "U6")])
+_TWO_U_ROWS = np.array([("αβ", "héllo"), ("\U0001F600", "wörld")], dtype=_TWO_U_OUT)
+
+
+@njit
+def _two_u_series(start, stop):
+    return _TWO_U_ROWS[start:stop]

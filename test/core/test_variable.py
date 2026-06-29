@@ -2,6 +2,8 @@ from inspect import getsource
 from textwrap import dedent
 from typing import Any
 
+import pytest
+
 from numbox.core.variable.variable import CompiledGraph, Graph, Values, Variables, Variable
 from numbox.core.variable.node import make_node
 from numbox.core.work.print_tree import make_image
@@ -241,6 +243,52 @@ vars_.output--vars_.quantity--configs.s
                                              configs.init_quantity
                                              |
                                              buffer.storage"""
+
+
+def test_recompute_graph_priority_over_co_changed_override():
+    """Recompute takes priority: a supplied Variables-source value that is downstream of a
+    co-changed external input is recomputed from the graph, not held at the supplied value."""
+    def derive_b(a_):
+        return 10 * a_
+
+    def derive_c(b_):
+        return b_ + 1
+
+    def _spec(name, inputs, formula):
+        return {"name": name, "inputs": inputs, "formula": formula,
+                "metadata": dedent(getsource(formula))}
+
+    graph = Graph(
+        variables_lists={"vars_": [
+            _spec("b", {"a": "ext"}, derive_b),
+            _spec("c", {"b": "vars_"}, derive_c),
+        ]},
+        external_source_names=["ext"],
+    )
+    compiled = graph.compile(["vars_.c"])
+    values = Values()
+    b = graph.registry["vars_"]["b"]
+    c = graph.registry["vars_"]["c"]
+
+    compiled.execute({"ext": {"a": 1}}, values)
+    assert values.get(b).value == 10
+    assert values.get(c).value == 11
+
+    # b is supplied 999 but is downstream of the co-changed external a; graph priority
+    # recomputes b from a (=2), so b=20 and c=21 -- the supplied 999 is discarded.
+    compiled.recompute({"ext": {"a": 2}, "vars_": {"b": 999}}, values)
+    assert values.get(b).value == 20
+    assert values.get(c).value == 21
+
+
+def test_variable_name_rejects_qual_sep_but_source_allows_it():
+    # '.' is the qualified-name separator (source.name), decomposed via rsplit('.', 1).
+    # A '.' in the name breaks that round-trip, so a dotted name is rejected; a '.' in
+    # the source/namespace round-trips (rsplit binds only the final '.') and is allowed.
+    with pytest.raises(ValueError, match="reserved"):
+        Variable(name="a.b", source="s")
+    v = Variable(name="b", source="a.b")
+    assert v.qual_name() == "a.b.b"
 
 
 if __name__ == "__main__":

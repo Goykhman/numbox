@@ -455,11 +455,16 @@ def register_tvf(db, name, arg_types, out_dtype, fn):
 
     @cfunc(types.int32(types.intp, types.int32, types.intp, types.int32, types.intp), cache=_CACHE)
     def _tvf_xfilter(cur, idx_num, idx_str, argc, argv):
-        # If the user fn raises inside xfilter_impl, the @cfunc boundary swallows
-        # the exception and returns the zero default (SQLITE_OK), so SQLite sees a
-        # successful query with no rows rather than an error. Unlike a UDF, xFilter
-        # gets no sqlite3_context, so there is no handle to call sqlite3_result_error.
-        xfilter_impl(cur, argc, argv)
+        # A bare try/except (not try/finally, which reraises on numba 0.65.1)
+        # converts a user-fn exception into SQLITE_ERROR via xFilter's own return
+        # code; otherwise the @cfunc boundary swallows it and returns the zero
+        # default (SQLITE_OK), so SQLite reports a successful query with no rows.
+        # xfilter_impl zeroes the cursor before calling the user fn, so the cursor
+        # is left in a consistent empty state on the error path.
+        try:
+            xfilter_impl(cur, argc, argv)
+        except Exception:
+            return SQLITE_ERROR
         return SQLITE_OK
 
     xconnect = _make_xconnect()

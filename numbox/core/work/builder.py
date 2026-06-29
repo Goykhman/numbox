@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, NamedTuple, Optional, Sequence, Tuple as
 
 from numbox.core.configurations import jit_options as jit_options_
 from numbox.core.work.lowlevel_work_utils import ll_make_work
-from numbox.utils.highlevel import cres
+from numbox.utils.highlevel import cres, hash_type
 
 
 def _file_anchor():
@@ -121,6 +121,16 @@ def code_block_hash(code_txt: str):
     return sha256(code_txt.encode("utf-8")).hexdigest()
 
 
+def _kernel_fingerprint(code_block: str, derive_hashes: list, type_sigs: list) -> str:
+    """Content hash baked into the name ``_make_<hash>`` of the generated kernel.
+    Folds each node's declared type (``type_sigs``) in alongside the body text and
+    derive source hashes, since a declared ty reaches the generated code only as the
+    bare global name ``{name}_ty`` and so is not otherwise captured by the body."""
+    return code_block_hash(
+        f"code_block = {code_block} derive_hashes = {derive_hashes} type_sigs = {type_sigs}"
+    )
+
+
 def _infer_end_and_derived_nodes(spec: SpecTy, all_inputs_: Dict[str, Type], all_derived_: Dict[str, Type], registry):
     if spec.name in all_inputs_ or spec.name in all_derived_:
         return
@@ -167,8 +177,8 @@ def make_graph(
     for derived_ in all_derived_:
         line_ = _derived_line(derived_, ns, initializers, derive_hashes, _make_args, jit_options)
         code_txt.write(f"\n\t{line_}")
-    hash_str = f"code_block = {code_txt.getvalue()} derive_hashes = {derive_hashes}"
-    hash_ = code_block_hash(hash_str)
+    type_sigs = [(n.name, hash_type(get_ty(n))) for n in chain(all_inputs_, all_derived_)]
+    hash_ = _kernel_fingerprint(code_txt.getvalue(), derive_hashes, type_sigs)
     access_nodes_names = [n.name for n in access_nodes]
     tup_ = ", ".join(access_nodes_names) + ","
     code_txt.write(f"""\n\taccess_tuple = ({tup_})""")

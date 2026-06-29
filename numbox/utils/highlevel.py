@@ -120,10 +120,6 @@ class {struct_name}(StructRefProxy):
     def {method_name}_{method_hash}({params_str}):
         return {self_name}.{method_name}({names_params_str_wo_self})
 """)
-            method_header = re.findall(r"^\s*def\s+[a-zA-Z_]\w*\s*\(([^)]*)\)\s*:[^\n]*", method_source, re.MULTILINE)
-            assert len(method_header) == 1, method_header
-            params_str_ = method_header[0]
-            assert params_str == params_str_, (params_str, params_str_)
             method_source = re.sub(r"\bdef\s+([a-zA-Z_]\w*)\b", "def _", method_source)
             methods_code_txt.write(f"""
 @overload_method({struct_type_class.__name__}, "{method_name}", jit_options=jit_options)
