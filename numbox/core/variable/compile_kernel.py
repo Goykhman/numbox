@@ -44,7 +44,7 @@ import warnings
 
 from collections import OrderedDict
 from types import FunctionType
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 from numba import njit, typeof
 from numba.core.ccallback import CFunc
@@ -72,6 +72,16 @@ from numbox.utils.preprocessing import (
 
 _ANCHOR_SUBDIR = "numbox-compile-kernel"
 _orphan_anchor_sweep(_ANCHOR_SUBDIR)
+
+
+class _KernelCtx(NamedTuple):
+    """Build context threaded into a CompiledKernel (Python-side only; never enters njit)."""
+    compiled: Any
+    idents: dict
+    bindings_by_var: dict
+    jit_options: dict | None
+    cache: bool | None
+    external: set
 
 
 def _effective_flags(jit_options: dict | None) -> dict:
@@ -340,7 +350,7 @@ class CompiledKernel:
 
     def __init__(self, kernel: Dispatcher, params: list[tuple[str, str, str]],
                  outputs: list[str], source: str, identifiers: dict[str, str],
-                 ctx: tuple, required_vars: list[Variable],
+                 ctx: "_KernelCtx", required_vars: list[Variable],
                  external_vars: list[Variable], is_declared: bool = False) -> None:
         self._fused = kernel
         self.is_declared = is_declared
@@ -388,7 +398,7 @@ class CompiledKernel:
         return result
 
     def _fused_report(self) -> PartitionReport:
-        compiled, _, _, _, _, external = self._ctx
+        compiled, external = self._ctx.compiled, self._ctx.external
         nodes = tuple(
             n.variable.qual_name() for n in compiled.ordered_nodes
             if n.variable not in external
@@ -521,7 +531,7 @@ class CompiledKernel:
         """Write changed values into the store; return the set of changed Variables.
         External names resolve via required_external_variables; interior names via
         ordered_nodes (overriding an interior node expands the change-source set)."""
-        compiled = self._ctx[0]
+        compiled = self._ctx.compiled
         # First pass: resolve every (src, name) -> var and run the declared
         # contract check, collecting (var, val, is_external). If ANY check
         # fails, raise here -- before mutating _store -- so a caught-and-retried
@@ -573,7 +583,7 @@ class CompiledKernel:
     def _ensure_boundary(self):
         if self._boundary is not None:
             return
-        compiled = self._ctx[0]
+        compiled = self._ctx.compiled
         if self._sources is None:
             self._sources = set(self._external_vars)
         self._boundary = compute_boundary(
@@ -706,7 +716,7 @@ class CompiledKernel:
         changed_vars = self._apply_changes(changed)
         if not changed_vars:
             return tuple(self._store[v] for v in self._required_vars)
-        compiled = self._ctx[0]
+        compiled = self._ctx.compiled
         self._ensure_boundary()
         affected = [n for n in compiled._collect_affected(changed_vars) if n.variable not in changed_vars]
         if not affected:
@@ -883,7 +893,7 @@ def compile_kernel(
         n.variable: bindings["f_" + idents[n.variable]]
         for n in compiled.ordered_nodes if n.variable not in external
     }
-    ctx = (compiled, idents, bindings_by_var, jit_options, cache, external)
+    ctx = _KernelCtx(compiled, idents, bindings_by_var, jit_options, cache, external)
     identifiers = {v.qual_name(): ident for v, ident in idents.items()}
     if case == "A":
         ck = CompiledKernel(kernel, params, outputs, source, identifiers, ctx,
