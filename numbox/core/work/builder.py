@@ -122,12 +122,10 @@ def code_block_hash(code_txt: str):
 
 
 def _kernel_fingerprint(code_block: str, derive_hashes: list, type_sigs: list) -> str:
-    """Content hash naming the generated ``_make_<hash>`` kernel. Folds each
-    node's declared type (``type_sigs``) in alongside the body text and derive
-    source hashes: an explicit ty enters the generated code only as the bare
-    global name ``{name}_ty``, so two graphs identical except for a declared ty
-    would otherwise produce the same kernel name and, under ``cache=True``,
-    reuse a stale cached kernel that builds Work nodes of the wrong data type."""
+    """Content hash baked into the name ``_make_<hash>`` of the generated kernel.
+    Folds each node's declared type (``type_sigs``) in alongside the body text and
+    derive source hashes, since a declared ty reaches the generated code only as the
+    bare global name ``{name}_ty`` and so is not otherwise captured by the body."""
     return code_block_hash(
         f"code_block = {code_block} derive_hashes = {derive_hashes} type_sigs = {type_sigs}"
     )
