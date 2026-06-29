@@ -350,7 +350,7 @@ class CompiledKernel:
 
     def __init__(self, kernel: Dispatcher, params: list[tuple[str, str, str]],
                  outputs: list[str], source: str, identifiers: dict[str, str],
-                 ctx: "_KernelCtx", required_vars: list[Variable],
+                 ctx: _KernelCtx, required_vars: list[Variable],
                  external_vars: list[Variable], is_declared: bool = False) -> None:
         self._fused = kernel
         self.is_declared = is_declared
