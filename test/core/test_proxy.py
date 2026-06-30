@@ -1,7 +1,9 @@
 import importlib
 import math
 import re
+import subprocess
 import sys
+import textwrap
 
 import numpy as np
 import pytest
@@ -32,10 +34,10 @@ def test_1():
     assert abs(aux_1(2.2) - 3.14 * 2.2) < 1e-15
     llvm_ir = next(iter(aux_1.inspect_llvm().values()))
     assert aux_1.__name__ == make_proxy_name('aux_1')
-    if '@cfunc.' in llvm_ir:
-        cfunc_name = r"double @cfunc\.\w+aux_1\w+\(double"  # noqa: W605
-        assert len(re.findall(f"declare {cfunc_name}", llvm_ir)) == 1
-        assert len(re.findall(f"call {cfunc_name}", llvm_ir)) == 1
+    if 'numbox_pxy_aux_1' in llvm_ir:
+        alias_name = r"double @numbox_pxy_aux_1_\w+\(double"  # noqa: W605
+        assert len(re.findall(f"declare {alias_name}", llvm_ir)) == 1
+        assert len(re.findall(f"call {alias_name}", llvm_ir)) == 1
     else:
         print(f"LLVM inspection disabled for cached code, {aux_1.__name__}")
 
@@ -95,12 +97,15 @@ def test_proxy_caller_survives_subprocess_round_trip(tmp_path):
     to the cold-cache first process — and neither file is rewritten on the
     warm run (mtimes preserved).
 
-    ``proxy`` declares the callee's ``llvm_cfunc_wrapper_name`` as an extern
-    in the caller's IR module; llvmlite's JIT linker resolves the symbol per
-    process at cache reload, so cached IR survives ASLR across processes
-    without baking in any runtime address. See the
-    ``assert_njit_cache_survives_subprocess_roundtrip`` helper in
-    ``test/auxiliary_utils.py`` for the full assertion contract.
+    ``proxy`` declares a process-stable alias for the callee's cfunc wrapper
+    (registered via ``add_symbol``) as an extern in the caller's IR module;
+    llvmlite's JIT linker resolves the alias per process at cache reload, so
+    cached IR survives ASLR across processes without baking in any runtime
+    address. See the ``assert_njit_cache_survives_subprocess_roundtrip`` helper
+    in ``test/auxiliary_utils.py`` for the full assertion contract, and
+    ``test_proxy_referenced_symbol_is_process_stable`` for why the alias (not
+    numba's process-local ``v<uid>`` wrapper name) is what keeps concurrently
+    built caches consistent.
     """
     assert_njit_cache_survives_subprocess_roundtrip(
         tmp_path,
@@ -119,6 +124,71 @@ def test_proxy_caller_survives_subprocess_round_trip(tmp_path):
         """,
         expected_stdout_lines=["42"],
     )
+
+
+def test_proxy_referenced_symbol_is_process_stable(tmp_path):
+    """A caller must bake the *same* callee symbol regardless of compile order.
+
+    Regression for the concurrent-cache hazard: ``proxy`` references each body's
+    cfunc wrapper by a deterministic alias registered via ``llvmlite.add_symbol``,
+    not numba's process-local ``v<uid>`` wrapper name. If it regressed to the uid
+    name, two processes that compiled a different number of functions first would
+    bake different symbols into otherwise-equal cached objects, so a
+    concurrently-built shared cache could pair a body defining ``v<Na>`` with a
+    caller referencing ``v<Nb>`` and abort on load with
+    ``LLVM ERROR: Symbol not found: cfunc...``. We run a probe twice with a
+    different number of warm-up compiles and assert the baked callee symbol is
+    identical (and is the stable alias).
+    """
+    probe = tmp_path / "probe.py"
+    probe.write_text(textwrap.dedent('''
+        import sys
+        from numba import njit
+        from numba.core import types
+        from numbox.core.proxy.proxy import proxy
+
+        def d0(x): return x
+        def d1(x): return x
+        def d2(x): return x
+        def d3(x): return x
+        def d4(x): return x
+
+        for _f in (d0, d1, d2, d3, d4)[:int(sys.argv[1])]:
+            njit(types.int64(types.int64))(_f)(0)
+
+        @proxy(types.int64(types.int64))
+        def binding(x):
+            return x + 1
+
+        @njit
+        def caller(x):
+            return binding(x)
+
+        caller(0)
+        ir = "\\n".join(caller.inspect_llvm().values())
+        toks = set()
+        for tok in ir.replace("(", " ").replace(")", " ").replace("*", " ").split():
+            if tok.startswith("@") and "numbox_pxy_" in tok:
+                toks.add(tok.strip('@"'))
+        print("|".join(sorted(toks)))
+    '''), encoding="utf-8")
+
+    def _run(prior):
+        r = subprocess.run(
+            [sys.executable, str(probe), str(prior)],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        assert r.returncode == 0, f"probe failed (prior={prior}):\n{r.stderr}"
+        return r.stdout.strip()
+
+    baseline = _run(0)
+    shifted = _run(5)
+    assert baseline, "no callee symbol found in caller IR"
+    assert baseline == shifted, (
+        "@proxy baked a process-dependent callee symbol (concurrent-cache hazard):\n"
+        f"  prior=0: {baseline!r}\n  prior=5: {shifted!r}"
+    )
+    assert "numbox_pxy_" in baseline, f"expected a stable add_symbol alias, got {baseline!r}"
 
 
 def _locate_libm():
