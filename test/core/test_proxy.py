@@ -98,7 +98,7 @@ def test_proxy_caller_survives_subprocess_round_trip(tmp_path):
     warm run (mtimes preserved).
 
     ``proxy`` declares a process-stable alias for the callee's cfunc wrapper
-    (registered via ``add_symbol``) as an extern in the caller's IR module;
+    (registered via ``llvmlite.binding.add_symbol``) as an extern in the caller's IR module;
     llvmlite's JIT linker resolves the alias per process at cache reload, so
     cached IR survives ASLR across processes without baking in any runtime
     address. See the ``assert_njit_cache_survives_subprocess_roundtrip`` helper
@@ -130,7 +130,7 @@ def test_proxy_referenced_symbol_is_process_stable(tmp_path):
     """A caller must bake the *same* callee symbol regardless of compile order.
 
     Regression for the concurrent-cache hazard: ``proxy`` references each body's
-    cfunc wrapper by a deterministic alias registered via ``llvmlite.add_symbol``,
+    cfunc wrapper by a deterministic alias registered via ``llvmlite.binding.add_symbol``,
     not numba's process-local ``v<uid>`` wrapper name. If it regressed to the uid
     name, two processes that compiled a different number of functions first would
     bake different symbols into otherwise-equal cached objects, so a

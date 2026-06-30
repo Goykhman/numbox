@@ -28,8 +28,8 @@ def _stable_cfunc_alias(func, main_sig):
     inlines the ``inline='always'`` proxy — lets concurrently-built caches pair a
     body object defining ``v<Na>`` with a caller referencing ``v<Nb>``, which
     aborts on load with ``LLVM ERROR: Symbol not found: cfunc...``. Referencing
-    this deterministic alias instead (resolved per-process via ``add_symbol``,
-    the same mechanism ``pysqlite_bridge`` uses) keeps cached references valid
+    this deterministic alias instead (resolved per-process via
+    ``llvmlite.binding.add_symbol``) keeps cached references valid
     across processes.
     """
     raw = f"{func.__module__ or ''}.{func.__qualname__}.{main_sig}".encode("utf-8")
