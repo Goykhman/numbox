@@ -1,0 +1,932 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings._fmtio &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/_fmtio.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings._fmtio</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings._fmtio</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Variadic formatted I/O — ``printf``, ``fprintf``, ``snprintf``, ``sscanf``</span>
+<span class="sd">callable from BOTH plain Python and ``@njit`` code.</span>
+
+<span class="sd">The public bindings are regular Python functions; numba dispatches to a</span>
+<span class="sd">private ``@intrinsic`` codegen path via ``@overload`` when called inside</span>
+<span class="sd">``@njit``. Same source runs unchanged in either mode, matching numba&#39;s</span>
+<span class="sd">own convention for builtins like ``print`` and ``range``::</span>
+
+<span class="sd">    def debug_kernel(x, label):</span>
+<span class="sd">        printf(&quot;step %d: %s\\n&quot;, x, label)</span>
+<span class="sd">        fflush(stdout())</span>
+<span class="sd">        return x * 2</span>
+
+<span class="sd">    debug_kernel(7, &quot;before&quot;)        # pure Python: writes via sys.stdout</span>
+<span class="sd">    njit(debug_kernel)(7, &quot;before&quot;)  # jitted: writes via libc printf</span>
+
+<span class="sd">Call convention</span>
+<span class="sd">---------------</span>
+
+<span class="sd">User-facing API is C-like — positional ``*args`` after the format string;</span>
+<span class="sd">no tuple wrapper at the call site. Internally the @overload path bundles</span>
+<span class="sd">the args into a tuple before calling the private ``_xxx_intrinsic`` (the</span>
+<span class="sd">intrinsic itself still uses the tuple-as-args shape because numba&#39;s</span>
+<span class="sd">``@intrinsic`` typing function doesn&#39;t accept Python-level ``*args``)::</span>
+
+<span class="sd">    printf(&quot;x = %d, ratio = %.3f\\n&quot;, n, ratio)</span>
+<span class="sd">    fprintf(stderr(), &quot;warning: %s\\n&quot;, msg)</span>
+<span class="sd">    snprintf(array_data_p(buf), buf.size, &quot;[%d:%d]&quot;, lo, hi)</span>
+<span class="sd">    sscanf(buf_p, &quot;%d %lf&quot;, array_data_p(n_out), array_data_p(x_out))</span>
+<span class="sd">    printf(&quot;no args here\\n&quot;)</span>
+
+<span class="sd">Format string must be a literal in @njit</span>
+<span class="sd">----------------------------------------</span>
+
+<span class="sd">Required so the format string can be embedded as an IR global constant —</span>
+<span class="sd">the same constraint a C compiler operates under when emitting a</span>
+<span class="sd">format-checked printf call. A runtime-built ``unicode`` raises a clean</span>
+<span class="sd">``TypingError`` at call typing time. In pure-Python mode the format</span>
+<span class="sd">string can of course be any str.</span>
+
+<span class="sd">Because the format is a literal, the ``@njit`` writers also cross-check it</span>
+<span class="sd">against the arguments at typing time (like a C compiler&#39;s ``-Wformat``): the</span>
+<span class="sd">conversion-specifier count must equal the argument count, and each specifier&#39;s</span>
+<span class="sd">class must match its arg (``%d``/``%x``/… → Integer/Boolean, ``%f``/``%g``/… →</span>
+<span class="sd">Float, ``%s`` → unicode or an ``intp``/``uintp`` pointer, ``%p`` → ``intp``/``uintp``). A mismatch</span>
+<span class="sd">raises ``TypingError`` instead of reading an unpushed varargs slot, dereferencing</span>
+<span class="sd">an int as ``char*``, or reading a GP register for an SSE-passed float. Caveat:</span>
+<span class="sd">numba&#39;s ``intp`` is ``int64``, so a pointer-width int passed for ``%s``/``%p``</span>
+<span class="sd">cannot be told apart from a real pointer (narrower ints, floats and booleans</span>
+<span class="sd">are still rejected).</span>
+
+<span class="sd">Format string encoding: UTF-8</span>
+<span class="sd">-----------------------------</span>
+
+<span class="sd">Non-ASCII codepoints in the literal are encoded as UTF-8 byte sequences</span>
+<span class="sd">and embedded into the IR global. printf treats every non-``%`` byte as</span>
+<span class="sd">opaque pass-through, so the bytes flow through libc to stdout / FILE\\* /</span>
+<span class="sd">the snprintf buffer unmodified. Modern terminals, files, and Windows</span>
+<span class="sd">10+ consoles all expect UTF-8.</span>
+
+<span class="sd">.. note::</span>
+<span class="sd">   ``%-Ns`` width is byte-counted by printf in every libc, so non-ASCII</span>
+<span class="sd">   output won&#39;t right-pad to a codepoint count. That&#39;s printf&#39;s contract.</span>
+<span class="sd">   Pad in numba-side string formatting (``f&quot;{s:&lt;10}&quot;``) before passing</span>
+<span class="sd">   through ``%s`` if codepoint-counted widths matter.</span>
+
+<span class="sd">Cross-mode caveats</span>
+<span class="sd">------------------</span>
+
+<span class="sd">1. **Length modifiers in format strings.** ``%lld``, ``%ld``, ``%lf``,</span>
+<span class="sd">   ``%hd``, etc. are valid in C printf but rejected by Python&#39;s ``%``</span>
+<span class="sd">   operator. The pure-Python impls strip length modifiers via a regex</span>
+<span class="sd">   before formatting (``%lld`` → ``%d``, ``%.3lf`` → ``%.3f``). The</span>
+<span class="sd">   stripped form produces identical output for typical values because</span>
+<span class="sd">   Python ints / floats carry the same width independent of the spec.</span>
+
+<span class="sd">2. **C-ABI auto-promotion of integer args to 64-bit.** The @njit impl</span>
+<span class="sd">   widens every integer variadic arg to 64-bit before the libc call</span>
+<span class="sd">   (sext / zext as appropriate). Without this, a user writing</span>
+<span class="sd">   ``printf(&quot;%lld&quot;, np.int32(7))`` in @njit would have libc read 8 bytes</span>
+<span class="sd">   from a 4-byte source — register garbage in the high bits. With the</span>
+<span class="sd">   widening, ``%lld`` against int32 / int16 / int8 / bool works</span>
+<span class="sd">   correctly. Diverges from C ABI (C doesn&#39;t promote int to long long)</span>
+<span class="sd">   but matches user expectations and the pure-Python ``%`` behavior.</span>
+
+<span class="sd">3. **String args + ``%s``.** Pure-Python&#39;s ``%`` handles strings</span>
+<span class="sd">   natively. The @njit @overload auto-converts ``unicode_type`` args</span>
+<span class="sd">   via ``get_unicode_data_p`` so libc sees a NUL-terminated C string.</span>
+<span class="sd">   Users no longer need to call ``get_unicode_data_p`` themselves at</span>
+<span class="sd">   the call site.</span>
+
+<span class="sd">4. **``%ld`` on Win64 (LLP64).** ``long`` is 4 bytes on Win64 but 8 on</span>
+<span class="sd">   LP64; ``%ld`` against int64 truncates the high 32 bits on Win64 in</span>
+<span class="sd">   @njit. Pure-Python mode hides this because Python&#39;s ``%`` ignores</span>
+<span class="sd">   length modifiers. Prefer ``%lld`` + int64 for portable 8-byte width.</span>
+
+<span class="sd">5. **``snprintf`` truncation rc on Windows.** Pure-Python and Linux/macOS</span>
+<span class="sd">   @njit follow C99 semantics (return would-have-written count).</span>
+<span class="sd">   Windows @njit targets MSVCRT ``_snprintf`` (returns ``-1`` on</span>
+<span class="sd">   truncation, no NUL-term guarantee). Portable check that works on</span>
+<span class="sd">   every platform: ``(rc &lt; 0) or (rc &gt;= size)``.</span>
+
+<span class="sd">6. **``fprintf`` to non-stdio FILE\\* in pure-Python.** The Python impl</span>
+<span class="sd">   routes ``stdout()`` / ``stderr()`` / ``stdin()`` handles to the</span>
+<span class="sd">   corresponding ``sys.*`` streams via an address cache. ``fopen``-</span>
+<span class="sd">   returned FILE\\* values aren&#39;t dereferenceable from Python without</span>
+<span class="sd">   a ctypes call, so they raise a clear error in pure-Python mode</span>
+<span class="sd">   (use ``open()`` + ``f.write()`` for Python-side file I/O).</span>
+
+<span class="sd">7. **``sscanf`` is @njit-only.** Pure-Python implementations of</span>
+<span class="sd">   sscanf-style parsing are usually better served by ``int()`` /</span>
+<span class="sd">   ``float()`` / ``re``; calling from pure-Python raises</span>
+<span class="sd">   ``NotImplementedError``.</span>
+
+<span class="sd">References</span>
+<span class="sd">----------</span>
+
+<span class="sd">- `printf(3) &lt;https://man7.org/linux/man-pages/man3/printf.3.html&gt;`_</span>
+<span class="sd">- `fprintf(3) &lt;https://man7.org/linux/man-pages/man3/fprintf.3.html&gt;`_</span>
+<span class="sd">- `snprintf(3) &lt;https://man7.org/linux/man-pages/man3/snprintf.3.html&gt;`_</span>
+<span class="sd">- `sscanf(3) &lt;https://man7.org/linux/man-pages/man3/sscanf.3.html&gt;`_</span>
+<span class="sd">- `Microsoft _snprintf</span>
+<span class="sd">  &lt;https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/snprintf-snprintf-snprintf-l-snwprintf-snwprintf-l&gt;`_</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">ctypes</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">llvmlite</span><span class="w"> </span><span class="kn">import</span> <span class="n">ir</span> <span class="k">as</span> <span class="n">llir</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">cgutils</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.cgutils</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_or_insert_function</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">TypingError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">BaseTuple</span><span class="p">,</span> <span class="n">Boolean</span><span class="p">,</span> <span class="n">Float</span><span class="p">,</span> <span class="n">Integer</span><span class="p">,</span> <span class="n">UnicodeType</span><span class="p">,</span> <span class="n">int32</span><span class="p">,</span> <span class="n">intp</span><span class="p">,</span> <span class="n">uintp</span><span class="p">,</span>
+    <span class="n">unliteral</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">intrinsic</span><span class="p">,</span> <span class="n">overload</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">extract_literal_str</span><span class="p">,</span> <span class="n">intp_ll_type</span><span class="p">,</span> <span class="n">load_lib</span><span class="p">,</span> <span class="n">platform_</span><span class="p">,</span>
+<span class="p">)</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;printf&quot;</span><span class="p">,</span> <span class="s2">&quot;fprintf&quot;</span><span class="p">,</span> <span class="s2">&quot;snprintf&quot;</span><span class="p">,</span> <span class="s2">&quot;sscanf&quot;</span><span class="p">]</span>
+
+
+<span class="n">load_lib</span><span class="p">(</span><span class="s2">&quot;c&quot;</span><span class="p">)</span>
+
+
+<span class="c1"># Windows MSVCRT exports &quot;_snprintf&quot; with non-C99 truncation semantics</span>
+<span class="c1"># (returns -1 on truncation, no NUL guarantee). UCRT&#39;s C99-compliant</span>
+<span class="c1"># &quot;snprintf&quot; is a header-only inline over __stdio_common_vsnprintf that</span>
+<span class="c1"># isn&#39;t directly linkable in the simple C99 calling shape — declaring</span>
+<span class="c1"># `i32 @snprintf(...)` in LLVM IR and letting the JIT linker resolve it</span>
+<span class="c1"># crashes with an access violation. So on Windows the @njit binding</span>
+<span class="c1"># deliberately targets MSVCRT (see snprintf module-docstring section on</span>
+<span class="c1"># cross-mode caveats); pure-Python uses POSIX/C99 semantics universally.</span>
+<span class="n">_SNPRINTF_SYMBOL</span> <span class="o">=</span> <span class="s2">&quot;_snprintf&quot;</span> <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">&quot;Windows&quot;</span> <span class="k">else</span> <span class="s2">&quot;snprintf&quot;</span>
+
+
+<span class="c1"># C-printf length modifiers: &#39;hh&#39;, &#39;h&#39;, &#39;l&#39;, &#39;ll&#39;, &#39;L&#39;. Python&#39;s % operator</span>
+<span class="c1"># rejects them with `ValueError: unsupported format character`. Strip them</span>
+<span class="c1"># before pure-Python formatting; the stripped %d / %f produces equivalent</span>
+<span class="c1"># output for typical values (Python&#39;s % uses the value&#39;s natural width).</span>
+<span class="n">_LENGTH_MODIFIER_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span>
+    <span class="sa">r</span><span class="s1">&#39;%([-+0# ]*[0-9*]*\.?[0-9*]*)(hh|ll|h|l|L|j|z|t|q|I32|I64)([diouxXfFeEgGaAcsp])&#39;</span>
+<span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_python_fmt_compat</span><span class="p">(</span><span class="n">fmt</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Strip C printf length modifiers so Python&#39;s % accepts the format.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_LENGTH_MODIFIER_RE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;%\1\3&#39;</span><span class="p">,</span> <span class="n">fmt</span><span class="p">)</span>
+
+
+<span class="c1"># ---------------------------------------------------------------------------</span>
+<span class="c1"># Helpers for the @intrinsic codegen layer (private)</span>
+<span class="c1"># ---------------------------------------------------------------------------</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_promote_for_varargs</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">arg_ty</span><span class="p">,</span> <span class="n">arg_val</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;C-ABI promotion + opportunistic widening of all integer args to 64-bit.</span>
+
+<span class="sd">    - ``float32`` → ``float64`` (fpext)</span>
+<span class="sd">    - ``bool`` → ``int64`` (zext)</span>
+<span class="sd">    - any signed ``Integer`` of width &lt; 64 → ``int64`` (sext)</span>
+<span class="sd">    - any unsigned ``Integer`` of width &lt; 64 → ``int64`` (zext)</span>
+<span class="sd">    - 64-bit ints, doubles, pointers — pass through</span>
+
+<span class="sd">    Widening to 64-bit (rather than just int32 per strict C ABI) is a</span>
+<span class="sd">    deliberate choice: it makes ``%lld + int32`` work in @njit, which</span>
+<span class="sd">    matches pure-Python&#39;s behavior (Python ignores length modifiers and</span>
+<span class="sd">    uses the value&#39;s natural width). The cost is a single LLVM sext /</span>
+<span class="sd">    zext / fpext per arg — free at runtime.</span>
+
+<span class="sd">    Arg-type validation is done at typing time via</span>
+<span class="sd">    ``_validate_writer_arg_type``; the ``else: raise`` here is</span>
+<span class="sd">    defense-in-depth — should typing-layer validation fail to filter</span>
+<span class="sd">    everything (e.g. a future numba changes how tuples flatten), the</span>
+<span class="sd">    codegen path stops rather than dropping garbage into libc&#39;s</span>
+<span class="sd">    variadic call.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">i64_ll</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="mi">64</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">arg_ty</span><span class="p">,</span> <span class="n">Float</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">arg_ty</span><span class="o">.</span><span class="n">bitwidth</span> <span class="o">==</span> <span class="mi">32</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">fpext</span><span class="p">(</span><span class="n">arg_val</span><span class="p">,</span> <span class="n">llir</span><span class="o">.</span><span class="n">DoubleType</span><span class="p">())</span>
+        <span class="k">return</span> <span class="n">arg_val</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">arg_ty</span><span class="p">,</span> <span class="n">Boolean</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">zext</span><span class="p">(</span><span class="n">arg_val</span><span class="p">,</span> <span class="n">i64_ll</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">arg_ty</span><span class="p">,</span> <span class="n">Integer</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">arg_ty</span><span class="o">.</span><span class="n">bitwidth</span> <span class="o">&lt;</span> <span class="mi">64</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">arg_ty</span><span class="o">.</span><span class="n">signed</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">sext</span><span class="p">(</span><span class="n">arg_val</span><span class="p">,</span> <span class="n">i64_ll</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">zext</span><span class="p">(</span><span class="n">arg_val</span><span class="p">,</span> <span class="n">i64_ll</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">arg_val</span>
+    <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">&quot;variadic arg of type </span><span class="si">{</span><span class="n">arg_ty</span><span class="si">!r}</span><span class="s2"> is not supported by printf-family &quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;bindings; allowed: Float, Integer, Boolean, or intp pointer&quot;</span>
+    <span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_validate_writer_arg_type</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">idx</span><span class="p">,</span> <span class="n">ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Raise ``TypingError`` unless ``ty`` is a scalar type supported by</span>
+<span class="sd">    ``printf`` / ``fprintf`` / ``snprintf`` — Float, Integer (incl. intp</span>
+<span class="sd">    for raw pointers), Boolean, or a unicode type (which the @overload</span>
+<span class="sd">    layer auto-converts via ``get_unicode_data_p``).</span>
+
+<span class="sd">    Without this guard, ``_promote_for_varargs`` would silently</span>
+<span class="sd">    ``return arg_val`` for unsupported types, dropping numpy arrays,</span>
+<span class="sd">    complex numbers, tuples, etc. directly into libc&#39;s variadic call as</span>
+<span class="sd">    LLVM aggregates — silent miscompilation, not a clean error.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">unliteral</span><span class="p">(</span><span class="n">ty</span><span class="p">),</span> <span class="p">(</span><span class="n">Float</span><span class="p">,</span> <span class="n">Integer</span><span class="p">,</span> <span class="n">Boolean</span><span class="p">,</span> <span class="n">UnicodeType</span><span class="p">)):</span>
+        <span class="k">return</span>
+    <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: arg </span><span class="si">{</span><span class="n">idx</span><span class="si">}</span><span class="s2"> has unsupported type </span><span class="si">{</span><span class="n">ty</span><span class="si">!r}</span><span class="s2">; allowed: Float, &quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;Integer, Boolean, unicode (auto-converted to char* via &quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;get_unicode_data_p), or intp (raw pointer / preconverted string)&quot;</span>
+    <span class="p">)</span>
+
+
+<span class="n">_PERCENT_N_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span>
+    <span class="sa">r</span><span class="s1">&#39;%(?:[0-9]+\$)?[-+0# ]*[*0-9]*(?:[0-9]+\$)?&#39;</span>
+    <span class="sa">r</span><span class="s1">&#39;(?:\.[*0-9]*(?:[0-9]+\$)?)?&#39;</span>
+    <span class="sa">r</span><span class="s1">&#39;(?:hh|ll|h|l|L|j|z|t|q|I32|I64)?n&#39;</span>
+<span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_reject_percent_n_or_raise</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Raise ``TypingError`` if ``fmt_str`` contains a ``%n`` directive</span>
+<span class="sd">    (with or without flags / width / precision / length modifier).</span>
+
+<span class="sd">    ``%n`` causes printf to write the byte-count-written-so-far through a</span>
+<span class="sd">    caller-supplied ``int*`` pointer. Allowing it would (a) be a memory</span>
+<span class="sd">    write through an arg that pure-Python&#39;s ``%`` operator rejects with</span>
+<span class="sd">    ``ValueError`` — breaking dual-mode equivalence — and (b) be a memory-</span>
+<span class="sd">    safety hazard widely flagged by static analyzers and disabled by</span>
+<span class="sd">    glibc&#39;s ``_FORTIFY_SOURCE`` for writable format strings.</span>
+
+<span class="sd">    ``%%n`` (a literal ``%`` followed by ``n``) is allowed: the regex</span>
+<span class="sd">    operates on the format string after stripping ``%%`` pairs to a</span>
+<span class="sd">    sentinel that the directive matcher cannot land on.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">stripped</span> <span class="o">=</span> <span class="n">fmt_str</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%%</span><span class="s1">&#39;</span><span class="p">,</span> <span class="s1">&#39;</span><span class="se">\x00\x00</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">_PERCENT_N_RE</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">stripped</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: %n directive in format string </span><span class="si">{</span><span class="n">fmt_str</span><span class="si">!r}</span><span class="s2"> is not &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;allowed (writes byte-count-written through caller pointer; &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;memory-safety hazard, also diverges from pure-Python behavior). &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;Use sscanf if you need %n&#39;s read-position semantics.&quot;</span>
+        <span class="p">)</span>
+
+
+<span class="c1"># A directive whose flag run contains the glibc ``&#39;`` (thousands-grouping)</span>
+<span class="c1"># flag. Operates on the ``%%``-masked format string.</span>
+<span class="n">_GROUPING_FLAG_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;%[-+0# &#39;]*&#39;&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_reject_grouping_flag_or_raise</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Raise ``TypingError`` if ``fmt_str`` uses the glibc ``&#39;`` grouping flag.</span>
+
+<span class="sd">    ``&#39;`` (thousands grouping) is a legal glibc printf flag but is absent from</span>
+<span class="sd">    C99 and unsupported by Python&#39;s ``%`` operator, so honoring it would</span>
+<span class="sd">    diverge between the @njit and pure-Python paths. It is also not recognized</span>
+<span class="sd">    by ``_FMT_SPEC_RE``: a ``%&#39;d`` directive would not match at all, so the</span>
+<span class="sd">    specifier count would be silently under-counted and a following directive</span>
+<span class="sd">    would read an unpushed varargs slot (garbage / info-disclosure / crash) —</span>
+<span class="sd">    the exact hazard ``_validate_format_vs_args`` exists to prevent. Reject it</span>
+<span class="sd">    cleanly in both modes, mirroring ``%n`` handling.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">stripped</span> <span class="o">=</span> <span class="n">fmt_str</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%%</span><span class="s1">&#39;</span><span class="p">,</span> <span class="s1">&#39;</span><span class="se">\x00\x00</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">_GROUPING_FLAG_RE</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">stripped</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: the &#39; (thousands-grouping) flag in format string &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">fmt_str</span><span class="si">!r}</span><span class="s2"> is not supported (glibc-only, absent from C99 and &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;Python&#39;s % operator). Remove it or group the digits yourself.&quot;</span>
+        <span class="p">)</span>
+
+
+<span class="n">_FMT_SPEC_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span>
+    <span class="sa">r</span><span class="s1">&#39;%[-+0# ]*&#39;</span>                          <span class="c1"># flags</span>
+    <span class="sa">r</span><span class="s1">&#39;(?:\*|[0-9]*)&#39;</span>                       <span class="c1"># field width (number or &#39;*&#39;)</span>
+    <span class="sa">r</span><span class="s1">&#39;(?:\.(?:\*|[0-9]*))?&#39;</span>               <span class="c1"># .precision (number or &#39;*&#39;)</span>
+    <span class="sa">r</span><span class="s1">&#39;(?:hh|ll|h|l|L|j|z|t|q|I32|I64)?&#39;</span>   <span class="c1"># length modifier</span>
+    <span class="sa">r</span><span class="s1">&#39;([diouxXeEfFgGaAcsp])&#39;</span>              <span class="c1"># conversion (group 1); &#39;n&#39; is rejected</span>
+<span class="p">)</span>                                          <span class="c1"># separately, &#39;%%&#39; is masked first</span>
+
+<span class="n">_CONV_INT</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="s2">&quot;diouxXc&quot;</span><span class="p">)</span>
+<span class="n">_CONV_FLOAT</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="s2">&quot;eEfFgGaA&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_validate_format_vs_args</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">,</span> <span class="n">args_ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Cross-check the literal format&#39;s conversion specifiers against the arg</span>
+<span class="sd">    types at typing time (what a C compiler&#39;s ``-Wformat`` does):</span>
+
+<span class="sd">    - the specifier count must equal the argument count, and</span>
+<span class="sd">    - each specifier&#39;s class must match its arg</span>
+<span class="sd">      (``%d/%i/%u/%o/%x/%X/%c`` → Integer/Boolean; ``%e/%f/%g/...`` → Float;</span>
+<span class="sd">      ``%s`` → unicode or an ``intp``/``uintp`` pointer; ``%p`` → ``intp``/``uintp``).</span>
+
+<span class="sd">    Each ``*`` dynamic width/precision consumes a preceding Integer arg.</span>
+
+<span class="sd">    Without this, ``printf(&#39;%d %d&#39;, x)`` reads an unpushed varargs slot</span>
+<span class="sd">    (garbage / info-disclosure / crash), ``printf(&#39;%s&#39;, 5)`` makes libc</span>
+<span class="sd">    dereference an int as ``char*``, and ``printf(&#39;%d&#39;, 3.5)`` reads a GP</span>
+<span class="sd">    register for an SSE-passed float (silent wrong result). Note ``intp`` is</span>
+<span class="sd">    ``int64`` in numba, so a pointer-width int passed for ``%s``/``%p`` cannot</span>
+<span class="sd">    be distinguished from a real pointer; narrower ints, floats and booleans</span>
+<span class="sd">    for those specifiers ARE rejected.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">stripped</span> <span class="o">=</span> <span class="n">fmt_str</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%%</span><span class="s1">&#39;</span><span class="p">,</span> <span class="s1">&#39;</span><span class="se">\x00\x00</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="n">expected</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">_FMT_SPEC_RE</span><span class="o">.</span><span class="n">finditer</span><span class="p">(</span><span class="n">stripped</span><span class="p">):</span>
+        <span class="n">expected</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="s1">&#39;int&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="s1">&#39;*&#39;</span><span class="p">))</span>
+        <span class="n">conv</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">conv</span> <span class="ow">in</span> <span class="n">_CONV_INT</span><span class="p">:</span>
+            <span class="n">expected</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">&#39;int&#39;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">conv</span> <span class="ow">in</span> <span class="n">_CONV_FLOAT</span><span class="p">:</span>
+            <span class="n">expected</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">&#39;float&#39;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">conv</span> <span class="o">==</span> <span class="s1">&#39;s&#39;</span><span class="p">:</span>
+            <span class="n">expected</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">&#39;str&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>  <span class="c1"># &#39;p&#39;</span>
+            <span class="n">expected</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s1">&#39;ptr&#39;</span><span class="p">)</span>
+    <span class="n">arg_types</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">args_ty</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">expected</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">arg_types</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: format </span><span class="si">{</span><span class="n">fmt_str</span><span class="si">!r}</span><span class="s2"> has </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">expected</span><span class="p">)</span><span class="si">}</span><span class="s2"> conversion &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;specifier(s) but </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">arg_types</span><span class="p">)</span><span class="si">}</span><span class="s2"> argument(s) were passed&quot;</span>
+        <span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">ty</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">expected</span><span class="p">,</span> <span class="n">arg_types</span><span class="p">)):</span>
+        <span class="n">uty</span> <span class="o">=</span> <span class="n">unliteral</span><span class="p">(</span><span class="n">ty</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">cls</span> <span class="o">==</span> <span class="s1">&#39;int&#39;</span><span class="p">:</span>
+            <span class="n">ok</span> <span class="o">=</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">uty</span><span class="p">,</span> <span class="p">(</span><span class="n">Integer</span><span class="p">,</span> <span class="n">Boolean</span><span class="p">))</span>
+        <span class="k">elif</span> <span class="bp">cls</span> <span class="o">==</span> <span class="s1">&#39;float&#39;</span><span class="p">:</span>
+            <span class="n">ok</span> <span class="o">=</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">uty</span><span class="p">,</span> <span class="n">Float</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="bp">cls</span> <span class="o">==</span> <span class="s1">&#39;str&#39;</span><span class="p">:</span>
+            <span class="n">ok</span> <span class="o">=</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">uty</span><span class="p">,</span> <span class="n">UnicodeType</span><span class="p">)</span> <span class="ow">or</span> <span class="n">uty</span> <span class="ow">in</span> <span class="p">(</span><span class="n">intp</span><span class="p">,</span> <span class="n">uintp</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>  <span class="c1"># &#39;ptr&#39;</span>
+            <span class="n">ok</span> <span class="o">=</span> <span class="n">uty</span> <span class="ow">in</span> <span class="p">(</span><span class="n">intp</span><span class="p">,</span> <span class="n">uintp</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">ok</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: format specifier #</span><span class="si">{</span><span class="n">i</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2"> in </span><span class="si">{</span><span class="n">fmt_str</span><span class="si">!r}</span><span class="s2"> expects &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">cls</span><span class="si">}</span><span class="s2">, but arg </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2"> has type </span><span class="si">{</span><span class="n">ty</span><span class="si">!r}</span><span class="s2">&quot;</span>
+            <span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_unpack_args_tuple</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">args_ty</span><span class="p">,</span> <span class="n">args_pack</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Extract individual LLVM values from a tuple-of-args LLVM aggregate.&quot;&quot;&quot;</span>
+    <span class="n">arg_types</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">args_ty</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">[</span>
+        <span class="p">(</span><span class="n">arg_types</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">builder</span><span class="o">.</span><span class="n">extract_value</span><span class="p">(</span><span class="n">args_pack</span><span class="p">,</span> <span class="n">i</span><span class="p">))</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">arg_types</span><span class="p">))</span>
+    <span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_emit_variadic_call</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">symbol</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">,</span> <span class="n">leading_vals</span><span class="p">,</span> <span class="n">args_ty</span><span class="p">,</span> <span class="n">args_pack</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">leading_tys</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Emit IR for ``symbol(*leading_vals, fmt_p, *promoted_args) -&gt; i32``.</span>
+
+<span class="sd">    ``leading_tys`` is the explicit list of LLVM types for the leading</span>
+<span class="sd">    positional args (size_t, FILE*, char*, etc. — anything that precedes</span>
+<span class="sd">    the format string in the libc signature). Callers pass it so the</span>
+<span class="sd">    function-type declaration documents the libc ABI contract at the</span>
+<span class="sd">    codegen call site, rather than implicitly reading</span>
+<span class="sd">    ``[v.type for v in leading_vals]`` and relying on numba&#39;s lowering to</span>
+<span class="sd">    produce the right LLVM types. The explicit form is what&#39;s needed for</span>
+<span class="sd">    size_t in snprintf — derive via ``intp_ll_type(context)`` to keep</span>
+<span class="sd">    consistency with numba&#39;s intp lowering API.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">i8p</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">()</span>
+    <span class="n">i32_ll</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span>
+    <span class="n">mod</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">module</span>
+    <span class="n">fmt_bytes</span> <span class="o">=</span> <span class="n">cgutils</span><span class="o">.</span><span class="n">make_bytearray</span><span class="p">((</span><span class="n">fmt_str</span> <span class="o">+</span> <span class="s1">&#39;</span><span class="se">\x00</span><span class="s1">&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">))</span>
+    <span class="c1"># cgutils.global_constant uses linkage=&#39;internal&#39; and routes through</span>
+    <span class="c1"># module.get_unique_name → scope.deduplicate, which auto-suffixes when</span>
+    <span class="c1"># the same name is re-used within a module (printf_format,</span>
+    <span class="c1"># printf_format.1, ...). Across modules, internal-linkage globals are</span>
+    <span class="c1"># module-private; LLVM&#39;s linker further renames on merge into the</span>
+    <span class="c1"># shared MCJIT engine. So multiple call sites — same or distinct</span>
+    <span class="c1"># format strings — each get their own deduplicated global.</span>
+    <span class="n">global_fmt</span> <span class="o">=</span> <span class="n">cgutils</span><span class="o">.</span><span class="n">global_constant</span><span class="p">(</span><span class="n">mod</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">symbol</span><span class="si">}</span><span class="s2">_format&quot;</span><span class="p">,</span> <span class="n">fmt_bytes</span><span class="p">)</span>
+    <span class="n">fmt_p</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">bitcast</span><span class="p">(</span><span class="n">global_fmt</span><span class="p">,</span> <span class="n">i8p</span><span class="p">)</span>
+    <span class="n">unpacked</span> <span class="o">=</span> <span class="n">_unpack_args_tuple</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">args_ty</span><span class="p">,</span> <span class="n">args_pack</span><span class="p">)</span>
+    <span class="n">promoted</span> <span class="o">=</span> <span class="p">[</span><span class="n">_promote_for_varargs</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">t</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">unpacked</span><span class="p">]</span>
+    <span class="n">fn_ty</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">FunctionType</span><span class="p">(</span><span class="n">i32_ll</span><span class="p">,</span> <span class="nb">list</span><span class="p">(</span><span class="n">leading_tys</span><span class="p">)</span> <span class="o">+</span> <span class="p">[</span><span class="n">i8p</span><span class="p">],</span> <span class="n">var_arg</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">fn</span> <span class="o">=</span> <span class="n">get_or_insert_function</span><span class="p">(</span><span class="n">mod</span><span class="p">,</span> <span class="n">fn_ty</span><span class="p">,</span> <span class="n">symbol</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">fn</span><span class="p">,</span> <span class="nb">list</span><span class="p">(</span><span class="n">leading_vals</span><span class="p">)</span> <span class="o">+</span> <span class="p">[</span><span class="n">fmt_p</span><span class="p">]</span> <span class="o">+</span> <span class="n">promoted</span><span class="p">)</span>
+
+
+<span class="c1"># ---------------------------------------------------------------------------</span>
+<span class="c1"># Private @intrinsics — the @njit codegen path</span>
+<span class="c1"># ---------------------------------------------------------------------------</span>
+
+
+<span class="nd">@intrinsic</span><span class="p">(</span><span class="n">prefer_literal</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_printf_intrinsic</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">fmt_ty</span><span class="p">,</span> <span class="n">args_ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;libc printf via a tuple-of-args. Internal; user code calls printf().&quot;&quot;&quot;</span>
+    <span class="n">fmt_str</span> <span class="o">=</span> <span class="n">extract_literal_str</span><span class="p">(</span><span class="s2">&quot;printf&quot;</span><span class="p">,</span> <span class="n">fmt_ty</span><span class="p">,</span> <span class="n">field</span><span class="o">=</span><span class="s2">&quot;format string&quot;</span><span class="p">)</span>
+    <span class="n">_reject_percent_n_or_raise</span><span class="p">(</span><span class="s2">&quot;printf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">)</span>
+    <span class="n">_reject_grouping_flag_or_raise</span><span class="p">(</span><span class="s2">&quot;printf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">args_ty</span><span class="p">,</span> <span class="n">BaseTuple</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;printf: args must be a tuple, got </span><span class="si">{</span><span class="n">args_ty</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ty</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">tuple</span><span class="p">(</span><span class="n">args_ty</span><span class="p">)):</span>
+        <span class="n">_validate_writer_arg_type</span><span class="p">(</span><span class="s2">&quot;printf&quot;</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">ty</span><span class="p">)</span>
+    <span class="n">_validate_format_vs_args</span><span class="p">(</span><span class="s2">&quot;printf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">,</span> <span class="n">args_ty</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="n">llvm_args</span><span class="p">):</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">args_pack</span> <span class="o">=</span> <span class="n">llvm_args</span>
+        <span class="k">return</span> <span class="n">_emit_variadic_call</span><span class="p">(</span>
+            <span class="n">builder</span><span class="p">,</span> <span class="s2">&quot;printf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">,</span> <span class="p">[],</span> <span class="n">args_ty</span><span class="p">,</span> <span class="n">args_pack</span><span class="p">,</span>
+            <span class="n">leading_tys</span><span class="o">=</span><span class="p">[])</span>
+
+    <span class="k">return</span> <span class="n">int32</span><span class="p">(</span><span class="n">fmt_ty</span><span class="p">,</span> <span class="n">args_ty</span><span class="p">),</span> <span class="n">codegen</span>
+
+
+<span class="nd">@intrinsic</span><span class="p">(</span><span class="n">prefer_literal</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_fprintf_intrinsic</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">fp_ty</span><span class="p">,</span> <span class="n">fmt_ty</span><span class="p">,</span> <span class="n">args_ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;libc fprintf via a tuple-of-args. Internal; user code calls fprintf().&quot;&quot;&quot;</span>
+    <span class="n">fmt_str</span> <span class="o">=</span> <span class="n">extract_literal_str</span><span class="p">(</span><span class="s2">&quot;fprintf&quot;</span><span class="p">,</span> <span class="n">fmt_ty</span><span class="p">,</span> <span class="n">field</span><span class="o">=</span><span class="s2">&quot;format string&quot;</span><span class="p">)</span>
+    <span class="n">_reject_percent_n_or_raise</span><span class="p">(</span><span class="s2">&quot;fprintf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">)</span>
+    <span class="n">_reject_grouping_flag_or_raise</span><span class="p">(</span><span class="s2">&quot;fprintf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">args_ty</span><span class="p">,</span> <span class="n">BaseTuple</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;fprintf: args must be a tuple, got </span><span class="si">{</span><span class="n">args_ty</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">fp_ty</span> <span class="o">!=</span> <span class="n">intp</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;fprintf: fp must be intp (FILE* as pointer-as-int), got </span><span class="si">{</span><span class="n">fp_ty</span><span class="si">!r}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ty</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">tuple</span><span class="p">(</span><span class="n">args_ty</span><span class="p">)):</span>
+        <span class="n">_validate_writer_arg_type</span><span class="p">(</span><span class="s2">&quot;fprintf&quot;</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">ty</span><span class="p">)</span>
+    <span class="n">_validate_format_vs_args</span><span class="p">(</span><span class="s2">&quot;fprintf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">,</span> <span class="n">args_ty</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="n">llvm_args</span><span class="p">):</span>
+        <span class="n">i8p</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">()</span>
+        <span class="n">fp_int</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">args_pack</span> <span class="o">=</span> <span class="n">llvm_args</span>
+        <span class="n">fp_ptr</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">inttoptr</span><span class="p">(</span><span class="n">fp_int</span><span class="p">,</span> <span class="n">i8p</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">_emit_variadic_call</span><span class="p">(</span>
+            <span class="n">builder</span><span class="p">,</span> <span class="s2">&quot;fprintf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">,</span> <span class="p">[</span><span class="n">fp_ptr</span><span class="p">],</span> <span class="n">args_ty</span><span class="p">,</span> <span class="n">args_pack</span><span class="p">,</span>
+            <span class="n">leading_tys</span><span class="o">=</span><span class="p">[</span><span class="n">i8p</span><span class="p">])</span>
+
+    <span class="k">return</span> <span class="n">int32</span><span class="p">(</span><span class="n">fp_ty</span><span class="p">,</span> <span class="n">fmt_ty</span><span class="p">,</span> <span class="n">args_ty</span><span class="p">),</span> <span class="n">codegen</span>
+
+
+<span class="nd">@intrinsic</span><span class="p">(</span><span class="n">prefer_literal</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_snprintf_intrinsic</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">buf_ty</span><span class="p">,</span> <span class="n">size_ty</span><span class="p">,</span> <span class="n">fmt_ty</span><span class="p">,</span> <span class="n">args_ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;libc snprintf via a tuple-of-args. Internal; user code calls snprintf().&quot;&quot;&quot;</span>
+    <span class="n">fmt_str</span> <span class="o">=</span> <span class="n">extract_literal_str</span><span class="p">(</span><span class="s2">&quot;snprintf&quot;</span><span class="p">,</span> <span class="n">fmt_ty</span><span class="p">,</span> <span class="n">field</span><span class="o">=</span><span class="s2">&quot;format string&quot;</span><span class="p">)</span>
+    <span class="n">_reject_percent_n_or_raise</span><span class="p">(</span><span class="s2">&quot;snprintf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">)</span>
+    <span class="n">_reject_grouping_flag_or_raise</span><span class="p">(</span><span class="s2">&quot;snprintf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">args_ty</span><span class="p">,</span> <span class="n">BaseTuple</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;snprintf: args must be a tuple, got </span><span class="si">{</span><span class="n">args_ty</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">buf_ty</span> <span class="o">!=</span> <span class="n">intp</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;snprintf: buf must be intp (pointer-as-int), got </span><span class="si">{</span><span class="n">buf_ty</span><span class="si">!r}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="n">size_ty</span> <span class="o">!=</span> <span class="n">intp</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;snprintf: size must be intp (size_t-as-int), got </span><span class="si">{</span><span class="n">size_ty</span><span class="si">!r}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ty</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">tuple</span><span class="p">(</span><span class="n">args_ty</span><span class="p">)):</span>
+        <span class="n">_validate_writer_arg_type</span><span class="p">(</span><span class="s2">&quot;snprintf&quot;</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">ty</span><span class="p">)</span>
+    <span class="n">_validate_format_vs_args</span><span class="p">(</span><span class="s2">&quot;snprintf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">,</span> <span class="n">args_ty</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="n">llvm_args</span><span class="p">):</span>
+        <span class="n">i8p</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">()</span>
+        <span class="n">buf_int</span><span class="p">,</span> <span class="n">size_val</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">args_pack</span> <span class="o">=</span> <span class="n">llvm_args</span>
+        <span class="n">buf_ptr</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">inttoptr</span><span class="p">(</span><span class="n">buf_int</span><span class="p">,</span> <span class="n">i8p</span><span class="p">)</span>
+        <span class="c1"># size_t is pointer-width on all current 64-bit platforms; derive</span>
+        <span class="c1"># the LLVM type from numba&#39;s intp via the shared helper so the</span>
+        <span class="c1"># libc snprintf signature stays correct under platform changes and</span>
+        <span class="c1"># matches the typing-time `size_ty != intp` guard above.</span>
+        <span class="k">return</span> <span class="n">_emit_variadic_call</span><span class="p">(</span>
+            <span class="n">builder</span><span class="p">,</span> <span class="n">_SNPRINTF_SYMBOL</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">,</span>
+            <span class="p">[</span><span class="n">buf_ptr</span><span class="p">,</span> <span class="n">size_val</span><span class="p">],</span> <span class="n">args_ty</span><span class="p">,</span> <span class="n">args_pack</span><span class="p">,</span>
+            <span class="n">leading_tys</span><span class="o">=</span><span class="p">[</span><span class="n">i8p</span><span class="p">,</span> <span class="n">intp_ll_type</span><span class="p">(</span><span class="n">context</span><span class="p">)])</span>
+
+    <span class="k">return</span> <span class="n">int32</span><span class="p">(</span><span class="n">buf_ty</span><span class="p">,</span> <span class="n">size_ty</span><span class="p">,</span> <span class="n">fmt_ty</span><span class="p">,</span> <span class="n">args_ty</span><span class="p">),</span> <span class="n">codegen</span>
+
+
+<span class="nd">@intrinsic</span><span class="p">(</span><span class="n">prefer_literal</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_sscanf_intrinsic</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">buf_ty</span><span class="p">,</span> <span class="n">fmt_ty</span><span class="p">,</span> <span class="n">args_ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;libc sscanf via a tuple-of-args. Internal; user code calls sscanf().</span>
+
+<span class="sd">    Args are intp output pointers; no default-arg promotion applies</span>
+<span class="sd">    (pointers don&#39;t promote). See sscanf() for the caller-facing contract.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">fmt_str</span> <span class="o">=</span> <span class="n">extract_literal_str</span><span class="p">(</span><span class="s2">&quot;sscanf&quot;</span><span class="p">,</span> <span class="n">fmt_ty</span><span class="p">,</span> <span class="n">field</span><span class="o">=</span><span class="s2">&quot;format string&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">args_ty</span><span class="p">,</span> <span class="n">BaseTuple</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;sscanf: args must be a tuple, got </span><span class="si">{</span><span class="n">args_ty</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">buf_ty</span> <span class="o">!=</span> <span class="n">intp</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;sscanf: buf must be intp (pointer-as-int), got </span><span class="si">{</span><span class="n">buf_ty</span><span class="si">!r}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ty</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">tuple</span><span class="p">(</span><span class="n">args_ty</span><span class="p">)):</span>
+        <span class="k">if</span> <span class="n">ty</span> <span class="o">!=</span> <span class="n">intp</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;sscanf: args[</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">] must be intp (output pointer), got </span><span class="si">{</span><span class="n">ty</span><span class="si">!r}</span><span class="s2">&quot;</span>
+            <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="n">llvm_args</span><span class="p">):</span>
+        <span class="n">i8p</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">()</span>
+        <span class="n">buf_int</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">args_pack</span> <span class="o">=</span> <span class="n">llvm_args</span>
+        <span class="n">buf_ptr</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">inttoptr</span><span class="p">(</span><span class="n">buf_int</span><span class="p">,</span> <span class="n">i8p</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">_emit_variadic_call</span><span class="p">(</span>
+            <span class="n">builder</span><span class="p">,</span> <span class="s2">&quot;sscanf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">,</span> <span class="p">[</span><span class="n">buf_ptr</span><span class="p">],</span> <span class="n">args_ty</span><span class="p">,</span> <span class="n">args_pack</span><span class="p">,</span>
+            <span class="n">leading_tys</span><span class="o">=</span><span class="p">[</span><span class="n">i8p</span><span class="p">])</span>
+
+    <span class="k">return</span> <span class="n">int32</span><span class="p">(</span><span class="n">buf_ty</span><span class="p">,</span> <span class="n">fmt_ty</span><span class="p">,</span> <span class="n">args_ty</span><span class="p">),</span> <span class="n">codegen</span>
+
+
+<span class="c1"># ---------------------------------------------------------------------------</span>
+<span class="c1"># @overload helper: build an impl source string with str args auto-converted</span>
+<span class="c1"># ---------------------------------------------------------------------------</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_build_args_tuple_expr_from_starargs</span><span class="p">(</span><span class="n">arg_tys</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Build a Python source fragment ``(...)`` that constructs the args</span>
+<span class="sd">    tuple for the intrinsic call, indexing into the impl&#39;s ``*args`` and</span>
+<span class="sd">    auto-converting any ``UnicodeType`` arg via ``get_unicode_data_p``</span>
+<span class="sd">    so libc sees a NUL-terminated C string for ``%s``.</span>
+
+<span class="sd">    Numba requires the @overload&#39;s impl signature to match the typing</span>
+<span class="sd">    signature shape exactly — ``*args`` in typing must be ``*args`` in</span>
+<span class="sd">    impl. So we cannot expand per-arity explicit parameters; we have</span>
+<span class="sd">    to index into the ``args`` tuple from inside the impl.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">arg_tys</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">n</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;()&quot;</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ty</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">arg_tys</span><span class="p">):</span>
+        <span class="c1"># Both numba&#39;s runtime ``unicode_type`` and the compile-time</span>
+        <span class="c1"># ``Literal[str]`` (StringLiteral) need conversion. StringLiteral</span>
+        <span class="c1"># is NOT a UnicodeType subclass directly — its MRO is</span>
+        <span class="c1"># ``StringLiteral → Literal → Dummy → Type`` — so we use</span>
+        <span class="c1"># ``unliteral(ty)`` to strip any Literal wrapping before the check.</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">unliteral</span><span class="p">(</span><span class="n">ty</span><span class="p">),</span> <span class="n">UnicodeType</span><span class="p">):</span>
+            <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;get_unicode_data_p(args[</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">])&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;args[</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">]&quot;</span><span class="p">)</span>
+    <span class="n">inner</span> <span class="o">=</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">inner</span><span class="si">}</span><span class="s2">,)&quot;</span> <span class="k">if</span> <span class="n">n</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">inner</span><span class="si">}</span><span class="s2">)&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_build_overload_impl</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">fixed_params</span><span class="p">,</span> <span class="n">args_tys</span><span class="p">,</span> <span class="n">intrinsic_callable</span><span class="p">,</span>
+                         <span class="n">get_unicode_data_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Build an impl function via exec&#39;d source that:</span>
+
+<span class="sd">    - Takes ``(fixed_params..., *args)`` — matching the typing-function shape</span>
+<span class="sd">    - Bundles ``*args`` into a tuple via index expressions, auto-converting</span>
+<span class="sd">      ``UnicodeType`` args via ``get_unicode_data_p``</span>
+<span class="sd">    - Calls the underlying intrinsic with the bundled tuple</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">args_tuple_expr</span> <span class="o">=</span> <span class="n">_build_args_tuple_expr_from_starargs</span><span class="p">(</span><span class="n">args_tys</span><span class="p">)</span>
+    <span class="n">sig_params</span> <span class="o">=</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">fixed_params</span><span class="p">)</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;*args&quot;</span><span class="p">])</span>
+    <span class="n">intrinsic_args</span> <span class="o">=</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">fixed_params</span><span class="p">)</span> <span class="o">+</span> <span class="p">[</span><span class="n">args_tuple_expr</span><span class="p">])</span>
+    <span class="n">src</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;def impl(</span><span class="si">{</span><span class="n">sig_params</span><span class="si">}</span><span class="s2">):</span><span class="se">\n</span><span class="s2">    return _intr(</span><span class="si">{</span><span class="n">intrinsic_args</span><span class="si">}</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span>
+    <span class="n">ns</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;_intr&quot;</span><span class="p">:</span> <span class="n">intrinsic_callable</span><span class="p">,</span> <span class="s2">&quot;get_unicode_data_p&quot;</span><span class="p">:</span> <span class="n">get_unicode_data_p</span><span class="p">}</span>
+    <span class="n">exec</span><span class="p">(</span><span class="nb">compile</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;&lt;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">-overload-impl&gt;&quot;</span><span class="p">,</span> <span class="s2">&quot;exec&quot;</span><span class="p">),</span> <span class="n">ns</span><span class="p">)</span>  <span class="c1"># nosec B102 - JIT codegen of internal source</span>
+    <span class="k">return</span> <span class="n">ns</span><span class="p">[</span><span class="s2">&quot;impl&quot;</span><span class="p">]</span>
+
+
+<span class="c1"># Lazy import to avoid circular dependency at module load</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_get_unicode_data_p_lazy</span><span class="p">():</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.lowlevel</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_unicode_data_p</span>
+    <span class="k">return</span> <span class="n">get_unicode_data_p</span>
+
+
+<span class="c1"># ---------------------------------------------------------------------------</span>
+<span class="c1"># Pure-Python stdio-handle address cache (lazy init for fprintf routing)</span>
+<span class="c1"># ---------------------------------------------------------------------------</span>
+
+
+<span class="n">_PY_STREAM_BY_FP</span> <span class="o">=</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_ensure_py_stream_cache</span><span class="p">():</span>
+    <span class="k">global</span> <span class="n">_PY_STREAM_BY_FP</span>
+    <span class="k">if</span> <span class="n">_PY_STREAM_BY_FP</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="c1"># Defer the imports to avoid a circular dep at module load — _fmtio is</span>
+    <span class="c1"># imported AFTER _stdio by numbox.core.bindings.__init__, but doing</span>
+    <span class="c1"># the calls here at first use guarantees the bindings are ready.</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings</span><span class="w"> </span><span class="kn">import</span> <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span><span class="p">,</span> <span class="n">stdin</span>
+    <span class="n">_PY_STREAM_BY_FP</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="nb">int</span><span class="p">(</span><span class="n">stdout</span><span class="p">()):</span> <span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span>
+        <span class="nb">int</span><span class="p">(</span><span class="n">stderr</span><span class="p">()):</span> <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">,</span>
+        <span class="nb">int</span><span class="p">(</span><span class="n">stdin</span><span class="p">()):</span>  <span class="n">sys</span><span class="o">.</span><span class="n">stdin</span><span class="p">,</span>
+    <span class="p">}</span>
+
+
+<span class="c1"># ---------------------------------------------------------------------------</span>
+<span class="c1"># Public Python-callable wrappers + @overload registrations</span>
+<span class="c1"># ---------------------------------------------------------------------------</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_reject_percent_n_in_python</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">fmt</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Pure-Python equivalent of ``_reject_percent_n_or_raise``: raise</span>
+<span class="sd">    ``ValueError`` if ``%n`` appears in ``fmt``. Python&#39;s ``%`` operator</span>
+<span class="sd">    would itself raise on ``%n`` (it&#39;s an unsupported format character),</span>
+<span class="sd">    but the message is generic; this gives users the same clear error</span>
+<span class="sd">    message in both Python and @njit modes.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">stripped</span> <span class="o">=</span> <span class="n">fmt</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%%</span><span class="s1">&#39;</span><span class="p">,</span> <span class="s1">&#39;</span><span class="se">\x00\x00</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">_PERCENT_N_RE</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">stripped</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: %n directive in format string </span><span class="si">{</span><span class="n">fmt</span><span class="si">!r}</span><span class="s2"> is not allowed &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;(writes byte-count-written through caller pointer; memory-&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;safety hazard). Use sscanf if you need %n&#39;s read-position &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;semantics.&quot;</span>
+        <span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_reject_grouping_flag_in_python</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">fmt</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Pure-Python equivalent of ``_reject_grouping_flag_or_raise``: raise</span>
+<span class="sd">    ``ValueError`` if the glibc ``&#39;`` grouping flag appears in ``fmt``.</span>
+<span class="sd">    Python&#39;s ``%`` operator would itself raise on ``%&#39;d`` (unsupported</span>
+<span class="sd">    format character), but the message is generic; this gives users the</span>
+<span class="sd">    same clear error in both Python and @njit modes.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">stripped</span> <span class="o">=</span> <span class="n">fmt</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">%%</span><span class="s1">&#39;</span><span class="p">,</span> <span class="s1">&#39;</span><span class="se">\x00\x00</span><span class="s1">&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">_GROUPING_FLAG_RE</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">stripped</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: the &#39; (thousands-grouping) flag in format string &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">fmt</span><span class="si">!r}</span><span class="s2"> is not supported (glibc-only, absent from C99 and &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;Python&#39;s % operator). Remove it or group the digits yourself.&quot;</span>
+        <span class="p">)</span>
+
+
+<div class="viewcode-block" id="printf">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._fmtio.printf">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">printf</span><span class="p">(</span><span class="n">fmt</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;C-style ``printf(fmt, *args)`` — dual-mode (plain Python AND @njit).</span>
+
+<span class="sd">    From plain Python: writes to ``sys.stdout`` via ``str.__mod__`` after</span>
+<span class="sd">    stripping C length modifiers (``%lld`` → ``%d``, etc.).</span>
+
+<span class="sd">    From @njit: ``@overload`` below routes to the private ``_printf_intrinsic``</span>
+<span class="sd">    after auto-converting any ``unicode_type`` args via ``get_unicode_data_p``</span>
+<span class="sd">    so libc ``%s`` receives a NUL-terminated C string. Format string must be</span>
+<span class="sd">    a literal in @njit (see module docstring for caveats).</span>
+
+<span class="sd">    ``%n`` is rejected in both modes (see ``_reject_percent_n_or_raise``).</span>
+
+<span class="sd">    Returns the number of bytes written (or written-equivalent), as int32.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">_reject_percent_n_in_python</span><span class="p">(</span><span class="s2">&quot;printf&quot;</span><span class="p">,</span> <span class="n">fmt</span><span class="p">)</span>
+    <span class="n">_reject_grouping_flag_in_python</span><span class="p">(</span><span class="s2">&quot;printf&quot;</span><span class="p">,</span> <span class="n">fmt</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">_python_fmt_compat</span><span class="p">(</span><span class="n">fmt</span><span class="p">)</span> <span class="o">%</span> <span class="n">args</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+    <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">))</span></div>
+
+
+
+<span class="nd">@overload</span><span class="p">(</span><span class="n">printf</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_overload_printf</span><span class="p">(</span><span class="n">fmt</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+    <span class="n">fmt_str</span> <span class="o">=</span> <span class="n">extract_literal_str</span><span class="p">(</span><span class="s2">&quot;printf&quot;</span><span class="p">,</span> <span class="n">fmt</span><span class="p">,</span> <span class="n">field</span><span class="o">=</span><span class="s2">&quot;format string&quot;</span><span class="p">)</span>
+    <span class="n">_reject_percent_n_or_raise</span><span class="p">(</span><span class="s2">&quot;printf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">)</span>
+    <span class="n">_reject_grouping_flag_or_raise</span><span class="p">(</span><span class="s2">&quot;printf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ty</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+        <span class="n">_validate_writer_arg_type</span><span class="p">(</span><span class="s2">&quot;printf&quot;</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">ty</span><span class="p">)</span>
+    <span class="n">impl</span> <span class="o">=</span> <span class="n">_build_overload_impl</span><span class="p">(</span>
+        <span class="s2">&quot;printf&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;fmt&quot;</span><span class="p">],</span> <span class="n">args</span><span class="p">,</span> <span class="n">_printf_intrinsic</span><span class="p">,</span>
+        <span class="n">_get_unicode_data_p_lazy</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">impl</span>
+
+
+<div class="viewcode-block" id="fprintf">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._fmtio.fprintf">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">fprintf</span><span class="p">(</span><span class="n">fp</span><span class="p">,</span> <span class="n">fmt</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;C-style ``fprintf(fp, fmt, *args)`` — dual-mode.</span>
+
+<span class="sd">    ``fp`` is a FILE\\* as ``intp`` (from ``stdout()`` / ``stderr()`` /</span>
+<span class="sd">    ``stdin()`` or ``fopen()``).</span>
+
+<span class="sd">    From plain Python: routes ``stdout()`` / ``stderr()`` / ``stdin()``</span>
+<span class="sd">    handles to the corresponding ``sys.*`` streams via an address cache.</span>
+<span class="sd">    Arbitrary FILE\\* values (e.g. ``fopen``-returned) raise</span>
+<span class="sd">    ``RuntimeError`` — use ``open()`` + ``f.write()`` for Python-side</span>
+<span class="sd">    file I/O.</span>
+
+<span class="sd">    From @njit: routes to ``_fprintf_intrinsic`` with str auto-conversion.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">_reject_percent_n_in_python</span><span class="p">(</span><span class="s2">&quot;fprintf&quot;</span><span class="p">,</span> <span class="n">fmt</span><span class="p">)</span>
+    <span class="n">_reject_grouping_flag_in_python</span><span class="p">(</span><span class="s2">&quot;fprintf&quot;</span><span class="p">,</span> <span class="n">fmt</span><span class="p">)</span>
+    <span class="n">_ensure_py_stream_cache</span><span class="p">()</span>
+    <span class="n">py_stream</span> <span class="o">=</span> <span class="n">_PY_STREAM_BY_FP</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">fp</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">py_stream</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;fprintf in pure-Python mode only supports stdout / stderr / &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;stdin handles; got fp=</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">fp</span><span class="p">)</span><span class="si">:</span><span class="s2">#x</span><span class="si">}</span><span class="s2">. For arbitrary FILE* &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;(e.g. fopen) use @njit, or use Python&#39;s open() + write().&quot;</span>
+        <span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">_python_fmt_compat</span><span class="p">(</span><span class="n">fmt</span><span class="p">)</span> <span class="o">%</span> <span class="n">args</span>
+    <span class="n">py_stream</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">py_stream</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+    <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">))</span></div>
+
+
+
+<span class="nd">@overload</span><span class="p">(</span><span class="n">fprintf</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_overload_fprintf</span><span class="p">(</span><span class="n">fp</span><span class="p">,</span> <span class="n">fmt</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+    <span class="n">fmt_str</span> <span class="o">=</span> <span class="n">extract_literal_str</span><span class="p">(</span><span class="s2">&quot;fprintf&quot;</span><span class="p">,</span> <span class="n">fmt</span><span class="p">,</span> <span class="n">field</span><span class="o">=</span><span class="s2">&quot;format string&quot;</span><span class="p">)</span>
+    <span class="n">_reject_percent_n_or_raise</span><span class="p">(</span><span class="s2">&quot;fprintf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">)</span>
+    <span class="n">_reject_grouping_flag_or_raise</span><span class="p">(</span><span class="s2">&quot;fprintf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">fp</span> <span class="o">!=</span> <span class="n">intp</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;fprintf: fp must be intp (FILE* as pointer-as-int), got </span><span class="si">{</span><span class="n">fp</span><span class="si">!r}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ty</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+        <span class="n">_validate_writer_arg_type</span><span class="p">(</span><span class="s2">&quot;fprintf&quot;</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">ty</span><span class="p">)</span>
+    <span class="n">impl</span> <span class="o">=</span> <span class="n">_build_overload_impl</span><span class="p">(</span>
+        <span class="s2">&quot;fprintf&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;fp&quot;</span><span class="p">,</span> <span class="s2">&quot;fmt&quot;</span><span class="p">],</span> <span class="n">args</span><span class="p">,</span> <span class="n">_fprintf_intrinsic</span><span class="p">,</span>
+        <span class="n">_get_unicode_data_p_lazy</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">impl</span>
+
+
+<div class="viewcode-block" id="snprintf">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._fmtio.snprintf">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">snprintf</span><span class="p">(</span><span class="n">buf_p</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">fmt</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;C-style ``snprintf(buf_p, size, fmt, *args)`` — dual-mode.</span>
+
+<span class="sd">    ``buf_p`` is an ``intp`` pointer to the destination buffer (caller-</span>
+<span class="sd">    owned). Typically ``array_data_p(numpy_array)`` — that helper works</span>
+<span class="sd">    in both modes.</span>
+
+<span class="sd">    Returns the number of characters that WOULD have been written if</span>
+<span class="sd">    ``size`` were unlimited (excluding the trailing NUL), as int32. See</span>
+<span class="sd">    the module docstring for the Windows @njit truncation-rc divergence</span>
+<span class="sd">    (Python and Linux/macOS @njit follow C99; Windows @njit uses</span>
+<span class="sd">    MSVCRT ``_snprintf`` which returns ``-1`` on truncation).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">_reject_percent_n_in_python</span><span class="p">(</span><span class="s2">&quot;snprintf&quot;</span><span class="p">,</span> <span class="n">fmt</span><span class="p">)</span>
+    <span class="n">_reject_grouping_flag_in_python</span><span class="p">(</span><span class="s2">&quot;snprintf&quot;</span><span class="p">,</span> <span class="n">fmt</span><span class="p">)</span>
+    <span class="n">text_bytes</span> <span class="o">=</span> <span class="p">(</span><span class="n">_python_fmt_compat</span><span class="p">(</span><span class="n">fmt</span><span class="p">)</span> <span class="o">%</span> <span class="n">args</span><span class="p">)</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span>
+    <span class="n">n_would_have</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">text_bytes</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">size</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">n_write</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">n_would_have</span><span class="p">,</span> <span class="n">size</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="c1"># Slice content BEFORE appending NUL so the NUL is always at the</span>
+        <span class="c1"># correct position even when truncating. The previous form</span>
+        <span class="c1"># ``memmove(buf_p, text_bytes + b&#39;\x00&#39;, n_write + 1)`` left the</span>
+        <span class="c1"># NUL out of the copied prefix when truncating — buf got</span>
+        <span class="c1"># n_write content bytes with no terminator.</span>
+        <span class="n">src</span> <span class="o">=</span> <span class="n">text_bytes</span><span class="p">[:</span><span class="n">n_write</span><span class="p">]</span> <span class="o">+</span> <span class="sa">b</span><span class="s1">&#39;</span><span class="se">\x00</span><span class="s1">&#39;</span>
+        <span class="n">ctypes</span><span class="o">.</span><span class="n">memmove</span><span class="p">(</span><span class="n">buf_p</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">src</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">n_would_have</span></div>
+
+
+
+<span class="nd">@overload</span><span class="p">(</span><span class="n">snprintf</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_overload_snprintf</span><span class="p">(</span><span class="n">buf_p</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">fmt</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+    <span class="n">fmt_str</span> <span class="o">=</span> <span class="n">extract_literal_str</span><span class="p">(</span><span class="s2">&quot;snprintf&quot;</span><span class="p">,</span> <span class="n">fmt</span><span class="p">,</span> <span class="n">field</span><span class="o">=</span><span class="s2">&quot;format string&quot;</span><span class="p">)</span>
+    <span class="n">_reject_percent_n_or_raise</span><span class="p">(</span><span class="s2">&quot;snprintf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">)</span>
+    <span class="n">_reject_grouping_flag_or_raise</span><span class="p">(</span><span class="s2">&quot;snprintf&quot;</span><span class="p">,</span> <span class="n">fmt_str</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">buf_p</span> <span class="o">!=</span> <span class="n">intp</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;snprintf: buf must be intp (pointer-as-int), got </span><span class="si">{</span><span class="n">buf_p</span><span class="si">!r}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="n">size</span> <span class="o">!=</span> <span class="n">intp</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;snprintf: size must be intp (size_t-as-int), got </span><span class="si">{</span><span class="n">size</span><span class="si">!r}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ty</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+        <span class="n">_validate_writer_arg_type</span><span class="p">(</span><span class="s2">&quot;snprintf&quot;</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">ty</span><span class="p">)</span>
+    <span class="n">impl</span> <span class="o">=</span> <span class="n">_build_overload_impl</span><span class="p">(</span>
+        <span class="s2">&quot;snprintf&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;buf_p&quot;</span><span class="p">,</span> <span class="s2">&quot;size&quot;</span><span class="p">,</span> <span class="s2">&quot;fmt&quot;</span><span class="p">],</span> <span class="n">args</span><span class="p">,</span> <span class="n">_snprintf_intrinsic</span><span class="p">,</span>
+        <span class="n">_get_unicode_data_p_lazy</span><span class="p">(),</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">impl</span>
+
+
+<div class="viewcode-block" id="sscanf">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings._fmtio.sscanf">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">sscanf</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">fmt</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;C-style ``sscanf(buf, fmt, *args)`` — @njit-only.</span>
+
+<span class="sd">    Args are intp output pointers (typically ``array_data_p`` of a</span>
+<span class="sd">    1-element numpy array of the right dtype). See the @njit-only</span>
+<span class="sd">    docstring on ``_sscanf_intrinsic`` for the pointer-vs-spec contract.</span>
+
+<span class="sd">    Pure-Python users: this binding raises ``NotImplementedError``. For</span>
+<span class="sd">    parsing in pure Python use ``int()``, ``float()``, or ``re``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+        <span class="s2">&quot;sscanf is @njit-only; wrap the call in @njit, or use Python&#39;s &quot;</span>
+        <span class="s2">&quot;int() / float() / re for pure-Python parsing&quot;</span>
+    <span class="p">)</span></div>
+
+
+
+<span class="nd">@overload</span><span class="p">(</span><span class="n">sscanf</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_overload_sscanf</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">fmt</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">):</span>
+    <span class="n">extract_literal_str</span><span class="p">(</span><span class="s2">&quot;sscanf&quot;</span><span class="p">,</span> <span class="n">fmt</span><span class="p">,</span> <span class="n">field</span><span class="o">=</span><span class="s2">&quot;format string&quot;</span><span class="p">)</span>  <span class="c1"># validates Literal[str]</span>
+    <span class="k">if</span> <span class="n">buf</span> <span class="o">!=</span> <span class="n">intp</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;sscanf: buf must be intp (pointer-as-int), got </span><span class="si">{</span><span class="n">buf</span><span class="si">!r}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+    <span class="c1"># sscanf args are output POINTERS — must all be intp. No auto-conversion;</span>
+    <span class="c1"># pointers don&#39;t promote. Build the impl by reusing the helper but</span>
+    <span class="c1"># without get_unicode_data_p (intp args pass through unchanged).</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">ty</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">ty</span> <span class="o">!=</span> <span class="n">intp</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;sscanf: args[</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">] must be intp (output pointer), got </span><span class="si">{</span><span class="n">ty</span><span class="si">!r}</span><span class="s2">&quot;</span>
+            <span class="p">)</span>
+    <span class="n">impl</span> <span class="o">=</span> <span class="n">_build_overload_impl</span><span class="p">(</span>
+        <span class="s2">&quot;sscanf&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;buf&quot;</span><span class="p">,</span> <span class="s2">&quot;fmt&quot;</span><span class="p">],</span> <span class="n">args</span><span class="p">,</span> <span class="n">_sscanf_intrinsic</span><span class="p">,</span>
+        <span class="n">_get_unicode_data_p_lazy</span><span class="p">(),</span>  <span class="c1"># unused (no UnicodeType in args)</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">impl</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

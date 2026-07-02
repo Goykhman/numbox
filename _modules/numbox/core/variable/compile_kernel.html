@@ -1,0 +1,1071 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.variable.compile_kernel &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/variable/compile_kernel.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.variable.compile_kernel</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.variable.compile_kernel</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Compile a `core.variable` Variable graph into fused @njit kernel(s).</span>
+
+<span class="sd">Alongside `core.work` (a structref graph), this turns a `Graph`/`CompiledGraph`</span>
+<span class="sd">into JIT-compiled straight-line code. When every formula is njit-able the</span>
+<span class="sd">whole graph becomes a single fused @njit function whose interior nodes are SSA</span>
+<span class="sd">temporaries (no per-node type info needed: numba infers every interior type</span>
+<span class="sd">from the kernel&#39;s runtime argument types). When some formulas are not</span>
+<span class="sd">njit-able, the first call detects them automatically -- numba compile errors</span>
+<span class="sd">demote a node to plain Python, runtime errors always propagate -- and a Python</span>
+<span class="sd">master orchestrates fused @njit segments around the demoted nodes, with a</span>
+<span class="sd">fusion-maximizing linearization choosing the segment boundaries. The resulting</span>
+<span class="sd">partition is described by `CompiledKernel.partition` (a PartitionReport with</span>
+<span class="sd">per-node demotion reasons); formulas with no Python fallback</span>
+<span class="sd">(cres/CompileResultWAP, CFunc, DUFunc) are always treated as jittable.</span>
+
+<span class="sd">Jitability may be either discovered at the first call (above) or declared up</span>
+<span class="sd">front. Each `Variable` carries an optional `params` (`Params(jitable, type)`).</span>
+<span class="sd">A node with no `params` is discovered exactly as before -- byte-for-byte the</span>
+<span class="sd">same behavior. When every node in the required cone is declared (and every</span>
+<span class="sd">consumed external is typed), `compile_kernel()` resolves the execution mode at</span>
+<span class="sd">build time instead of at the first call: an all-jittable graph compiles eagerly</span>
+<span class="sd">into one fused kernel (&quot;fused&quot;), a declared jit/Python mix compiles eagerly into</span>
+<span class="sd">a static segment plan (&quot;segmented&quot;) with no probing, and `CompiledKernel.partition`</span>
+<span class="sd">is populated at build (inspectable before any call). A declared `params.type`</span>
+<span class="sd">that the formula does not naturally yield is caught at build by an explicit</span>
+<span class="sd">unconstrained return-type probe -- not by binding the formula to the declared</span>
+<span class="sd">signature, which would silently coerce a convertible-but-wrong scalar type (a</span>
+<span class="sd">node declared int64 over a float-returning body would otherwise return a</span>
+<span class="sd">truncated value). Any node left undeclared (or only partially typed) keeps the</span>
+<span class="sd">runtime-discovery path; a graph that declares nothing behaves exactly as today.</span>
+
+<span class="sd">The on-disk cache is content-addressed per compiled unit (the fused kernel, or</span>
+<span class="sd">each jit segment): the digest fingerprints each formula&#39;s code, constants,</span>
+<span class="sd">default arguments, closure-cell values, referenced globals, and the kernel&#39;s</span>
+<span class="sd">effective jit flags, so a stale binary is never reused and two distinct</span>
+<span class="sd">kernels never collide. The kernel source never mentions types, so declared</span>
+<span class="sd">signatures are appended to the digest as well: two declared-type variants of one</span>
+<span class="sd">graph therefore get distinct cache anchors. A formula with no canonical</span>
+<span class="sd">fingerprint forces its unit uncached (no anchor, no numba cache) -- never</span>
+<span class="sd">reused, never wrong.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">OrderedDict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">types</span><span class="w"> </span><span class="kn">import</span> <span class="n">FunctionType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">NamedTuple</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">njit</span><span class="p">,</span> <span class="n">typeof</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.ccallback</span><span class="w"> </span><span class="kn">import</span> <span class="n">CFunc</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.dispatcher</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dispatcher</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">NumbaError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.np.ufunc.dufunc</span><span class="w"> </span><span class="kn">import</span> <span class="n">DUFunc</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span> <span class="k">as</span> <span class="n">_default_jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.variable._kernel_partition</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">PartitionReport</span><span class="p">,</span> <span class="n">Segment</span><span class="p">,</span> <span class="n">_ConePlan</span><span class="p">,</span> <span class="n">_JitStep</span><span class="p">,</span> <span class="n">_Plan</span><span class="p">,</span> <span class="n">_PyStep</span><span class="p">,</span>
+    <span class="n">_evaluate</span><span class="p">,</span> <span class="n">build_runs</span><span class="p">,</span> <span class="n">compute_boundary</span><span class="p">,</span> <span class="n">cone_liveness</span><span class="p">,</span> <span class="n">discover</span><span class="p">,</span> <span class="n">linearize</span><span class="p">,</span> <span class="n">segment_liveness</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.variable.utils</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">_assign_identifiers</span><span class="p">,</span> <span class="n">_check_formula_arity</span><span class="p">,</span> <span class="n">_validate_declared_return</span><span class="p">,</span> <span class="n">_wrap_formula</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.variable.variable</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">QUAL_SEP</span><span class="p">,</span> <span class="n">CompiledGraph</span><span class="p">,</span> <span class="n">CompiledNode</span><span class="p">,</span> <span class="n">Graph</span><span class="p">,</span> <span class="n">Variable</span><span class="p">,</span> <span class="n">make_qual_name</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.fingerprint</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">_Unfingerprintable</span><span class="p">,</span> <span class="n">_canon_value</span><span class="p">,</span> <span class="n">_fingerprint_function</span><span class="p">,</span> <span class="n">_safe_repr</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.preprocessing</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">_anchor_root</span><span class="p">,</span> <span class="n">_materialize_anchor</span><span class="p">,</span> <span class="n">_orphan_anchor_sweep</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="n">_ANCHOR_SUBDIR</span> <span class="o">=</span> <span class="s2">&quot;numbox-compile-kernel&quot;</span>
+<span class="n">_orphan_anchor_sweep</span><span class="p">(</span><span class="n">_ANCHOR_SUBDIR</span><span class="p">)</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_KernelCtx</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Build context threaded into a CompiledKernel (Python-side only; never enters njit).&quot;&quot;&quot;</span>
+    <span class="n">compiled</span><span class="p">:</span> <span class="n">Any</span>
+    <span class="n">idents</span><span class="p">:</span> <span class="nb">dict</span>
+    <span class="n">bindings_by_var</span><span class="p">:</span> <span class="nb">dict</span>
+    <span class="n">jit_options</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span>
+    <span class="n">cache</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="kc">None</span>
+    <span class="n">external</span><span class="p">:</span> <span class="nb">set</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_effective_flags</span><span class="p">(</span><span class="n">jit_options</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The non-`cache` jit flags for the kernel. Threaded into the inner formula</span>
+<span class="sd">    njit-wraps too, so a plain-Python formula computes identically whether reached</span>
+<span class="sd">    via discovery, a fused segment, or the fully fused kernel (non-default flags such</span>
+<span class="sd">    as `fastmath`/`error_model` otherwise diverge across the discovery boundary).&quot;&quot;&quot;</span>
+    <span class="n">opts</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">_default_jit_options</span><span class="p">,</span> <span class="o">**</span><span class="p">(</span><span class="n">jit_options</span> <span class="ow">or</span> <span class="p">{})}</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">opts</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span> <span class="o">!=</span> <span class="s2">&quot;cache&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_formula_fingerprint</span><span class="p">(</span><span class="n">formula</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">bool</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Behavioral identity of a formula for the cache digest.</span>
+
+<span class="sd">    Returns ``(text, cacheable)``. The text covers every value channel</span>
+<span class="sd">    numba freezes into a compiled artifact: code-object bytecode/consts/</span>
+<span class="sd">    names, default-argument values, closure-cell values, the values of</span>
+<span class="sd">    referenced module-level globals (recursing into helper functions and</span>
+<span class="sd">    dispatchers, with cycle protection), the defining module, and</span>
+<span class="sd">    dispatcher targetoptions. Builtins resolve outside ``__globals__``</span>
+<span class="sd">    and are deliberately not hashed. Any value with no canonical form</span>
+<span class="sd">    makes the formula un-fingerprintable: the returned text is then a</span>
+<span class="sd">    per-object placeholder and ``cacheable`` is False, so the kernel is</span>
+<span class="sd">    compiled without an on-disk cache -- never reused, never wrong.</span>
+<span class="sd">    CFunc formulas embed an ASLR-randomized address, so numba can never</span>
+<span class="sd">    disk-cache kernels that call them -- they are fingerprinted</span>
+<span class="sd">    deterministically but marked uncacheable.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">target</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">formula</span><span class="p">,</span> <span class="s2">&quot;py_func&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">extra</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">target</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">formula</span><span class="p">,</span> <span class="p">(</span><span class="n">DUFunc</span><span class="p">,</span> <span class="n">CFunc</span><span class="p">)):</span>
+        <span class="n">target</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">formula</span><span class="p">,</span> <span class="s2">&quot;__wrapped__&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="n">extra</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;;kind=</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">formula</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">if</span> <span class="n">target</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">target</span> <span class="o">=</span> <span class="n">formula</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="n">FunctionType</span><span class="p">):</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">_safe_repr</span><span class="p">(</span><span class="n">formula</span><span class="p">)</span><span class="si">}</span><span class="s2"> @</span><span class="si">{</span><span class="nb">id</span><span class="p">(</span><span class="n">formula</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="kc">False</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">formula</span><span class="p">,</span> <span class="n">Dispatcher</span><span class="p">):</span>
+            <span class="n">extra</span> <span class="o">+=</span> <span class="s2">&quot;;targetoptions=&quot;</span> <span class="o">+</span> <span class="n">_canon_value</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="n">formula</span><span class="o">.</span><span class="n">targetoptions</span> <span class="ow">or</span> <span class="p">{}),</span> <span class="nb">set</span><span class="p">())</span>
+        <span class="k">return</span> <span class="n">_fingerprint_function</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="nb">set</span><span class="p">())</span> <span class="o">+</span> <span class="n">extra</span><span class="p">,</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">formula</span><span class="p">,</span> <span class="n">CFunc</span><span class="p">)</span>
+    <span class="k">except</span> <span class="p">(</span><span class="n">_Unfingerprintable</span><span class="p">,</span> <span class="ne">RecursionError</span><span class="p">):</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">_safe_repr</span><span class="p">(</span><span class="n">formula</span><span class="p">)</span><span class="si">}</span><span class="s2"> @</span><span class="si">{</span><span class="nb">id</span><span class="p">(</span><span class="n">formula</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="kc">False</span>
+
+
+<span class="c1"># Build-time return-type validations are memoized by (formula fingerprint,</span>
+<span class="c1"># input types, declared type) so repeated compile_kernel() calls do not re-probe.</span>
+<span class="n">_validated_returns</span><span class="p">:</span> <span class="nb">set</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_is_typed</span><span class="p">(</span><span class="n">var</span><span class="p">:</span> <span class="n">Variable</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">var</span><span class="o">.</span><span class="n">params</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">var</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">type</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_classify</span><span class="p">(</span><span class="n">compiled</span><span class="p">:</span> <span class="n">CompiledGraph</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Label interior nodes and pick the case. Returns</span>
+<span class="sd">    (case, dispositions: {Variable: str}, consumed_externals: set[Variable]).&quot;&quot;&quot;</span>
+    <span class="n">external</span> <span class="o">=</span> <span class="p">{</span><span class="n">v</span> <span class="k">for</span> <span class="n">vs</span> <span class="ow">in</span> <span class="n">compiled</span><span class="o">.</span><span class="n">required_external_variables</span><span class="o">.</span><span class="n">values</span><span class="p">()</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">vs</span><span class="o">.</span><span class="n">values</span><span class="p">()}</span>
+    <span class="n">consumed</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="n">dispositions</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="n">compiled</span><span class="o">.</span><span class="n">ordered_nodes</span><span class="p">:</span>
+        <span class="n">var</span> <span class="o">=</span> <span class="n">node</span><span class="o">.</span><span class="n">variable</span>
+        <span class="k">if</span> <span class="n">var</span> <span class="ow">in</span> <span class="n">external</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="k">for</span> <span class="n">inp</span> <span class="ow">in</span> <span class="n">node</span><span class="o">.</span><span class="n">inputs</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">inp</span> <span class="ow">in</span> <span class="n">external</span><span class="p">:</span>
+                <span class="n">consumed</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">inp</span><span class="p">)</span>
+        <span class="n">p</span> <span class="o">=</span> <span class="n">var</span><span class="o">.</span><span class="n">params</span>
+        <span class="k">if</span> <span class="n">p</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">p</span><span class="o">.</span><span class="n">jitable</span><span class="p">:</span>
+            <span class="n">dispositions</span><span class="p">[</span><span class="n">var</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;STATIC_PY&quot;</span>
+        <span class="k">elif</span> <span class="n">p</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">p</span><span class="o">.</span><span class="n">jitable</span> <span class="ow">and</span> <span class="n">p</span><span class="o">.</span><span class="n">type</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">all</span><span class="p">(</span><span class="n">_is_typed</span><span class="p">(</span><span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">node</span><span class="o">.</span><span class="n">inputs</span><span class="p">):</span>
+            <span class="n">dispositions</span><span class="p">[</span><span class="n">var</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;STATIC_JIT&quot;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">dispositions</span><span class="p">[</span><span class="n">var</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;UNKNOWN&quot;</span>
+    <span class="n">vals</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">dispositions</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+    <span class="c1"># An empty `dispositions` is a fully-undeclared external-only graph (zero</span>
+    <span class="c1"># interior nodes); route it to &quot;C&quot; so the &quot;declares nothing = byte-for-byte</span>
+    <span class="c1"># today&quot; invariant holds (no eager build, partition None until first call).</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">dispositions</span> <span class="ow">or</span> <span class="s2">&quot;UNKNOWN&quot;</span> <span class="ow">in</span> <span class="n">vals</span> <span class="ow">or</span> <span class="nb">any</span><span class="p">(</span><span class="ow">not</span> <span class="n">_is_typed</span><span class="p">(</span><span class="n">e</span><span class="p">)</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">consumed</span><span class="p">):</span>
+        <span class="n">case</span> <span class="o">=</span> <span class="s2">&quot;C&quot;</span>
+    <span class="k">elif</span> <span class="s2">&quot;STATIC_PY&quot;</span> <span class="ow">in</span> <span class="n">vals</span><span class="p">:</span>
+        <span class="n">case</span> <span class="o">=</span> <span class="s2">&quot;B&quot;</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">case</span> <span class="o">=</span> <span class="s2">&quot;A&quot;</span>
+    <span class="k">return</span> <span class="n">case</span><span class="p">,</span> <span class="n">dispositions</span><span class="p">,</span> <span class="n">consumed</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_assemble_source</span><span class="p">(</span><span class="n">params</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]],</span> <span class="n">lines</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">out_ids</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Assemble the canonical kernel source; both the fused kernel and every</span>
+<span class="sd">    segment must share this exact shape so cache digests cannot drift.&quot;&quot;&quot;</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">ident</span> <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">ident</span> <span class="ow">in</span> <span class="n">params</span><span class="p">)</span>
+    <span class="n">ret</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;    return (</span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">out_ids</span><span class="p">)</span><span class="si">}</span><span class="s2">,)&quot;</span>
+    <span class="n">body</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">lines</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;def _kernel(</span><span class="si">{</span><span class="n">sig</span><span class="si">}</span><span class="s2">):</span><span class="se">\n</span><span class="si">{</span><span class="n">body</span><span class="si">}{</span><span class="n">ret</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_emit_lines</span><span class="p">(</span>
+    <span class="n">nodes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">CompiledNode</span><span class="p">],</span> <span class="n">skip</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="n">Variable</span><span class="p">],</span>
+    <span class="n">idents</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="n">Variable</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span> <span class="n">bindings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span> <span class="n">flags</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Emit one body line per node (excluding `skip`), filling `bindings`;</span>
+<span class="sd">    raises on a missing formula, a non-callable formula, or an arity mismatch.&quot;&quot;&quot;</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="n">nodes</span><span class="p">:</span>
+        <span class="n">var</span> <span class="o">=</span> <span class="n">node</span><span class="o">.</span><span class="n">variable</span>
+        <span class="k">if</span> <span class="n">var</span> <span class="ow">in</span> <span class="n">skip</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="n">var</span><span class="o">.</span><span class="n">formula</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">var</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span><span class="si">!r}</span><span class="s2"> has graph placement but no formula; a fused &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;kernel cannot compile it. Provide a formula, or use CompiledGraph.&quot;</span>
+            <span class="p">)</span>
+        <span class="n">temp</span> <span class="o">=</span> <span class="n">idents</span><span class="p">[</span><span class="n">var</span><span class="p">]</span>
+        <span class="n">fg</span> <span class="o">=</span> <span class="s2">&quot;f_&quot;</span> <span class="o">+</span> <span class="n">temp</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">bindings</span><span class="p">[</span><span class="n">fg</span><span class="p">]</span> <span class="o">=</span> <span class="n">_wrap_formula</span><span class="p">(</span><span class="n">var</span><span class="o">.</span><span class="n">formula</span><span class="p">,</span> <span class="n">flags</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">TypeError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">var</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span><span class="si">!r}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
+        <span class="n">_check_formula_arity</span><span class="p">(</span><span class="n">var</span><span class="o">.</span><span class="n">formula</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">node</span><span class="o">.</span><span class="n">inputs</span><span class="p">),</span> <span class="n">var</span><span class="o">.</span><span class="n">qual_name</span><span class="p">())</span>
+        <span class="n">arg_ids</span> <span class="o">=</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">idents</span><span class="p">[</span><span class="n">inp</span><span class="p">]</span> <span class="k">for</span> <span class="n">inp</span> <span class="ow">in</span> <span class="n">node</span><span class="o">.</span><span class="n">inputs</span><span class="p">)</span>
+        <span class="n">in_names</span> <span class="o">=</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">repr</span><span class="p">(</span><span class="n">inp</span><span class="o">.</span><span class="n">qual_name</span><span class="p">())</span> <span class="k">for</span> <span class="n">inp</span> <span class="ow">in</span> <span class="n">node</span><span class="o">.</span><span class="n">inputs</span><span class="p">)</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">temp</span><span class="si">}</span><span class="s2"> = </span><span class="si">{</span><span class="n">fg</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">arg_ids</span><span class="si">}</span><span class="s2">)  # </span><span class="si">{</span><span class="n">var</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span><span class="si">!r}</span><span class="s2"> = f(</span><span class="si">{</span><span class="n">in_names</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">lines</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_generate_segment_body</span><span class="p">(</span>
+    <span class="n">run_nodes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">CompiledNode</span><span class="p">],</span> <span class="n">live_in</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">Variable</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
+    <span class="n">live_out</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">Variable</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span> <span class="n">idents</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="n">Variable</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span> <span class="n">flags</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">list</span><span class="p">,</span> <span class="nb">list</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Like _generate_body, for one jit segment: live-ins are parameters,</span>
+<span class="sd">    live-outs the return tuple. Same source shape so _compile applies verbatim.</span>
+
+<span class="sd">    Returns (source, bindings, params, outputs) with params/outputs in the</span>
+<span class="sd">    caller-provided (qual-sorted) live_in/live_out order.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">[(</span><span class="n">v</span><span class="o">.</span><span class="n">source</span><span class="p">,</span> <span class="n">v</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">idents</span><span class="p">[</span><span class="n">v</span><span class="p">])</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">live_in</span><span class="p">]</span>
+    <span class="n">bindings</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="n">_emit_lines</span><span class="p">(</span><span class="n">run_nodes</span><span class="p">,</span> <span class="nb">set</span><span class="p">(),</span> <span class="n">idents</span><span class="p">,</span> <span class="n">bindings</span><span class="p">,</span> <span class="n">flags</span><span class="p">)</span>
+    <span class="n">outputs</span> <span class="o">=</span> <span class="p">[</span><span class="n">v</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">live_out</span><span class="p">]</span>
+    <span class="n">out_ids</span> <span class="o">=</span> <span class="p">[</span><span class="n">idents</span><span class="p">[</span><span class="n">v</span><span class="p">]</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">live_out</span><span class="p">]</span>
+    <span class="n">source</span> <span class="o">=</span> <span class="n">_assemble_source</span><span class="p">(</span><span class="n">params</span><span class="p">,</span> <span class="n">lines</span><span class="p">,</span> <span class="n">out_ids</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">source</span><span class="p">,</span> <span class="n">bindings</span><span class="p">,</span> <span class="n">params</span><span class="p">,</span> <span class="n">outputs</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_generate_body</span><span class="p">(</span>
+    <span class="n">compiled</span><span class="p">:</span> <span class="n">CompiledGraph</span><span class="p">,</span> <span class="n">required</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">idents</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="n">Variable</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span> <span class="n">flags</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">list</span><span class="p">,</span> <span class="nb">list</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Generate `def _kernel(...): ...` source (no decorator) + bindings.</span>
+
+<span class="sd">    Returns (source, bindings, params, outputs):</span>
+<span class="sd">      source   - the kernel def as text (function name is the literal _kernel)</span>
+<span class="sd">      bindings - {formula_global_name: njit-callable}</span>
+<span class="sd">      params   - [(source_name, var_name, identifier)] in kernel-arg order</span>
+<span class="sd">      outputs  - [requested_qual_name] in return-tuple order</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">required</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;compile_kernel requires at least one requested variable&quot;</span><span class="p">)</span>
+
+    <span class="n">external</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">vars_</span> <span class="ow">in</span> <span class="n">compiled</span><span class="o">.</span><span class="n">required_external_variables</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+        <span class="n">external</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">vars_</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+
+    <span class="n">ext_sorted</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">external</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">v</span><span class="p">:</span> <span class="n">v</span><span class="o">.</span><span class="n">qual_name</span><span class="p">())</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="p">[(</span><span class="n">v</span><span class="o">.</span><span class="n">source</span><span class="p">,</span> <span class="n">v</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">idents</span><span class="p">[</span><span class="n">v</span><span class="p">])</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">ext_sorted</span><span class="p">]</span>
+
+    <span class="n">bindings</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="n">_emit_lines</span><span class="p">(</span><span class="n">compiled</span><span class="o">.</span><span class="n">ordered_nodes</span><span class="p">,</span> <span class="n">external</span><span class="p">,</span> <span class="n">idents</span><span class="p">,</span> <span class="n">bindings</span><span class="p">,</span> <span class="n">flags</span><span class="p">)</span>
+
+    <span class="n">by_qual</span> <span class="o">=</span> <span class="p">{</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">qual_name</span><span class="p">():</span> <span class="n">n</span><span class="o">.</span><span class="n">variable</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">compiled</span><span class="o">.</span><span class="n">ordered_nodes</span><span class="p">}</span>
+    <span class="n">outputs</span><span class="p">,</span> <span class="n">out_ids</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">q</span> <span class="ow">in</span> <span class="n">required</span><span class="p">:</span>
+        <span class="n">var</span> <span class="o">=</span> <span class="n">by_qual</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">q</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">var</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Requested variable </span><span class="si">{</span><span class="n">q</span><span class="si">!r}</span><span class="s2"> is not in the compiled graph&quot;</span><span class="p">)</span>
+        <span class="n">outputs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">q</span><span class="p">)</span>
+        <span class="n">out_ids</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">idents</span><span class="p">[</span><span class="n">var</span><span class="p">])</span>
+
+    <span class="n">source</span> <span class="o">=</span> <span class="n">_assemble_source</span><span class="p">(</span><span class="n">params</span><span class="p">,</span> <span class="n">lines</span><span class="p">,</span> <span class="n">out_ids</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">source</span><span class="p">,</span> <span class="n">bindings</span><span class="p">,</span> <span class="n">params</span><span class="p">,</span> <span class="n">outputs</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_compile</span><span class="p">(</span>
+    <span class="n">source</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">bindings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span> <span class="n">jit_options</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">cache</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">declared_sigs</span><span class="p">:</span> <span class="nb">tuple</span> <span class="o">=</span> <span class="p">(),</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dispatcher</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Content-addressed compile of the kernel source into an @njit dispatcher.</span>
+
+<span class="sd">    `declared_sigs` carries the unit&#39;s declared signature(s) -- the consumed</span>
+<span class="sd">    external signature for an eager fused kernel, each segment&#39;s live-in/out</span>
+<span class="sd">    signature for an eager segment -- folded into the digest via `repr` so two</span>
+<span class="sd">    declared-type variants of one type-free source get distinct anchors. Empty</span>
+<span class="sd">    for undeclared (Case C) units.&quot;&quot;&quot;</span>
+    <span class="n">fingerprints</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">cacheable</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">for</span> <span class="n">fg</span><span class="p">,</span> <span class="n">formula</span> <span class="ow">in</span> <span class="n">bindings</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">fp</span><span class="p">,</span> <span class="n">ok</span> <span class="o">=</span> <span class="n">_formula_fingerprint</span><span class="p">(</span><span class="n">formula</span><span class="p">)</span>
+        <span class="n">fingerprints</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">fg</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">fp</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">cacheable</span> <span class="o">=</span> <span class="n">cacheable</span> <span class="ow">and</span> <span class="n">ok</span>
+    <span class="n">opts</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">_default_jit_options</span><span class="p">,</span> <span class="o">**</span><span class="p">(</span><span class="n">jit_options</span> <span class="ow">or</span> <span class="p">{})}</span>
+    <span class="k">if</span> <span class="n">cache</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">opts</span><span class="p">[</span><span class="s2">&quot;cache&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cache</span>
+    <span class="n">opts</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s2">&quot;cache&quot;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+    <span class="n">flags</span> <span class="o">=</span> <span class="n">_effective_flags</span><span class="p">(</span><span class="n">jit_options</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">flags_canon</span> <span class="o">=</span> <span class="n">_canon_value</span><span class="p">(</span><span class="n">flags</span><span class="p">,</span> <span class="nb">set</span><span class="p">())</span>
+    <span class="k">except</span> <span class="p">(</span><span class="n">_Unfingerprintable</span><span class="p">,</span> <span class="ne">RecursionError</span><span class="p">):</span>
+        <span class="n">flags_canon</span> <span class="o">=</span> <span class="nb">repr</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">flags</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="nb">repr</span><span class="p">))</span>
+        <span class="n">cacheable</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">hash_text</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="s2">&quot;ck-digest-v3</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="n">source</span>
+        <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2"># formulas:</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">fingerprints</span><span class="p">)</span>
+        <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2"># flags: &quot;</span> <span class="o">+</span> <span class="n">flags_canon</span>
+        <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2"># declared_sigs: &quot;</span> <span class="o">+</span> <span class="nb">repr</span><span class="p">([</span><span class="nb">repr</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">declared_sigs</span><span class="p">])</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">cacheable</span><span class="p">:</span>
+        <span class="n">opts</span><span class="p">[</span><span class="s2">&quot;cache&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">digest</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">(</span><span class="n">hash_text</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()[:</span><span class="mi">16</span><span class="p">]</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;_kernel_</span><span class="si">{</span><span class="n">digest</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="n">final_src</span> <span class="o">=</span> <span class="s2">&quot;@njit(**_kernel_jit_options)</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="n">source</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span>
+        <span class="s2">&quot;def _kernel(&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;def </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">(&quot;</span><span class="p">,</span> <span class="mi">1</span>
+    <span class="p">)</span>
+    <span class="n">anchor</span> <span class="o">=</span> <span class="n">_anchor_root</span><span class="p">(</span><span class="n">_ANCHOR_SUBDIR</span><span class="p">)</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;_kernel_</span><span class="si">{</span><span class="n">digest</span><span class="si">}</span><span class="s2">.py&quot;</span>
+    <span class="k">if</span> <span class="n">opts</span><span class="p">[</span><span class="s2">&quot;cache&quot;</span><span class="p">]:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">anchor</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="n">_materialize_anchor</span><span class="p">(</span><span class="n">anchor</span><span class="p">,</span> <span class="n">final_src</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;compile_kernel: cache directory unusable (</span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">); &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;compiling without an on-disk cache&quot;</span>
+            <span class="p">)</span>
+            <span class="n">opts</span><span class="p">[</span><span class="s2">&quot;cache&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="nb">compile</span><span class="p">(</span><span class="n">final_src</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">anchor</span><span class="p">),</span> <span class="s2">&quot;exec&quot;</span><span class="p">)</span>
+    <span class="c1"># __name__ must be an importable module so numba can rebuild the cached</span>
+    <span class="c1"># overload&#39;s environment in another process (importlib.import_module needs</span>
+    <span class="c1"># a real name, not None); mirrors make_graph / make_structref.</span>
+    <span class="n">ns</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">bindings</span><span class="p">,</span> <span class="s2">&quot;njit&quot;</span><span class="p">:</span> <span class="n">njit</span><span class="p">,</span> <span class="s2">&quot;_kernel_jit_options&quot;</span><span class="p">:</span> <span class="n">opts</span><span class="p">,</span> <span class="s2">&quot;__name__&quot;</span><span class="p">:</span> <span class="vm">__name__</span><span class="p">}</span>
+    <span class="n">exec</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>  <span class="c1"># nosec B102 - JIT codegen of internal source</span>
+    <span class="k">return</span> <span class="n">ns</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="CompiledKernel">
+<a class="viewcode-back" href="../../../../numbox.core.variable.html#numbox.core.variable.compile_kernel.CompiledKernel">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">CompiledKernel</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A fused @njit kernel compiled from a Variable graph.</span>
+
+<span class="sd">    Attributes::</span>
+
+<span class="sd">      kernel      - hot-path callable: resolver before the first call, the</span>
+<span class="sd">                    bare numba dispatcher once fused, the segmented master</span>
+<span class="sd">                    otherwise. Positional external args (in `params` order)</span>
+<span class="sd">                    -&gt; tuple (in `outputs` order).</span>
+<span class="sd">      recompute   - value-only incremental refresh of only the cone affected</span>
+<span class="sd">                    by a change, over a store seeded by a prior `kernel` call;</span>
+<span class="sd">                    returns a tuple in `outputs` order (see `recompute`).</span>
+<span class="sd">      params      - external input qual_names, kernel-argument order.</span>
+<span class="sd">      outputs     - requested variable qual_names, return-tuple order.</span>
+<span class="sd">      source      - generated kernel source text.</span>
+<span class="sd">      identifiers - {qual_name: temp identifier} for inspection.</span>
+<span class="sd">      partition   - PartitionReport describing what runs where. None until the</span>
+<span class="sd">                    first call for undeclared graphs; set at build time for</span>
+<span class="sd">                    fully-declared (eager) graphs.</span>
+<span class="sd">      is_declared - True when the graph was fully declared and the mode resolved</span>
+<span class="sd">                    eagerly at build; False for a discovery (undeclared) kernel.</span>
+<span class="sd">                    Declared kernels enforce the `recompute()` type contract</span>
+<span class="sd">                    instead of re-discovering.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">kernel</span><span class="p">:</span> <span class="n">Dispatcher</span><span class="p">,</span> <span class="n">params</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]],</span>
+                 <span class="n">outputs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">source</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">identifiers</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span>
+                 <span class="n">ctx</span><span class="p">:</span> <span class="n">_KernelCtx</span><span class="p">,</span> <span class="n">required_vars</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Variable</span><span class="p">],</span>
+                 <span class="n">external_vars</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Variable</span><span class="p">],</span> <span class="n">is_declared</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_fused</span> <span class="o">=</span> <span class="n">kernel</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">is_declared</span> <span class="o">=</span> <span class="n">is_declared</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span> <span class="o">=</span> <span class="s2">&quot;virgin&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_plan</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">partition</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ctx</span> <span class="o">=</span> <span class="n">ctx</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_param_keys</span> <span class="o">=</span> <span class="p">[(</span><span class="n">src</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span> <span class="k">for</span> <span class="n">src</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">params</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">params</span> <span class="o">=</span> <span class="p">[</span><span class="n">make_qual_name</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span> <span class="k">for</span> <span class="n">src</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">params</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">outputs</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">outputs</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">source</span> <span class="o">=</span> <span class="n">source</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">identifiers</span> <span class="o">=</span> <span class="n">identifiers</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_required_vars</span> <span class="o">=</span> <span class="n">required_vars</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_external_vars</span> <span class="o">=</span> <span class="n">external_vars</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_store</span> <span class="o">=</span> <span class="kc">None</span>          <span class="c1"># {Variable: value}; seeded on first recompute</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_demoted</span> <span class="o">=</span> <span class="p">{}</span>          <span class="c1"># {Variable: reason}; frozen demotion verdicts</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_last_args</span> <span class="o">=</span> <span class="kc">None</span>      <span class="c1"># external args of the most recent full resolution</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_sources</span> <span class="o">=</span> <span class="kc">None</span>        <span class="c1"># change-source Variables (externals; may grow on interior override)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_boundary</span> <span class="o">=</span> <span class="kc">None</span>       <span class="c1"># set[Variable]; persisted-node set, computed lazily</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cone_cache</span> <span class="o">=</span> <span class="n">OrderedDict</span><span class="p">()</span>  <span class="c1"># LRU cache of cone sub-plans, keyed on cone+live-in</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cone_cap</span> <span class="o">=</span> <span class="mi">64</span>         <span class="c1"># max distinct cone plans retained before LRU eviction</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">kernel</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Callable</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span> <span class="o">==</span> <span class="s2">&quot;fused&quot;</span><span class="p">:</span>
+            <span class="c1"># Fused is permanent: later signatures go through numba&#39;s own</span>
+            <span class="c1"># dispatch, and a typing failure there raises -- no segmentation</span>
+            <span class="c1"># fallback from fused mode.</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fused</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span> <span class="o">==</span> <span class="s2">&quot;fused-pending&quot;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fused_pending_call</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span> <span class="o">==</span> <span class="s2">&quot;segmented&quot;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_run_segmented</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_resolve_and_call</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_fused_pending_call</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">:</span>
+        <span class="c1"># A caller may hold a reference to this bound method across calls; once</span>
+        <span class="c1"># the mode has flipped to &quot;fused&quot;, go straight to the dispatcher without</span>
+        <span class="c1"># re-stamping _last_args (the first call already captured the seeding args).</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span> <span class="o">==</span> <span class="s2">&quot;fused&quot;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fused</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">)</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fused</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_last_args</span> <span class="o">=</span> <span class="n">args</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span> <span class="o">=</span> <span class="s2">&quot;fused&quot;</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_fused_report</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">PartitionReport</span><span class="p">:</span>
+        <span class="n">compiled</span><span class="p">,</span> <span class="n">external</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ctx</span><span class="o">.</span><span class="n">compiled</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ctx</span><span class="o">.</span><span class="n">external</span>
+        <span class="n">nodes</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span>
+            <span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">compiled</span><span class="o">.</span><span class="n">ordered_nodes</span>
+            <span class="k">if</span> <span class="n">n</span><span class="o">.</span><span class="n">variable</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">external</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">PartitionReport</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s2">&quot;fused&quot;</span><span class="p">,</span> <span class="n">segments</span><span class="o">=</span><span class="p">(</span><span class="n">Segment</span><span class="p">(</span>
+            <span class="n">kind</span><span class="o">=</span><span class="s2">&quot;jit&quot;</span><span class="p">,</span> <span class="n">nodes</span><span class="o">=</span><span class="n">nodes</span><span class="p">,</span> <span class="n">inputs</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">params</span><span class="p">),</span>
+            <span class="n">outputs</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">outputs</span><span class="p">),</span> <span class="n">source</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="p">,</span> <span class="n">reasons</span><span class="o">=</span><span class="p">{},</span>
+        <span class="p">),))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_resolve_and_call</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span> <span class="o">!=</span> <span class="s2">&quot;virgin&quot;</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">kernel</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">arg_types</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">typeof</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">args</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">ValueError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">):</span>
+            <span class="n">arg_types</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">arg_types</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_fused</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="n">arg_types</span><span class="p">)</span>
+            <span class="k">except</span> <span class="n">NumbaError</span><span class="p">:</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_discover_and_run</span><span class="p">(</span><span class="n">args</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_last_args</span> <span class="o">=</span> <span class="n">args</span>
+                <span class="k">return</span> <span class="n">result</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span> <span class="o">=</span> <span class="s2">&quot;fused&quot;</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">partition</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fused_report</span><span class="p">()</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fused</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_last_args</span> <span class="o">=</span> <span class="n">args</span>
+            <span class="k">return</span> <span class="n">result</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_discover_and_run</span><span class="p">(</span><span class="n">args</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_last_args</span> <span class="o">=</span> <span class="n">args</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_run_segmented</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_plan</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">args</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">NumbaError</span><span class="p">:</span>
+            <span class="c1"># Deliberately broad: a segment failing to compile for new input</span>
+            <span class="c1"># types triggers re-discovery. A NumbaError raised inside a</span>
+            <span class="c1"># python-step formula re-raises from re-discovery&#39;s own Python</span>
+            <span class="c1"># evaluation of the same args, so nothing is masked. Declared</span>
+            <span class="c1"># kernels do not re-discover (that would overwrite the authoritative</span>
+            <span class="c1"># _demoted); an off-contract input re-raises instead.</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">is_declared</span><span class="p">:</span>
+                <span class="k">raise</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_discover_and_run</span><span class="p">(</span><span class="n">args</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_args</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_last_args</span> <span class="o">=</span> <span class="n">args</span>
+        <span class="k">return</span> <span class="n">result</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_discover_and_run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">args</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">:</span>
+        <span class="n">compiled</span><span class="p">,</span> <span class="n">idents</span><span class="p">,</span> <span class="n">bindings_by_var</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">,</span> <span class="n">cache</span><span class="p">,</span> <span class="n">external</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ctx</span>
+        <span class="n">flags</span> <span class="o">=</span> <span class="n">_effective_flags</span><span class="p">(</span><span class="n">jit_options</span><span class="p">)</span>
+        <span class="n">values</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_external_vars</span><span class="p">,</span> <span class="n">args</span><span class="p">))</span>
+        <span class="n">demoted</span> <span class="o">=</span> <span class="n">discover</span><span class="p">(</span><span class="n">compiled</span><span class="o">.</span><span class="n">ordered_nodes</span><span class="p">,</span> <span class="n">external</span><span class="p">,</span> <span class="n">values</span><span class="p">,</span> <span class="n">bindings_by_var</span><span class="p">,</span> <span class="n">flags</span><span class="p">)</span>
+        <span class="n">nodes</span> <span class="o">=</span> <span class="p">[</span><span class="n">n</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">compiled</span><span class="o">.</span><span class="n">ordered_nodes</span> <span class="k">if</span> <span class="n">n</span><span class="o">.</span><span class="n">variable</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">external</span><span class="p">]</span>
+        <span class="n">order</span> <span class="o">=</span> <span class="n">linearize</span><span class="p">(</span><span class="n">nodes</span><span class="p">,</span> <span class="nb">set</span><span class="p">(</span><span class="n">demoted</span><span class="p">))</span>
+        <span class="n">runs</span> <span class="o">=</span> <span class="n">build_runs</span><span class="p">(</span><span class="n">order</span><span class="p">,</span> <span class="nb">set</span><span class="p">(</span><span class="n">demoted</span><span class="p">))</span>
+        <span class="n">steps</span><span class="p">,</span> <span class="n">segments</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">kind</span><span class="p">,</span> <span class="n">run_nodes</span> <span class="ow">in</span> <span class="n">runs</span><span class="p">:</span>
+            <span class="n">quals</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">run_nodes</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;python&quot;</span><span class="p">:</span>
+                <span class="n">ins</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+                <span class="n">produced</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+                <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">run_nodes</span><span class="p">:</span>
+                    <span class="n">ins</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">n</span><span class="o">.</span><span class="n">inputs</span> <span class="k">if</span> <span class="n">i</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">produced</span><span class="p">)</span>
+                    <span class="n">produced</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="p">)</span>
+                    <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_PyStep</span><span class="p">(</span>
+                        <span class="n">var</span><span class="o">=</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="p">,</span>
+                        <span class="n">py_callable</span><span class="o">=</span><span class="nb">getattr</span><span class="p">(</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">formula</span><span class="p">,</span> <span class="s2">&quot;py_func&quot;</span><span class="p">,</span> <span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">formula</span><span class="p">),</span>
+                        <span class="n">in_vars</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">n</span><span class="o">.</span><span class="n">inputs</span><span class="p">),</span>
+                    <span class="p">))</span>
+                <span class="n">reasons</span> <span class="o">=</span> <span class="p">{</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">qual_name</span><span class="p">():</span> <span class="n">demoted</span><span class="p">[</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="p">]</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">run_nodes</span><span class="p">}</span>
+                <span class="n">key</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">v</span><span class="p">:</span> <span class="n">v</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span>   <span class="c1"># noqa: E731 - tiny local sort key</span>
+                <span class="n">segments</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">Segment</span><span class="p">(</span>
+                    <span class="n">kind</span><span class="o">=</span><span class="s2">&quot;python&quot;</span><span class="p">,</span> <span class="n">nodes</span><span class="o">=</span><span class="n">quals</span><span class="p">,</span>
+                    <span class="n">inputs</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">ins</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">key</span><span class="p">)),</span>
+                    <span class="n">outputs</span><span class="o">=</span><span class="n">quals</span><span class="p">,</span> <span class="n">source</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">reasons</span><span class="o">=</span><span class="n">reasons</span><span class="p">,</span>
+                <span class="p">))</span>
+                <span class="k">continue</span>
+            <span class="n">live_in</span><span class="p">,</span> <span class="n">live_out</span> <span class="o">=</span> <span class="n">segment_liveness</span><span class="p">(</span>
+                <span class="n">run_nodes</span><span class="p">,</span> <span class="n">external</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_required_vars</span><span class="p">,</span> <span class="n">order</span>
+            <span class="p">)</span>
+            <span class="n">src</span><span class="p">,</span> <span class="n">seg_bindings</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">_generate_segment_body</span><span class="p">(</span>
+                <span class="n">run_nodes</span><span class="p">,</span> <span class="n">live_in</span><span class="p">,</span> <span class="n">live_out</span><span class="p">,</span> <span class="n">idents</span><span class="p">,</span> <span class="n">flags</span>
+            <span class="p">)</span>
+            <span class="n">disp</span> <span class="o">=</span> <span class="n">_compile</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">seg_bindings</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">,</span> <span class="n">cache</span><span class="p">)</span>
+            <span class="n">disp</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="nb">tuple</span><span class="p">(</span><span class="n">typeof</span><span class="p">(</span><span class="n">values</span><span class="p">[</span><span class="n">v</span><span class="p">])</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">live_in</span><span class="p">))</span>
+            <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_JitStep</span><span class="p">(</span><span class="n">dispatcher</span><span class="o">=</span><span class="n">disp</span><span class="p">,</span> <span class="n">in_vars</span><span class="o">=</span><span class="n">live_in</span><span class="p">,</span> <span class="n">out_vars</span><span class="o">=</span><span class="n">live_out</span><span class="p">))</span>
+            <span class="n">segments</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">Segment</span><span class="p">(</span>
+                <span class="n">kind</span><span class="o">=</span><span class="s2">&quot;jit&quot;</span><span class="p">,</span> <span class="n">nodes</span><span class="o">=</span><span class="n">quals</span><span class="p">,</span>
+                <span class="n">inputs</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">live_in</span><span class="p">),</span>
+                <span class="n">outputs</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">live_out</span><span class="p">),</span>
+                <span class="n">source</span><span class="o">=</span><span class="n">src</span><span class="p">,</span> <span class="n">reasons</span><span class="o">=</span><span class="p">{},</span>
+            <span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_plan</span> <span class="o">=</span> <span class="n">_Plan</span><span class="p">(</span>
+            <span class="n">steps</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">steps</span><span class="p">),</span>
+            <span class="n">external_vars</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_external_vars</span><span class="p">),</span>
+            <span class="n">output_vars</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_required_vars</span><span class="p">),</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_store</span> <span class="o">=</span> <span class="n">values</span>              <span class="c1"># seed store from the already-computed values</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_demoted</span> <span class="o">=</span> <span class="n">demoted</span>           <span class="c1"># freeze demotion verdicts for cone builds</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span> <span class="o">=</span> <span class="s2">&quot;segmented&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">partition</span> <span class="o">=</span> <span class="n">PartitionReport</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s2">&quot;segmented&quot;</span><span class="p">,</span> <span class="n">segments</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">segments</span><span class="p">))</span>
+        <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">values</span><span class="p">[</span><span class="n">v</span><span class="p">]</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_required_vars</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_ensure_store</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_store</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mode</span> <span class="o">==</span> <span class="s2">&quot;virgin&quot;</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_args</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">&quot;CompiledKernel.recompute requires a prior full call: call the kernel &quot;</span>
+                <span class="s2">&quot;once with the current inputs to seed the value store before recompute().&quot;</span>
+            <span class="p">)</span>
+        <span class="n">compiled</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">bindings_by_var</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">,</span> <span class="n">cache</span><span class="p">,</span> <span class="n">external</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ctx</span>
+        <span class="n">flags</span> <span class="o">=</span> <span class="n">_effective_flags</span><span class="p">(</span><span class="n">jit_options</span><span class="p">)</span>
+        <span class="c1"># A fused first call discarded interior values, so seed by evaluating the</span>
+        <span class="c1"># whole graph once from the captured args. Fused-graph formulas are njit-pure,</span>
+        <span class="c1"># so the one extra evaluation is observationally safe. Seeding only the</span>
+        <span class="c1"># persisted-node closure instead is a possible future optimization.</span>
+        <span class="n">values</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_external_vars</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_last_args</span><span class="p">))</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">is_declared</span><span class="p">:</span>
+            <span class="c1"># Seed interior values with the frozen declared demotion set; re-running</span>
+            <span class="c1"># discover would re-probe and could disagree with the declarations.</span>
+            <span class="n">_evaluate</span><span class="p">(</span><span class="n">compiled</span><span class="o">.</span><span class="n">ordered_nodes</span><span class="p">,</span> <span class="n">external</span><span class="p">,</span> <span class="n">values</span><span class="p">,</span> <span class="n">bindings_by_var</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_demoted</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_demoted</span> <span class="o">=</span> <span class="n">discover</span><span class="p">(</span><span class="n">compiled</span><span class="o">.</span><span class="n">ordered_nodes</span><span class="p">,</span> <span class="n">external</span><span class="p">,</span> <span class="n">values</span><span class="p">,</span> <span class="n">bindings_by_var</span><span class="p">,</span> <span class="n">flags</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_store</span> <span class="o">=</span> <span class="n">values</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_apply_changes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">changed</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Write changed values into the store; return the set of changed Variables.</span>
+<span class="sd">        External names resolve via required_external_variables; interior names via</span>
+<span class="sd">        ordered_nodes (overriding an interior node expands the change-source set).&quot;&quot;&quot;</span>
+        <span class="n">compiled</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ctx</span><span class="o">.</span><span class="n">compiled</span>
+        <span class="c1"># First pass: resolve every (src, name) -&gt; var and run the declared</span>
+        <span class="c1"># contract check, collecting (var, val, is_external). If ANY check</span>
+        <span class="c1"># fails, raise here -- before mutating _store -- so a caught-and-retried</span>
+        <span class="c1"># ValueError cannot leave the store partially written.</span>
+        <span class="n">resolved</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">src</span><span class="p">,</span> <span class="n">vals</span> <span class="ow">in</span> <span class="n">changed</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">val</span> <span class="ow">in</span> <span class="n">vals</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">var</span> <span class="o">=</span> <span class="n">compiled</span><span class="o">.</span><span class="n">required_external_variables</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+                <span class="n">is_external</span> <span class="o">=</span> <span class="n">var</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                <span class="k">if</span> <span class="n">var</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">qual</span> <span class="o">=</span> <span class="n">make_qual_name</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
+                    <span class="n">var</span> <span class="o">=</span> <span class="nb">next</span><span class="p">((</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">compiled</span><span class="o">.</span><span class="n">ordered_nodes</span>
+                                <span class="k">if</span> <span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span> <span class="o">==</span> <span class="n">qual</span><span class="p">),</span> <span class="kc">None</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">var</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">qual</span><span class="si">}</span><span class="s2"> is not in the calculation path, update has no effect.&quot;</span><span class="p">)</span>
+                        <span class="k">continue</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">is_declared</span> <span class="ow">and</span> <span class="n">_is_typed</span><span class="p">(</span><span class="n">var</span><span class="p">):</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="n">got</span> <span class="o">=</span> <span class="n">typeof</span><span class="p">(</span><span class="n">val</span><span class="p">)</span>
+                        <span class="n">ok</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fused</span><span class="o">.</span><span class="n">typingctx</span><span class="o">.</span><span class="n">can_convert</span><span class="p">(</span><span class="n">got</span><span class="p">,</span> <span class="n">var</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">type</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                    <span class="k">except</span> <span class="p">(</span><span class="ne">ValueError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">):</span>
+                        <span class="n">ok</span><span class="p">,</span> <span class="n">got</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="n">val</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">ok</span><span class="p">:</span>
+                        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                            <span class="sa">f</span><span class="s2">&quot;declared type </span><span class="si">{</span><span class="n">var</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">type</span><span class="si">}</span><span class="s2">, got </span><span class="si">{</span><span class="n">got</span><span class="si">}</span><span class="s2"> for </span><span class="si">{</span><span class="n">var</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="n">resolved</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">var</span><span class="p">,</span> <span class="n">val</span><span class="p">,</span> <span class="n">is_external</span><span class="p">))</span>
+        <span class="c1"># Second pass: writes, changed_vars, and interior-override bookkeeping.</span>
+        <span class="n">changed_vars</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="n">new_interior_sources</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">var</span><span class="p">,</span> <span class="n">val</span><span class="p">,</span> <span class="n">is_external</span> <span class="ow">in</span> <span class="n">resolved</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_store</span><span class="p">[</span><span class="n">var</span><span class="p">]</span> <span class="o">=</span> <span class="n">val</span>
+            <span class="n">changed_vars</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">var</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">is_external</span> <span class="ow">and</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_sources</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">var</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sources</span><span class="p">):</span>
+                <span class="n">new_interior_sources</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">var</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">new_interior_sources</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_expand_sources</span><span class="p">(</span><span class="n">new_interior_sources</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">changed_vars</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_expand_sources</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">new_sources</span><span class="p">:</span> <span class="nb">set</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Add overridden interior nodes to the change-source set, force the</span>
+<span class="sd">        persisted-node boundary to recompute, and invalidate cached cone plans</span>
+<span class="sd">        (their boundaries have changed).&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sources</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_sources</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_external_vars</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_sources</span> <span class="o">|=</span> <span class="n">new_sources</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_boundary</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cone_cache</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_ensure_boundary</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_boundary</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="n">compiled</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ctx</span><span class="o">.</span><span class="n">compiled</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sources</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_sources</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_external_vars</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_boundary</span> <span class="o">=</span> <span class="n">compute_boundary</span><span class="p">(</span>
+            <span class="n">compiled</span><span class="o">.</span><span class="n">ordered_nodes</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sources</span><span class="p">,</span> <span class="nb">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_required_vars</span><span class="p">)</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_cone_live_in_type</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">v</span><span class="p">:</span> <span class="n">Variable</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;The numba type to compile a cone jit-segment live-in against. For a</span>
+<span class="sd">        declared kernel whose live-in declares a type, use the declared type (so the</span>
+<span class="sd">        cone matches the eager build&#39;s signature); otherwise fall back to the stored</span>
+<span class="sd">        value&#39;s runtime type, as the undeclared path always does.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">is_declared</span> <span class="ow">and</span> <span class="n">_is_typed</span><span class="p">(</span><span class="n">v</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">v</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">type</span>
+        <span class="k">return</span> <span class="n">typeof</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_store</span><span class="p">[</span><span class="n">v</span><span class="p">])</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_build_cone_plan</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">affected</span><span class="p">:</span> <span class="nb">list</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">_ConePlan</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Linearize the affected cone, split into runs, and compile each jit run</span>
+<span class="sd">        against its live-in types (declared types for a declared kernel, else the</span>
+<span class="sd">        store&#39;s current runtime types; Python runs become _PyStep chains).</span>
+<span class="sd">        `_demoted` is restricted to cone nodes so only nodes demoted at seed time stay</span>
+<span class="sd">        Python. Called by `_cone_plan_cached` on a cache miss.&quot;&quot;&quot;</span>
+        <span class="n">compiled</span><span class="p">,</span> <span class="n">idents</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">,</span> <span class="n">cache</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ctx</span>
+        <span class="n">flags</span> <span class="o">=</span> <span class="n">_effective_flags</span><span class="p">(</span><span class="n">jit_options</span><span class="p">)</span>
+        <span class="n">cone_vars</span> <span class="o">=</span> <span class="p">{</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">affected</span><span class="p">}</span>
+        <span class="n">demoted_in_cone</span> <span class="o">=</span> <span class="p">{</span><span class="n">v</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_demoted</span> <span class="k">if</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">cone_vars</span><span class="p">}</span>
+        <span class="n">order</span> <span class="o">=</span> <span class="n">linearize</span><span class="p">(</span><span class="n">affected</span><span class="p">,</span> <span class="n">demoted_in_cone</span><span class="p">)</span>
+        <span class="n">runs</span> <span class="o">=</span> <span class="n">build_runs</span><span class="p">(</span><span class="n">order</span><span class="p">,</span> <span class="n">demoted_in_cone</span><span class="p">)</span>
+        <span class="n">steps</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">kind</span><span class="p">,</span> <span class="n">run_nodes</span> <span class="ow">in</span> <span class="n">runs</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;python&quot;</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">run_nodes</span><span class="p">:</span>
+                    <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_PyStep</span><span class="p">(</span>
+                        <span class="n">var</span><span class="o">=</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="p">,</span>
+                        <span class="n">py_callable</span><span class="o">=</span><span class="nb">getattr</span><span class="p">(</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">formula</span><span class="p">,</span> <span class="s2">&quot;py_func&quot;</span><span class="p">,</span> <span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">formula</span><span class="p">),</span>
+                        <span class="n">in_vars</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">n</span><span class="o">.</span><span class="n">inputs</span><span class="p">),</span>
+                    <span class="p">))</span>
+                <span class="k">continue</span>
+            <span class="n">live_in</span><span class="p">,</span> <span class="n">live_out</span> <span class="o">=</span> <span class="n">cone_liveness</span><span class="p">(</span><span class="n">run_nodes</span><span class="p">,</span> <span class="n">order</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_required_vars</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_boundary</span><span class="p">)</span>
+            <span class="n">src</span><span class="p">,</span> <span class="n">seg_bindings</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">_generate_segment_body</span><span class="p">(</span><span class="n">run_nodes</span><span class="p">,</span> <span class="n">live_in</span><span class="p">,</span> <span class="n">live_out</span><span class="p">,</span> <span class="n">idents</span><span class="p">,</span> <span class="n">flags</span><span class="p">)</span>
+            <span class="n">disp</span> <span class="o">=</span> <span class="n">_compile</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">seg_bindings</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">,</span> <span class="n">cache</span><span class="p">)</span>
+            <span class="n">disp</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="nb">tuple</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_cone_live_in_type</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">live_in</span><span class="p">))</span>
+            <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_JitStep</span><span class="p">(</span><span class="n">dispatcher</span><span class="o">=</span><span class="n">disp</span><span class="p">,</span> <span class="n">in_vars</span><span class="o">=</span><span class="n">live_in</span><span class="p">,</span> <span class="n">out_vars</span><span class="o">=</span><span class="n">live_out</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">_ConePlan</span><span class="p">(</span><span class="n">steps</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">steps</span><span class="p">))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_cone_key</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">affected</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">frozenset</span><span class="p">,</span> <span class="nb">frozenset</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Cache key for a cone sub-plan: (cone node qual_names, live-in boundary</span>
+<span class="sd">        qual_names). Including the live-in boundary keeps an external change and an</span>
+<span class="sd">        interior override that share a cone from colliding (their boundaries differ).&quot;&quot;&quot;</span>
+        <span class="n">cone_vars</span> <span class="o">=</span> <span class="p">{</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">affected</span><span class="p">}</span>
+        <span class="n">live_in_boundary</span> <span class="o">=</span> <span class="p">{</span><span class="n">inp</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">affected</span> <span class="k">for</span> <span class="n">inp</span> <span class="ow">in</span> <span class="n">n</span><span class="o">.</span><span class="n">inputs</span> <span class="k">if</span> <span class="n">inp</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">cone_vars</span><span class="p">}</span>
+        <span class="k">return</span> <span class="p">(</span><span class="nb">frozenset</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">cone_vars</span><span class="p">),</span>
+                <span class="nb">frozenset</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">live_in_boundary</span><span class="p">))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_cone_plan_cached</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">affected</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">_ConePlan</span><span class="p">:</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cone_key</span><span class="p">(</span><span class="n">affected</span><span class="p">)</span>
+        <span class="n">plan</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cone_cache</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">plan</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cone_cache</span><span class="o">.</span><span class="n">move_to_end</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">plan</span>
+        <span class="n">plan</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_build_cone_plan</span><span class="p">(</span><span class="n">affected</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cone_cache</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">plan</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_cone_cache</span><span class="p">)</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cone_cap</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cone_cache</span><span class="o">.</span><span class="n">popitem</span><span class="p">(</span><span class="n">last</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">plan</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_flush_and_reseed</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Drop the cone-plan cache and re-seed the store + boundary from the last full</span>
+<span class="sd">        call. Used to recover when a boundary live-in&#39;s type change makes a cached cone</span>
+<span class="sd">        dispatcher fail to compile.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cone_cache</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_store</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_boundary</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_store</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_boundary</span><span class="p">()</span>
+
+<div class="viewcode-block" id="CompiledKernel.recompute">
+<a class="viewcode-back" href="../../../../numbox.core.variable.html#numbox.core.variable.compile_kernel.CompiledKernel.recompute">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">recompute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">changed</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Incrementally re-evaluate only the cone affected by `changed`.</span>
+
+<span class="sd">        Mirrors :meth:`numbox.core.variable.variable.CompiledGraph.recompute`: this</span>
+<span class="sd">        is a value-only refresh, not a recompile. `changed` is</span>
+<span class="sd">        ``{source: {name: value}}``; the returned tuple is in `outputs` order. The</span>
+<span class="sd">        same variables may carry different values across calls, but their numba types</span>
+<span class="sd">        must stay the same as the seeding call (a type change is recovered from once,</span>
+<span class="sd">        see below, but the contract is same-types).</span>
+
+<span class="sd">        Precondition: a prior full call (``kernel(...)`` / ``execute(...)``) must have</span>
+<span class="sd">        seeded the value store. Calling `recompute` first raises ``RuntimeError``.</span>
+
+<span class="sd">        What it does: it writes the changed values into a persistent value store,</span>
+<span class="sd">        collects the downstream cone of the changed nodes, and re-fuses just that cone</span>
+<span class="sd">        -- reading every unchanged input from the store. The cone sub-plan is compiled</span>
+<span class="sd">        on first use and kept in a bounded LRU cache keyed on the cone and its live-in</span>
+<span class="sd">        boundary, so a recurring change pattern reuses its compiled plan without</span>
+<span class="sd">        re-fusing. Nodes that were demoted to plain Python at seed time stay Python in</span>
+<span class="sd">        the cone; the jittable remainder fuses into ``@njit`` segments.</span>
+
+<span class="sd">        Interior overrides: a `changed` name may resolve to an interior (computed) node</span>
+<span class="sd">        rather than an external input -- mirroring the interpreted path. Its value is</span>
+<span class="sd">        overridden in the store and only its downstream cone recomputes; the overridden</span>
+<span class="sd">        node&#39;s own formula is *not* re-run -- unless the node is itself downstream of</span>
+<span class="sd">        another changed input in the same call, in which case graph priority applies and</span>
+<span class="sd">        it is recomputed from its formula. The first override of a not-yet-seen interior</span>
+<span class="sd">        node expands the change-source set and rebuilds the persisted-node boundary (and</span>
+<span class="sd">        invalidates cached cone plans, whose boundaries have shifted).</span>
+
+<span class="sd">        Limitations:</span>
+
+<span class="sd">        - Do not interleave input-changing ``kernel(...)`` throughput calls between</span>
+<span class="sd">          `recompute` calls. `recompute` is the stateful entry point: the store is</span>
+<span class="sd">          seeded once, and a throughput call does not update it, so a subsequent</span>
+<span class="sd">          `recompute` would read stale unchanged values. Use `recompute` for the</span>
+<span class="sd">          incremental workflow and the bare kernel for independent one-shot calls.</span>
+<span class="sd">        - An interior plain-Python (demoted) node must return a stable numba type across</span>
+<span class="sd">          recomputes. The same-types contract extends to demoted outputs: a demoted</span>
+<span class="sd">          node whose output type drifts between recomputes is not supported.</span>
+
+<span class="sd">        On a live-in type change a cached cone dispatcher fails to compile; the whole</span>
+<span class="sd">        cone-plan cache is flushed once, the store re-seeded from the last full call, the</span>
+<span class="sd">        change re-applied, and the cone rebuilt against the new types.</span>
+
+<span class="sd">        Declared kernels enforce a contract instead of recovering. For a kernel</span>
+<span class="sd">        built from a fully-declared graph, a changed value is checked for numba</span>
+<span class="sd">        assignability to the node&#39;s declared type: a value numba cannot assign to</span>
+<span class="sd">        the declared type raises a crisp ``declared type X, got Y`` error, while a</span>
+<span class="sd">        benign difference numba accepts -- a C-contiguous array against an</span>
+<span class="sd">        ``&#39;A&#39;``-layout array declaration, or a safe scalar promotion -- is accepted.</span>
+<span class="sd">        The check is convertibility, not type identity, and is scoped to declared</span>
+<span class="sd">        (eager) kernels; an individually-declared node inside an otherwise</span>
+<span class="sd">        discovered kernel keeps the flush-and-reseed recovery above.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_store</span><span class="p">()</span>
+        <span class="n">changed_vars</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_apply_changes</span><span class="p">(</span><span class="n">changed</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">changed_vars</span><span class="p">:</span>
+            <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_store</span><span class="p">[</span><span class="n">v</span><span class="p">]</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_required_vars</span><span class="p">)</span>
+        <span class="n">compiled</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ctx</span><span class="o">.</span><span class="n">compiled</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_boundary</span><span class="p">()</span>
+        <span class="n">affected</span> <span class="o">=</span> <span class="n">compiled</span><span class="o">.</span><span class="n">_collect_affected</span><span class="p">(</span><span class="n">changed_vars</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">affected</span><span class="p">:</span>
+            <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_store</span><span class="p">[</span><span class="n">v</span><span class="p">]</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_required_vars</span><span class="p">)</span>
+        <span class="n">plan</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cone_plan_cached</span><span class="p">(</span><span class="n">affected</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">plan</span><span class="o">.</span><span class="n">run_into</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_store</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">NumbaError</span><span class="p">:</span>
+            <span class="c1"># A live-in type change invalidates every compiled cone plan; flush</span>
+            <span class="c1"># the whole cache once, reseed the store, re-apply the change against</span>
+            <span class="c1"># the fresh store, and rebuild against the new types. Declared kernels</span>
+            <span class="c1"># fix every type by contract, so the (d) contract check already</span>
+            <span class="c1"># rejected off-contract types crisply; flushing here would be pointless.</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">is_declared</span><span class="p">:</span>
+                <span class="k">raise</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_flush_and_reseed</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_apply_changes</span><span class="p">(</span><span class="n">changed</span><span class="p">)</span>
+            <span class="n">affected</span> <span class="o">=</span> <span class="n">compiled</span><span class="o">.</span><span class="n">_collect_affected</span><span class="p">(</span><span class="n">changed_vars</span><span class="p">)</span>
+            <span class="n">plan</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cone_plan_cached</span><span class="p">(</span><span class="n">affected</span><span class="p">)</span>
+            <span class="n">plan</span><span class="o">.</span><span class="n">run_into</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_store</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_store</span><span class="p">[</span><span class="n">v</span><span class="p">]</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_required_vars</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="CompiledKernel.execute">
+<a class="viewcode-back" href="../../../../numbox.core.variable.html#numbox.core.variable.compile_kernel.CompiledKernel.execute">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">external_values</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Dict-in / dict-out convenience, symmetric with CompiledGraph.execute.&quot;&quot;&quot;</span>
+        <span class="n">args</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">src</span><span class="p">,</span> <span class="n">name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_param_keys</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">external_values</span><span class="p">[</span><span class="n">src</span><span class="p">][</span><span class="n">name</span><span class="p">])</span>
+            <span class="k">except</span> <span class="ne">KeyError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">KeyError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Missing external value for </span><span class="si">{</span><span class="n">make_qual_name</span><span class="p">(</span><span class="n">src</span><span class="p">,</span><span class="w"> </span><span class="n">name</span><span class="p">)</span><span class="si">!r}</span><span class="s2">&quot;</span>
+                <span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">kernel</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">outputs</span><span class="p">,</span> <span class="n">result</span><span class="p">))</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="compile_kernel">
+<a class="viewcode-back" href="../../../../numbox.core.variable.html#numbox.core.variable.compile_kernel.compile_kernel">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">compile_kernel</span><span class="p">(</span>
+    <span class="n">graph</span><span class="p">:</span> <span class="n">Graph</span><span class="p">,</span> <span class="n">required</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="o">*</span><span class="p">,</span>
+    <span class="n">jit_options</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">cache</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">CompiledKernel</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compile `graph` into a fused @njit kernel for the `required` variables.</span>
+
+<span class="sd">    :param graph: its dependency structure and formulas are fused</span>
+<span class="sd">        into one straight-line @njit function (see `CompiledKernel`).</span>
+<span class="sd">    :param required: Order is preserved and fixes the order of</span>
+<span class="sd">        `CompiledKernel.outputs` / the kernel&#39;s return tuple; a duplicate</span>
+<span class="sd">        entry raises `ValueError` (each</span>
+<span class="sd">        output is requested once -- the return tuple is positional, so a</span>
+<span class="sd">        repeat carries no information).</span>
+<span class="sd">    :param jit_options: merged over numbox&#39;s defaults</span>
+<span class="sd">        (`NUMBOX_JIT_OPTIONS` env) and passed to @njit. All options except</span>
+<span class="sd">        `cache` participate in the content-addressed digest.</span>
+<span class="sd">    :param cache: tri-state. `None` (default) defers to</span>
+<span class="sd">        `jit_options[&quot;cache&quot;]`, then the `NUMBOX_JIT_OPTIONS` env default,</span>
+<span class="sd">        then `True`. An explicit `True`/`False` wins over both.</span>
+
+<span class="sd">    Error timing: structural problems raise here (unknown or malformed</span>
+<span class="sd">    `required` entries, non-callable formulas, arity mismatches against the</span>
+<span class="sd">    declared inputs, graphs deeper than the recursion limit). For an undeclared</span>
+<span class="sd">    (or partially-declared) graph, numba typing problems surface at the kernel&#39;s</span>
+<span class="sd">    first call (auto-njit of plain-Python formulas is lazy). For a fully-declared</span>
+<span class="sd">    graph (every node carries `params`, every consumed external is typed) the</span>
+<span class="sd">    mode resolves eagerly here, so type errors move to build time: a formula</span>
+<span class="sd">    whose natural return at the declared input types is non-convertible to the</span>
+<span class="sd">    declared type, a cross-node type mismatch, and -- crucially -- a</span>
+<span class="sd">    coercible-but-wrong `params.type`. The last is caught by an explicit</span>
+<span class="sd">    unconstrained return-type probe that compares the formula&#39;s naturally</span>
+<span class="sd">    inferred return type against the declaration; binding the formula to the</span>
+<span class="sd">    declared signature does not catch it, because numba silently coerces a</span>
+<span class="sd">    convertible scalar (declaring int64 over a `x * 1.5` body would otherwise</span>
+<span class="sd">    compute 7, not 7.5). Fully-declared graphs thus fail fast at build;</span>
+<span class="sd">    any-undeclared graph fails at the first call, exactly as today. Runtime</span>
+<span class="sd">    errors never demote -- they propagate.</span>
+
+<span class="sd">    Caching: the kernel digest fingerprints each formula&#39;s bytecode,</span>
+<span class="sd">    constants, default values, closure-cell values, referenced module-level</span>
+<span class="sd">    globals (including helper functions, recursively), defining module, and</span>
+<span class="sd">    the effective jit flags. Because the generated source never mentions types,</span>
+<span class="sd">    a declared graph&#39;s signatures are appended to the digest too (the consumed</span>
+<span class="sd">    external signature for an eager fused kernel, each segment&#39;s live-in/out</span>
+<span class="sd">    signature for an eager segment), so two declared-type variants of one</span>
+<span class="sd">    type-free graph get distinct cache anchors and never reuse each other&#39;s</span>
+<span class="sd">    binary. A formula whose state cannot be fingerprinted (e.g.</span>
+<span class="sd">    cres/CompileResultWAP objects, values with no canonical form) downgrades</span>
+<span class="sd">    that one kernel to cache=False: always recompiled, never stale. When caching</span>
+<span class="sd">    is enabled, a content-addressed anchor `.py` file is written under numba&#39;s</span>
+<span class="sd">    cache directory; with caching off (or the cache dir unwritable, which warns</span>
+<span class="sd">    and degrades) nothing is written.</span>
+
+<span class="sd">    Non-jittable formulas: for an undeclared graph the first call resolves the</span>
+<span class="sd">    execution mode. If the fully fused kernel cannot be typed for the actual</span>
+<span class="sd">    argument types, each node is probed against the real intermediate values;</span>
+<span class="sd">    nodes whose formulas fail to *compile* (or whose input values numba cannot</span>
+<span class="sd">    type) run in plain Python, and the jittable remainder is fused into segments</span>
+<span class="sd">    orchestrated from Python. A declared `jitable=False` node is instead demoted</span>
+<span class="sd">    by declaration (no probing): a graph mixing declared jittable and</span>
+<span class="sd">    declared-Python nodes resolves eagerly to a &quot;segmented&quot; plan at build,</span>
+<span class="sd">    `CompiledKernel.partition` populated immediately with per-node reasons.</span>
+<span class="sd">    `CompiledKernel.partition` describes the result, including per-node demotion</span>
+<span class="sd">    reasons; it is `None` before the first call only for an undeclared graph</span>
+<span class="sd">    (set at build for a fully-declared one). `CompiledKernel.kernel` is the</span>
+<span class="sd">    hot-path callable: the bare @njit dispatcher once the graph resolves fully</span>
+<span class="sd">    fused, the Python master when segmented. For an undeclared graph a later</span>
+<span class="sd">    call whose types break a segment re-learns and replaces the partition (one</span>
+<span class="sd">    active plan); a declared kernel does not re-discover. The crisp</span>
+<span class="sd">    `declared type X, got Y` contract is enforced at build time and on</span>
+<span class="sd">    `recompute()` (`can_convert` against each declared type), not on the</span>
+<span class="sd">    throughput `kernel(...)` path: throughput retains numba&#39;s polymorphic</span>
+<span class="sd">    widening across calls, and a later `kernel(...)` whose off-contract type</span>
+<span class="sd">    breaks a jit segment raises numba&#39;s own typing error (the declared `_demoted`</span>
+<span class="sd">    is left untouched -- no silent re-discovery). Once fully fused, fused is</span>
+<span class="sd">    permanent (a later-signature typing failure raises). The discovery call computes</span>
+<span class="sd">    jit-node values through per-node dispatchers while later calls use fused</span>
+<span class="sd">    segments -- identical under default IEEE semantics, but non-default</span>
+<span class="sd">    jit_options such as fastmath could in principle differ across fusion</span>
+<span class="sd">    boundaries.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">required</span> <span class="o">=</span> <span class="p">[</span><span class="n">required</span><span class="p">]</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">required</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="nb">list</span><span class="p">(</span><span class="n">required</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">required</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">entry</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;required entries must be qualified-name strings; got </span><span class="si">{</span><span class="n">entry</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">QUAL_SEP</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">entry</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;required entry </span><span class="si">{</span><span class="n">entry</span><span class="si">!r}</span><span class="s2"> is not qualified (expected &#39;source</span><span class="si">{</span><span class="n">QUAL_SEP</span><span class="si">}</span><span class="s2">name&#39;)&quot;</span>
+            <span class="p">)</span>
+    <span class="n">dupes</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">entry</span> <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">required</span> <span class="k">if</span> <span class="n">required</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">})</span>
+    <span class="k">if</span> <span class="n">dupes</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;required has duplicate entries </span><span class="si">{</span><span class="n">dupes</span><span class="si">}</span><span class="s2">; each requested output must &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;appear once (the kernel&#39;s return tuple is positional)&quot;</span>
+        <span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">compiled</span> <span class="o">=</span> <span class="n">graph</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="n">required</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">KeyError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;required name or one of its dependencies cannot be resolved in the graph: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
+    <span class="k">except</span> <span class="ne">RecursionError</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RecursionError</span><span class="p">(</span><span class="s2">&quot;Consider raising recursion limit.&quot;</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="kc">None</span>
+    <span class="n">external</span> <span class="o">=</span> <span class="p">{</span><span class="n">v</span> <span class="k">for</span> <span class="n">vs</span> <span class="ow">in</span> <span class="n">compiled</span><span class="o">.</span><span class="n">required_external_variables</span><span class="o">.</span><span class="n">values</span><span class="p">()</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">vs</span><span class="o">.</span><span class="n">values</span><span class="p">()}</span>
+    <span class="n">case</span><span class="p">,</span> <span class="n">dispositions</span><span class="p">,</span> <span class="n">consumed</span> <span class="o">=</span> <span class="n">_classify</span><span class="p">(</span><span class="n">compiled</span><span class="p">)</span>
+    <span class="n">idents</span> <span class="o">=</span> <span class="n">_assign_identifiers</span><span class="p">([</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">compiled</span><span class="o">.</span><span class="n">ordered_nodes</span><span class="p">])</span>
+    <span class="n">flags</span> <span class="o">=</span> <span class="n">_effective_flags</span><span class="p">(</span><span class="n">jit_options</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">case</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;A&quot;</span><span class="p">,</span> <span class="s2">&quot;B&quot;</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="n">compiled</span><span class="o">.</span><span class="n">ordered_nodes</span><span class="p">:</span>
+            <span class="n">var</span> <span class="o">=</span> <span class="n">node</span><span class="o">.</span><span class="n">variable</span>
+            <span class="k">if</span> <span class="n">var</span> <span class="ow">in</span> <span class="n">external</span> <span class="ow">or</span> <span class="n">dispositions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">var</span><span class="p">)</span> <span class="o">!=</span> <span class="s2">&quot;STATIC_JIT&quot;</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">in_types</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">i</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">type</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">node</span><span class="o">.</span><span class="n">inputs</span><span class="p">)</span>
+            <span class="n">fp</span><span class="p">,</span> <span class="n">fingerprintable</span> <span class="o">=</span> <span class="n">_formula_fingerprint</span><span class="p">(</span><span class="n">var</span><span class="o">.</span><span class="n">formula</span><span class="p">)</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="p">(</span><span class="n">fp</span><span class="p">,</span> <span class="n">in_types</span><span class="p">,</span> <span class="n">var</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">type</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">fingerprintable</span> <span class="ow">and</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">_validated_returns</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">_validate_declared_return</span><span class="p">(</span><span class="n">var</span><span class="o">.</span><span class="n">formula</span><span class="p">,</span> <span class="n">in_types</span><span class="p">,</span> <span class="n">var</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">type</span><span class="p">,</span> <span class="n">flags</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">fingerprintable</span><span class="p">:</span>
+                <span class="n">_validated_returns</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+    <span class="n">source</span><span class="p">,</span> <span class="n">bindings</span><span class="p">,</span> <span class="n">params</span><span class="p">,</span> <span class="n">outputs</span> <span class="o">=</span> <span class="n">_generate_body</span><span class="p">(</span><span class="n">compiled</span><span class="p">,</span> <span class="n">required</span><span class="p">,</span> <span class="n">idents</span><span class="p">,</span> <span class="n">flags</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_registry_var</span><span class="p">(</span><span class="n">qual</span><span class="p">):</span>
+        <span class="n">src</span><span class="p">,</span> <span class="n">name</span> <span class="o">=</span> <span class="n">qual</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="n">QUAL_SEP</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">graph</span><span class="o">.</span><span class="n">registry</span><span class="p">[</span><span class="n">src</span><span class="p">][</span><span class="n">name</span><span class="p">]</span>
+
+    <span class="n">required_vars</span> <span class="o">=</span> <span class="p">[</span><span class="n">_registry_var</span><span class="p">(</span><span class="n">q</span><span class="p">)</span> <span class="k">for</span> <span class="n">q</span> <span class="ow">in</span> <span class="n">outputs</span><span class="p">]</span>
+    <span class="n">external_vars</span> <span class="o">=</span> <span class="p">[</span><span class="n">graph</span><span class="o">.</span><span class="n">registry</span><span class="p">[</span><span class="n">src</span><span class="p">][</span><span class="n">name</span><span class="p">]</span> <span class="k">for</span> <span class="n">src</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">params</span><span class="p">]</span>
+    <span class="c1"># For Case A fold the consumed-external declared signature (kernel-arg order,</span>
+    <span class="c1"># matching the eager `.compile` below) into the digest so int64/float64</span>
+    <span class="c1"># variants of one type-free source get distinct anchors. Cases B/C pass ().</span>
+    <span class="n">declared_sigs</span> <span class="o">=</span> <span class="p">()</span>
+    <span class="k">if</span> <span class="n">case</span> <span class="o">==</span> <span class="s2">&quot;A&quot;</span><span class="p">:</span>
+        <span class="n">consumed_sig</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">type</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">external_vars</span> <span class="k">if</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">consumed</span><span class="p">)</span>
+        <span class="n">declared_sigs</span> <span class="o">=</span> <span class="p">(</span><span class="n">consumed_sig</span><span class="p">,)</span>
+    <span class="n">kernel</span> <span class="o">=</span> <span class="n">_compile</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">bindings</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">,</span> <span class="n">cache</span><span class="p">,</span> <span class="n">declared_sigs</span><span class="p">)</span>
+    <span class="n">bindings_by_var</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="p">:</span> <span class="n">bindings</span><span class="p">[</span><span class="s2">&quot;f_&quot;</span> <span class="o">+</span> <span class="n">idents</span><span class="p">[</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="p">]]</span>
+        <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">compiled</span><span class="o">.</span><span class="n">ordered_nodes</span> <span class="k">if</span> <span class="n">n</span><span class="o">.</span><span class="n">variable</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">external</span>
+    <span class="p">}</span>
+    <span class="n">ctx</span> <span class="o">=</span> <span class="n">_KernelCtx</span><span class="p">(</span><span class="n">compiled</span><span class="p">,</span> <span class="n">idents</span><span class="p">,</span> <span class="n">bindings_by_var</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">,</span> <span class="n">cache</span><span class="p">,</span> <span class="n">external</span><span class="p">)</span>
+    <span class="n">identifiers</span> <span class="o">=</span> <span class="p">{</span><span class="n">v</span><span class="o">.</span><span class="n">qual_name</span><span class="p">():</span> <span class="n">ident</span> <span class="k">for</span> <span class="n">v</span><span class="p">,</span> <span class="n">ident</span> <span class="ow">in</span> <span class="n">idents</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="k">if</span> <span class="n">case</span> <span class="o">==</span> <span class="s2">&quot;A&quot;</span><span class="p">:</span>
+        <span class="n">ck</span> <span class="o">=</span> <span class="n">CompiledKernel</span><span class="p">(</span><span class="n">kernel</span><span class="p">,</span> <span class="n">params</span><span class="p">,</span> <span class="n">outputs</span><span class="p">,</span> <span class="n">source</span><span class="p">,</span> <span class="n">identifiers</span><span class="p">,</span> <span class="n">ctx</span><span class="p">,</span>
+                            <span class="n">required_vars</span><span class="p">,</span> <span class="n">external_vars</span><span class="p">,</span> <span class="n">is_declared</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">sig_vars</span> <span class="o">=</span> <span class="p">[</span><span class="n">v</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">external_vars</span> <span class="k">if</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">consumed</span><span class="p">]</span>
+        <span class="c1"># Eager-compile only when every kernel param is consumed; a pass-through</span>
+        <span class="c1"># external output is a kernel arg but has no declared type, so a partial</span>
+        <span class="c1"># signature would be wrong-arity. Such graphs compile lazily on first call.</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">sig_vars</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">external_vars</span><span class="p">):</span>
+            <span class="n">ck</span><span class="o">.</span><span class="n">_fused</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="nb">tuple</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">type</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">sig_vars</span><span class="p">))</span>
+        <span class="n">ck</span><span class="o">.</span><span class="n">_mode</span> <span class="o">=</span> <span class="s2">&quot;fused-pending&quot;</span>
+        <span class="n">ck</span><span class="o">.</span><span class="n">partition</span> <span class="o">=</span> <span class="n">ck</span><span class="o">.</span><span class="n">_fused_report</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">ck</span>
+    <span class="k">if</span> <span class="n">case</span> <span class="o">==</span> <span class="s2">&quot;B&quot;</span><span class="p">:</span>
+        <span class="n">demoted</span> <span class="o">=</span> <span class="p">{</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="p">:</span> <span class="s2">&quot;declared non-jittable&quot;</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">compiled</span><span class="o">.</span><span class="n">ordered_nodes</span>
+                   <span class="k">if</span> <span class="n">dispositions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&quot;STATIC_PY&quot;</span><span class="p">}</span>
+        <span class="n">nodes</span> <span class="o">=</span> <span class="p">[</span><span class="n">n</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">compiled</span><span class="o">.</span><span class="n">ordered_nodes</span> <span class="k">if</span> <span class="n">n</span><span class="o">.</span><span class="n">variable</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">external</span><span class="p">]</span>
+        <span class="n">order</span> <span class="o">=</span> <span class="n">linearize</span><span class="p">(</span><span class="n">nodes</span><span class="p">,</span> <span class="n">demoted</span><span class="p">)</span>
+        <span class="n">runs</span> <span class="o">=</span> <span class="n">build_runs</span><span class="p">(</span><span class="n">order</span><span class="p">,</span> <span class="n">demoted</span><span class="p">)</span>
+        <span class="n">steps</span><span class="p">,</span> <span class="n">segments</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+        <span class="c1"># Same segment structure as _discover_and_run, but with declared types and a static demotion set (no probing).</span>
+        <span class="k">for</span> <span class="n">kind</span><span class="p">,</span> <span class="n">run_nodes</span> <span class="ow">in</span> <span class="n">runs</span><span class="p">:</span>
+            <span class="n">quals</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">run_nodes</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;python&quot;</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">run_nodes</span><span class="p">:</span>
+                    <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_PyStep</span><span class="p">(</span>
+                        <span class="n">var</span><span class="o">=</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="p">,</span>
+                        <span class="n">py_callable</span><span class="o">=</span><span class="nb">getattr</span><span class="p">(</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">formula</span><span class="p">,</span> <span class="s2">&quot;py_func&quot;</span><span class="p">,</span> <span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">formula</span><span class="p">),</span>
+                        <span class="n">in_vars</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">n</span><span class="o">.</span><span class="n">inputs</span><span class="p">)))</span>
+                <span class="n">reasons</span> <span class="o">=</span> <span class="p">{</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="o">.</span><span class="n">qual_name</span><span class="p">():</span> <span class="n">demoted</span><span class="p">[</span><span class="n">n</span><span class="o">.</span><span class="n">variable</span><span class="p">]</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">run_nodes</span><span class="p">}</span>
+                <span class="n">ins</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">i</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">run_nodes</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">n</span><span class="o">.</span><span class="n">inputs</span>
+                              <span class="k">if</span> <span class="n">i</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">{</span><span class="n">x</span><span class="o">.</span><span class="n">variable</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">run_nodes</span><span class="p">}},</span>
+                             <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">v</span><span class="p">:</span> <span class="n">v</span><span class="o">.</span><span class="n">qual_name</span><span class="p">())</span>
+                <span class="n">segments</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">Segment</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">&quot;python&quot;</span><span class="p">,</span> <span class="n">nodes</span><span class="o">=</span><span class="n">quals</span><span class="p">,</span>
+                                        <span class="n">inputs</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">ins</span><span class="p">),</span>
+                                        <span class="n">outputs</span><span class="o">=</span><span class="n">quals</span><span class="p">,</span> <span class="n">source</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">reasons</span><span class="o">=</span><span class="n">reasons</span><span class="p">))</span>
+                <span class="k">continue</span>
+            <span class="n">live_in</span><span class="p">,</span> <span class="n">live_out</span> <span class="o">=</span> <span class="n">segment_liveness</span><span class="p">(</span><span class="n">run_nodes</span><span class="p">,</span> <span class="n">external</span><span class="p">,</span> <span class="n">required_vars</span><span class="p">,</span> <span class="n">order</span><span class="p">)</span>
+            <span class="n">src</span><span class="p">,</span> <span class="n">seg_bindings</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">_generate_segment_body</span><span class="p">(</span><span class="n">run_nodes</span><span class="p">,</span> <span class="n">live_in</span><span class="p">,</span> <span class="n">live_out</span><span class="p">,</span> <span class="n">idents</span><span class="p">,</span> <span class="n">flags</span><span class="p">)</span>
+            <span class="n">seg_sigs</span> <span class="o">=</span> <span class="p">(</span><span class="nb">tuple</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">type</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">live_in</span><span class="p">),</span>
+                        <span class="nb">tuple</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">type</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">live_out</span><span class="p">))</span>
+            <span class="n">disp</span> <span class="o">=</span> <span class="n">_compile</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">seg_bindings</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">,</span> <span class="n">cache</span><span class="p">,</span> <span class="n">seg_sigs</span><span class="p">)</span>
+            <span class="n">disp</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="nb">tuple</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">params</span><span class="o">.</span><span class="n">type</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">live_in</span><span class="p">))</span>
+            <span class="n">steps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_JitStep</span><span class="p">(</span><span class="n">dispatcher</span><span class="o">=</span><span class="n">disp</span><span class="p">,</span> <span class="n">in_vars</span><span class="o">=</span><span class="n">live_in</span><span class="p">,</span> <span class="n">out_vars</span><span class="o">=</span><span class="n">live_out</span><span class="p">))</span>
+            <span class="n">segments</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">Segment</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">&quot;jit&quot;</span><span class="p">,</span> <span class="n">nodes</span><span class="o">=</span><span class="n">quals</span><span class="p">,</span>
+                                    <span class="n">inputs</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">live_in</span><span class="p">),</span>
+                                    <span class="n">outputs</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">qual_name</span><span class="p">()</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">live_out</span><span class="p">),</span>
+                                    <span class="n">source</span><span class="o">=</span><span class="n">src</span><span class="p">,</span> <span class="n">reasons</span><span class="o">=</span><span class="p">{}))</span>
+        <span class="n">ck</span> <span class="o">=</span> <span class="n">CompiledKernel</span><span class="p">(</span><span class="n">kernel</span><span class="p">,</span> <span class="n">params</span><span class="p">,</span> <span class="n">outputs</span><span class="p">,</span> <span class="n">source</span><span class="p">,</span> <span class="n">identifiers</span><span class="p">,</span> <span class="n">ctx</span><span class="p">,</span>
+                            <span class="n">required_vars</span><span class="p">,</span> <span class="n">external_vars</span><span class="p">,</span> <span class="n">is_declared</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">ck</span><span class="o">.</span><span class="n">_plan</span> <span class="o">=</span> <span class="n">_Plan</span><span class="p">(</span><span class="n">steps</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">steps</span><span class="p">),</span> <span class="n">external_vars</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">external_vars</span><span class="p">),</span>
+                         <span class="n">output_vars</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">required_vars</span><span class="p">))</span>
+        <span class="n">ck</span><span class="o">.</span><span class="n">_demoted</span> <span class="o">=</span> <span class="n">demoted</span>
+        <span class="n">ck</span><span class="o">.</span><span class="n">_mode</span> <span class="o">=</span> <span class="s2">&quot;segmented&quot;</span>
+        <span class="n">ck</span><span class="o">.</span><span class="n">partition</span> <span class="o">=</span> <span class="n">PartitionReport</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s2">&quot;segmented&quot;</span><span class="p">,</span> <span class="n">segments</span><span class="o">=</span><span class="nb">tuple</span><span class="p">(</span><span class="n">segments</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">ck</span>
+    <span class="k">return</span> <span class="n">CompiledKernel</span><span class="p">(</span>
+        <span class="n">kernel</span><span class="p">,</span> <span class="n">params</span><span class="p">,</span> <span class="n">outputs</span><span class="p">,</span> <span class="n">source</span><span class="p">,</span> <span class="n">identifiers</span><span class="p">,</span> <span class="n">ctx</span><span class="p">,</span> <span class="n">required_vars</span><span class="p">,</span> <span class="n">external_vars</span>
+    <span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
