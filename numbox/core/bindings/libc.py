@@ -205,7 +205,7 @@ def strerror(errnum):
 
     NOT thread-safe — the returned pointer references a per-process static
     buffer that subsequent strerror calls may overwrite. Use ``strerror_safe``
-    (in ``numbox.core.bindings._strerror``) for thread-safe operation.
+    (in ``numbox.core.bindings.strerror``) for thread-safe operation.
     """
     return _call_lib_func("strerror", (errnum,))
 

@@ -11,28 +11,16 @@ import numpy as np
 from numba import carray, cfunc, njit, types
 from numba.core import types as nb_types
 
-from numbox.core.bindings import (
-    SQLITE_BLOB,
-    SQLITE_FLOAT,
-    SQLITE_INTEGER,
-    SQLITE_NULL,
-    SQLITE_OK,
-    SQLITE_TEXT,
-    SQLITE_UTF8,
-    sqlite3_close,
-    sqlite3_create_function_v2,
-    sqlite3_exec,
-    sqlite3_open,
-    sqlite3_result_int,
-    sqlite3_user_data,
-    sqlite3_value_blob,
-    sqlite3_value_bytes,
-    sqlite3_value_double,
-    sqlite3_value_dup,
-    sqlite3_value_free,
-    sqlite3_value_int,
-    sqlite3_value_int64,
-    sqlite3_value_text,
+from numbox.core.bindings.sqlite.constants import (
+    SQLITE_BLOB, SQLITE_FLOAT, SQLITE_INTEGER, SQLITE_NULL, SQLITE_OK, SQLITE_TEXT, SQLITE_UTF8,
+)
+from numbox.core.bindings.sqlite.conn import sqlite3_close, sqlite3_open
+from numbox.core.bindings.sqlite.udf import sqlite3_create_function_v2, sqlite3_user_data
+from numbox.core.bindings.sqlite.exec import sqlite3_exec
+from numbox.core.bindings.sqlite.result import sqlite3_result_int
+from numbox.core.bindings.sqlite.value import (
+    sqlite3_value_blob, sqlite3_value_bytes, sqlite3_value_double, sqlite3_value_dup,
+    sqlite3_value_free, sqlite3_value_int, sqlite3_value_int64, sqlite3_value_text,
     sqlite3_value_type,
 )
 from numbox.utils.cstrings import c_string

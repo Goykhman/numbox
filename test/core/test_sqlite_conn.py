@@ -3,25 +3,13 @@ from ctypes import addressof, c_int64
 
 import pytest
 
-from numbox.core.bindings import (
-    SQLITE_CANTOPEN,
-    SQLITE_OK,
-    SQLITE_OPEN_CREATE,
-    SQLITE_OPEN_READONLY,
-    SQLITE_OPEN_READWRITE,
-    sqlite3_changes64,
-    sqlite3_close,
-    sqlite3_db_filename,
-    sqlite3_db_readonly,
-    sqlite3_errcode,
-    sqlite3_errmsg,
-    sqlite3_extended_errcode,
-    sqlite3_libversion,
-    sqlite3_libversion_number,
-    sqlite3_open,
-    sqlite3_open_v2,
-    sqlite3_threadsafe,
-    sqlite3_total_changes64,
+from numbox.core.bindings.sqlite.constants import (
+    SQLITE_CANTOPEN, SQLITE_OK, SQLITE_OPEN_CREATE, SQLITE_OPEN_READONLY, SQLITE_OPEN_READWRITE,
+)
+from numbox.core.bindings.sqlite.conn import (
+    sqlite3_changes64, sqlite3_close, sqlite3_db_filename, sqlite3_db_readonly, sqlite3_errcode,
+    sqlite3_errmsg, sqlite3_extended_errcode, sqlite3_libversion, sqlite3_libversion_number,
+    sqlite3_open, sqlite3_open_v2, sqlite3_threadsafe, sqlite3_total_changes64,
 )
 from numbox.utils.cstrings import c_string
 from numbox.utils.lowlevel import get_str_from_p_as_int

@@ -1,7 +1,8 @@
 """SQLite numeric constants (result codes, type codes, open flags, blob flags,
 trace flags, destructor sentinels).
 
-Public surface — imported via star-import by ``numbox/core/bindings/__init__.py``.
+Public surface — import directly, e.g.
+``from numbox.core.bindings.sqlite.constants import SQLITE_OK``.
 All names are uppercase ``SQLITE_*`` to avoid collision with the lowercase
 C-function-named wrappers.
 

@@ -5,7 +5,7 @@ from platform import system
 import pytest
 
 from numbox.utils.pysqlite_bridge import extract_connection_ptr, libraries_coordinated
-from numbox.core.bindings._sqlite_conn import sqlite3_changes, sqlite3_libversion
+from numbox.core.bindings.sqlite.conn import sqlite3_changes, sqlite3_libversion
 
 
 def test_numbox_and_python_use_same_libsqlite3():

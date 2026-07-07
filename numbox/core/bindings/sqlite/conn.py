@@ -1,8 +1,8 @@
 """SQLite connection + metadata bindings.
 
 Resolves the shared library via ``load_lib("sqlite3")`` from
-``utils._loaded_libs``. Other ``_sqlite_*.py`` modules (currently
-``_sqlite_column``) call the same getter rather than importing
+``utils._loaded_libs``. Other ``sqlite/*.py`` modules (currently
+``column``) call the same getter rather than importing
 ``_sqlite3_lib`` from here, so there's no cross-module dependency on
 which file happens to load the library first.
 

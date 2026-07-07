@@ -2,7 +2,7 @@ import threading
 import numpy as np
 from numba import njit, prange
 
-from numbox.core.bindings import errno_get, errno_set
+from numbox.core.bindings.errno import errno_get, errno_set
 
 
 @njit(cache=True)

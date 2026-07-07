@@ -9,22 +9,22 @@ import sqlite3
 import pytest
 import numpy as np
 from numbox.utils.cstrings import c_string
-from numbox.core.bindings import (
-    sqlite3_open, sqlite3_close, register_table,
-    sqlite3_prepare_v2, sqlite3_step, sqlite3_finalize,
-    sqlite3_column_count, sqlite3_column_type,
-    sqlite3_column_int64, sqlite3_column_double,
+from numbox.core.bindings.sqlite.conn import sqlite3_open, sqlite3_close
+from numbox.core.bindings.sqlite.vtable import register_table
+from numbox.core.bindings.sqlite.stmt import sqlite3_prepare_v2, sqlite3_step, sqlite3_finalize
+from numbox.core.bindings.sqlite.column import (
+    sqlite3_column_count, sqlite3_column_type, sqlite3_column_int64, sqlite3_column_double,
     sqlite3_column_text, sqlite3_column_blob, sqlite3_column_bytes,
 )
-from numbox.core.bindings import query_to_array
+from numbox.core.bindings.sqlite.query import query_to_array
 from numbox.utils.pysqlite_bridge import extract_connection_ptr, libraries_coordinated
-from numbox.core.bindings._sqlite_vtable import utf32_to_utf8, _nul_trimmed_len
-from numbox.core.bindings._sqlite_vtable import _build_descriptor, _TAG_I64, _TAG_F64, _TAG_U
+from numbox.core.bindings.sqlite.vtable import utf32_to_utf8, _nul_trimmed_len
+from numbox.core.bindings.sqlite.vtable import _build_descriptor, _TAG_I64, _TAG_F64, _TAG_U
 from numbox.utils.lowlevel import array_data_p
 
 
 def test_imports():
-    from numbox.core.bindings import _sqlite_vtable as v
+    from numbox.core.bindings.sqlite import vtable as v
     assert hasattr(v.sqlite3_create_module_v2, "py_func")
     assert hasattr(v.sqlite3_declare_vtab, "py_func")
     assert hasattr(v.sqlite3_malloc, "py_func")
@@ -88,7 +88,7 @@ def test_descriptor_2d_int64():
 
 
 def test_descriptor_columnar_layout():
-    from numbox.core.bindings._sqlite_vtable import _build_descriptor_columnar
+    from numbox.core.bindings.sqlite.vtable import _build_descriptor_columnar
     a = np.arange(3, dtype=np.int64)
     b = np.arange(3, dtype=np.float64)
     d = _build_descriptor_columnar({"a": a, "b": b}, False)
@@ -142,13 +142,13 @@ def test_widest_unicode_width_accepted():
 
 
 def test_descriptor_dtype_itemsize():
-    from numbox.core.bindings._sqlite_vtable import _DESC_DTYPE
+    from numbox.core.bindings.sqlite.vtable import _DESC_DTYPE
     assert _DESC_DTYPE.itemsize == 64
 
 
 def test_index_info_offsets_match_c_abi():
     import ctypes
-    from numbox.core.bindings._sqlite_vtable import _IDX_INFO_DTYPE
+    from numbox.core.bindings.sqlite.vtable import _IDX_INFO_DTYPE
 
     class _IndexInfo(ctypes.Structure):
         _fields_ = [
@@ -169,7 +169,7 @@ def test_index_info_offsets_match_c_abi():
 
 
 def test_xbestindex_sets_cardinality():
-    from numbox.core.bindings._sqlite_vtable import (
+    from numbox.core.bindings.sqlite.vtable import (
         _xbestindex, _build_descriptor, _VTAB_DTYPE, _VTAB_SIZE, _IDX_INFO_DTYPE,
     )
     arr = np.arange(12, dtype=np.int64).reshape(4, 3)
@@ -187,11 +187,12 @@ def test_xbestindex_sets_cardinality():
 def test_xbestindex_estimates_bound_branch():
     # With nbound usable EQ constraints on numeric columns, estimatedRows is the
     # heuristic nrows // (nbound + 1) + 1 and estimatedCost is float(nrows).
-    from numbox.core.bindings._sqlite_vtable import (
+    from numbox.core.bindings.sqlite.vtable import (
         _xbestindex, _build_descriptor, _VTAB_DTYPE, _VTAB_SIZE, _IDX_INFO_DTYPE,
         _CONSTRAINT_DTYPE, _USAGE_DTYPE,
     )
-    from numbox.core.bindings import SQLITE_INDEX_CONSTRAINT_EQ, sqlite3_free
+    from numbox.core.bindings.sqlite.constants import SQLITE_INDEX_CONSTRAINT_EQ
+    from numbox.core.bindings.sqlite.exec import sqlite3_free
     nrows = 10
     arr = np.arange(nrows * 3, dtype=np.int64).reshape(nrows, 3)
     built = _build_descriptor(arr, ["a", "b", "c"], False)
@@ -503,10 +504,11 @@ def test_duplicate_name_replaces():
 _DRIVER = textwrap.dedent('''
     from ctypes import addressof, c_int64
     import numpy as np
-    from numbox.core.bindings import (
-        sqlite3_open, sqlite3_prepare_v2, sqlite3_step,
-        sqlite3_column_int64, sqlite3_finalize, SQLITE_ROW)
-    from numbox.core.bindings._sqlite_vtable import register_table
+    from numbox.core.bindings.sqlite.conn import sqlite3_open
+    from numbox.core.bindings.sqlite.stmt import sqlite3_prepare_v2, sqlite3_step, sqlite3_finalize
+    from numbox.core.bindings.sqlite.column import sqlite3_column_int64
+    from numbox.core.bindings.sqlite.constants import SQLITE_ROW
+    from numbox.core.bindings.sqlite.vtable import register_table
     from numbox.utils.cstrings import c_string
 
     db_p = c_int64(0)
@@ -542,7 +544,7 @@ def _run_vtable_driver(tmp_path, cache_dir):
 def _count_vtable_nbc(cache_dir):
     # Scope to the vtable cfunc/njit caches only, so the no-growth assertion is
     # immune to unrelated bindings whose compile timing differs across runs.
-    return sum(1 for _ in cache_dir.rglob("*_sqlite_vtable*.nbc"))
+    return sum(1 for _ in cache_dir.rglob("*vtable.*.nbc"))
 
 
 def test_xprocess_cache_no_growth(tmp_path):
@@ -558,13 +560,13 @@ def test_xprocess_cache_no_growth(tmp_path):
 
 
 def test_pushdown_element_dtype_itemsizes():
-    from numbox.core.bindings._sqlite_vtable import (
+    from numbox.core.bindings.sqlite.vtable import (
         _CONSTRAINT_DTYPE, _USAGE_DTYPE, _ORDERBY_DTYPE,
     )
     assert _CONSTRAINT_DTYPE.itemsize == 12
     assert _USAGE_DTYPE.itemsize == 8
     assert _ORDERBY_DTYPE.itemsize == 8
-    from numbox.core.bindings._sqlite_vtable import _SPEC_DTYPE
+    from numbox.core.bindings.sqlite.vtable import _SPEC_DTYPE
     assert _SPEC_DTYPE.itemsize == 8
     assert _SPEC_DTYPE.names == ("col", "op")
     assert _SPEC_DTYPE.fields["col"][1] == 0
@@ -639,7 +641,7 @@ def test_pushdown_no_constraint_full_scan():
 
 
 def test_xdestroy_pops_anchor_on_close():
-    from numbox.core.bindings import _sqlite_vtable as v
+    from numbox.core.bindings.sqlite import vtable as v
     db = c_int64(0)
     with c_string(":memory:") as p:
         sqlite3_open(p, addressof(db))
@@ -652,7 +654,7 @@ def test_xdestroy_pops_anchor_on_close():
 
 
 def test_xdestroy_two_tables():
-    from numbox.core.bindings import _sqlite_vtable as v
+    from numbox.core.bindings.sqlite import vtable as v
     db = c_int64(0)
     with c_string(":memory:") as p:
         sqlite3_open(p, addressof(db))
@@ -665,7 +667,7 @@ def test_xdestroy_two_tables():
 
 
 def test_xdestroy_three_tables():
-    from numbox.core.bindings import _sqlite_vtable as v
+    from numbox.core.bindings.sqlite import vtable as v
     db = c_int64(0)
     with c_string(":memory:") as p:
         sqlite3_open(p, addressof(db))
@@ -679,7 +681,7 @@ def test_xdestroy_three_tables():
 
 
 def test_xdestroy_reregister_drops_first():
-    from numbox.core.bindings import _sqlite_vtable as v
+    from numbox.core.bindings.sqlite import vtable as v
     db = c_int64(0)
     with c_string(":memory:") as p:
         sqlite3_open(p, addressof(db))
@@ -701,7 +703,7 @@ def test_xdestroy_reregister_drops_first():
 
 
 def test_xdestroy_no_c_free_of_descriptor():
-    from numbox.core.bindings import _sqlite_vtable as v
+    from numbox.core.bindings.sqlite import vtable as v
     db = c_int64(0)
     with c_string(":memory:") as p:
         sqlite3_open(p, addressof(db))
@@ -722,8 +724,8 @@ def test_xdestroy_no_c_free_of_descriptor():
 
 
 def test_xdestroy_tvf_pops_anchor_on_close():
-    from numbox.core.bindings import _sqlite_vtable as v
-    from numbox.core.bindings import register_tvf
+    from numbox.core.bindings.sqlite import vtable as v
+    from numbox.core.bindings.sqlite.tvf import register_tvf
     from numba import njit
 
     out = np.dtype([("n", "i8")])
@@ -979,8 +981,8 @@ def test_pushdown_uint64_high_magnitude_consistent():
 
 
 def test_xdestroy_deferred_while_statement_open():
-    from numbox.core.bindings import _sqlite_vtable as v
-    from numbox.core.bindings import register_tvf
+    from numbox.core.bindings.sqlite import vtable as v
+    from numbox.core.bindings.sqlite.tvf import register_tvf
     from numba import njit
     out = np.dtype([("n", "i8")])
 

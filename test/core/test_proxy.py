@@ -11,7 +11,8 @@ from numba import float64, njit
 from numba.core.types import Omitted
 from numba.core.types.function_type import CompileResultWAP
 
-from numbox.core.bindings import errno_get, getenv, memcpy
+from numbox.core.bindings.errno import errno_get
+from numbox.core.bindings.libc import getenv, memcpy
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.utils import load_lib_path, platform_
 from numbox.core.proxy.proxy import proxy, proxy_if_available, make_proxy_name
@@ -111,7 +112,7 @@ def test_proxy_caller_survives_subprocess_round_trip(tmp_path):
         tmp_path,
         probe_source="""
             from numba import njit
-            from numbox.core.bindings import errno_get, errno_set
+            from numbox.core.bindings.errno import errno_get, errno_set
 
             @njit(cache=True)
             def caller():

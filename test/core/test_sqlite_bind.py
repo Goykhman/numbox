@@ -4,24 +4,14 @@ from ctypes import addressof, c_int64
 import numpy as np
 import pytest
 
-from numbox.core.bindings import (
-    SQLITE_OK,
-    SQLITE_RANGE,
-    SQLITE_TRANSIENT,
-    sqlite3_bind_blob,
-    sqlite3_bind_double,
-    sqlite3_bind_int,
-    sqlite3_bind_int64,
-    sqlite3_bind_null,
-    sqlite3_bind_parameter_count,
-    sqlite3_bind_parameter_index,
-    sqlite3_bind_parameter_name,
+from numbox.core.bindings.sqlite.constants import SQLITE_OK, SQLITE_RANGE, SQLITE_TRANSIENT
+from numbox.core.bindings.sqlite.bind import (
+    sqlite3_bind_blob, sqlite3_bind_double, sqlite3_bind_int, sqlite3_bind_int64, sqlite3_bind_null,
+    sqlite3_bind_parameter_count, sqlite3_bind_parameter_index, sqlite3_bind_parameter_name,
     sqlite3_bind_text,
-    sqlite3_close,
-    sqlite3_finalize,
-    sqlite3_open,
-    sqlite3_prepare_v2,
 )
+from numbox.core.bindings.sqlite.conn import sqlite3_close, sqlite3_open
+from numbox.core.bindings.sqlite.stmt import sqlite3_finalize, sqlite3_prepare_v2
 from numbox.utils.cstrings import c_string
 from test.auxiliary_utils import collect_and_run_tests, str_from_p_as_int
 

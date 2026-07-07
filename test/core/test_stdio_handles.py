@@ -1,7 +1,8 @@
 import pytest
 from numba import njit
 
-from numbox.core.bindings import stdout, stderr, stdin, fputs, fflush
+from numbox.core.bindings.stdio import stdout, stderr, stdin
+from numbox.core.bindings.libc import fputs, fflush
 from numbox.core.bindings.utils import platform_
 from numbox.utils.lowlevel import get_unicode_data_p
 
