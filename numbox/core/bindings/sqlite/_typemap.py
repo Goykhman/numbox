@@ -1,6 +1,6 @@
 """Shared numpy-dtype ↔ SQLite type mapping + fixed-width string helpers.
 
-Used by the read-only vtable (_sqlite_vtable), the table-valued-function
+Used by the read-only vtable (sqlite.vtable), the table-valued-function
 mechanism, and query_to_array. The dtype tags are the single source of truth
 for how a numpy column maps to a SQLite column type and how its bytes are
 read/written.

@@ -1,10 +1,17 @@
 import errno
+import json
+import subprocess
+import sys
+import textwrap
 
 import numpy as np
 import pytest
 from ctypes import c_char_p, c_void_p
 from numba import njit
-from numbox.core.bindings import *
+from numbox.core.bindings.libc import (
+    fclose, fopen, fread, fwrite, getenv, memchr, memcmp, memcpy, memmove, memset,
+    rand, srand, strchr, strcmp, strerror, strlen, strncmp, strncpy, strrchr, strstr,
+)
 from numbox.core.bindings.utils import platform_
 from numbox.utils.lowlevel import array_data_p, get_unicode_data_p, get_str_from_p_as_int
 from test.auxiliary_utils import collect_and_run_tests
@@ -290,6 +297,37 @@ def test_resolve_lib_path_windows_nonsqlite_prefers_bundled(monkeypatch):
 
     monkeypatch.setattr(utils, "_windows_bundled_dll_path", lambda n: None)
     assert utils._resolve_lib_path("foo") == "C:\\PATH\\foo.dll"
+
+
+def test_import_one_binding_stays_lazy(tmp_path):
+    # The reason bindings/__init__.py is empty: importing one binding must not
+    # eagerly compile the rest of the subsystem (a plain libm import used to
+    # drag in all of sqlite — ~71% of the ~12.8s cold cost). A re-export
+    # sneaked back into __init__.py, or a stray top-level import in
+    # call.py/utils.py, would silently restore that cost with no test failing.
+    # Run in a fresh process: pytest has already imported every binding here.
+    probe = tmp_path / "lazy_probe.py"
+    probe.write_text(textwrap.dedent('''
+        import json
+        import sys
+        import numbox.core.bindings.libm  # noqa: F401
+        loaded = sorted(m for m in sys.modules if m.startswith("numbox.core.bindings"))
+        print(json.dumps(loaded))
+    '''), encoding="utf-8")
+    r = subprocess.run(
+        [sys.executable, str(probe)],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    assert r.returncode == 0, r.stderr
+    loaded = json.loads(r.stdout.splitlines()[-1])
+    assert "numbox.core.bindings.libm" in loaded, loaded
+    forbidden = [
+        m for m in loaded
+        if m == "numbox.core.bindings.sqlite"
+        or m.startswith("numbox.core.bindings.sqlite.")
+        or m in ("numbox.core.bindings.stdio", "numbox.core.bindings.fmtio")
+    ]
+    assert not forbidden, f"importing libm eagerly loaded heavy modules: {forbidden}"
 
 
 if __name__ == "__main__":

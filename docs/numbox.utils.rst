@@ -142,7 +142,7 @@ numbox.utils.cstrings
 Allocating C strings for the bindings layer
 '''''''''''''''''''''''''''''''''''''''''''
 
-The bindings family (``numbox.core.bindings._c``, ``_sqlite_*``, etc.)
+The bindings family (``numbox.core.bindings.libc``, ``numbox.core.bindings.sqlite.*``, etc.)
 takes ``intp`` pointers for every text argument. Producing a valid
 NUL-terminated UTF-8 C string from a Python ``str`` is non-trivial:
 :func:`~numbox.utils.lowlevel.get_unicode_data_p` returns a pointer to
@@ -155,7 +155,7 @@ input and yields the pointer with safe lifetime tied to the ``with``
 block::
 
     from numbox.utils.cstrings import c_string
-    from numbox.core.bindings import sqlite3_exec
+    from numbox.core.bindings.sqlite.exec import sqlite3_exec
 
     with c_string("CREATE TABLE t(x INTEGER)") as sql_p:
         sqlite3_exec(db_p, sql_p, 0, 0, 0)
@@ -196,7 +196,7 @@ numbox's JIT-callable SQLite bindings::
 
     import numbox.utils.pysqlite_bridge as pysqlite_bridge
     import sqlite3
-    from numbox.core.bindings import sqlite3_changes
+    from numbox.core.bindings.sqlite.conn import sqlite3_changes
 
     conn = sqlite3.connect("app.db")
     conn.execute("CREATE TABLE t(x INTEGER)")

@@ -11,45 +11,23 @@ import numpy as np
 from numba import carray, cfunc, njit, types
 from numba.core import types as nb_types
 
-from numbox.core.bindings import (
-    SQLITE_NOMEM,
-    SQLITE_NULL,
-    SQLITE_OK,
-    SQLITE_RESULT_SUBTYPE,
-    SQLITE_SUBTYPE,
-    SQLITE_TOOBIG,
-    SQLITE_TRANSIENT,
-    SQLITE_UTF8,
-    sqlite3_close,
-    sqlite3_create_function_v2,
-    sqlite3_exec,
-    sqlite3_libversion_number,
-    sqlite3_open,
-    sqlite3_result_blob,
-    sqlite3_result_blob64,
-    sqlite3_result_double,
-    sqlite3_result_error,
-    sqlite3_result_error_code,
-    sqlite3_result_error_nomem,
-    sqlite3_result_error_toobig,
-    sqlite3_result_int,
-    sqlite3_result_int64,
-    sqlite3_result_null,
-    sqlite3_result_subtype,
-    sqlite3_result_text,
-    sqlite3_result_text64,
-    sqlite3_result_value,
-    sqlite3_result_zeroblob,
+from numbox.core.bindings.sqlite.constants import (
+    SQLITE_NOMEM, SQLITE_NULL, SQLITE_OK, SQLITE_RESULT_SUBTYPE, SQLITE_SUBTYPE, SQLITE_TOOBIG,
+    SQLITE_TRANSIENT, SQLITE_UTF8,
+)
+from numbox.core.bindings.sqlite.conn import sqlite3_close, sqlite3_libversion_number, sqlite3_open
+from numbox.core.bindings.sqlite.udf import sqlite3_create_function_v2, sqlite3_user_data
+from numbox.core.bindings.sqlite.exec import sqlite3_exec
+from numbox.core.bindings.sqlite.result import (
+    sqlite3_result_blob, sqlite3_result_blob64, sqlite3_result_double, sqlite3_result_error,
+    sqlite3_result_error_code, sqlite3_result_error_nomem, sqlite3_result_error_toobig,
+    sqlite3_result_int, sqlite3_result_int64, sqlite3_result_null, sqlite3_result_subtype,
+    sqlite3_result_text, sqlite3_result_text64, sqlite3_result_value, sqlite3_result_zeroblob,
     sqlite3_result_zeroblob64,
-    sqlite3_user_data,
-    sqlite3_value_blob,
-    sqlite3_value_bytes,
-    sqlite3_value_double,
-    sqlite3_value_int64,
-    sqlite3_value_numeric_type,
-    sqlite3_value_subtype,
-    sqlite3_value_text,
-    sqlite3_value_type,
+)
+from numbox.core.bindings.sqlite.value import (
+    sqlite3_value_blob, sqlite3_value_bytes, sqlite3_value_double, sqlite3_value_int64,
+    sqlite3_value_numeric_type, sqlite3_value_subtype, sqlite3_value_text, sqlite3_value_type,
 )
 from numbox.utils.cstrings import c_string
 from numbox.utils.lowlevel import _cast_int_to_void_p, get_unicode_data_p
@@ -557,7 +535,7 @@ def test_result_subtype():
 
 def test_value_numeric_type():
     """sqlite3_value_numeric_type coerces text '123' to SQLITE_INTEGER."""
-    from numbox.core.bindings._sqlite_constants import SQLITE_INTEGER
+    from numbox.core.bindings.sqlite.constants import SQLITE_INTEGER
     db_p = _open_memory()
     out = np.zeros(1, dtype=np.int64)
     _register(db_p, "rtnum", 0, _result_text_for_numeric_cb.address, 0)

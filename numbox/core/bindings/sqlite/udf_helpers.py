@@ -47,16 +47,9 @@ from numba import cfunc, types
 from numba.core.types import StructRef
 from numba.extending import is_jitted
 
-from numbox.core.bindings import sqlite3_errmsg
-from numbox.core.bindings import (
-    SQLITE_DETERMINISTIC,
-    SQLITE_OK,
-    SQLITE_UTF8,
-)
-from numbox.core.bindings import (
-    sqlite3_create_function_v2,
-    sqlite3_create_window_function,
-)
+from numbox.core.bindings.sqlite.conn import sqlite3_errmsg
+from numbox.core.bindings.sqlite.constants import SQLITE_DETERMINISTIC, SQLITE_OK, SQLITE_UTF8
+from numbox.core.bindings.sqlite.udf import sqlite3_create_function_v2, sqlite3_create_window_function
 from numbox.utils.cstrings import c_string
 from numbox.utils.digest import digest
 from numbox.utils.preprocessing import (
@@ -70,8 +63,8 @@ from numbox.utils.preprocessing import (
 import numpy as np  # noqa: F401
 from numba import carray, njit  # noqa: F401
 from numbox.core.configurations import jit_options  # noqa: F401
-from numbox.core.bindings import sqlite3_result_error  # noqa: F401
-from numbox.core.bindings import sqlite3_aggregate_context  # noqa: F401
+from numbox.core.bindings.sqlite.result import sqlite3_result_error  # noqa: F401
+from numbox.core.bindings.sqlite.udf import sqlite3_aggregate_context  # noqa: F401
 from numbox.utils.lowlevel import _cast_int_to_void_p, get_unicode_data_p  # noqa: F401
 from numbox.utils.meminfo import (  # noqa: F401
     borrow_structref,

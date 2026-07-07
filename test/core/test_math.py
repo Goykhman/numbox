@@ -2,7 +2,7 @@ import math
 import numpy as np
 from numba import njit
 
-from numbox.core.bindings._math import (
+from numbox.core.bindings.libm import (
     cos, sin, tan,
     acos, asin, atan,
     cosh, sinh, tanh, acosh, asinh, atanh,

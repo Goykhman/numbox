@@ -19,11 +19,10 @@ Analogous technique can be expanded as needed for the user custom code.
 Bindings module conventions
 +++++++++++++++++++++++++++
 
-Every binding in the ``numbox.core.bindings`` family (``_c``, ``_math``,
-``_sqlite_conn`` / ``_stmt`` / ``_bind`` / ``_column`` / ``_exec`` /
-``_blob`` / ``_hooks`` / ``_constants`` / ``_sqlite_value`` / ``_sqlite_result`` /
-``_sqlite_udf`` / ``_sqlite_query`` / ``_sqlite_tvf`` / ``_sqlite_typemap``, ``_stdio``, ``_errno``,
-``_strerror``, ``_fmtio``) uses
+Every binding in the ``numbox.core.bindings`` family (``libc``, ``libm``,
+``stdio``, ``errno``, ``strerror``, ``fmtio``, and the
+``numbox.core.bindings.sqlite`` subpackage — see
+:doc:`numbox.core.bindings.sqlite`) uses
 extern-symbol references via
 :func:`~numbox.core.bindings.call._call_lib_func`, so the ABI dispatch is
 ASLR-safe. Pointer arguments are typed as ``intp`` -- the caller is
@@ -90,7 +89,8 @@ Example — write to stderr from inside @njit:
 .. code-block:: python
 
     from numba import njit
-    from numbox.core.bindings import stderr, fputs, fflush
+    from numbox.core.bindings.stdio import stderr
+    from numbox.core.bindings.libc import fputs, fflush
 
     @njit(cache=True)
     def log_to_stderr(msg_p):
@@ -111,7 +111,7 @@ Example — read and report errno after a syscall-style binding:
 .. code-block:: python
 
     from numba import njit
-    from numbox.core.bindings import errno_get, errno_set
+    from numbox.core.bindings.errno import errno_get, errno_set
 
     @njit(cache=True)
     def clear_then_call_and_report(do_work):
@@ -156,7 +156,7 @@ Example — render the message for ``ENOENT`` (errno 2 on POSIX) into a buffer:
     import errno
     import numpy as np
     from numba import njit
-    from numbox.core.bindings import strerror_safe
+    from numbox.core.bindings.strerror import strerror_safe
     from numbox.utils.lowlevel import array_data_p
 
     @njit(cache=True)
@@ -198,7 +198,9 @@ calling the intrinsic.
 .. code-block:: python
 
     from numba import njit
-    from numbox.core.bindings import printf, fflush, stdout
+    from numbox.core.bindings.fmtio import printf
+    from numbox.core.bindings.libc import fflush
+    from numbox.core.bindings.stdio import stdout
 
     def debug_kernel(x, label):
         printf("step %d: %s\n", x, label)
@@ -333,7 +335,9 @@ dual-mode:
 .. code-block:: python
 
     from numba import njit
-    from numbox.core.bindings import fprintf, fflush, stderr
+    from numbox.core.bindings.fmtio import fprintf
+    from numbox.core.bindings.libc import fflush
+    from numbox.core.bindings.stdio import stderr
 
     def warn(code, msg):
         fprintf(stderr(), "warning code=%d: %s\n", code, msg)
@@ -349,7 +353,7 @@ detect truncation, decode:
 
     import numpy as np
     from numba import njit
-    from numbox.core.bindings import snprintf
+    from numbox.core.bindings.fmtio import snprintf
     from numbox.utils.lowlevel import array_data_p
 
     def fmt_range(lo, hi, buf):
@@ -432,7 +436,7 @@ Example — parse a "<int> <double>" pair into typed numpy slots:
 
     import numpy as np
     from numba import njit
-    from numbox.core.bindings import sscanf
+    from numbox.core.bindings.fmtio import sscanf
     from numbox.utils.lowlevel import array_data_p, get_unicode_data_p
 
     @njit(cache=True)
@@ -456,178 +460,50 @@ numbox.core.bindings.abi
    :show-inheritance:
    :undoc-members:
 
-numbox.core.bindings._c
------------------------
+numbox.core.bindings.libc
+-------------------------
 
-.. automodule:: numbox.core.bindings._c
+.. automodule:: numbox.core.bindings.libc
    :members:
    :show-inheritance:
    :undoc-members:
 
-numbox.core.bindings._errno
----------------------------
-
-.. automodule:: numbox.core.bindings._errno
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._stdio
----------------------------
-
-.. automodule:: numbox.core.bindings._stdio
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._strerror
-------------------------------
-
-.. automodule:: numbox.core.bindings._strerror
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._fmtio
----------------------------
-
-.. automodule:: numbox.core.bindings._fmtio
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._math
+numbox.core.bindings.errno
 --------------------------
 
-.. automodule:: numbox.core.bindings._math
+.. automodule:: numbox.core.bindings.errno
    :members:
    :show-inheritance:
    :undoc-members:
 
-numbox.core.bindings._sqlite_conn
----------------------------------
+numbox.core.bindings.stdio
+--------------------------
 
-.. automodule:: numbox.core.bindings._sqlite_conn
+.. automodule:: numbox.core.bindings.stdio
    :members:
    :show-inheritance:
    :undoc-members:
 
-numbox.core.bindings._sqlite_stmt
----------------------------------
+numbox.core.bindings.strerror
+-----------------------------
 
-.. automodule:: numbox.core.bindings._sqlite_stmt
+.. automodule:: numbox.core.bindings.strerror
    :members:
    :show-inheritance:
    :undoc-members:
 
-numbox.core.bindings._sqlite_bind
----------------------------------
+numbox.core.bindings.fmtio
+--------------------------
 
-.. automodule:: numbox.core.bindings._sqlite_bind
+.. automodule:: numbox.core.bindings.fmtio
    :members:
    :show-inheritance:
    :undoc-members:
 
-numbox.core.bindings._sqlite_column
------------------------------------
+numbox.core.bindings.libm
+-------------------------
 
-.. automodule:: numbox.core.bindings._sqlite_column
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._sqlite_exec
----------------------------------
-
-.. automodule:: numbox.core.bindings._sqlite_exec
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._sqlite_blob
----------------------------------
-
-.. automodule:: numbox.core.bindings._sqlite_blob
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._sqlite_hooks
-----------------------------------
-
-.. automodule:: numbox.core.bindings._sqlite_hooks
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._sqlite_constants
---------------------------------------
-
-.. automodule:: numbox.core.bindings._sqlite_constants
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._sqlite_value
------------------------------------
-
-.. automodule:: numbox.core.bindings._sqlite_value
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._sqlite_result
-------------------------------------
-
-.. automodule:: numbox.core.bindings._sqlite_result
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._sqlite_udf
----------------------------------
-
-.. automodule:: numbox.core.bindings._sqlite_udf
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._sqlite_udf_helpers
-----------------------------------------
-
-.. automodule:: numbox.core.bindings._sqlite_udf_helpers
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._sqlite_vtable
------------------------------------
-
-.. automodule:: numbox.core.bindings._sqlite_vtable
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._sqlite_query
-----------------------------------
-
-.. automodule:: numbox.core.bindings._sqlite_query
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._sqlite_tvf
---------------------------------
-
-.. automodule:: numbox.core.bindings._sqlite_tvf
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-numbox.core.bindings._sqlite_typemap
-------------------------------------
-
-.. automodule:: numbox.core.bindings._sqlite_typemap
+.. automodule:: numbox.core.bindings.libm
    :members:
    :show-inheritance:
    :undoc-members:

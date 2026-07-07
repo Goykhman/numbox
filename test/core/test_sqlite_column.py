@@ -3,33 +3,17 @@ from ctypes import addressof, c_int64, c_ubyte
 
 import pytest
 
-from numbox.core.bindings import (
-    SQLITE_BLOB,
-    SQLITE_FLOAT,
-    SQLITE_INTEGER,
-    SQLITE_NULL,
-    SQLITE_OK,
-    SQLITE_ROW,
-    SQLITE_TEXT,
-    sqlite3_close,
-    sqlite3_column_blob,
-    sqlite3_column_bytes,
-    sqlite3_column_count,
-    sqlite3_column_database_name,
-    sqlite3_column_decltype,
-    sqlite3_column_double,
-    sqlite3_column_int,
-    sqlite3_column_int64,
-    sqlite3_column_name,
-    sqlite3_column_origin_name,
-    sqlite3_column_table_name,
-    sqlite3_column_text,
-    sqlite3_column_type,
-    sqlite3_finalize,
-    sqlite3_open,
-    sqlite3_prepare_v2,
-    sqlite3_step,
+from numbox.core.bindings.sqlite.constants import (
+    SQLITE_BLOB, SQLITE_FLOAT, SQLITE_INTEGER, SQLITE_NULL, SQLITE_OK, SQLITE_ROW, SQLITE_TEXT,
 )
+from numbox.core.bindings.sqlite.conn import sqlite3_close, sqlite3_open
+from numbox.core.bindings.sqlite.column import (
+    sqlite3_column_blob, sqlite3_column_bytes, sqlite3_column_count, sqlite3_column_database_name,
+    sqlite3_column_decltype, sqlite3_column_double, sqlite3_column_int, sqlite3_column_int64,
+    sqlite3_column_name, sqlite3_column_origin_name, sqlite3_column_table_name, sqlite3_column_text,
+    sqlite3_column_type,
+)
+from numbox.core.bindings.sqlite.stmt import sqlite3_finalize, sqlite3_prepare_v2, sqlite3_step
 from numbox.utils.cstrings import c_string
 from test.auxiliary_utils import collect_and_run_tests, str_from_p_as_int
 

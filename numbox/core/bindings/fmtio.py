@@ -595,10 +595,9 @@ def _ensure_py_stream_cache():
     global _PY_STREAM_BY_FP
     if _PY_STREAM_BY_FP is not None:
         return
-    # Defer the imports to avoid a circular dep at module load — _fmtio is
-    # imported AFTER _stdio by numbox.core.bindings.__init__, but doing
-    # the calls here at first use guarantees the bindings are ready.
-    from numbox.core.bindings import stdout, stderr, stdin
+    # Deferred so that importing this module does not pull in the stdio
+    # bindings unless the Python-stream mapping is actually used.
+    from numbox.core.bindings.stdio import stdout, stderr, stdin
     _PY_STREAM_BY_FP = {
         int(stdout()): sys.stdout,
         int(stderr()): sys.stderr,

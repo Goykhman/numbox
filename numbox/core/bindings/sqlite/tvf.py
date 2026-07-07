@@ -26,12 +26,12 @@ import ctypes
 import numpy as np
 from numba import cfunc, types
 
-from numbox.core.bindings._sqlite_constants import (
+from numbox.core.bindings.sqlite.constants import (
     SQLITE_OK, SQLITE_ERROR, SQLITE_NOMEM, SQLITE_CONSTRAINT,
     SQLITE_INDEX_CONSTRAINT_EQ,
 )
-from numbox.core.bindings._sqlite_typemap import _col_tag, _SQL_TYPE, tags_buf_t
-from numbox.core.bindings._sqlite_vtable import (
+from numbox.core.bindings.sqlite._typemap import _col_tag, _SQL_TYPE, tags_buf_t
+from numbox.core.bindings.sqlite.vtable import (
     _Sqlite3Module, _SQLITE3_VTAB_CURSOR_DTYPE, _VTAB_DTYPE, _VTAB_SIZE,
     _IDX_INFO_DTYPE, _CONSTRAINT_DTYPE, _USAGE_DTYPE,
     _register_with_destroy,
@@ -47,16 +47,16 @@ from numba import carray, njit  # noqa: F401
 from numba.core.types import (  # noqa: F401
     int8, int16, int32, int64, uint8, uint16, uint32, uint64, float32, float64,
 )
-from numbox.core.bindings._sqlite_vtable import sqlite3_declare_vtab  # noqa: F401
-from numbox.core.bindings._sqlite_exec import sqlite3_malloc, sqlite3_free  # noqa: F401
-from numbox.core.bindings._sqlite_value import (  # noqa: F401
+from numbox.core.bindings.sqlite.vtable import sqlite3_declare_vtab  # noqa: F401
+from numbox.core.bindings.sqlite.exec import sqlite3_malloc, sqlite3_free  # noqa: F401
+from numbox.core.bindings.sqlite.value import (  # noqa: F401
     sqlite3_value_int64, sqlite3_value_double,
 )
-from numbox.core.bindings._sqlite_result import (  # noqa: F401
+from numbox.core.bindings.sqlite.result import (  # noqa: F401
     sqlite3_result_int64, sqlite3_result_double,
     sqlite3_result_text, sqlite3_result_blob, sqlite3_result_error,
 )
-from numbox.core.bindings._sqlite_typemap import (  # noqa: F401
+from numbox.core.bindings.sqlite._typemap import (  # noqa: F401
     _TAG_I8, _TAG_I16, _TAG_I32, _TAG_I64, _TAG_U8, _TAG_U16, _TAG_U32, _TAG_U64,
     _TAG_F32, _TAG_F64, _TAG_BOOL, _TAG_S, _TAG_U, _TAG_BLOB,
     _nul_trimmed_len, utf32_to_utf8,

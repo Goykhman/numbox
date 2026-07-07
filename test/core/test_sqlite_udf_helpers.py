@@ -7,21 +7,13 @@ from numba import carray, cfunc, njit, types
 from numba.core import types as nb_types
 from numba.experimental import structref
 
-from numbox.core.bindings import (
-    SQLITE_OK,
-    SQLITE_UTF8,
-    register_aggregate,
-    register_window,
-    sqlite3_close,
-    sqlite3_create_function_v2,
-    sqlite3_errmsg,
-    sqlite3_exec,
-    sqlite3_open,
-    sqlite3_result_int,
-    sqlite3_result_int64,
-    sqlite3_user_data,
-    sqlite3_value_int64,
-)
+from numbox.core.bindings.sqlite.constants import SQLITE_OK, SQLITE_UTF8
+from numbox.core.bindings.sqlite.udf_helpers import register_aggregate, register_window
+from numbox.core.bindings.sqlite.conn import sqlite3_close, sqlite3_errmsg, sqlite3_open
+from numbox.core.bindings.sqlite.udf import sqlite3_create_function_v2, sqlite3_user_data
+from numbox.core.bindings.sqlite.exec import sqlite3_exec
+from numbox.core.bindings.sqlite.result import sqlite3_result_int, sqlite3_result_int64
+from numbox.core.bindings.sqlite.value import sqlite3_value_int64
 from numbox.utils.cstrings import c_string
 from numbox.utils.lowlevel import _cast_int_to_void_p
 
@@ -143,11 +135,13 @@ _DRIVER = textwrap.dedent('''
     from numba import carray, cfunc, njit, types
     from numba.core import types as nb_types
     from numba.experimental import structref
-    from numbox.core.bindings import (
-        SQLITE_OK, SQLITE_UTF8, sqlite3_close, sqlite3_create_function_v2,
-        sqlite3_exec, sqlite3_open, sqlite3_result_int, sqlite3_result_int64,
-        sqlite3_user_data, sqlite3_value_int64)
-    from numbox.core.bindings._sqlite_udf_helpers import register_aggregate
+    from numbox.core.bindings.sqlite.constants import SQLITE_OK, SQLITE_UTF8
+    from numbox.core.bindings.sqlite.conn import sqlite3_close, sqlite3_open
+    from numbox.core.bindings.sqlite.udf import sqlite3_create_function_v2, sqlite3_user_data
+    from numbox.core.bindings.sqlite.exec import sqlite3_exec
+    from numbox.core.bindings.sqlite.result import sqlite3_result_int, sqlite3_result_int64
+    from numbox.core.bindings.sqlite.value import sqlite3_value_int64
+    from numbox.core.bindings.sqlite.udf_helpers import register_aggregate
     from numbox.utils.cstrings import c_string
     from numbox.utils.lowlevel import _cast_int_to_void_p
 
@@ -324,7 +318,7 @@ def test_deterministic_flag_ors_bit(monkeypatch):
     sqlite3_create_function_v2, and the default must not. The flag is a
     query-planner hint with no effect on an aggregate's value, so a result
     assertion alone cannot guard this contract -- spy on the flags instead."""
-    import numbox.core.bindings._sqlite_udf_helpers as helpers
+    import numbox.core.bindings.sqlite.udf_helpers as helpers
     real = helpers.sqlite3_create_function_v2
     seen = []
 
@@ -364,7 +358,7 @@ def test_no_meminfo_leak():
 def test_window_deterministic_flag_ors_bit(monkeypatch):
     """register_window must OR SQLITE_DETERMINISTIC into the flags passed to
     sqlite3_create_window_function when deterministic=True, and not otherwise."""
-    import numbox.core.bindings._sqlite_udf_helpers as helpers
+    import numbox.core.bindings.sqlite.udf_helpers as helpers
     real = helpers.sqlite3_create_window_function
     seen = []
 
@@ -388,7 +382,7 @@ def test_registration_error_raises(monkeypatch):
     build-dependent -- SQLITE_MAX_FUNCTION_ARG and name limits vary), so the
     test is portable across sqlite builds."""
     import pytest
-    import numbox.core.bindings._sqlite_udf_helpers as helpers
+    import numbox.core.bindings.sqlite.udf_helpers as helpers
     monkeypatch.setattr(helpers, "sqlite3_create_function_v2",
                         lambda *a, **k: 1)  # non-OK rc (SQLITE_ERROR)
     db = _open_memory()

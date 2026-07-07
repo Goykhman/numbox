@@ -35,7 +35,7 @@ On Linux there is typically only one sqlite on the system, so no workaround is n
 import ctypes
 import sqlite3
 
-from numbox.core.bindings._sqlite_conn import sqlite3_errmsg, sqlite3_libversion
+from numbox.core.bindings.sqlite.conn import sqlite3_errmsg, sqlite3_libversion
 
 
 def _pyobject_head_fields():
@@ -93,7 +93,7 @@ class _PysqliteConnection(ctypes.Structure):
 def libraries_coordinated():
     """True if numbox's ``@njit`` bindings and Python's ``sqlite3`` resolve to the same libsqlite3.
 
-    Compares :func:`~numbox.core.bindings._sqlite_conn.sqlite3_libversion` (what numbox's bindings
+    Compares :func:`~numbox.core.bindings.sqlite.conn.sqlite3_libversion` (what numbox's bindings
     link against) with ``sqlite3.sqlite_version`` (what Python's ``sqlite3`` module links against).
     When they differ — the macOS shared-cache situation described in the module docstring — passing a
     connection pointer across the two is unsafe, and :func:`extract_connection_ptr` raises rather than
@@ -113,7 +113,7 @@ def extract_connection_ptr(conn):
     Uses :class:`_PysqliteConnection` to read the ``db`` field at its
     platform-correct offset inside the PyObject struct, then validates
     the pointer by calling
-    :func:`~numbox.core.bindings._sqlite_conn.sqlite3_errmsg` (a
+    :func:`~numbox.core.bindings.sqlite.conn.sqlite3_errmsg` (a
     healthy connection returns ``"not an error"``).
 
     Before reading the pointer, checks (via :func:`libraries_coordinated`) that

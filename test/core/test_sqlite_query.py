@@ -2,8 +2,10 @@ from ctypes import addressof, c_int64
 
 import pytest
 import numpy as np
-from numbox.core.bindings._sqlite_typemap import utf8_to_utf32, utf32_to_utf8
-from numbox.core.bindings import sqlite3_open, sqlite3_close, query_to_array, sqlite3_exec
+from numbox.core.bindings.sqlite._typemap import utf8_to_utf32, utf32_to_utf8
+from numbox.core.bindings.sqlite.conn import sqlite3_open, sqlite3_close
+from numbox.core.bindings.sqlite.query import query_to_array
+from numbox.core.bindings.sqlite.exec import sqlite3_exec
 from numbox.utils.cstrings import c_string
 from numbox.utils.lowlevel import array_data_p
 
@@ -213,10 +215,12 @@ def test_query_xprocess_cache(tmp_path):
         from ctypes import addressof, c_int64
         import numpy as np
         from numba import njit
-        from numbox.core.bindings import (
-            sqlite3_open, sqlite3_close, sqlite3_exec, query_to_array,
-            sqlite3_prepare_v2, sqlite3_step, sqlite3_column_int64, sqlite3_finalize,
-            register_tvf)
+        from numbox.core.bindings.sqlite.conn import sqlite3_open, sqlite3_close
+        from numbox.core.bindings.sqlite.exec import sqlite3_exec
+        from numbox.core.bindings.sqlite.query import query_to_array
+        from numbox.core.bindings.sqlite.stmt import sqlite3_prepare_v2, sqlite3_step, sqlite3_finalize
+        from numbox.core.bindings.sqlite.column import sqlite3_column_int64
+        from numbox.core.bindings.sqlite.tvf import register_tvf
         from numbox.utils.cstrings import c_string
 
         OUT = np.dtype([("n", "i8")])

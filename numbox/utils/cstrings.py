@@ -1,6 +1,6 @@
 """Python-side helpers for passing C strings into the bindings layer.
 
-The bindings layer (``numbox.core.bindings._sqlite_*``, ``_c``, etc.)
+The bindings layer (``numbox.core.bindings.sqlite.*``, ``numbox.core.bindings.libc``, etc.)
 takes ``intp`` pointers for every text argument. Producing a valid
 NUL-terminated UTF-8 C string from a Python ``str`` is non-trivial:
 ``get_unicode_data_p`` in ``lowlevel.py`` returns a pointer to the
@@ -32,7 +32,7 @@ def c_string(s):
     Usage::
 
         from numbox.utils.cstrings import c_string
-        from numbox.core.bindings import sqlite3_exec
+        from numbox.core.bindings.sqlite.exec import sqlite3_exec
 
         with c_string("CREATE TABLE t(x INTEGER)") as sql_p:
             sqlite3_exec(db_p, sql_p, 0, 0, 0)

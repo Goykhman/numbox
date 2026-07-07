@@ -10,25 +10,15 @@ from numba import carray, cfunc, njit, types
 from numba.core import types as nb_types
 from numba.experimental import structref
 
-from numbox.core.bindings import (
-    SQLITE_NULL,
-    SQLITE_OK,
-    SQLITE_UTF8,
-    sqlite3_aggregate_context,
-    sqlite3_close,
-    sqlite3_context_db_handle,
-    sqlite3_create_function_v2,
-    sqlite3_create_window_function,
-    sqlite3_exec,
-    sqlite3_open,
-    sqlite3_result_int,
-    sqlite3_result_int64,
-    sqlite3_result_null,
-    sqlite3_user_data,
-    sqlite3_value_int,
-    sqlite3_value_int64,
-    sqlite3_value_type,
+from numbox.core.bindings.sqlite.constants import SQLITE_NULL, SQLITE_OK, SQLITE_UTF8
+from numbox.core.bindings.sqlite.udf import (
+    sqlite3_aggregate_context, sqlite3_context_db_handle, sqlite3_create_function_v2,
+    sqlite3_create_window_function, sqlite3_user_data,
 )
+from numbox.core.bindings.sqlite.conn import sqlite3_close, sqlite3_open
+from numbox.core.bindings.sqlite.exec import sqlite3_exec
+from numbox.core.bindings.sqlite.result import sqlite3_result_int, sqlite3_result_int64, sqlite3_result_null
+from numbox.core.bindings.sqlite.value import sqlite3_value_int, sqlite3_value_int64, sqlite3_value_type
 from numbox.utils.cstrings import c_string
 from numbox.utils.lowlevel import _cast_int_to_void_p
 from numbox.utils.meminfo import _incref_meminfo, borrow_structref, export_meminfo, release_meminfo, structref_meminfo

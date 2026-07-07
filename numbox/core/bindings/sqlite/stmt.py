@@ -2,7 +2,7 @@
 sql / expanded_sql / stmt_busy.
 
 Note: ``sqlite3_expanded_sql`` returns a ``char *`` the caller MUST free via
-``sqlite3_free`` (bound in _sqlite_exec.py). Document this with each call site
+``sqlite3_free`` (bound in sqlite/exec.py). Document this with each call site
 rather than building a wrapper that auto-frees — the wrapper would hide
 ownership in a way the rest of the bindings don't.
 """

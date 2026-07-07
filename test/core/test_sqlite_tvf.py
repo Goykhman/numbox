@@ -5,17 +5,18 @@ import numpy as np
 from numba import njit
 
 from numbox.utils.cstrings import c_string
-from numbox.core.bindings import (
-    sqlite3_open, sqlite3_close, register_tvf,
-    sqlite3_prepare_v2, sqlite3_step, sqlite3_finalize,
-    sqlite3_column_int64, sqlite3_column_double,
-    sqlite3_column_text, sqlite3_column_type, sqlite3_column_count,
+from numbox.core.bindings.sqlite.conn import sqlite3_open, sqlite3_close
+from numbox.core.bindings.sqlite.tvf import register_tvf
+from numbox.core.bindings.sqlite.stmt import sqlite3_prepare_v2, sqlite3_step, sqlite3_finalize
+from numbox.core.bindings.sqlite.column import (
+    sqlite3_column_int64, sqlite3_column_double, sqlite3_column_text, sqlite3_column_type,
+    sqlite3_column_count,
 )
-from numbox.core.bindings._sqlite_tvf import _make_xbestindex, _TVF_DESC_DTYPE
-from numbox.core.bindings._sqlite_vtable import (
+from numbox.core.bindings.sqlite.tvf import _make_xbestindex, _TVF_DESC_DTYPE
+from numbox.core.bindings.sqlite.vtable import (
     _VTAB_DTYPE, _IDX_INFO_DTYPE, _CONSTRAINT_DTYPE, _USAGE_DTYPE,
 )
-from numbox.core.bindings._sqlite_constants import (
+from numbox.core.bindings.sqlite.constants import (
     SQLITE_OK, SQLITE_CONSTRAINT, SQLITE_INDEX_CONSTRAINT_EQ, SQLITE_ROW,
     SQLITE_ERROR, SQLITE_DONE, SQLITE_INTEGER, SQLITE_TEXT,
 )

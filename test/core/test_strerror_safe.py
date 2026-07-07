@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from numba import njit
 
-from numbox.core.bindings import strerror_safe
+from numbox.core.bindings.strerror import strerror_safe
 from numbox.core.bindings.utils import platform_
 from numbox.utils.lowlevel import array_data_p, get_str_from_p_as_int
 
@@ -132,11 +132,10 @@ def test_strerror_safe_two_threads_no_contamination():
 def test_strerror_safe_rejects_int64_errnum():
     """The private _strerror_safe intrinsic requires int32 errnum at typing
     time. The user-facing strerror_safe wrapper casts to int32 first, so
-    this guard only fires on direct misuse — defensive parallel to the
-    _store_int32_at guard in _errno.py.
+    this guard only fires on direct misuse.
     """
     from numba.core.errors import TypingError
-    from numbox.core.bindings._strerror import _strerror_safe
+    from numbox.core.bindings.strerror import _strerror_safe
 
     @njit
     def caller(errnum, buf, buflen):
@@ -151,7 +150,7 @@ def test_strerror_safe_rejects_int64_errnum():
 @pytest.mark.skipif(platform_ != "Linux", reason="glibc-only IR-inspection probe")
 def test_strerror_safe_ir_uses_strerror_r_when_xpg_absent(monkeypatch):
     import llvmlite.binding as ll
-    from numbox.core.bindings import _strerror as strerror_mod
+    from numbox.core.bindings import strerror as strerror_mod
 
     original = ll.address_of_symbol
 

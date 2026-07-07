@@ -1,5 +1,5 @@
 """Tests for the variadic printf/fprintf/snprintf/sscanf intrinsics in
-numbox.core.bindings._fmtio.
+numbox.core.bindings.fmtio.
 
 Coverage:
 - Basic round-trips via capfd / buffer-write
@@ -20,15 +20,9 @@ import pytest
 from numba import njit
 from numba.core.errors import TypingError
 
-from numbox.core.bindings import (
-    fflush,
-    fprintf,
-    printf,
-    snprintf,
-    sscanf,
-    stderr,
-    stdout,
-)
+from numbox.core.bindings.libc import fflush
+from numbox.core.bindings.fmtio import fprintf, printf, snprintf, sscanf
+from numbox.core.bindings.stdio import stderr, stdout
 from numbox.core.bindings.utils import platform_
 from numbox.utils.lowlevel import array_data_p, get_unicode_data_p
 from test.auxiliary_utils import assert_njit_cache_survives_subprocess_roundtrip
@@ -312,7 +306,7 @@ def test_snprintf_no_args():
 
 def test_snprintf_truncation_detection():
     """snprintf truncation behavior diverges by platform — see the
-    snprintf docstring in numbox/core/bindings/_fmtio.py.
+    snprintf docstring in numbox/core/bindings/fmtio.py.
 
     - **Linux/macOS** (POSIX/C99 ``snprintf``): ``rc`` is the would-have-
       written count (excluding NUL); ``rc >= size`` signals truncation;
@@ -769,7 +763,7 @@ def test_fmtio_caller_survives_subprocess_round_trip(tmp_path):
         probe_source="""
             import numpy as np
             from numba import njit
-            from numbox.core.bindings import snprintf
+            from numbox.core.bindings.fmtio import snprintf
             from numbox.utils.lowlevel import array_data_p
 
             @njit(cache=True)
@@ -821,15 +815,11 @@ def test_all_binding_families_survive_subprocess_round_trip(tmp_path):
         probe_source=r"""
             import numpy as np
             from numba import njit
-            from numbox.core.bindings import (
-                errno_get, errno_set,
-                stdout, stderr,
-                strerror_safe,
-                strcmp, strchr,
-                memset, memcpy, memcmp,
-                getenv,
-                snprintf, printf, fflush,
-            )
+            from numbox.core.bindings.errno import errno_get, errno_set
+            from numbox.core.bindings.stdio import stdout, stderr
+            from numbox.core.bindings.strerror import strerror_safe
+            from numbox.core.bindings.libc import strcmp, strchr, memset, memcpy, memcmp, getenv, fflush
+            from numbox.core.bindings.fmtio import snprintf, printf
             from numbox.utils.lowlevel import (
                 array_data_p, get_unicode_data_p,
             )
@@ -923,13 +913,13 @@ def test_njit_writer_rejects_array_arg(fn_name):
     libc would read garbage from the next stack slot. Both the typing-
     function layer (intrinsic) and the @overload should reject."""
     src = {
-        "printf": "from numbox.core.bindings import printf\n"
+        "printf": "from numbox.core.bindings.fmtio import printf\n"
                   "import numpy as np\n"
                   "@njit\ndef k(a): printf('%d', a)\n",
-        "fprintf": "from numbox.core.bindings import fprintf, stdout\n"
+        "fprintf": "from numbox.core.bindings.fmtio import fprintf\nfrom numbox.core.bindings.stdio import stdout\n"
                    "import numpy as np\n"
                    "@njit\ndef k(a): fprintf(stdout(), '%d', a)\n",
-        "snprintf": "from numbox.core.bindings import snprintf\n"
+        "snprintf": "from numbox.core.bindings.fmtio import snprintf\n"
                     "from numbox.utils.lowlevel import array_data_p\n"
                     "import numpy as np\n"
                     "@njit\ndef k(buf, a): snprintf(array_data_p(buf), buf.size, '%d', a)\n",
@@ -947,11 +937,11 @@ def test_njit_writer_rejects_array_arg(fn_name):
 @pytest.mark.parametrize("fn_name", ["printf", "fprintf", "snprintf"])
 def test_njit_writer_rejects_complex_arg(fn_name):
     src = {
-        "printf": "from numbox.core.bindings import printf\n"
+        "printf": "from numbox.core.bindings.fmtio import printf\n"
                   "@njit\ndef k(c): printf('%f', c)\n",
-        "fprintf": "from numbox.core.bindings import fprintf, stdout\n"
+        "fprintf": "from numbox.core.bindings.fmtio import fprintf\nfrom numbox.core.bindings.stdio import stdout\n"
                    "@njit\ndef k(c): fprintf(stdout(), '%f', c)\n",
-        "snprintf": "from numbox.core.bindings import snprintf\n"
+        "snprintf": "from numbox.core.bindings.fmtio import snprintf\n"
                     "from numbox.utils.lowlevel import array_data_p\n"
                     "import numpy as np\n"
                     "@njit\ndef k(buf, c): snprintf(array_data_p(buf), buf.size, '%f', c)\n",
@@ -969,11 +959,11 @@ def test_njit_writer_rejects_complex_arg(fn_name):
 @pytest.mark.parametrize("fn_name", ["printf", "fprintf", "snprintf"])
 def test_njit_writer_rejects_tuple_arg(fn_name):
     src = {
-        "printf": "from numbox.core.bindings import printf\n"
+        "printf": "from numbox.core.bindings.fmtio import printf\n"
                   "@njit\ndef k(t): printf('%d %d', t)\n",
-        "fprintf": "from numbox.core.bindings import fprintf, stdout\n"
+        "fprintf": "from numbox.core.bindings.fmtio import fprintf\nfrom numbox.core.bindings.stdio import stdout\n"
                    "@njit\ndef k(t): fprintf(stdout(), '%d %d', t)\n",
-        "snprintf": "from numbox.core.bindings import snprintf\n"
+        "snprintf": "from numbox.core.bindings.fmtio import snprintf\n"
                     "from numbox.utils.lowlevel import array_data_p\n"
                     "import numpy as np\n"
                     "@njit\ndef k(buf, t): snprintf(array_data_p(buf), buf.size, '%d %d', t)\n",
@@ -998,7 +988,7 @@ def test_njit_printf_rejects_percent_n(fmt):
     arg — memory-safety hazard, also diverges from pure-Python's `%`
     operator which raises ValueError on ``%n``. Reject at typing time."""
     src = f"""
-from numbox.core.bindings import printf
+from numbox.core.bindings.fmtio import printf
 from numbox.utils.lowlevel import array_data_p
 @njit
 def k(out):
@@ -1014,15 +1004,15 @@ def k(out):
 @pytest.mark.parametrize("fn", ["printf", "fprintf", "snprintf"])
 def test_njit_writer_rejects_percent_n(fn):
     if fn == "printf":
-        src = "from numbox.core.bindings import printf\n" \
+        src = "from numbox.core.bindings.fmtio import printf\n" \
               "from numbox.utils.lowlevel import array_data_p\n" \
               "@njit\ndef k(out): printf('count=%n', array_data_p(out))\n"
     elif fn == "fprintf":
-        src = "from numbox.core.bindings import fprintf, stdout\n" \
+        src = "from numbox.core.bindings.fmtio import fprintf\nfrom numbox.core.bindings.stdio import stdout\n" \
               "from numbox.utils.lowlevel import array_data_p\n" \
               "@njit\ndef k(out): fprintf(stdout(), 'count=%n', array_data_p(out))\n"
     else:
-        src = "from numbox.core.bindings import snprintf\n" \
+        src = "from numbox.core.bindings.fmtio import snprintf\n" \
               "from numbox.utils.lowlevel import array_data_p\n" \
               "import numpy as np\n" \
               "@njit\ndef k(buf, out): snprintf(array_data_p(buf), buf.size, 'count=%n', array_data_p(out))\n"
@@ -1057,7 +1047,7 @@ def test_njit_printf_rejects_grouping_flag(fmt):
     unsupported by Python's ``%``; reject it at typing time (mirrors %n
     handling). ``%'n`` also slips past the %n guard, so this catches it too."""
     src = f"""
-from numbox.core.bindings import printf
+from numbox.core.bindings.fmtio import printf
 @njit
 def k(x):
     printf({fmt!r}, x)
@@ -1071,13 +1061,13 @@ def k(x):
 @pytest.mark.parametrize("fn", ["printf", "fprintf", "snprintf"])
 def test_njit_writer_rejects_grouping_flag(fn):
     if fn == "printf":
-        src = "from numbox.core.bindings import printf\n" \
+        src = "from numbox.core.bindings.fmtio import printf\n" \
               "@njit\ndef k(x): printf(\"%'d\", x)\n"
     elif fn == "fprintf":
-        src = "from numbox.core.bindings import fprintf, stdout\n" \
+        src = "from numbox.core.bindings.fmtio import fprintf\nfrom numbox.core.bindings.stdio import stdout\n" \
               "@njit\ndef k(x): fprintf(stdout(), \"%'d\", x)\n"
     else:
-        src = "from numbox.core.bindings import snprintf\n" \
+        src = "from numbox.core.bindings.fmtio import snprintf\n" \
               "from numbox.utils.lowlevel import array_data_p\n" \
               "@njit\ndef k(buf, x): snprintf(array_data_p(buf), buf.size, \"%'d\", x)\n"
     ns = {"njit": njit}
@@ -1258,6 +1248,6 @@ def test_validate_format_accepts_uintp_for_string_and_pointer():
     # uintp (unsigned pointer-width int) is a valid pointer value for %s and %p,
     # not just intp -- validation must accept it without raising.
     from numba.core.types import Tuple, uintp
-    from numbox.core.bindings._fmtio import _validate_format_vs_args
+    from numbox.core.bindings.fmtio import _validate_format_vs_args
 
     _validate_format_vs_args("printf", "%s %p", Tuple([uintp, uintp]))
