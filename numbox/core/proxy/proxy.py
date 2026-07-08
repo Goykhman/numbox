@@ -4,9 +4,10 @@ from llvmlite import binding as ll
 from llvmlite import ir  # noqa: F401
 from numba import njit
 from numba.core import cgutils  # noqa: F401
+from numba.core.errors import TypingError
 from numba.core.types.function_type import CompileResultWAP
 from numba.core.typing.templates import Signature
-from numba.extending import intrinsic  # noqa: F401
+from numba.extending import intrinsic, overload
 from types import FunctionType as PyFunctionType
 from typing import List, Optional, Tuple
 
@@ -138,9 +139,13 @@ def proxy_if_available(lib, sig, jit_options: Optional[dict] = None):
     the C symbol matching ``func.__name__`` is absent from ``lib``.
 
     Use for binding sets that target multiple library versions where some
-    symbols only exist in newer releases. Callers get a stub that raises
+    symbols only exist in newer releases. Python callers get a stub that raises
     ``NotImplementedError`` instead of a confusing LLVM link error at call
-    time. Parallel to ``cres_if_available`` in :mod:`numbox.utils.highlevel`.
+    time; ``@njit`` callers get a ``TypingError`` naming the binding and the
+    missing-symbol cause at typing time (the untyped stub would otherwise
+    surface an untyped-global failure that names the binding but not why it
+    is unusable). Parallel to ``cres_if_available`` in
+    :mod:`numbox.utils.highlevel`.
 
     The stub does NOT expose ``.as_func`` — a function-value handle is
     meaningless without an underlying jitted body, and a stub one would
@@ -155,10 +160,22 @@ def proxy_if_available(lib, sig, jit_options: Optional[dict] = None):
         if hasattr(lib, func.__name__):
             return proxy(sig, jit_options=jit_options)(func)
 
+        name = func.__name__
+
         def stub(*args, **_kwargs):
-            raise NotImplementedError(f"{func.__name__} is not available")
-        stub.__name__ = make_proxy_name(func.__name__)
+            raise NotImplementedError(f"{name} is not available")
+        stub.__name__ = make_proxy_name(name)
         stub.__qualname__ = func.__qualname__
         stub.__doc__ = func.__doc__
+
+        # The stub is untyped, so a bare @njit call to it fails typing with an
+        # untyped-global error that names the binding but not why it is unusable.
+        # Register an @overload that raises a clear, named TypingError instead.
+        @overload(stub)
+        def _unavailable(*args, **kwargs):
+            raise TypingError(
+                f"{name} is not available in the loaded library "
+                f"(C symbol missing)"
+            )
         return stub
     return _
