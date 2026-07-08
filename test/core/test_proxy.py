@@ -8,6 +8,7 @@ import textwrap
 import numpy as np
 import pytest
 from numba import float64, njit
+from numba.core.errors import TypingError
 from numba.core.types import Omitted
 from numba.core.types.function_type import CompileResultWAP
 
@@ -245,6 +246,30 @@ def test_proxy_if_available_missing_symbol_returns_stub():
     assert not hasattr(nonexistent_fn, "as_func")
     with pytest.raises(NotImplementedError, match="nonexistent_fn is not available"):
         nonexistent_fn(1.0)
+
+
+def test_proxy_if_available_missing_symbol_njit_raises_clear_error():
+    """When the C symbol is absent, calling the stub from ``@njit`` raises a
+    clear ``TypingError`` naming the binding and the missing-symbol cause at
+    typing time, not an opaque numba typing failure."""
+    lib_path = _locate_libm()
+    if lib_path is None:
+        pytest.skip("No suitable math/C runtime library discoverable")
+    lib = load_lib_path(lib_path)
+
+    @proxy_if_available(lib, float64(float64))
+    def nonexistent_njit_fn(x):
+        return x
+
+    @njit
+    def use_it(x):
+        return nonexistent_njit_fn(x)
+
+    with pytest.raises(TypingError) as excinfo:
+        use_it(1.0)
+    message = str(excinfo.value)
+    assert "nonexistent_njit_fn is not available" in message
+    assert "C symbol missing" in message
 
 
 def test_proxy_function_above_anchor_line_raises_clear_error(tmp_path):
