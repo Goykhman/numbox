@@ -8,7 +8,7 @@ from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
 from numbox.core.bindings.utils import load_lib
 from numbox.core.configurations import jit_options
-from numbox.core.proxy.proxy import proxy
+from numbox.core.proxy.proxy import proxy, proxy_if_available
 
 
 __all__ = [
@@ -21,7 +21,7 @@ __all__ = [
 ]
 
 
-load_lib("sqlite3")
+_sqlite3_lib = load_lib("sqlite3")
 
 
 @proxy(signatures.get("sqlite3_value_int"), jit_options=jit_options)
@@ -69,7 +69,8 @@ def sqlite3_value_nochange(value_p):
     return _call_lib_func("sqlite3_value_nochange", (value_p,))
 
 
-@proxy(signatures.get("sqlite3_value_frombind"), jit_options=jit_options)
+# SQLite 3.28+; stubbed via proxy_if_available on older library versions.
+@proxy_if_available(_sqlite3_lib, signatures.get("sqlite3_value_frombind"), jit_options=jit_options)
 def sqlite3_value_frombind(value_p):
     return _call_lib_func("sqlite3_value_frombind", (value_p,))
 
