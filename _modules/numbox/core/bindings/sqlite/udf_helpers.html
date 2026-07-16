@@ -1,0 +1,442 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.sqlite.udf_helpers &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/sqlite/udf_helpers.html" />
+      <script src="../../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.sqlite.udf_helpers</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.sqlite.udf_helpers</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Higher-level registration helpers for structref-backed SQLite UDAFs.</span>
+
+<span class="sd">``register_aggregate`` / ``register_window`` generate the SQLite callback</span>
+<span class="sd">functions (xStep/xInverse/xValue/xFinal) that perform the per-group state</span>
+<span class="sd">lifecycle -- ``sqlite3_aggregate_context`` allocation + NULL guard, the single</span>
+<span class="sd">intp slot, init-on-first-step via ``export_meminfo``, ``borrow_structref``, and</span>
+<span class="sd">the release-in-xFinal-but-NOT-xValue rule -- so callers write only their</span>
+<span class="sd">``init``/``step``/``finalize`` (and ``inverse``/``value`` for windows) state</span>
+<span class="sd">logic, as plain Python or already-jitted (``@njit``/``@proxy``) functions.</span>
+
+<span class="sd">**Exception handling.** Each generated callback wraps the user</span>
+<span class="sd">step/inverse/value/finalize call in a ``try``/``except`` that reports a</span>
+<span class="sd">descriptive error via ``sqlite3_result_error`` (e.g. &quot;error in user step</span>
+<span class="sd">callback&quot;, with code ``SQLITE_ERROR``) when the user callback raises.</span>
+<span class="sd">A numba ``@cfunc`` otherwise SWALLOWS the exception (it prints &quot;Exception</span>
+<span class="sd">ignored&quot; and returns the zero default without unwinding into SQLite), which would</span>
+<span class="sd">be a silent wrong result; the in-body catch also lets numba run the borrowed</span>
+<span class="sd">state&#39;s reference-count decrement, which the unwind would otherwise skip -- a</span>
+<span class="sd">per-group meminfo leak. Only ``xFinal`` releases the slot.</span>
+
+<span class="sd">Mechanism: per-UDAF callback source is generated with the state type and the user functions</span>
+<span class="sd">baked in as module globals (so the calls inline), written to a content-addressed</span>
+<span class="sd">anchor file under numba&#39;s cache dir (reusing numbox.utils.preprocessing), and the</span>
+<span class="sd">impls (``@njit(**jit_options)`` -- the numbox-wide config, default ``cache=True``)</span>
+<span class="sd">cache across processes. The anchor&#39;s content hash</span>
+<span class="sd">folds a cloudpickle of the user functions&#39; code objects so editing a body --</span>
+<span class="sd">including a numeric literal -- invalidates correctly.</span>
+
+<span class="sd">**Caller requirements.** Callbacks may be plain Python functions or already-jitted</span>
+<span class="sd">callables (``@njit``/``@proxy``); plain ones are compiled with ``njit`` (see</span>
+<span class="sd">``_prepare_callbacks``). The generated impls (``@njit(**jit_options)``, default</span>
+<span class="sd">``cache=True``) cache and invalidate correctly even when the state-type class and</span>
+<span class="sd">the callbacks are defined in ``__main__`` -- the anchor key is content-addressed</span>
+<span class="sd">on a ``cloudpickle`` of each callback&#39;s ``__code__`` (plus ``repr(state_type)``,</span>
+<span class="sd">the resolved ``jit_options``, and the numba/numbox versions), never on</span>
+<span class="sd">``__module__`` (see ``numbox.utils.digest.digest``); the</span>
+<span class="sd">subprocess tests ``test_xprocess_cache_no_growth`` /</span>
+<span class="sd">``test_invalidation_on_literal_edit`` exercise this ``__main__`` path. The one</span>
+<span class="sd">case that does require a stable ``__module__`` is a *caller-side*</span>
+<span class="sd">``@njit(cache=True)`` callback -- numba refuses to cache functions defined in</span>
+<span class="sd">``__main__`` -- so for deployments where callbacks are themselves cached, define</span>
+<span class="sd">the state-type class and callbacks in an importable module.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">ctypes</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">cfunc</span><span class="p">,</span> <span class="n">types</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">StructRef</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">is_jitted</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.conn</span><span class="w"> </span><span class="kn">import</span> <span class="n">sqlite3_errmsg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">SQLITE_DETERMINISTIC</span><span class="p">,</span> <span class="n">SQLITE_OK</span><span class="p">,</span> <span class="n">SQLITE_UTF8</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.udf</span><span class="w"> </span><span class="kn">import</span> <span class="n">sqlite3_create_function_v2</span><span class="p">,</span> <span class="n">sqlite3_create_window_function</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.cstrings</span><span class="w"> </span><span class="kn">import</span> <span class="n">c_string</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.digest</span><span class="w"> </span><span class="kn">import</span> <span class="n">digest</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.preprocessing</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">_anchor_path</span><span class="p">,</span>
+    <span class="n">_materialize_anchor</span><span class="p">,</span>
+    <span class="n">_orphan_anchor_sweep</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1"># These names are referenced by the GENERATED anchor source; importing them here</span>
+<span class="c1"># puts them in this module&#39;s __dict__, which seeds the exec namespace below.</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">carray</span><span class="p">,</span> <span class="n">njit</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.result</span><span class="w"> </span><span class="kn">import</span> <span class="n">sqlite3_result_error</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.udf</span><span class="w"> </span><span class="kn">import</span> <span class="n">sqlite3_aggregate_context</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.lowlevel</span><span class="w"> </span><span class="kn">import</span> <span class="n">_cast_int_to_void_p</span><span class="p">,</span> <span class="n">get_unicode_data_p</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.meminfo</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>  <span class="c1"># noqa: F401</span>
+    <span class="n">borrow_structref</span><span class="p">,</span>
+    <span class="n">export_meminfo</span><span class="p">,</span>
+    <span class="n">release_meminfo</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;register_aggregate&quot;</span><span class="p">,</span> <span class="s2">&quot;register_window&quot;</span><span class="p">]</span>
+
+<span class="n">_ANCHOR_SUBDIR</span> <span class="o">=</span> <span class="s2">&quot;numbox-sqlite-udaf&quot;</span>
+<span class="n">_orphan_anchor_sweep</span><span class="p">(</span><span class="n">_ANCHOR_SUBDIR</span><span class="p">)</span>
+
+
+<span class="c1"># Generated-source templates. Baked global names: _state_type, _init, _step,</span>
+<span class="c1"># _finalize, _inverse, _value, jit_options. Each impl is @njit(**jit_options)</span>
+<span class="c1"># (numbox-wide config, default cache=True) so it caches cross-process; the user</span>
+<span class="c1"># fns inline because they are module globals here.</span>
+<span class="n">_XSTEP_SRC</span> <span class="o">=</span> <span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">@njit(**jit_options)</span>
+<span class="s1">def _xstep_impl(ctx, argc, argv_pp):</span>
+<span class="s1">    agg = sqlite3_aggregate_context(ctx, 8)</span>
+<span class="s1">    if agg == 0:</span>
+<span class="s1">        return</span>
+<span class="s1">    slot = carray(_cast_int_to_void_p(agg), (1,), dtype=np.intp)</span>
+<span class="s1">    if slot[0] == 0:</span>
+<span class="s1">        try:</span>
+<span class="s1">            slot[0] = export_meminfo(_init())</span>
+<span class="s1">        except Exception:</span>
+<span class="s1">            sqlite3_result_error(ctx, get_unicode_data_p(&quot;error in user init callback&quot;), -1)</span>
+<span class="s1">            return</span>
+<span class="s1">    try:</span>
+<span class="s1">        _step(borrow_structref(_state_type, slot[0]), ctx, argc, argv_pp)</span>
+<span class="s1">    except Exception:</span>
+<span class="s1">        sqlite3_result_error(ctx, get_unicode_data_p(&quot;error in user step callback&quot;), -1)</span>
+<span class="s1">&#39;&#39;&#39;</span>
+
+<span class="n">_XFINAL_SRC</span> <span class="o">=</span> <span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">@njit(**jit_options)</span>
+<span class="s1">def _xfinal_impl(ctx):</span>
+<span class="s1">    agg = sqlite3_aggregate_context(ctx, 0)</span>
+<span class="s1">    if agg == 0:</span>
+<span class="s1">        try:</span>
+<span class="s1">            _state = _init()</span>
+<span class="s1">        except Exception:</span>
+<span class="s1">            sqlite3_result_error(ctx, get_unicode_data_p(&quot;error in user init callback&quot;), -1)</span>
+<span class="s1">            return</span>
+<span class="s1">        try:</span>
+<span class="s1">            _finalize(_state, ctx)</span>
+<span class="s1">        except Exception:</span>
+<span class="s1">            sqlite3_result_error(ctx, get_unicode_data_p(&quot;error in user finalize callback&quot;), -1)</span>
+<span class="s1">        return</span>
+<span class="s1">    slot = carray(_cast_int_to_void_p(agg), (1,), dtype=np.intp)</span>
+<span class="s1">    if slot[0] == 0:</span>
+<span class="s1">        try:</span>
+<span class="s1">            _state = _init()</span>
+<span class="s1">        except Exception:</span>
+<span class="s1">            sqlite3_result_error(ctx, get_unicode_data_p(&quot;error in user init callback&quot;), -1)</span>
+<span class="s1">            return</span>
+<span class="s1">        try:</span>
+<span class="s1">            _finalize(_state, ctx)</span>
+<span class="s1">        except Exception:</span>
+<span class="s1">            sqlite3_result_error(ctx, get_unicode_data_p(&quot;error in user finalize callback&quot;), -1)</span>
+<span class="s1">        return</span>
+<span class="s1">    try:</span>
+<span class="s1">        _finalize(borrow_structref(_state_type, slot[0]), ctx)</span>
+<span class="s1">    except Exception:</span>
+<span class="s1">        sqlite3_result_error(ctx, get_unicode_data_p(&quot;error in user finalize callback&quot;), -1)</span>
+<span class="s1">    release_meminfo(slot[0])</span>
+<span class="s1">&#39;&#39;&#39;</span>
+
+<span class="n">_XINVERSE_SRC</span> <span class="o">=</span> <span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">@njit(**jit_options)</span>
+<span class="s1">def _xinverse_impl(ctx, argc, argv_pp):</span>
+<span class="s1">    agg = sqlite3_aggregate_context(ctx, 0)</span>
+<span class="s1">    if agg == 0:</span>
+<span class="s1">        return</span>
+<span class="s1">    slot = carray(_cast_int_to_void_p(agg), (1,), dtype=np.intp)</span>
+<span class="s1">    if slot[0] == 0:</span>
+<span class="s1">        return</span>
+<span class="s1">    try:</span>
+<span class="s1">        _inverse(borrow_structref(_state_type, slot[0]), ctx, argc, argv_pp)</span>
+<span class="s1">    except Exception:</span>
+<span class="s1">        sqlite3_result_error(ctx, get_unicode_data_p(&quot;error in user inverse callback&quot;), -1)</span>
+<span class="s1">&#39;&#39;&#39;</span>
+
+<span class="n">_XVALUE_SRC</span> <span class="o">=</span> <span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">@njit(**jit_options)</span>
+<span class="s1">def _xvalue_impl(ctx):</span>
+<span class="s1">    agg = sqlite3_aggregate_context(ctx, 0)</span>
+<span class="s1">    if agg == 0:</span>
+<span class="s1">        try:</span>
+<span class="s1">            _state = _init()</span>
+<span class="s1">        except Exception:</span>
+<span class="s1">            sqlite3_result_error(ctx, get_unicode_data_p(&quot;error in user init callback&quot;), -1)</span>
+<span class="s1">            return</span>
+<span class="s1">        try:</span>
+<span class="s1">            _value(_state, ctx)</span>
+<span class="s1">        except Exception:</span>
+<span class="s1">            sqlite3_result_error(ctx, get_unicode_data_p(&quot;error in user value callback&quot;), -1)</span>
+<span class="s1">        return</span>
+<span class="s1">    slot = carray(_cast_int_to_void_p(agg), (1,), dtype=np.intp)</span>
+<span class="s1">    if slot[0] == 0:</span>
+<span class="s1">        try:</span>
+<span class="s1">            _state = _init()</span>
+<span class="s1">        except Exception:</span>
+<span class="s1">            sqlite3_result_error(ctx, get_unicode_data_p(&quot;error in user init callback&quot;), -1)</span>
+<span class="s1">            return</span>
+<span class="s1">        try:</span>
+<span class="s1">            _value(_state, ctx)</span>
+<span class="s1">        except Exception:</span>
+<span class="s1">            sqlite3_result_error(ctx, get_unicode_data_p(&quot;error in user value callback&quot;), -1)</span>
+<span class="s1">        return</span>
+<span class="s1">    try:</span>
+<span class="s1">        _value(borrow_structref(_state_type, slot[0]), ctx)</span>
+<span class="s1">    except Exception:</span>
+<span class="s1">        sqlite3_result_error(ctx, get_unicode_data_p(&quot;error in user value callback&quot;), -1)</span>
+<span class="s1">&#39;&#39;&#39;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_validate_state_type</span><span class="p">(</span><span class="n">state_type</span><span class="p">):</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">state_type</span><span class="p">,</span> <span class="n">StructRef</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+            <span class="s2">&quot;state_type must be a numba StructRef instance &quot;</span>
+            <span class="s2">&quot;(e.g. MyStateType([(&#39;x&#39;, int64)])), got </span><span class="si">%r</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">state_type</span><span class="p">,))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_prepare_callbacks</span><span class="p">(</span><span class="o">**</span><span class="n">fns</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return ``fns`` with each callback ensured numba-compiled: an already</span>
+<span class="sd">    jitted callable (``@njit``, ``@proxy``, ...) passes through; a plain Python</span>
+<span class="sd">    function is wrapped with ``njit``. The callbacks are inlined into the</span>
+<span class="sd">    generated ``@njit(cache=True)`` impls, so a lazy ``njit`` (no explicit</span>
+<span class="sd">    signature) suffices -- the impl drives specialization -- and the</span>
+<span class="sd">    content-addressed anchor (keyed on ``py_func.__code__``) provides the</span>
+<span class="sd">    cross-process caching, so callbacks need no ``cache=True`` of their own.&quot;&quot;&quot;</span>
+    <span class="n">prepared</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">role</span><span class="p">,</span> <span class="n">fn</span> <span class="ow">in</span> <span class="n">fns</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">is_jitted</span><span class="p">(</span><span class="n">fn</span><span class="p">):</span>
+            <span class="n">prepared</span><span class="p">[</span><span class="n">role</span><span class="p">]</span> <span class="o">=</span> <span class="n">fn</span>
+        <span class="k">elif</span> <span class="nb">callable</span><span class="p">(</span><span class="n">fn</span><span class="p">):</span>
+            <span class="n">prepared</span><span class="p">[</span><span class="n">role</span><span class="p">]</span> <span class="o">=</span> <span class="n">njit</span><span class="p">(</span><span class="n">fn</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+                <span class="s2">&quot;</span><span class="si">%s</span><span class="s2"> must be a callable (plain Python or @njit), got </span><span class="si">%r</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">role</span><span class="p">,</span> <span class="n">fn</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">prepared</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_compile_callbacks</span><span class="p">(</span><span class="n">stem</span><span class="p">,</span> <span class="n">srcs</span><span class="p">,</span> <span class="n">state_type</span><span class="p">,</span> <span class="n">fns</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Generate + content-address-anchor + exec the @njit(cache=True) impls.</span>
+
+<span class="sd">    ``fns`` maps generated global names (``_init``, ``_step``, ...) to user</span>
+<span class="sd">    callables. Returns the exec namespace (contains ``_xstep_impl`` etc.).&quot;&quot;&quot;</span>
+    <span class="n">udaf_digest</span> <span class="o">=</span> <span class="n">digest</span><span class="p">(</span><span class="n">state_type</span><span class="p">,</span> <span class="nb">list</span><span class="p">(</span><span class="n">fns</span><span class="o">.</span><span class="n">values</span><span class="p">()))</span>
+    <span class="n">code_txt</span> <span class="o">=</span> <span class="s2">&quot;# udaf-digest: </span><span class="si">%s</span><span class="se">\n</span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">udaf_digest</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">srcs</span><span class="p">))</span>
+    <span class="c1"># globals() is this module&#39;s __dict__; it carries __name__, which numba&#39;s</span>
+    <span class="c1"># warm-cache Environment rebuild requires when reloading the cached impls.</span>
+    <span class="n">ns</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="nb">globals</span><span class="p">(),</span> <span class="s2">&quot;_state_type&quot;</span><span class="p">:</span> <span class="n">state_type</span><span class="p">,</span> <span class="o">**</span><span class="n">fns</span><span class="p">}</span>
+    <span class="n">anchor</span> <span class="o">=</span> <span class="n">_anchor_path</span><span class="p">(</span><span class="n">_ANCHOR_SUBDIR</span><span class="p">,</span> <span class="n">stem</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">)</span>
+    <span class="n">_materialize_anchor</span><span class="p">(</span><span class="n">anchor</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">)</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="nb">compile</span><span class="p">(</span><span class="n">code_txt</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">anchor</span><span class="p">),</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;exec&quot;</span><span class="p">)</span>
+    <span class="n">exec</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>  <span class="c1"># nosec B102 - JIT codegen of internal source</span>
+    <span class="k">return</span> <span class="n">ns</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_raise_rc</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">rc</span><span class="p">):</span>
+    <span class="n">msg_p</span> <span class="o">=</span> <span class="n">sqlite3_errmsg</span><span class="p">(</span><span class="n">db</span><span class="p">)</span>
+    <span class="n">detail</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">msg_p</span><span class="p">:</span>
+        <span class="n">detail</span> <span class="o">=</span> <span class="s2">&quot;: &quot;</span> <span class="o">+</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span>
+            <span class="n">msg_p</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_char_p</span><span class="p">)</span><span class="o">.</span><span class="n">value</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+        <span class="s2">&quot;sqlite3 UDAF registration failed for </span><span class="si">%r</span><span class="s2"> (rc=</span><span class="si">%d</span><span class="s2">)</span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">rc</span><span class="p">,</span> <span class="n">detail</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_stem</span><span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">prefix</span> <span class="o">+</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">c</span> <span class="k">if</span> <span class="n">c</span><span class="o">.</span><span class="n">isalnum</span><span class="p">()</span> <span class="k">else</span> <span class="s2">&quot;_&quot;</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">name</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="register_aggregate">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.udf_helpers.register_aggregate">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">register_aggregate</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">n_arg</span><span class="p">,</span> <span class="n">state_type</span><span class="p">,</span> <span class="n">init</span><span class="p">,</span> <span class="n">step</span><span class="p">,</span> <span class="n">finalize</span><span class="p">,</span>
+                       <span class="o">*</span><span class="p">,</span> <span class="n">deterministic</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Register a structref-backed aggregate UDAF.</span>
+
+<span class="sd">    Callbacks may be plain Python or already-jitted (``@njit``/``@proxy``); plain</span>
+<span class="sd">    functions are compiled with ``njit``.</span>
+
+<span class="sd">    :param db: connection pointer (intp), as returned by ``sqlite3_open``.</span>
+<span class="sd">    :param name: SQL function name (str); the C-string lifetime is handled here.</span>
+<span class="sd">    :param n_arg: argument count, or -1 for variadic.</span>
+<span class="sd">    :param state_type: the numba structref *instance* type for per-group state.</span>
+<span class="sd">    :param init: ``() -&gt; state`` returning a fresh state.</span>
+<span class="sd">    :param step: ``(state, ctx, argc, argv_pp)`` updating state.</span>
+<span class="sd">    :param finalize: ``(state, ctx)`` writing the result.</span>
+<span class="sd">    :param deterministic: OR-in ``SQLITE_DETERMINISTIC``.</span>
+
+<span class="sd">    Returns ``None``; the generated callbacks need not be retained -- numba keeps</span>
+<span class="sd">    the compiled cfunc code and dispatchers resident for the process lifetime.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">_validate_state_type</span><span class="p">(</span><span class="n">state_type</span><span class="p">)</span>
+    <span class="n">fns</span> <span class="o">=</span> <span class="n">_prepare_callbacks</span><span class="p">(</span><span class="n">init</span><span class="o">=</span><span class="n">init</span><span class="p">,</span> <span class="n">step</span><span class="o">=</span><span class="n">step</span><span class="p">,</span> <span class="n">finalize</span><span class="o">=</span><span class="n">finalize</span><span class="p">)</span>
+    <span class="n">ns</span> <span class="o">=</span> <span class="n">_compile_callbacks</span><span class="p">(</span>
+        <span class="n">_stem</span><span class="p">(</span><span class="s2">&quot;udaf_&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">),</span> <span class="p">[</span><span class="n">_XSTEP_SRC</span><span class="p">,</span> <span class="n">_XFINAL_SRC</span><span class="p">],</span> <span class="n">state_type</span><span class="p">,</span>
+        <span class="p">{</span><span class="s2">&quot;_init&quot;</span><span class="p">:</span> <span class="n">fns</span><span class="p">[</span><span class="s2">&quot;init&quot;</span><span class="p">],</span> <span class="s2">&quot;_step&quot;</span><span class="p">:</span> <span class="n">fns</span><span class="p">[</span><span class="s2">&quot;step&quot;</span><span class="p">],</span> <span class="s2">&quot;_finalize&quot;</span><span class="p">:</span> <span class="n">fns</span><span class="p">[</span><span class="s2">&quot;finalize&quot;</span><span class="p">]})</span>
+    <span class="n">xstep_impl</span> <span class="o">=</span> <span class="n">ns</span><span class="p">[</span><span class="s2">&quot;_xstep_impl&quot;</span><span class="p">]</span>
+    <span class="n">xfinal_impl</span> <span class="o">=</span> <span class="n">ns</span><span class="p">[</span><span class="s2">&quot;_xfinal_impl&quot;</span><span class="p">]</span>
+
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">void</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">))</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">step_cb</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">argc</span><span class="p">,</span> <span class="n">argv</span><span class="p">):</span>
+        <span class="n">xstep_impl</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">argc</span><span class="p">,</span> <span class="n">argv</span><span class="p">)</span>
+
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">void</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">))</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">final_cb</span><span class="p">(</span><span class="n">ctx</span><span class="p">):</span>
+        <span class="n">xfinal_impl</span><span class="p">(</span><span class="n">ctx</span><span class="p">)</span>
+
+    <span class="n">flags</span> <span class="o">=</span> <span class="n">SQLITE_UTF8</span> <span class="o">|</span> <span class="p">(</span><span class="n">SQLITE_DETERMINISTIC</span> <span class="k">if</span> <span class="n">deterministic</span> <span class="k">else</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="k">with</span> <span class="n">c_string</span><span class="p">(</span><span class="n">name</span><span class="p">)</span> <span class="k">as</span> <span class="n">name_p</span><span class="p">:</span>
+        <span class="n">rc</span> <span class="o">=</span> <span class="n">sqlite3_create_function_v2</span><span class="p">(</span>
+            <span class="n">db</span><span class="p">,</span> <span class="n">name_p</span><span class="p">,</span> <span class="n">n_arg</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span>
+            <span class="n">step_cb</span><span class="o">.</span><span class="n">address</span><span class="p">,</span> <span class="n">final_cb</span><span class="o">.</span><span class="n">address</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">rc</span> <span class="o">!=</span> <span class="n">SQLITE_OK</span><span class="p">:</span>
+        <span class="n">_raise_rc</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">rc</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="register_window">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.udf_helpers.register_window">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">register_window</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">n_arg</span><span class="p">,</span> <span class="n">state_type</span><span class="p">,</span> <span class="n">init</span><span class="p">,</span> <span class="n">step</span><span class="p">,</span> <span class="n">inverse</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span>
+                    <span class="n">finalize</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">deterministic</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Register a structref-backed window UDAF.</span>
+
+<span class="sd">    Same as :func:`register_aggregate` plus ``inverse(state, ctx, argc,</span>
+<span class="sd">    argv_pp)`` (un-applies a row; state already exists) and ``value(state,</span>
+<span class="sd">    ctx)`` (emits the running result WITHOUT releasing). Only ``xFinal``</span>
+<span class="sd">    releases the meminfo.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">_validate_state_type</span><span class="p">(</span><span class="n">state_type</span><span class="p">)</span>
+    <span class="n">fns</span> <span class="o">=</span> <span class="n">_prepare_callbacks</span><span class="p">(</span><span class="n">init</span><span class="o">=</span><span class="n">init</span><span class="p">,</span> <span class="n">step</span><span class="o">=</span><span class="n">step</span><span class="p">,</span> <span class="n">inverse</span><span class="o">=</span><span class="n">inverse</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">value</span><span class="p">,</span>
+                             <span class="n">finalize</span><span class="o">=</span><span class="n">finalize</span><span class="p">)</span>
+    <span class="n">ns</span> <span class="o">=</span> <span class="n">_compile_callbacks</span><span class="p">(</span>
+        <span class="n">_stem</span><span class="p">(</span><span class="s2">&quot;wudaf_&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">),</span>
+        <span class="p">[</span><span class="n">_XSTEP_SRC</span><span class="p">,</span> <span class="n">_XINVERSE_SRC</span><span class="p">,</span> <span class="n">_XVALUE_SRC</span><span class="p">,</span> <span class="n">_XFINAL_SRC</span><span class="p">],</span> <span class="n">state_type</span><span class="p">,</span>
+        <span class="p">{</span><span class="s2">&quot;_init&quot;</span><span class="p">:</span> <span class="n">fns</span><span class="p">[</span><span class="s2">&quot;init&quot;</span><span class="p">],</span> <span class="s2">&quot;_step&quot;</span><span class="p">:</span> <span class="n">fns</span><span class="p">[</span><span class="s2">&quot;step&quot;</span><span class="p">],</span> <span class="s2">&quot;_inverse&quot;</span><span class="p">:</span> <span class="n">fns</span><span class="p">[</span><span class="s2">&quot;inverse&quot;</span><span class="p">],</span>
+         <span class="s2">&quot;_value&quot;</span><span class="p">:</span> <span class="n">fns</span><span class="p">[</span><span class="s2">&quot;value&quot;</span><span class="p">],</span> <span class="s2">&quot;_finalize&quot;</span><span class="p">:</span> <span class="n">fns</span><span class="p">[</span><span class="s2">&quot;finalize&quot;</span><span class="p">]})</span>
+    <span class="n">xstep_impl</span> <span class="o">=</span> <span class="n">ns</span><span class="p">[</span><span class="s2">&quot;_xstep_impl&quot;</span><span class="p">]</span>
+    <span class="n">xinverse_impl</span> <span class="o">=</span> <span class="n">ns</span><span class="p">[</span><span class="s2">&quot;_xinverse_impl&quot;</span><span class="p">]</span>
+    <span class="n">xvalue_impl</span> <span class="o">=</span> <span class="n">ns</span><span class="p">[</span><span class="s2">&quot;_xvalue_impl&quot;</span><span class="p">]</span>
+    <span class="n">xfinal_impl</span> <span class="o">=</span> <span class="n">ns</span><span class="p">[</span><span class="s2">&quot;_xfinal_impl&quot;</span><span class="p">]</span>
+
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">void</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">))</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">step_cb</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">argc</span><span class="p">,</span> <span class="n">argv</span><span class="p">):</span>
+        <span class="n">xstep_impl</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">argc</span><span class="p">,</span> <span class="n">argv</span><span class="p">)</span>
+
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">void</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">))</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">inverse_cb</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">argc</span><span class="p">,</span> <span class="n">argv</span><span class="p">):</span>
+        <span class="n">xinverse_impl</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">argc</span><span class="p">,</span> <span class="n">argv</span><span class="p">)</span>
+
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">void</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">))</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">value_cb</span><span class="p">(</span><span class="n">ctx</span><span class="p">):</span>
+        <span class="n">xvalue_impl</span><span class="p">(</span><span class="n">ctx</span><span class="p">)</span>
+
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">void</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">))</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">final_cb</span><span class="p">(</span><span class="n">ctx</span><span class="p">):</span>
+        <span class="n">xfinal_impl</span><span class="p">(</span><span class="n">ctx</span><span class="p">)</span>
+
+    <span class="n">flags</span> <span class="o">=</span> <span class="n">SQLITE_UTF8</span> <span class="o">|</span> <span class="p">(</span><span class="n">SQLITE_DETERMINISTIC</span> <span class="k">if</span> <span class="n">deterministic</span> <span class="k">else</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="k">with</span> <span class="n">c_string</span><span class="p">(</span><span class="n">name</span><span class="p">)</span> <span class="k">as</span> <span class="n">name_p</span><span class="p">:</span>
+        <span class="n">rc</span> <span class="o">=</span> <span class="n">sqlite3_create_window_function</span><span class="p">(</span>
+            <span class="n">db</span><span class="p">,</span> <span class="n">name_p</span><span class="p">,</span> <span class="n">n_arg</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span>
+            <span class="n">step_cb</span><span class="o">.</span><span class="n">address</span><span class="p">,</span> <span class="n">final_cb</span><span class="o">.</span><span class="n">address</span><span class="p">,</span>
+            <span class="n">value_cb</span><span class="o">.</span><span class="n">address</span><span class="p">,</span> <span class="n">inverse_cb</span><span class="o">.</span><span class="n">address</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">rc</span> <span class="o">!=</span> <span class="n">SQLITE_OK</span><span class="p">:</span>
+        <span class="n">_raise_rc</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">rc</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

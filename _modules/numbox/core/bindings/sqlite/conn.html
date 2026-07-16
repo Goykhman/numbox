@@ -1,0 +1,275 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.sqlite.conn &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/sqlite/conn.html" />
+      <script src="../../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.sqlite.conn</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.sqlite.conn</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;SQLite connection + metadata bindings.</span>
+
+<span class="sd">Resolves the shared library via ``load_lib(&quot;sqlite3&quot;)`` from</span>
+<span class="sd">``utils._loaded_libs``. Other ``sqlite/*.py`` modules (currently</span>
+<span class="sd">``column``) call the same getter rather than importing</span>
+<span class="sd">``_sqlite3_lib`` from here, so there&#39;s no cross-module dependency on</span>
+<span class="sd">which file happens to load the library first.</span>
+
+<span class="sd">Two functions are decorated with ``proxy_if_available``:</span>
+<span class="sd">``sqlite3_changes64`` and ``sqlite3_total_changes64``, both added in</span>
+<span class="sd">SQLite 3.37 (Nov 2021). Older library versions lack these symbols —</span>
+<span class="sd">notably the SQLite 3.34 shipped with CPython 3.10 on Windows, and</span>
+<span class="sd">distro-shipped system sqlite3 on Linux / macOS that predates 3.37.</span>
+<span class="sd">The wrappers stub to ``NotImplementedError`` so callers can</span>
+<span class="sd">``hasattr(...,&quot;as_func&quot;)`` to decide whether to use them or fall back</span>
+<span class="sd">to the int32 variants.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.call</span><span class="w"> </span><span class="kn">import</span> <span class="n">_call_lib_func</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.signatures</span><span class="w"> </span><span class="kn">import</span> <span class="n">signatures</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_lib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span><span class="p">,</span> <span class="n">proxy_if_available</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">&quot;sqlite3_open&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_open_v2&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_close&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;sqlite3_libversion&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_libversion_number&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;sqlite3_errmsg&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_errcode&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_extended_errcode&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;sqlite3_threadsafe&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;sqlite3_db_handle&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_db_filename&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_db_readonly&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;sqlite3_changes&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_last_insert_rowid&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_total_changes&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;sqlite3_changes64&quot;</span><span class="p">,</span> <span class="s2">&quot;sqlite3_total_changes64&quot;</span><span class="p">,</span>
+<span class="p">]</span>
+
+
+<span class="n">_sqlite3_lib</span> <span class="o">=</span> <span class="n">load_lib</span><span class="p">(</span><span class="s2">&quot;sqlite3&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="sqlite3_open">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_open">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_open&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_open</span><span class="p">(</span><span class="n">filename_p</span><span class="p">,</span> <span class="n">db_pp</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_open&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">filename_p</span><span class="p">,</span> <span class="n">db_pp</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_open_v2">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_open_v2">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_open_v2&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_open_v2</span><span class="p">(</span><span class="n">filename_p</span><span class="p">,</span> <span class="n">db_pp</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="n">vfs_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_open_v2&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">filename_p</span><span class="p">,</span> <span class="n">db_pp</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="n">vfs_p</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_close">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_close">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_close&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_close</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_close&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_libversion">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_libversion">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_libversion&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_libversion</span><span class="p">():</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_libversion&quot;</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_libversion_number">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_libversion_number">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_libversion_number&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_libversion_number</span><span class="p">():</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_libversion_number&quot;</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_errmsg">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_errmsg">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_errmsg&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_errmsg</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_errmsg&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_errcode">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_errcode">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_errcode&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_errcode</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_errcode&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_extended_errcode">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_extended_errcode">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_extended_errcode&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_extended_errcode</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_extended_errcode&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_threadsafe">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_threadsafe">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_threadsafe&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_threadsafe</span><span class="p">():</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_threadsafe&quot;</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_db_handle">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_db_handle">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_db_handle&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_db_handle</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_db_handle&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_db_filename">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_db_filename">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_db_filename&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_db_filename</span><span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">name_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_db_filename&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">name_p</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_db_readonly">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_db_readonly">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_db_readonly&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_db_readonly</span><span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">name_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_db_readonly&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">name_p</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_changes">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_changes">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_changes&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_changes</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_changes&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_last_insert_rowid">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_last_insert_rowid">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_last_insert_rowid&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_last_insert_rowid</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_last_insert_rowid&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_total_changes">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_total_changes">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_total_changes&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_total_changes</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_total_changes&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<span class="c1"># SQLite 3.37+; stubbed via proxy_if_available on older library versions.</span>
+<div class="viewcode-block" id="sqlite3_changes64">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_changes64">[docs]</a>
+<span class="nd">@proxy_if_available</span><span class="p">(</span><span class="n">_sqlite3_lib</span><span class="p">,</span> <span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_changes64&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_changes64</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_changes64&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_total_changes64">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_total_changes64">[docs]</a>
+<span class="nd">@proxy_if_available</span><span class="p">(</span><span class="n">_sqlite3_lib</span><span class="p">,</span> <span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sqlite3_total_changes64&quot;</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_total_changes64</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">&quot;sqlite3_total_changes64&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

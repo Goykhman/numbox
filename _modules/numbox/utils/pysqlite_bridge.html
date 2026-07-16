@@ -1,0 +1,284 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.utils.pysqlite_bridge &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/utils/pysqlite_bridge.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.utils.pysqlite_bridge</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.utils.pysqlite_bridge</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Extract raw SQLite C API pointers from Python ``sqlite3`` objects.</span>
+
+<span class="sd">Bridges CPython&#39;s stdlib ``sqlite3`` module to the numba-callable bindings layer by exposing the underlying</span>
+<span class="sd">``sqlite3 *db`` handle that sits inside a Python ``sqlite3.Connection``.  Mirrors the pattern in</span>
+<span class="sd">`numbduck.pybridge &lt;https://github.com/Goykhman/numbduck/blob/main/numbduck/pybridge.py&gt;`_.</span>
+
+<span class="sd">macOS caveat</span>
+<span class="sd">~~~~~~~~~~~~</span>
+
+<span class="sd">On macOS, the system sqlite is in the `dyld shared cache</span>
+<span class="sd">&lt;https://keith.github.io/xcode-man-pages/dyld.1.html&gt;`_ (structure defined in Apple&#39;s</span>
+<span class="sd">`DyldSharedCache.h &lt;https://github.com/apple-oss-distributions/dyld/blob/main/common/DyldSharedCache.h&gt;`_),</span>
+<span class="sd">mapped into every process at launch.  LLVM&#39;s JIT linker resolves ``sqlite3_*`` symbols via</span>
+<span class="sd">``dlsym(RTLD_DEFAULT)``, which returns the first match in load order — the system copy.  Python&#39;s</span>
+<span class="sd">``_sqlite3.so`` may use a *different* sqlite (statically linked on python.org framework builds, or</span>
+<span class="sd">dynamically linked to Homebrew&#39;s copy).</span>
+
+<span class="sd">If the system sqlite and Python&#39;s sqlite differ enough in version or internal layout, passing the pointer from</span>
+<span class="sd">:func:`extract_connection_ptr` to numbox&#39;s ``@njit`` bindings can produce wrong results or segfaults.</span>
+
+<span class="sd">**Workaround:** force the process to load your Python&#39;s sqlite first::</span>
+
+<span class="sd">    DYLD_INSERT_LIBRARIES=/path/to/your/libsqlite3.dylib python my_script.py</span>
+
+<span class="sd">Common paths:</span>
+
+<span class="sd">- Homebrew (Apple Silicon): ``/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib``</span>
+<span class="sd">- Homebrew (Intel): ``/usr/local/opt/sqlite/lib/libsqlite3.dylib``</span>
+<span class="sd">- Conda-forge: ``$CONDA_PREFIX/lib/libsqlite3.dylib``</span>
+<span class="sd">- python.org framework builds statically link sqlite — no external dylib available;</span>
+<span class="sd">  install Homebrew sqlite and use its path.</span>
+
+<span class="sd">On Linux there is typically only one sqlite on the system, so no workaround is needed.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">ctypes</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sqlite3</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.conn</span><span class="w"> </span><span class="kn">import</span> <span class="n">sqlite3_errmsg</span><span class="p">,</span> <span class="n">sqlite3_libversion</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_pyobject_head_fields</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return ctypes field list for CPython&#39;s ``PyObject_HEAD``.</span>
+
+<span class="sd">    Detects debug and free-threaded builds at runtime so the struct</span>
+<span class="sd">    offset to ``db`` is correct in all configurations.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">sysconfig</span>
+
+    <span class="n">fields</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">sys</span><span class="p">,</span> <span class="s2">&quot;gettotalrefcount&quot;</span><span class="p">):</span>
+        <span class="n">fields</span> <span class="o">+=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="s2">&quot;_ob_next&quot;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_void_p</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;_ob_prev&quot;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_void_p</span><span class="p">),</span>
+        <span class="p">]</span>
+
+    <span class="k">if</span> <span class="n">sysconfig</span><span class="o">.</span><span class="n">get_config_var</span><span class="p">(</span><span class="s2">&quot;Py_GIL_DISABLED&quot;</span><span class="p">):</span>
+        <span class="n">fields</span> <span class="o">+=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="s2">&quot;ob_tid&quot;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_size_t</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;_padding&quot;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_uint16</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;ob_mutex&quot;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_uint8</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;ob_gc_bits&quot;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_uint8</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;ob_ref_local&quot;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_uint32</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;ob_ref_shared&quot;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_ssize_t</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;ob_type&quot;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_void_p</span><span class="p">),</span>
+        <span class="p">]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">fields</span> <span class="o">+=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="s2">&quot;ob_refcnt&quot;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_ssize_t</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">&quot;ob_type&quot;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_void_p</span><span class="p">),</span>
+        <span class="p">]</span>
+
+    <span class="k">return</span> <span class="n">fields</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_PysqliteConnection</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">Structure</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Model the first fields of CPython&#39;s ``pysqlite_Connection``.</span>
+
+<span class="sd">    Mirrors the layout in `Modules/_sqlite/connection.h</span>
+<span class="sd">    &lt;https://github.com/python/cpython/blob/main/Modules/_sqlite/connection.h&gt;`_.</span>
+<span class="sd">    ``ctypes.Structure`` computes the ``db`` offset from the declared</span>
+<span class="sd">    field types, so the layout is correct across 32/64-bit, debug, and</span>
+<span class="sd">    free-threaded builds without hardcoded constants.</span>
+
+<span class="sd">    Pattern from `numbsql</span>
+<span class="sd">    &lt;https://github.com/cpcloud/numbsql/blob/main/numbsql/sqlite.py#L282&gt;`_.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">_fields_</span> <span class="o">=</span> <span class="n">_pyobject_head_fields</span><span class="p">()</span> <span class="o">+</span> <span class="p">[(</span><span class="s2">&quot;db&quot;</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_void_p</span><span class="p">)]</span>
+
+
+<div class="viewcode-block" id="libraries_coordinated">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.pysqlite_bridge.libraries_coordinated">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">libraries_coordinated</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;True if numbox&#39;s ``@njit`` bindings and Python&#39;s ``sqlite3`` resolve to the same libsqlite3.</span>
+
+<span class="sd">    Compares :func:`~numbox.core.bindings.sqlite.conn.sqlite3_libversion` (what numbox&#39;s bindings</span>
+<span class="sd">    link against) with ``sqlite3.sqlite_version`` (what Python&#39;s ``sqlite3`` module links against).</span>
+<span class="sd">    When they differ — the macOS shared-cache situation described in the module docstring — passing a</span>
+<span class="sd">    connection pointer across the two is unsafe, and :func:`extract_connection_ptr` raises rather than</span>
+<span class="sd">    proceed.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    bool</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">numbox_version</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_char_p</span><span class="p">(</span><span class="n">sqlite3_libversion</span><span class="p">())</span><span class="o">.</span><span class="n">value</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">numbox_version</span> <span class="o">==</span> <span class="n">sqlite3</span><span class="o">.</span><span class="n">sqlite_version</span></div>
+
+
+
+<div class="viewcode-block" id="extract_connection_ptr">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.pysqlite_bridge.extract_connection_ptr">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">extract_connection_ptr</span><span class="p">(</span><span class="n">conn</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return the raw ``sqlite3*`` underlying a Python ``sqlite3.Connection``.</span>
+
+<span class="sd">    Uses :class:`_PysqliteConnection` to read the ``db`` field at its</span>
+<span class="sd">    platform-correct offset inside the PyObject struct, then validates</span>
+<span class="sd">    the pointer by calling</span>
+<span class="sd">    :func:`~numbox.core.bindings.sqlite.conn.sqlite3_errmsg` (a</span>
+<span class="sd">    healthy connection returns ``&quot;not an error&quot;``).</span>
+
+<span class="sd">    Before reading the pointer, checks (via :func:`libraries_coordinated`) that</span>
+<span class="sd">    numbox&#39;s bindings and Python&#39;s ``sqlite3`` module resolve to the same</span>
+<span class="sd">    libsqlite3.  If they differ — the macOS shared-cache situation in the module</span>
+<span class="sd">    docstring — it raises rather than pass the pointer to a mismatched library,</span>
+<span class="sd">    which could segfault.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    conn : sqlite3.Connection</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    int</span>
+<span class="sd">        ``sqlite3*`` as a Python int (``intp``-compatible). The pointer is</span>
+<span class="sd">        **borrowed** from *conn*: it is owned by the Python ``Connection`` and</span>
+<span class="sd">        stays valid only while *conn* is alive and open. An ``int`` cannot keep</span>
+<span class="sd">        *conn* referenced, so the keep-alive is the caller&#39;s responsibility.</span>
+
+<span class="sd">    Warning</span>
+<span class="sd">    -------</span>
+<span class="sd">    The caller must retain *conn* for the entire lifetime of any ``@njit`` use</span>
+<span class="sd">    of the returned pointer, and must not use the pointer after ``conn.close()``</span>
+<span class="sd">    or after *conn* is garbage-collected — doing so is a use-after-free</span>
+<span class="sd">    (dereferencing a dangling ``sqlite3*``). This mirrors the ``SQLITE_STATIC``</span>
+<span class="sd">    ownership contract on ``bind_text`` / ``bind_blob``: the borrowed memory</span>
+<span class="sd">    must outlive every use.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    TypeError</span>
+<span class="sd">        If *conn* is not a ``sqlite3.Connection``.</span>
+<span class="sd">    RuntimeError</span>
+<span class="sd">        If numbox&#39;s bindings and Python&#39;s ``sqlite3`` use different</span>
+<span class="sd">        libsqlite3 instances, or if the extracted pointer fails the</span>
+<span class="sd">        validation call.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">sqlite3</span><span class="o">.</span><span class="n">Connection</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;expected sqlite3.Connection, got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">libraries_coordinated</span><span class="p">():</span>
+        <span class="n">numbox_version</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_char_p</span><span class="p">(</span><span class="n">sqlite3_libversion</span><span class="p">())</span><span class="o">.</span><span class="n">value</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;numbox&#39;s @njit bindings resolve libsqlite3 </span><span class="si">{</span><span class="n">numbox_version</span><span class="si">!r}</span><span class="s2">, but Python&#39;s &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;sqlite3 module uses </span><span class="si">{</span><span class="n">sqlite3</span><span class="o">.</span><span class="n">sqlite_version</span><span class="si">!r}</span><span class="s2">.  Passing this connection &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;pointer to numbox&#39;s bindings would be unsafe (possible segfault).  On macOS, &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;set DYLD_INSERT_LIBRARIES to your Python&#39;s libsqlite3.dylib — see the &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;numbox.utils.pysqlite_bridge module docstring.&quot;</span>
+        <span class="p">)</span>
+    <span class="n">db_ptr</span> <span class="o">=</span> <span class="n">_PysqliteConnection</span><span class="o">.</span><span class="n">from_address</span><span class="p">(</span><span class="nb">id</span><span class="p">(</span><span class="n">conn</span><span class="p">))</span><span class="o">.</span><span class="n">db</span>
+    <span class="k">if</span> <span class="n">db_ptr</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;extracted null sqlite3* from sqlite3.Connection&quot;</span><span class="p">)</span>
+    <span class="n">errmsg</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_char_p</span><span class="p">(</span><span class="n">sqlite3_errmsg</span><span class="p">(</span><span class="n">db_ptr</span><span class="p">))</span><span class="o">.</span><span class="n">value</span>
+    <span class="k">if</span> <span class="n">errmsg</span> <span class="o">!=</span> <span class="sa">b</span><span class="s2">&quot;not an error&quot;</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;extracted connection pointer failed validation: </span><span class="si">{</span><span class="n">errmsg</span><span class="si">!r}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">db_ptr</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

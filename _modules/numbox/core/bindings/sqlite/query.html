@@ -1,0 +1,300 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.sqlite.query &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/sqlite/query.html" />
+      <script src="../../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.sqlite.query</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.sqlite.query</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;query_to_array: collect SELECT results into a numpy structured array.&quot;&quot;&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">ctypes</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">njit</span><span class="p">,</span> <span class="n">carray</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">uint8</span><span class="p">,</span> <span class="n">uint32</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">SQLITE_ROW</span><span class="p">,</span> <span class="n">SQLITE_NULL</span><span class="p">,</span> <span class="n">SQLITE_OK</span><span class="p">,</span> <span class="n">SQLITE_DONE</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.stmt</span><span class="w"> </span><span class="kn">import</span> <span class="n">sqlite3_prepare_v2</span><span class="p">,</span> <span class="n">sqlite3_step</span><span class="p">,</span> <span class="n">sqlite3_finalize</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.column</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">sqlite3_column_count</span><span class="p">,</span> <span class="n">sqlite3_column_type</span><span class="p">,</span> <span class="n">sqlite3_column_int64</span><span class="p">,</span> <span class="n">sqlite3_column_double</span><span class="p">,</span>
+    <span class="n">sqlite3_column_text</span><span class="p">,</span> <span class="n">sqlite3_column_blob</span><span class="p">,</span> <span class="n">sqlite3_column_bytes</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.conn</span><span class="w"> </span><span class="kn">import</span> <span class="n">sqlite3_errmsg</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite._typemap</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">_col_tag</span><span class="p">,</span>
+    <span class="n">_TAG_I8</span><span class="p">,</span> <span class="n">_TAG_I16</span><span class="p">,</span> <span class="n">_TAG_I32</span><span class="p">,</span> <span class="n">_TAG_I64</span><span class="p">,</span> <span class="n">_TAG_U8</span><span class="p">,</span> <span class="n">_TAG_U16</span><span class="p">,</span> <span class="n">_TAG_U32</span><span class="p">,</span> <span class="n">_TAG_U64</span><span class="p">,</span>
+    <span class="n">_TAG_F32</span><span class="p">,</span> <span class="n">_TAG_F64</span><span class="p">,</span> <span class="n">_TAG_BOOL</span><span class="p">,</span> <span class="n">_TAG_S</span><span class="p">,</span> <span class="n">_TAG_U</span><span class="p">,</span> <span class="n">_TAG_BLOB</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.lowlevel</span><span class="w"> </span><span class="kn">import</span> <span class="n">_cast_int_to_void_p</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;query_to_array&quot;</span><span class="p">]</span>
+
+
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_copy_bytes</span><span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">off</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">nbytes</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Copy ``nbytes`` bytes from the start of ``src`` into ``dst`` at ``off``.&quot;&quot;&quot;</span>
+    <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nbytes</span><span class="p">):</span>
+        <span class="n">dst</span><span class="p">[</span><span class="n">off</span> <span class="o">+</span> <span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">src</span><span class="p">[</span><span class="n">k</span><span class="p">]</span>
+
+
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_put_unicode</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">off</span><span class="p">,</span> <span class="n">scratch8</span><span class="p">,</span> <span class="n">src_p</span><span class="p">,</span> <span class="n">nbytes</span><span class="p">,</span> <span class="n">width_cp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Decode UTF-8 at ``src_p`` into up to ``width_cp`` UTF-32 code points and</span>
+<span class="sd">    write them into ``buf`` at ``off`` in the platform&#39;s NATIVE byte order (via a</span>
+<span class="sd">    uint32 view of ``scratch8``, matching numpy&#39;s &#39;U&#39; dtype). Mirrors</span>
+<span class="sd">    ``_typemap.utf8_to_utf32`` but writes natively into ``buf`` (a tracked</span>
+<span class="sd">    uint8 array view) instead of a raw pointer -- raw-pointer stores get</span>
+<span class="sd">    dead-code-eliminated by the macOS-arm64 optimizer. Malformed input -&gt; U+FFFD.&quot;&quot;&quot;</span>
+    <span class="n">inp</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">src_p</span><span class="p">),</span> <span class="p">(</span><span class="n">nbytes</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+    <span class="n">cps</span> <span class="o">=</span> <span class="n">scratch8</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">uint32</span><span class="p">)</span>
+    <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">k</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">while</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">nbytes</span> <span class="ow">and</span> <span class="n">k</span> <span class="o">&lt;</span> <span class="n">width_cp</span><span class="p">:</span>
+        <span class="n">b0</span> <span class="o">=</span> <span class="n">uint32</span><span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">b0</span> <span class="o">&lt;</span> <span class="mh">0x80</span><span class="p">:</span>
+            <span class="n">cp</span> <span class="o">=</span> <span class="n">b0</span>
+            <span class="n">i</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">elif</span> <span class="n">b0</span> <span class="o">&gt;&gt;</span> <span class="mi">5</span> <span class="o">==</span> <span class="mh">0x6</span> <span class="ow">and</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">&lt;</span> <span class="n">nbytes</span> <span class="ow">and</span> <span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">&gt;&gt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">==</span> <span class="mh">0x2</span><span class="p">:</span>
+            <span class="n">cp</span> <span class="o">=</span> <span class="p">((</span><span class="n">b0</span> <span class="o">&amp;</span> <span class="mh">0x1F</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">uint32</span><span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">])</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">cp</span> <span class="o">&lt;</span> <span class="mh">0x80</span><span class="p">:</span>
+                <span class="n">cp</span> <span class="o">=</span> <span class="mh">0xFFFD</span>
+            <span class="n">i</span> <span class="o">+=</span> <span class="mi">2</span>
+        <span class="k">elif</span> <span class="n">b0</span> <span class="o">&gt;&gt;</span> <span class="mi">4</span> <span class="o">==</span> <span class="mh">0xE</span> <span class="ow">and</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">2</span> <span class="o">&lt;</span> <span class="n">nbytes</span> <span class="ow">and</span> <span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">&gt;&gt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">==</span> <span class="mh">0x2</span> <span class="ow">and</span> <span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">2</span><span class="p">]</span> <span class="o">&gt;&gt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">==</span> <span class="mh">0x2</span><span class="p">:</span>
+            <span class="n">cp</span> <span class="o">=</span> <span class="p">((</span><span class="n">b0</span> <span class="o">&amp;</span> <span class="mh">0x0F</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="mi">12</span><span class="p">)</span> <span class="o">|</span> <span class="p">((</span><span class="n">uint32</span><span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">])</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">uint32</span><span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">2</span><span class="p">])</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">cp</span> <span class="o">&lt;</span> <span class="mh">0x800</span> <span class="ow">or</span> <span class="p">(</span><span class="mh">0xD800</span> <span class="o">&lt;=</span> <span class="n">cp</span> <span class="o">&lt;=</span> <span class="mh">0xDFFF</span><span class="p">):</span>
+                <span class="n">cp</span> <span class="o">=</span> <span class="mh">0xFFFD</span>
+            <span class="n">i</span> <span class="o">+=</span> <span class="mi">3</span>
+        <span class="k">elif</span> <span class="p">(</span><span class="n">b0</span> <span class="o">&gt;&gt;</span> <span class="mi">3</span> <span class="o">==</span> <span class="mh">0x1E</span> <span class="ow">and</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">3</span> <span class="o">&lt;</span> <span class="n">nbytes</span> <span class="ow">and</span> <span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">&gt;&gt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">==</span> <span class="mh">0x2</span>
+              <span class="ow">and</span> <span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">2</span><span class="p">]</span> <span class="o">&gt;&gt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">==</span> <span class="mh">0x2</span> <span class="ow">and</span> <span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">3</span><span class="p">]</span> <span class="o">&gt;&gt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">==</span> <span class="mh">0x2</span><span class="p">):</span>
+            <span class="n">cp</span> <span class="o">=</span> <span class="p">(((</span><span class="n">b0</span> <span class="o">&amp;</span> <span class="mh">0x07</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="mi">18</span><span class="p">)</span> <span class="o">|</span> <span class="p">((</span><span class="n">uint32</span><span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">])</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="mi">12</span><span class="p">)</span>
+                  <span class="o">|</span> <span class="p">((</span><span class="n">uint32</span><span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">2</span><span class="p">])</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">uint32</span><span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">3</span><span class="p">])</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">cp</span> <span class="o">&lt;</span> <span class="mh">0x10000</span> <span class="ow">or</span> <span class="n">cp</span> <span class="o">&gt;</span> <span class="mh">0x10FFFF</span><span class="p">:</span>
+                <span class="n">cp</span> <span class="o">=</span> <span class="mh">0xFFFD</span>
+            <span class="n">i</span> <span class="o">+=</span> <span class="mi">4</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">cp</span> <span class="o">=</span> <span class="mh">0xFFFD</span>
+            <span class="n">i</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">cps</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">cp</span>
+        <span class="n">_copy_bytes</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">off</span> <span class="o">+</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">k</span><span class="p">,</span> <span class="n">scratch8</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="n">k</span> <span class="o">+=</span> <span class="mi">1</span>
+
+
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_store_cell</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">off</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">width</span><span class="p">,</span> <span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">scratch8</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write column ``j`` of the current row into the uint8 array view ``buf`` at</span>
+<span class="sd">    byte offset ``off``. Scalars are serialised through ``scratch8`` (a tracked</span>
+<span class="sd">    8-byte uint8 array) via a typed view, so the bytes land in the platform&#39;s</span>
+<span class="sd">    NATIVE order, then copied into ``buf`` -- all numba-tracked array writes, so</span>
+<span class="sd">    the optimizer cannot drop them on macOS-arm64. The row is pre-zeroed by the</span>
+<span class="sd">    caller (np.zeros): a SQL NULL leaves an integer cell 0 / text-blob empty; only</span>
+<span class="sd">    float cells get NaN. The text/blob accessor is read before column_bytes.&quot;&quot;&quot;</span>
+    <span class="n">ctype</span> <span class="o">=</span> <span class="n">sqlite3_column_type</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">ctype</span> <span class="o">==</span> <span class="n">SQLITE_NULL</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_F32</span><span class="p">:</span>
+            <span class="n">scratch8</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+            <span class="n">_copy_bytes</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">off</span><span class="p">,</span> <span class="n">scratch8</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_F64</span><span class="p">:</span>
+            <span class="n">scratch8</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+            <span class="n">_copy_bytes</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">off</span><span class="p">,</span> <span class="n">scratch8</span><span class="p">,</span> <span class="mi">8</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="k">if</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_I8</span> <span class="ow">or</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_U8</span><span class="p">:</span>
+        <span class="n">buf</span><span class="p">[</span><span class="n">off</span><span class="p">]</span> <span class="o">=</span> <span class="n">uint8</span><span class="p">(</span><span class="n">sqlite3_column_int64</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">))</span>
+    <span class="k">elif</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_I16</span> <span class="ow">or</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_U16</span><span class="p">:</span>
+        <span class="n">scratch8</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int16</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">int16</span><span class="p">(</span><span class="n">sqlite3_column_int64</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">))</span>
+        <span class="n">_copy_bytes</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">off</span><span class="p">,</span> <span class="n">scratch8</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_I32</span> <span class="ow">or</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_U32</span><span class="p">:</span>
+        <span class="n">scratch8</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">int32</span><span class="p">(</span><span class="n">sqlite3_column_int64</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">))</span>
+        <span class="n">_copy_bytes</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">off</span><span class="p">,</span> <span class="n">scratch8</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_I64</span> <span class="ow">or</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_U64</span><span class="p">:</span>
+        <span class="n">scratch8</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">(</span><span class="n">sqlite3_column_int64</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">))</span>
+        <span class="n">_copy_bytes</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">off</span><span class="p">,</span> <span class="n">scratch8</span><span class="p">,</span> <span class="mi">8</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_BOOL</span><span class="p">:</span>
+        <span class="n">buf</span><span class="p">[</span><span class="n">off</span><span class="p">]</span> <span class="o">=</span> <span class="n">uint8</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="k">if</span> <span class="n">sqlite3_column_int64</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="k">else</span> <span class="n">uint8</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_F32</span><span class="p">:</span>
+        <span class="n">scratch8</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">(</span><span class="n">sqlite3_column_double</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">))</span>
+        <span class="n">_copy_bytes</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">off</span><span class="p">,</span> <span class="n">scratch8</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_F64</span><span class="p">:</span>
+        <span class="n">scratch8</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">sqlite3_column_double</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+        <span class="n">_copy_bytes</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">off</span><span class="p">,</span> <span class="n">scratch8</span><span class="p">,</span> <span class="mi">8</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_U</span><span class="p">:</span>
+        <span class="n">_put_unicode</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">off</span><span class="p">,</span> <span class="n">scratch8</span><span class="p">,</span> <span class="n">sqlite3_column_text</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">),</span> <span class="n">sqlite3_column_bytes</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">),</span> <span class="n">width</span> <span class="o">//</span> <span class="mi">4</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_S</span><span class="p">:</span>
+        <span class="n">src_p</span> <span class="o">=</span> <span class="n">sqlite3_column_text</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+        <span class="n">nbytes</span> <span class="o">=</span> <span class="n">sqlite3_column_bytes</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+        <span class="n">src</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">src_p</span><span class="p">),</span> <span class="p">(</span><span class="n">nbytes</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+        <span class="n">nn</span> <span class="o">=</span> <span class="n">nbytes</span> <span class="k">if</span> <span class="n">nbytes</span> <span class="o">&lt;</span> <span class="n">width</span> <span class="k">else</span> <span class="n">width</span>
+        <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nn</span><span class="p">):</span>
+            <span class="n">buf</span><span class="p">[</span><span class="n">off</span> <span class="o">+</span> <span class="n">b</span><span class="p">]</span> <span class="o">=</span> <span class="n">src</span><span class="p">[</span><span class="n">b</span><span class="p">]</span>
+    <span class="k">elif</span> <span class="n">tag</span> <span class="o">==</span> <span class="n">_TAG_BLOB</span><span class="p">:</span>
+        <span class="n">src_p</span> <span class="o">=</span> <span class="n">sqlite3_column_blob</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+        <span class="n">nbytes</span> <span class="o">=</span> <span class="n">sqlite3_column_bytes</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">)</span>
+        <span class="n">src</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">src_p</span><span class="p">),</span> <span class="p">(</span><span class="n">nbytes</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+        <span class="n">nn</span> <span class="o">=</span> <span class="n">nbytes</span> <span class="k">if</span> <span class="n">nbytes</span> <span class="o">&lt;</span> <span class="n">width</span> <span class="k">else</span> <span class="n">width</span>
+        <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nn</span><span class="p">):</span>
+            <span class="n">buf</span><span class="p">[</span><span class="n">off</span> <span class="o">+</span> <span class="n">b</span><span class="p">]</span> <span class="o">=</span> <span class="n">src</span><span class="p">[</span><span class="n">b</span><span class="p">]</span>
+
+
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_query_core</span><span class="p">(</span><span class="n">stmt</span><span class="p">,</span> <span class="n">ncols</span><span class="p">,</span> <span class="n">offsets</span><span class="p">,</span> <span class="n">tags</span><span class="p">,</span> <span class="n">widths</span><span class="p">,</span> <span class="n">itemsize</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Step ``stmt`` to exhaustion, materialising rows into a flat uint8 numpy</span>
+<span class="sd">    array that grows geometrically, then trim to the exact length. Returns</span>
+<span class="sd">    ``(buf, rc)`` where ``buf`` is ``n * itemsize`` native-order bytes (the</span>
+<span class="sd">    caller views it back to the structured dtype) and ``rc`` is the terminal</span>
+<span class="sd">    step return code (SQLITE_DONE on success).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">cap</span> <span class="o">=</span> <span class="mi">16</span>
+    <span class="n">out_u8</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">cap</span> <span class="o">*</span> <span class="n">itemsize</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+    <span class="n">scratch8</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">rc</span> <span class="o">=</span> <span class="n">sqlite3_step</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+    <span class="k">while</span> <span class="n">rc</span> <span class="o">==</span> <span class="n">SQLITE_ROW</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">n</span> <span class="o">==</span> <span class="n">cap</span><span class="p">:</span>
+            <span class="n">cap</span> <span class="o">=</span> <span class="n">cap</span> <span class="o">*</span> <span class="mi">2</span>
+            <span class="n">new_u8</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">cap</span> <span class="o">*</span> <span class="n">itemsize</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+            <span class="n">new_u8</span><span class="p">[:</span><span class="n">n</span> <span class="o">*</span> <span class="n">itemsize</span><span class="p">]</span> <span class="o">=</span> <span class="n">out_u8</span><span class="p">[:</span><span class="n">n</span> <span class="o">*</span> <span class="n">itemsize</span><span class="p">]</span>
+            <span class="n">out_u8</span> <span class="o">=</span> <span class="n">new_u8</span>
+        <span class="n">row_off</span> <span class="o">=</span> <span class="n">n</span> <span class="o">*</span> <span class="n">itemsize</span>
+        <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">ncols</span><span class="p">):</span>
+            <span class="n">_store_cell</span><span class="p">(</span><span class="n">out_u8</span><span class="p">,</span> <span class="n">row_off</span> <span class="o">+</span> <span class="n">offsets</span><span class="p">[</span><span class="n">j</span><span class="p">],</span> <span class="n">tags</span><span class="p">[</span><span class="n">j</span><span class="p">],</span> <span class="n">widths</span><span class="p">[</span><span class="n">j</span><span class="p">],</span> <span class="n">stmt</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">scratch8</span><span class="p">)</span>
+        <span class="n">n</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">rc</span> <span class="o">=</span> <span class="n">sqlite3_step</span><span class="p">(</span><span class="n">stmt</span><span class="p">)</span>
+    <span class="c1"># The bare slice is lifetime-safe (it shares the parent&#39;s NRT meminfo via</span>
+    <span class="c1"># make_view/impl_ret_borrowed); .copy() only trims the growth slack, whose</span>
+    <span class="c1"># absolute size is under one doubling: less than n rows&#39; worth (n * itemsize</span>
+    <span class="c1"># bytes) for n &gt; 16, at most 16 rows&#39; worth when n &lt;= 16 (cap floors at 16).</span>
+    <span class="k">return</span> <span class="n">out_u8</span><span class="p">[:</span><span class="n">n</span> <span class="o">*</span> <span class="n">itemsize</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span> <span class="n">rc</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_raise_rc</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">rc</span><span class="p">):</span>
+    <span class="n">msg_p</span> <span class="o">=</span> <span class="n">sqlite3_errmsg</span><span class="p">(</span><span class="n">db</span><span class="p">)</span>
+    <span class="n">detail</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">msg_p</span><span class="p">:</span>
+        <span class="n">detail</span> <span class="o">=</span> <span class="s2">&quot;: &quot;</span> <span class="o">+</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">msg_p</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_char_p</span><span class="p">)</span><span class="o">.</span><span class="n">value</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;query_to_array failed (rc=</span><span class="si">%d</span><span class="s2">)</span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">rc</span><span class="p">,</span> <span class="n">detail</span><span class="p">))</span>
+
+
+<div class="viewcode-block" id="query_to_array">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.query.query_to_array">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">query_to_array</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">sql_p</span><span class="p">,</span> <span class="n">dtype</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Run the NUL-terminated SQL text at pointer ``sql_p`` on ``db`` and return</span>
+<span class="sd">    its rows as a 1-D numpy structured array of ``dtype`` (one field per result</span>
+<span class="sd">    column, by position). ``sql_p`` is a char* pointer (e.g. from</span>
+<span class="sd">    ``numbox.utils.cstrings.c_string`` or ``get_unicode_data_p``), not a Python</span>
+<span class="sd">    str. NULL -&gt; NaN (float) / 0 (int) / empty (text/blob).&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">dtype</span><span class="o">.</span><span class="n">fields</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">dtype</span><span class="o">.</span><span class="n">names</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s2">&quot;dtype must be a structured numpy dtype, got </span><span class="si">%r</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">dtype</span><span class="p">,))</span>
+    <span class="n">names</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">dtype</span><span class="o">.</span><span class="n">names</span><span class="p">)</span>
+    <span class="n">offsets</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">dtype</span><span class="o">.</span><span class="n">fields</span><span class="p">[</span><span class="n">nm</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">nm</span> <span class="ow">in</span> <span class="n">names</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+    <span class="n">subs</span> <span class="o">=</span> <span class="p">[</span><span class="n">dtype</span><span class="o">.</span><span class="n">fields</span><span class="p">[</span><span class="n">nm</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">nm</span> <span class="ow">in</span> <span class="n">names</span><span class="p">]</span>
+    <span class="n">tags</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">_col_tag</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">subs</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+    <span class="n">widths</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">itemsize</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">subs</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+    <span class="n">stmt</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int64</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">rc</span> <span class="o">=</span> <span class="n">sqlite3_prepare_v2</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">sql_p</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">addressof</span><span class="p">(</span><span class="n">stmt</span><span class="p">),</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">rc</span> <span class="o">!=</span> <span class="n">SQLITE_OK</span><span class="p">:</span>
+        <span class="n">_raise_rc</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">rc</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">ncols</span> <span class="o">=</span> <span class="n">sqlite3_column_count</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">value</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">ncols</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">names</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;dtype has </span><span class="si">%d</span><span class="s2"> fields but query returns </span><span class="si">%d</span><span class="s2"> columns&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">names</span><span class="p">),</span> <span class="n">ncols</span><span class="p">))</span>
+        <span class="n">buf</span><span class="p">,</span> <span class="n">last_rc</span> <span class="o">=</span> <span class="n">_query_core</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="n">ncols</span><span class="p">,</span> <span class="n">offsets</span><span class="p">,</span> <span class="n">tags</span><span class="p">,</span> <span class="n">widths</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">dtype</span><span class="o">.</span><span class="n">itemsize</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">last_rc</span> <span class="o">!=</span> <span class="n">SQLITE_DONE</span><span class="p">:</span>
+            <span class="n">_raise_rc</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">last_rc</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">buf</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">dtype</span><span class="p">)</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">sqlite3_finalize</span><span class="p">(</span><span class="n">stmt</span><span class="o">.</span><span class="n">value</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

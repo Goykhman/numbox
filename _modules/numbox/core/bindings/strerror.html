@@ -1,0 +1,232 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.strerror &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/strerror.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.strerror</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.strerror</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Thread-safe ``strerror_safe(errnum, buf, buflen)`` callable from @njit.</span>
+
+<span class="sd">Supported libcs (other Linux libcs are not supported):</span>
+
+<span class="sd">- **glibc** — `__xpg_strerror_r</span>
+<span class="sd">  &lt;https://codebrowser.dev/glibc/glibc/string/xpg-strerror.c.html&gt;`_ (POSIX</span>
+<span class="sd">  XSI form, present on glibc 2.3.4+ which shipped in 2004)</span>
+<span class="sd">- **musl** — also ``__xpg_strerror_r``: musl declares ``strerror_r`` as the</span>
+<span class="sd">  POSIX XSI form and exports ``__xpg_strerror_r`` as a `weak alias</span>
+<span class="sd">  &lt;https://git.musl-libc.org/cgit/musl/tree/src/string/strerror_r.c&gt;`_ to</span>
+<span class="sd">  the same implementation, so the same symbol resolves on glibc and musl</span>
+<span class="sd">- **macOS** — `strerror_r</span>
+<span class="sd">  &lt;https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/strerror_r.3.html&gt;`_</span>
+<span class="sd">  (POSIX form)</span>
+<span class="sd">- **Windows** — `strerror_s</span>
+<span class="sd">  &lt;https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/strerror-s-strerror-s-wcserror-s-wcserror-s&gt;`_</span>
+<span class="sd">  with reordered args (buffer, size, errnum)</span>
+
+<span class="sd">On glibc, plain ``strerror_r`` is the GNU form (returns ``char *``) and would</span>
+<span class="sd">not match this module&#39;s POSIX-shaped IR. The Linux symbol selector</span>
+<span class="sd">unconditionally picks ``__xpg_strerror_r`` and never the GNU form. A</span>
+<span class="sd">``strerror_r`` fallback remains in the selector as defense-in-depth in case</span>
+<span class="sd">a future libc drops the ``__xpg_strerror_r`` symbol, but the fallback is</span>
+<span class="sd">unreachable on every libc currently supported (verified by the Alpine</span>
+<span class="sd">``musl_symbol_check`` CI canary).</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">llvmlite.binding</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ll</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llvmlite</span><span class="w"> </span><span class="kn">import</span> <span class="n">ir</span> <span class="k">as</span> <span class="n">llir</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.cgutils</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_or_insert_function</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">TypingError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">int32</span><span class="p">,</span> <span class="n">int64</span><span class="p">,</span> <span class="n">intp</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">intrinsic</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">intp_ll_type</span><span class="p">,</span> <span class="n">platform_</span><span class="p">,</span> <span class="n">load_lib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;strerror_safe&quot;</span><span class="p">]</span>
+
+
+<span class="n">load_lib</span><span class="p">(</span><span class="s2">&quot;c&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_select_posix_symbol</span><span class="p">():</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">&quot;Linux&quot;</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">ll</span><span class="o">.</span><span class="n">address_of_symbol</span><span class="p">(</span><span class="s2">&quot;__xpg_strerror_r&quot;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="s2">&quot;__xpg_strerror_r&quot;</span>
+        <span class="c1"># Fallback: defense-in-depth in case a future libc drops the</span>
+        <span class="c1"># __xpg_strerror_r symbol. Currently unreachable — glibc 2.3.4+</span>
+        <span class="c1"># exports it directly, and musl exports it as a weak alias to its</span>
+        <span class="c1"># own (POSIX-form) strerror_r. On glibc, plain strerror_r is the</span>
+        <span class="c1"># GNU char*-returning form and would NOT match our IR signature;</span>
+        <span class="c1"># we never want to land here on glibc.</span>
+        <span class="k">return</span> <span class="s2">&quot;strerror_r&quot;</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">&quot;Darwin&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;strerror_r&quot;</span>
+    <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_strerror_safe</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">errnum_ty</span><span class="p">,</span> <span class="n">buf_ty</span><span class="p">,</span> <span class="n">buflen_ty</span><span class="p">):</span>
+    <span class="c1"># The underlying libc signatures (strerror_r, __xpg_strerror_r,</span>
+    <span class="c1"># strerror_s) all take a 32-bit int for errnum. Enforce int32 at</span>
+    <span class="c1"># typing time so a future caller that drops the explicit cast in</span>
+    <span class="c1"># the public strerror_safe wrapper gets a clean TypingError instead</span>
+    <span class="c1"># of an opaque IR-lowering type-mismatch.</span>
+    <span class="k">if</span> <span class="n">errnum_ty</span> <span class="o">!=</span> <span class="n">int32</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;_strerror_safe: errnum must be int32, got </span><span class="si">{</span><span class="n">errnum_ty</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">&quot;Windows&quot;</span><span class="p">:</span>
+        <span class="n">sym</span> <span class="o">=</span> <span class="s2">&quot;strerror_s&quot;</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">sym</span> <span class="o">=</span> <span class="n">_select_posix_symbol</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">sym</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;_strerror_safe: unsupported platform </span><span class="si">{</span><span class="n">platform_</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">arguments</span><span class="p">):</span>
+        <span class="n">errnum</span><span class="p">,</span> <span class="n">buf_p</span><span class="p">,</span> <span class="n">buflen</span> <span class="o">=</span> <span class="n">arguments</span>
+        <span class="n">i32</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span>
+        <span class="n">i8p</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">()</span>
+        <span class="n">size_t_ll</span> <span class="o">=</span> <span class="n">intp_ll_type</span><span class="p">(</span><span class="n">context</span><span class="p">)</span>
+        <span class="n">buf</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">inttoptr</span><span class="p">(</span><span class="n">buf_p</span><span class="p">,</span> <span class="n">i8p</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">&quot;Windows&quot;</span><span class="p">:</span>
+            <span class="n">func_ty</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">FunctionType</span><span class="p">(</span><span class="n">i32</span><span class="p">,</span> <span class="p">[</span><span class="n">i8p</span><span class="p">,</span> <span class="n">size_t_ll</span><span class="p">,</span> <span class="n">i32</span><span class="p">])</span>
+            <span class="n">func_p</span> <span class="o">=</span> <span class="n">get_or_insert_function</span><span class="p">(</span><span class="n">builder</span><span class="o">.</span><span class="n">module</span><span class="p">,</span> <span class="n">func_ty</span><span class="p">,</span> <span class="n">sym</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">func_p</span><span class="p">,</span> <span class="p">[</span><span class="n">buf</span><span class="p">,</span> <span class="n">buflen</span><span class="p">,</span> <span class="n">errnum</span><span class="p">])</span>
+        <span class="n">func_ty</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">FunctionType</span><span class="p">(</span><span class="n">i32</span><span class="p">,</span> <span class="p">[</span><span class="n">i32</span><span class="p">,</span> <span class="n">i8p</span><span class="p">,</span> <span class="n">size_t_ll</span><span class="p">])</span>
+        <span class="n">func_p</span> <span class="o">=</span> <span class="n">get_or_insert_function</span><span class="p">(</span><span class="n">builder</span><span class="o">.</span><span class="n">module</span><span class="p">,</span> <span class="n">func_ty</span><span class="p">,</span> <span class="n">sym</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">func_p</span><span class="p">,</span> <span class="p">[</span><span class="n">errnum</span><span class="p">,</span> <span class="n">buf</span><span class="p">,</span> <span class="n">buflen</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">int32</span><span class="p">(</span><span class="n">errnum_ty</span><span class="p">,</span> <span class="n">buf_ty</span><span class="p">,</span> <span class="n">buflen_ty</span><span class="p">),</span> <span class="n">codegen</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_render_ir_for_probe</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Render the IR _strerror_safe would emit for a probe call.</span>
+
+<span class="sd">    Used by the IR-inspection test (test_strerror_safe.py) to verify</span>
+<span class="sd">    that when ll.address_of_symbol(&quot;__xpg_strerror_r&quot;) returns None,</span>
+<span class="sd">    the chosen symbol is strerror_r and not __xpg_strerror_r. Bypasses</span>
+<span class="sd">    end-to-end execution: direct text inspection is the safe verification.</span>
+
+<span class="sd">    Uses ``intp_ll_type(None)`` — the same shared helper the real codegen</span>
+<span class="sd">    uses with a ``context``, so both paths derive the size_t LLVM width</span>
+<span class="sd">    from one place. numba locks intp&#39;s lowering to ``IntType(intp.bitwidth)``,</span>
+<span class="sd">    so the context&#39;d and contextless paths produce identical types.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">module</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">Module</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;probe&quot;</span><span class="p">)</span>
+    <span class="n">i32</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span>
+    <span class="n">i8p</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">()</span>
+    <span class="n">sym</span> <span class="o">=</span> <span class="n">_select_posix_symbol</span><span class="p">()</span>
+    <span class="n">func_ty</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">FunctionType</span><span class="p">(</span><span class="n">i32</span><span class="p">,</span> <span class="p">[</span><span class="n">i32</span><span class="p">,</span> <span class="n">i8p</span><span class="p">,</span> <span class="n">intp_ll_type</span><span class="p">()])</span>
+    <span class="n">get_or_insert_function</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="n">func_ty</span><span class="p">,</span> <span class="n">sym</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">module</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="strerror_safe">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.strerror.strerror_safe">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">int32</span><span class="p">(</span><span class="n">int64</span><span class="p">,</span> <span class="n">intp</span><span class="p">,</span> <span class="n">intp</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strerror_safe</span><span class="p">(</span><span class="n">errnum</span><span class="p">,</span> <span class="n">buf</span><span class="p">,</span> <span class="n">buflen</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write the error message for errnum into buf (length buflen).</span>
+
+<span class="sd">    Returns 0 on success, positive errno (ERANGE on short buffer,</span>
+<span class="sd">    EINVAL on unknown errnum) on failure. Thread-safe on all supported</span>
+<span class="sd">    platforms. Cross-platform dispatch happens at lowering time:</span>
+<span class="sd">    __xpg_strerror_r on glibc, strerror_r on musl / macOS, strerror_s</span>
+<span class="sd">    on Windows (with arg reorder).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_strerror_safe</span><span class="p">(</span><span class="n">int32</span><span class="p">(</span><span class="n">errnum</span><span class="p">),</span> <span class="n">buf</span><span class="p">,</span> <span class="n">buflen</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

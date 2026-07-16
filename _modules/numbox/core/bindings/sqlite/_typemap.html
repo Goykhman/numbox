@@ -1,0 +1,239 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.sqlite._typemap &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/sqlite/_typemap.html" />
+      <script src="../../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.sqlite._typemap</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.sqlite._typemap</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Shared numpy-dtype ↔ SQLite type mapping + fixed-width string helpers.</span>
+
+<span class="sd">Used by the read-only vtable (sqlite.vtable), the table-valued-function</span>
+<span class="sd">mechanism, and query_to_array. The dtype tags are the single source of truth</span>
+<span class="sd">for how a numpy column maps to a SQLite column type and how its bytes are</span>
+<span class="sd">read/written.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">carray</span><span class="p">,</span> <span class="n">njit</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">uint8</span><span class="p">,</span> <span class="n">uint32</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.lowlevel</span><span class="w"> </span><span class="kn">import</span> <span class="n">_cast_int_to_void_p</span><span class="p">,</span> <span class="n">load_unaligned</span><span class="p">,</span> <span class="n">store_unaligned</span>
+
+<span class="n">_TAG_I8</span><span class="p">,</span> <span class="n">_TAG_I16</span><span class="p">,</span> <span class="n">_TAG_I32</span><span class="p">,</span> <span class="n">_TAG_I64</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span>
+<span class="n">_TAG_U8</span><span class="p">,</span> <span class="n">_TAG_U16</span><span class="p">,</span> <span class="n">_TAG_U32</span><span class="p">,</span> <span class="n">_TAG_U64</span> <span class="o">=</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">6</span><span class="p">,</span> <span class="mi">7</span>
+<span class="n">_TAG_F32</span><span class="p">,</span> <span class="n">_TAG_F64</span><span class="p">,</span> <span class="n">_TAG_BOOL</span> <span class="o">=</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">9</span><span class="p">,</span> <span class="mi">10</span>
+<span class="n">_TAG_S</span><span class="p">,</span> <span class="n">_TAG_U</span><span class="p">,</span> <span class="n">_TAG_BLOB</span> <span class="o">=</span> <span class="mi">11</span><span class="p">,</span> <span class="mi">12</span><span class="p">,</span> <span class="mi">13</span>
+
+<span class="c1"># element type of every col_tags buffer; deref sites must use this alias</span>
+<span class="n">tags_buf_t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">int32</span>
+
+
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_nul_trimmed_len</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">width</span><span class="p">):</span>
+    <span class="n">buf</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">p</span><span class="p">),</span> <span class="p">(</span><span class="n">width</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="n">width</span>
+    <span class="k">while</span> <span class="n">n</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">buf</span><span class="p">[</span><span class="n">n</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">n</span> <span class="o">-=</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">n</span>
+
+
+<div class="viewcode-block" id="utf32_to_utf8">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite._typemap.utf32_to_utf8">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">utf32_to_utf8</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">n_codepoints</span><span class="p">,</span> <span class="n">dst</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``dst`` must hold at least ``4 * n_codepoints + 1`` bytes.&quot;&quot;&quot;</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">n_codepoints</span>
+    <span class="k">while</span> <span class="n">m</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">load_unaligned</span><span class="p">(</span><span class="n">src</span> <span class="o">+</span> <span class="mi">4</span> <span class="o">*</span> <span class="p">(</span><span class="n">m</span> <span class="o">-</span> <span class="mi">1</span><span class="p">),</span> <span class="n">uint32</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">m</span> <span class="o">-=</span> <span class="mi">1</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">dst</span><span class="p">),</span> <span class="p">(</span><span class="mi">4</span> <span class="o">*</span> <span class="n">n_codepoints</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+    <span class="n">k</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">m</span><span class="p">):</span>
+        <span class="n">cp</span> <span class="o">=</span> <span class="n">load_unaligned</span><span class="p">(</span><span class="n">src</span> <span class="o">+</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">i</span><span class="p">,</span> <span class="n">uint32</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cp</span> <span class="o">&gt;</span> <span class="mh">0x10FFFF</span> <span class="ow">or</span> <span class="p">(</span><span class="mh">0xD800</span> <span class="o">&lt;=</span> <span class="n">cp</span> <span class="o">&lt;=</span> <span class="mh">0xDFFF</span><span class="p">):</span>
+            <span class="n">cp</span> <span class="o">=</span> <span class="mh">0xFFFD</span>
+        <span class="k">if</span> <span class="n">cp</span> <span class="o">&lt;</span> <span class="mh">0x80</span><span class="p">:</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">uint8</span><span class="p">(</span><span class="n">cp</span><span class="p">)</span>
+            <span class="n">k</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">elif</span> <span class="n">cp</span> <span class="o">&lt;</span> <span class="mh">0x800</span><span class="p">:</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">uint8</span><span class="p">(</span><span class="mh">0xC0</span> <span class="o">|</span> <span class="p">(</span><span class="n">cp</span> <span class="o">&gt;&gt;</span> <span class="mi">6</span><span class="p">))</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">k</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">uint8</span><span class="p">(</span><span class="mh">0x80</span> <span class="o">|</span> <span class="p">(</span><span class="n">cp</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">))</span>
+            <span class="n">k</span> <span class="o">+=</span> <span class="mi">2</span>
+        <span class="k">elif</span> <span class="n">cp</span> <span class="o">&lt;</span> <span class="mh">0x10000</span><span class="p">:</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">uint8</span><span class="p">(</span><span class="mh">0xE0</span> <span class="o">|</span> <span class="p">(</span><span class="n">cp</span> <span class="o">&gt;&gt;</span> <span class="mi">12</span><span class="p">))</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">k</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">uint8</span><span class="p">(</span><span class="mh">0x80</span> <span class="o">|</span> <span class="p">((</span><span class="n">cp</span> <span class="o">&gt;&gt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">))</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">k</span> <span class="o">+</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">uint8</span><span class="p">(</span><span class="mh">0x80</span> <span class="o">|</span> <span class="p">(</span><span class="n">cp</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">))</span>
+            <span class="n">k</span> <span class="o">+=</span> <span class="mi">3</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">uint8</span><span class="p">(</span><span class="mh">0xF0</span> <span class="o">|</span> <span class="p">(</span><span class="n">cp</span> <span class="o">&gt;&gt;</span> <span class="mi">18</span><span class="p">))</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">k</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">uint8</span><span class="p">(</span><span class="mh">0x80</span> <span class="o">|</span> <span class="p">((</span><span class="n">cp</span> <span class="o">&gt;&gt;</span> <span class="mi">12</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">))</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">k</span> <span class="o">+</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">uint8</span><span class="p">(</span><span class="mh">0x80</span> <span class="o">|</span> <span class="p">((</span><span class="n">cp</span> <span class="o">&gt;&gt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">))</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">k</span> <span class="o">+</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">uint8</span><span class="p">(</span><span class="mh">0x80</span> <span class="o">|</span> <span class="p">(</span><span class="n">cp</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">))</span>
+            <span class="n">k</span> <span class="o">+=</span> <span class="mi">4</span>
+    <span class="k">return</span> <span class="n">k</span></div>
+
+
+
+<div class="viewcode-block" id="utf8_to_utf32">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite._typemap.utf8_to_utf32">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">utf8_to_utf32</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">nbytes</span><span class="p">,</span> <span class="n">dst</span><span class="p">,</span> <span class="n">width_cp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Decode the UTF-8 bytes at ``src`` (length ``nbytes``) into up to</span>
+<span class="sd">    ``width_cp`` little-endian uint32 code points at ``dst``; NUL-pad the</span>
+<span class="sd">    remainder. Malformed input (bad continuation byte, surrogate, overlong</span>
+<span class="sd">    encoding, out-of-range) decodes to U+FFFD. Returns the number of code points</span>
+<span class="sd">    written. ``dst`` may be misaligned (writes are align=1).&quot;&quot;&quot;</span>
+    <span class="n">inp</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">src</span><span class="p">),</span> <span class="p">(</span><span class="n">nbytes</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">width_cp</span><span class="p">):</span>
+        <span class="n">store_unaligned</span><span class="p">(</span><span class="n">dst</span> <span class="o">+</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">k</span><span class="p">,</span> <span class="n">uint32</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+    <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">k</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">while</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">nbytes</span> <span class="ow">and</span> <span class="n">k</span> <span class="o">&lt;</span> <span class="n">width_cp</span><span class="p">:</span>
+        <span class="n">b0</span> <span class="o">=</span> <span class="n">uint32</span><span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">b0</span> <span class="o">&lt;</span> <span class="mh">0x80</span><span class="p">:</span>
+            <span class="n">cp</span> <span class="o">=</span> <span class="n">b0</span>
+            <span class="n">i</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">elif</span> <span class="n">b0</span> <span class="o">&gt;&gt;</span> <span class="mi">5</span> <span class="o">==</span> <span class="mh">0x6</span> <span class="ow">and</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">&lt;</span> <span class="n">nbytes</span> <span class="ow">and</span> <span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">&gt;&gt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">==</span> <span class="mh">0x2</span><span class="p">:</span>
+            <span class="n">cp</span> <span class="o">=</span> <span class="p">((</span><span class="n">b0</span> <span class="o">&amp;</span> <span class="mh">0x1F</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">uint32</span><span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">])</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">cp</span> <span class="o">&lt;</span> <span class="mh">0x80</span><span class="p">:</span>
+                <span class="n">cp</span> <span class="o">=</span> <span class="mh">0xFFFD</span>
+            <span class="n">i</span> <span class="o">+=</span> <span class="mi">2</span>
+        <span class="k">elif</span> <span class="n">b0</span> <span class="o">&gt;&gt;</span> <span class="mi">4</span> <span class="o">==</span> <span class="mh">0xE</span> <span class="ow">and</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">2</span> <span class="o">&lt;</span> <span class="n">nbytes</span> <span class="ow">and</span> <span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">&gt;&gt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">==</span> <span class="mh">0x2</span> <span class="ow">and</span> <span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">2</span><span class="p">]</span> <span class="o">&gt;&gt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">==</span> <span class="mh">0x2</span><span class="p">:</span>
+            <span class="n">cp</span> <span class="o">=</span> <span class="p">((</span><span class="n">b0</span> <span class="o">&amp;</span> <span class="mh">0x0F</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="mi">12</span><span class="p">)</span> <span class="o">|</span> <span class="p">((</span><span class="n">uint32</span><span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">])</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">uint32</span><span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">2</span><span class="p">])</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">cp</span> <span class="o">&lt;</span> <span class="mh">0x800</span> <span class="ow">or</span> <span class="p">(</span><span class="mh">0xD800</span> <span class="o">&lt;=</span> <span class="n">cp</span> <span class="o">&lt;=</span> <span class="mh">0xDFFF</span><span class="p">):</span>
+                <span class="n">cp</span> <span class="o">=</span> <span class="mh">0xFFFD</span>
+            <span class="n">i</span> <span class="o">+=</span> <span class="mi">3</span>
+        <span class="k">elif</span> <span class="p">(</span><span class="n">b0</span> <span class="o">&gt;&gt;</span> <span class="mi">3</span> <span class="o">==</span> <span class="mh">0x1E</span> <span class="ow">and</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">3</span> <span class="o">&lt;</span> <span class="n">nbytes</span> <span class="ow">and</span> <span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">&gt;&gt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">==</span> <span class="mh">0x2</span>
+              <span class="ow">and</span> <span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">2</span><span class="p">]</span> <span class="o">&gt;&gt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">==</span> <span class="mh">0x2</span> <span class="ow">and</span> <span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">3</span><span class="p">]</span> <span class="o">&gt;&gt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">==</span> <span class="mh">0x2</span><span class="p">):</span>
+            <span class="n">cp</span> <span class="o">=</span> <span class="p">(((</span><span class="n">b0</span> <span class="o">&amp;</span> <span class="mh">0x07</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="mi">18</span><span class="p">)</span> <span class="o">|</span> <span class="p">((</span><span class="n">uint32</span><span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">])</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="mi">12</span><span class="p">)</span>
+                  <span class="o">|</span> <span class="p">((</span><span class="n">uint32</span><span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">2</span><span class="p">])</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="mi">6</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">uint32</span><span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">3</span><span class="p">])</span> <span class="o">&amp;</span> <span class="mh">0x3F</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">cp</span> <span class="o">&lt;</span> <span class="mh">0x10000</span> <span class="ow">or</span> <span class="n">cp</span> <span class="o">&gt;</span> <span class="mh">0x10FFFF</span><span class="p">:</span>
+                <span class="n">cp</span> <span class="o">=</span> <span class="mh">0xFFFD</span>
+            <span class="n">i</span> <span class="o">+=</span> <span class="mi">4</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">cp</span> <span class="o">=</span> <span class="mh">0xFFFD</span>
+            <span class="n">i</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">store_unaligned</span><span class="p">(</span><span class="n">dst</span> <span class="o">+</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">k</span><span class="p">,</span> <span class="n">uint32</span><span class="p">(</span><span class="n">cp</span><span class="p">))</span>
+        <span class="n">k</span> <span class="o">+=</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">k</span></div>
+
+
+
+<span class="n">_NUMERIC_TAGS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">&quot;int8&quot;</span><span class="p">):</span> <span class="n">_TAG_I8</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">&quot;int16&quot;</span><span class="p">):</span> <span class="n">_TAG_I16</span><span class="p">,</span>
+    <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">&quot;int32&quot;</span><span class="p">):</span> <span class="n">_TAG_I32</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">&quot;int64&quot;</span><span class="p">):</span> <span class="n">_TAG_I64</span><span class="p">,</span>
+    <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">&quot;uint8&quot;</span><span class="p">):</span> <span class="n">_TAG_U8</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">&quot;uint16&quot;</span><span class="p">):</span> <span class="n">_TAG_U16</span><span class="p">,</span>
+    <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">&quot;uint32&quot;</span><span class="p">):</span> <span class="n">_TAG_U32</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">&quot;uint64&quot;</span><span class="p">):</span> <span class="n">_TAG_U64</span><span class="p">,</span>
+    <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">&quot;float32&quot;</span><span class="p">):</span> <span class="n">_TAG_F32</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">&quot;float64&quot;</span><span class="p">):</span> <span class="n">_TAG_F64</span><span class="p">,</span>
+    <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="s2">&quot;bool&quot;</span><span class="p">):</span> <span class="n">_TAG_BOOL</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="n">_SQL_TYPE</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="n">_TAG_I8</span><span class="p">:</span> <span class="s2">&quot;INTEGER&quot;</span><span class="p">,</span> <span class="n">_TAG_I16</span><span class="p">:</span> <span class="s2">&quot;INTEGER&quot;</span><span class="p">,</span> <span class="n">_TAG_I32</span><span class="p">:</span> <span class="s2">&quot;INTEGER&quot;</span><span class="p">,</span> <span class="n">_TAG_I64</span><span class="p">:</span> <span class="s2">&quot;INTEGER&quot;</span><span class="p">,</span>
+    <span class="n">_TAG_U8</span><span class="p">:</span> <span class="s2">&quot;INTEGER&quot;</span><span class="p">,</span> <span class="n">_TAG_U16</span><span class="p">:</span> <span class="s2">&quot;INTEGER&quot;</span><span class="p">,</span> <span class="n">_TAG_U32</span><span class="p">:</span> <span class="s2">&quot;INTEGER&quot;</span><span class="p">,</span> <span class="n">_TAG_U64</span><span class="p">:</span> <span class="s2">&quot;INTEGER&quot;</span><span class="p">,</span>
+    <span class="n">_TAG_BOOL</span><span class="p">:</span> <span class="s2">&quot;INTEGER&quot;</span><span class="p">,</span> <span class="n">_TAG_F32</span><span class="p">:</span> <span class="s2">&quot;REAL&quot;</span><span class="p">,</span> <span class="n">_TAG_F64</span><span class="p">:</span> <span class="s2">&quot;REAL&quot;</span><span class="p">,</span>
+    <span class="n">_TAG_S</span><span class="p">:</span> <span class="s2">&quot;TEXT&quot;</span><span class="p">,</span> <span class="n">_TAG_U</span><span class="p">:</span> <span class="s2">&quot;TEXT&quot;</span><span class="p">,</span> <span class="n">_TAG_BLOB</span><span class="p">:</span> <span class="s2">&quot;BLOB&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_col_tag</span><span class="p">(</span><span class="n">dt</span><span class="p">,</span> <span class="n">text_as_blob</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">dt</span><span class="o">.</span><span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;S&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_TAG_BLOB</span> <span class="k">if</span> <span class="n">text_as_blob</span> <span class="k">else</span> <span class="n">_TAG_S</span>
+    <span class="k">if</span> <span class="n">dt</span><span class="o">.</span><span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;U&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_TAG_U</span>
+    <span class="k">if</span> <span class="n">dt</span> <span class="ow">in</span> <span class="n">_NUMERIC_TAGS</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_NUMERIC_TAGS</span><span class="p">[</span><span class="n">dt</span><span class="p">]</span>
+    <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s2">&quot;unsupported column dtype </span><span class="si">%r</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">dt</span><span class="p">,))</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

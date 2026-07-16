@@ -1,0 +1,722 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.utils &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/numbox.utils.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="numbox.core.work" href="numbox.core.work.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">numbox</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.any.html">numbox.core.any</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.html">numbox.core.bindings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.sqlite.html">numbox.core.bindings.sqlite</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.proxy.html">numbox.core.proxy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.variable.html">numbox.core.variable</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.vector.html">numbox.core.vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.work.html">numbox.core.work</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbox.utils</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#numbox-utils-highlevel">numbox.utils.highlevel</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#dynamically-defining-structref">Dynamically defining StructRef</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#numbox-utils-preprocessing">numbox.utils.preprocessing</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#cache-anchor-mechanism">Cache-anchor mechanism</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.utils.digest">numbox.utils.digest</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.digest.digest"><code class="docutils literal notranslate"><span class="pre">digest()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.utils.fingerprint">numbox.utils.fingerprint</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.utils.lowlevel">numbox.utils.lowlevel</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.array_data_p"><code class="docutils literal notranslate"><span class="pre">array_data_p()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.cast"><code class="docutils literal notranslate"><span class="pre">cast()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.deref_payload"><code class="docutils literal notranslate"><span class="pre">deref_payload()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.extract_struct_member"><code class="docutils literal notranslate"><span class="pre">extract_struct_member()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.get_func_p_as_int_from_func_struct"><code class="docutils literal notranslate"><span class="pre">get_func_p_as_int_from_func_struct()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.get_func_p_from_func_struct"><code class="docutils literal notranslate"><span class="pre">get_func_p_from_func_struct()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.get_func_tuple"><code class="docutils literal notranslate"><span class="pre">get_func_tuple()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.get_ll_func_sig"><code class="docutils literal notranslate"><span class="pre">get_ll_func_sig()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.get_str_from_p_as_int"><code class="docutils literal notranslate"><span class="pre">get_str_from_p_as_int()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.get_unicode_data_p"><code class="docutils literal notranslate"><span class="pre">get_unicode_data_p()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.load_at"><code class="docutils literal notranslate"><span class="pre">load_at()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.load_unaligned"><code class="docutils literal notranslate"><span class="pre">load_unaligned()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.populate_structref"><code class="docutils literal notranslate"><span class="pre">populate_structref()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.store_at"><code class="docutils literal notranslate"><span class="pre">store_at()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.store_unaligned"><code class="docutils literal notranslate"><span class="pre">store_unaligned()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.tuple_of_struct_ptrs_as_int"><code class="docutils literal notranslate"><span class="pre">tuple_of_struct_ptrs_as_int()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.lowlevel.uniformize_tuple_of_structs"><code class="docutils literal notranslate"><span class="pre">uniformize_tuple_of_structs()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#numbox-utils-cstrings">numbox.utils.cstrings</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#allocating-c-strings-for-the-bindings-layer">Allocating C strings for the bindings layer</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#numbox-utils-pysqlite-bridge">numbox.utils.pysqlite_bridge</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#bridging-python-sqlite3-connections-to-the-bindings-layer">Bridging Python <code class="docutils literal notranslate"><span class="pre">sqlite3</span></code> connections to the bindings layer</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.utils.timer">numbox.utils.timer</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.utils.timer.Timer"><code class="docutils literal notranslate"><span class="pre">Timer</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">numbox</a></li>
+      <li class="breadcrumb-item active">numbox.utils</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbox.utils.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbox-utils">
+<h1>numbox.utils<a class="headerlink" href="#numbox-utils" title="Link to this heading"></a></h1>
+<section id="numbox-utils-highlevel">
+<h2>numbox.utils.highlevel<a class="headerlink" href="#numbox-utils-highlevel" title="Link to this heading"></a></h2>
+<section id="dynamically-defining-structref">
+<h3>Dynamically defining StructRef<a class="headerlink" href="#dynamically-defining-structref" title="Link to this heading"></a></h3>
+<p>Defining numba <cite>StructRef</cite> requires writing a lot of boilerplate code.
+A utility for concise definition of <cite>StructRef</cite> types that supports caching
+is provided in <a class="reference internal" href="#numbox.utils.highlevel.make_structref" title="numbox.utils.highlevel.make_structref"><code class="xref py py-func docutils literal notranslate"><span class="pre">numbox.utils.highlevel.make_structref()</span></code></a>. To use it,
+define a <em>separate module</em> such as type_classes.py such as:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numba.experimental.structref</span><span class="w"> </span><span class="kn">import</span> <span class="n">register</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">StructRef</span>
+
+
+<span class="nd">@register</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">DataStructTypeClass</span><span class="p">(</span><span class="n">StructRef</span><span class="p">):</span>
+    <span class="k">pass</span>
+</pre></div>
+</div>
+<p>Then in a <em>different module</em> main.py define:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">float32</span><span class="p">,</span> <span class="n">unicode_type</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="kn">import</span> <span class="n">isclose</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.highlevel</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_structref</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">type_classes</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataStructTypeClass</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">derive_output</span><span class="p">(</span><span class="n">struct_</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">struct_</span><span class="o">.</span><span class="n">control</span> <span class="o">==</span> <span class="s2">&quot;double&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">struct_</span><span class="o">.</span><span class="n">value</span> <span class="o">*</span> <span class="mi">2</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">struct_</span><span class="o">.</span><span class="n">value</span>
+
+
+<span class="n">data_struct</span> <span class="o">=</span> <span class="n">make_structref</span><span class="p">(</span>
+    <span class="s2">&quot;DataStruct&quot;</span><span class="p">,</span>
+    <span class="p">{</span><span class="s2">&quot;value&quot;</span><span class="p">:</span> <span class="n">float32</span><span class="p">,</span> <span class="s2">&quot;control&quot;</span><span class="p">:</span> <span class="n">unicode_type</span><span class="p">},</span>
+    <span class="n">DataStructTypeClass</span><span class="p">,</span>
+    <span class="n">struct_methods</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">&quot;derive_output&quot;</span><span class="p">:</span> <span class="n">derive_output</span>
+    <span class="p">}</span>
+<span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">data_1</span> <span class="o">=</span> <span class="n">data_struct</span><span class="p">(</span><span class="mf">3.14</span><span class="p">,</span> <span class="s2">&quot;double&quot;</span><span class="p">)</span>
+    <span class="n">data_2</span> <span class="o">=</span> <span class="n">data_struct</span><span class="p">(</span><span class="mf">2.17</span><span class="p">,</span> <span class="s2">&quot;something else&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">isclose</span><span class="p">(</span><span class="n">data_1</span><span class="o">.</span><span class="n">derive_output</span><span class="p">(),</span> <span class="mf">6.28</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">isclose</span><span class="p">(</span><span class="n">data_2</span><span class="o">.</span><span class="n">derive_output</span><span class="p">(),</span> <span class="mf">2.17</span><span class="p">)</span>
+</pre></div>
+</div>
+<dl class="py function" id="module-numbox.utils.highlevel">
+<dt class="sig sig-object py" id="numbox.utils.highlevel.cres">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.highlevel.</span></span><span class="sig-name descname"><span class="pre">cres</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sig</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/highlevel.html#cres"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.highlevel.cres" title="Link to this definition"></a></dt>
+<dd><p>Returns Python proxy to <cite>FunctionType</cite> rather than <cite>CPUDispatcher</cite> returned by <cite>njit</cite></p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.highlevel.cres_if_available">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.highlevel.</span></span><span class="sig-name descname"><span class="pre">cres_if_available</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lib</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sig</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/highlevel.html#cres_if_available"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.highlevel.cres_if_available" title="Link to this definition"></a></dt>
+<dd><p>Like <code class="docutils literal notranslate"><span class="pre">cres(sig,</span> <span class="pre">**kwargs)</span></code>, but stubs out the wrapper if the C
+symbol matching <code class="docutils literal notranslate"><span class="pre">func.__name__</span></code> is absent from <code class="docutils literal notranslate"><span class="pre">lib</span></code>.</p>
+<p>Use for binding sets that target multiple library versions where some
+symbols may only exist in newer releases. Callers get a stub that
+raises <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code> instead of a confusing LLVM link error
+at call time.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.highlevel.determine_field_index">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.highlevel.</span></span><span class="sig-name descname"><span class="pre">determine_field_index</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">struct_ty</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">field_name</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/highlevel.html#determine_field_index"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.highlevel.determine_field_index" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.highlevel.hash_type">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.highlevel.</span></span><span class="sig-name descname"><span class="pre">hash_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ty</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Type</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/highlevel.html#hash_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.highlevel.hash_type" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.highlevel.make_structref">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.highlevel.</span></span><span class="sig-name descname"><span class="pre">make_structref</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">struct_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_fields</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Type</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_type_class</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">type</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Type</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_methods</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Callable</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">jit_options</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ns</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/highlevel.html#make_structref"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.highlevel.make_structref" title="Link to this definition"></a></dt>
+<dd><p>Makes structure type with <cite>struct_name</cite> and <cite>struct_fields</cite> from the StructRef type class.</p>
+<p>A unique <cite>struct_type_class</cite> for each structref needs to be provided.
+If caching of code that will be using the created struct type is desired,
+these type class(es) need/s to be defined in a python module that is <em>not</em> executed.
+(Same requirement is also to observed even when the full definition of StructRef
+is entirely hard-coded rather than created dynamically.)</p>
+<p>In particular, that’s why <cite>struct_type_class</cite> cannot be incorporated into
+the dynamic compile / exec routine here.</p>
+<p>Dictionary of methods to be bound to the created structref can be provided as well.
+Struct methods will get inlined into the caller if numba deems it to be optimal
+(even if <cite>jit_options</cite> says otherwise), therefore changing the methods code
+without poking the jitted caller can result in a stale cache - when the latter is
+cached. This is not an exclusive limitation of a dynamic structref creation via
+this function and is equally true when the structref definition is coded explicitly.</p>
+<section id="anchor-file">
+<h4>Anchor file<a class="headerlink" href="#anchor-file" title="Link to this heading"></a></h4>
+<p>The generated <code class="docutils literal notranslate"><span class="pre">code_txt</span></code> is written to a content-addressed file
+under numba’s cache directory and that file – not <code class="docutils literal notranslate"><span class="pre">highlevel.py</span></code>
+– is used as the <code class="docutils literal notranslate"><span class="pre">compile()</span></code> anchor. See the “Cache-anchor
+mechanism” section in <code class="docutils literal notranslate"><span class="pre">docs/numbox.utils.rst</span></code> for the rationale.</p>
+</section>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.highlevel.make_structref_code_txt">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.highlevel.</span></span><span class="sig-name descname"><span class="pre">make_structref_code_txt</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">struct_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_fields</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Iterable</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Type</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_type_class</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">type</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_methods</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Callable</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/highlevel.html#make_structref_code_txt"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.highlevel.make_structref_code_txt" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.highlevel.prune_type">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.highlevel.</span></span><span class="sig-name descname"><span class="pre">prune_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/highlevel.html#prune_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.highlevel.prune_type" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+</section>
+<section id="numbox-utils-preprocessing">
+<h2>numbox.utils.preprocessing<a class="headerlink" href="#numbox-utils-preprocessing" title="Link to this heading"></a></h2>
+<section id="cache-anchor-mechanism">
+<h3>Cache-anchor mechanism<a class="headerlink" href="#cache-anchor-mechanism" title="Link to this heading"></a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">make_structref</span></code> writes the generated <code class="docutils literal notranslate"><span class="pre">code_txt</span></code> to a
+content-addressed file under numba’s cache directory and uses that
+file – not <code class="docutils literal notranslate"><span class="pre">highlevel.py</span></code> – as the <code class="docutils literal notranslate"><span class="pre">compile()</span></code> anchor. The
+content-addressing is what keeps numba’s per-overload cache correct
+when two versions of the generated code differ only in <code class="docutils literal notranslate"><span class="pre">co_consts</span></code>.</p>
+<p>Numba’s per-overload cache key
+(<code class="docutils literal notranslate"><span class="pre">numba.core.caching.Cache._index_key</span></code>) is:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span><span class="o">.</span><span class="n">magic_tuple</span><span class="p">(),</span> <span class="nb">hash</span><span class="p">(</span><span class="n">co_code</span><span class="p">),</span> <span class="nb">hash</span><span class="p">(</span><span class="n">closure_cells</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>It hashes <code class="docutils literal notranslate"><span class="pre">co_code</span></code> only, not <code class="docutils literal notranslate"><span class="pre">co_consts</span></code>. Python’s
+<a class="reference external" href="https://docs.python.org/3/library/dis.html#opcode-LOAD_CONST">LOAD_CONST</a>
+opcode encodes an <em>index</em> into <code class="docutils literal notranslate"><span class="pre">co_consts</span></code> rather than the value
+itself, so two methods differing only in a numeric literal
+(<code class="docutils literal notranslate"><span class="pre">return</span> <span class="pre">self.x</span> <span class="pre">+</span> <span class="pre">1</span></code> vs <code class="docutils literal notranslate"><span class="pre">return</span> <span class="pre">self.x</span> <span class="pre">+</span> <span class="pre">1000</span></code>) produce identical
+<code class="docutils literal notranslate"><span class="pre">co_code</span></code>. With a shared anchor file both would resolve to the same
+<code class="docutils literal notranslate"><span class="pre">cache_subpath</span></code> (numba’s
+<code class="docutils literal notranslate"><span class="pre">_CacheLocator.get_suitable_cache_subpath</span></code> derives the cache subdir
+from a hash of <code class="docutils literal notranslate"><span class="pre">co_filename</span></code>) and the second to compile would
+silently load the first’s binary. Per-content anchors segregate the
+two by <code class="docutils literal notranslate"><span class="pre">cache_subpath</span></code> so the collision never arises.</p>
+<p>Structural body changes – different operators, additional
+statements, renamed variables – produce different <code class="docutils literal notranslate"><span class="pre">co_code</span></code> and
+therefore different <code class="docutils literal notranslate"><span class="pre">_index_key</span></code> values regardless of the anchoring
+scheme; those invalidate cleanly even under a shared anchor. The
+narrow failure mode protected by content-addressing is constant-only
+edits (numeric or string literals, default arg values) where
+<code class="docutils literal notranslate"><span class="pre">co_code</span></code> is identical across versions.</p>
+<p>Python 3.14’s
+<a class="reference external" href="https://docs.python.org/3.14/whatsnew/3.14.html">LOAD_SMALL_INT</a>
+opcode inlines small integers directly into <code class="docutils literal notranslate"><span class="pre">co_code</span></code>, narrowing
+the failure mode on that version to constants outside the inline
+range. Earlier supported versions (3.10–3.13) collide on any
+constant edit.</p>
+<p>See also <code class="docutils literal notranslate"><span class="pre">numba.core.caching.Cache._index_key</span></code> and
+<code class="docutils literal notranslate"><span class="pre">numba.core.caching._SourceFileBackedLocatorMixin.get_source_stamp</span></code>
+in numba’s source for the cache key construction and source-stamp
+validity check.</p>
+<p id="module-numbox.utils.preprocessing">Source-anchor machinery for dynamically-exec’d code.</p>
+<p>Content-addressed anchors keep numba’s per-overload cache correct
+when two exec’d code blocks differ only in <code class="docutils literal notranslate"><span class="pre">co_consts</span></code>. See the
+“Cache-anchor mechanism” section in <code class="docutils literal notranslate"><span class="pre">docs/numbox.utils.rst</span></code> for
+the rationale and references.</p>
+</section>
+</section>
+<section id="module-numbox.utils.digest">
+<span id="numbox-utils-digest"></span><h2>numbox.utils.digest<a class="headerlink" href="#module-numbox.utils.digest" title="Link to this heading"></a></h2>
+<p>Content-addressed digest for cache keys and anchor identifiers.</p>
+<p><code class="docutils literal notranslate"><span class="pre">digest</span></code> produces a short, stable hash that invalidates when the subject’s
+<code class="docutils literal notranslate"><span class="pre">repr</span></code>, the user functions, the resolved <code class="docutils literal notranslate"><span class="pre">jit_options</span></code>, or the numba/numbox
+versions change. Plain Python functions are fingerprinted with the shared
+closure/global-aware walker (<code class="docutils literal notranslate"><span class="pre">numbox.utils.fingerprint._fingerprint_function</span></code>)
+– so two callbacks with identical source but different captured closure-cell or
+referenced-global values key distinctly, which a bare code-object hash would
+miss. Callables with no canonical fingerprint (a partial, a builtin, a callable
+object, or a function closing over an un-canonicalizable value) fall back to
+cloudpickle of the object/code, which also captures bound state. The SQLite UDAF
+registration anchors are one consumer; any content-addressed cache that mixes a
+type/identifier with user callbacks can reuse it.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.digest.digest">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.digest.</span></span><span class="sig-name descname"><span class="pre">digest</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subject</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fns</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/digest.html#digest"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.digest.digest" title="Link to this definition"></a></dt>
+<dd><p>Content hash that invalidates when <code class="docutils literal notranslate"><span class="pre">subject</span></code> (by <code class="docutils literal notranslate"><span class="pre">repr</span></code>), the user
+functions (closure/global/const-sensitive via the shared fingerprint walker,
+with a cloudpickle fallback), the resolved <code class="docutils literal notranslate"><span class="pre">jit_options</span></code>, or the
+numba/numbox versions change.</p>
+</dd></dl>
+
+</section>
+<section id="module-numbox.utils.fingerprint">
+<span id="numbox-utils-fingerprint"></span><h2>numbox.utils.fingerprint<a class="headerlink" href="#module-numbox.utils.fingerprint" title="Link to this heading"></a></h2>
+<p>Content fingerprinting of Python values and functions for cache keys.</p>
+<p>A value canonicalizer (<cite>_canon_value</cite>) and a deep function fingerprint
+(<cite>_fingerprint_function</cite>) that capture everything numba freezes into a compiled
+artifact: code-object bytecode/consts/names, default arguments, closure-cell
+values, and the values of referenced module-level globals (recursing into helper
+functions and dispatchers, with cycle protection). Stronger than hashing the
+bare code object – two functions with identical source but different captured
+closure/global values fingerprint differently. Shared by
+<cite>numbox.core.variable.compile_kernel</cite> (kernel cache digest) and
+<cite>numbox.utils.digest</cite> (SQLite UDAF cache key).</p>
+<p><cite>_Unfingerprintable</cite> is raised for any value with no canonical form; callers
+decide how to degrade (compile_kernel marks the kernel uncached, digest falls
+back to cloudpickle of the code object).</p>
+</section>
+<section id="module-numbox.utils.lowlevel">
+<span id="numbox-utils-lowlevel"></span><h2>numbox.utils.lowlevel<a class="headerlink" href="#module-numbox.utils.lowlevel" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.array_data_p">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">array_data_p</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">arr</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#array_data_p"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.array_data_p" title="Link to this definition"></a></dt>
+<dd><p>Return the data pointer of a numpy array as signed intp.</p>
+<p><code class="docutils literal notranslate"><span class="pre">arr.ctypes.data</span></code> is <code class="docutils literal notranslate"><span class="pre">uint64</span></code> under numba; the cast aligns with the
+signed-pointer convention used by numbox binding signatures. Callable
+from Python and <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> contexts.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.cast">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">cast</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">source</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dest_ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#cast"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.cast" title="Link to this definition"></a></dt>
+<dd><p>Cast <cite>source</cite> to the type <cite>dest_ty</cite></p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.deref_payload">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">deref_payload</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#deref_payload"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.deref_payload" title="Link to this definition"></a></dt>
+<dd><p>Dereference payload of structref <cite>p</cite> as type <cite>ty</cite></p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.extract_struct_member">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">extract_struct_member</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">context</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">BaseContext</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">builder</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">IRBuilder</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_fe_ty</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">StructRef</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">struct_obj</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">member_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">incref</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#extract_struct_member"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.extract_struct_member" title="Link to this definition"></a></dt>
+<dd><p>For the given struct object of the given numba (front-end) type extract
+member with the given name (must be literal, available at compile time)</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.get_func_p_as_int_from_func_struct">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">get_func_p_as_int_from_func_struct</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">func_</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#get_func_p_as_int_from_func_struct"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.get_func_p_as_int_from_func_struct" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.get_func_p_from_func_struct">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">get_func_p_from_func_struct</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">builder</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">IRBuilder</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">func_struct</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#get_func_p_from_func_struct"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.get_func_p_from_func_struct" title="Link to this definition"></a></dt>
+<dd><p>Extract void* function pointer from the low-level FunctionType structure</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.get_func_tuple">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">get_func_tuple</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">func</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#get_func_tuple"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.get_func_tuple" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.get_ll_func_sig">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">get_ll_func_sig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">context</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">BaseContext</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">func_ty</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">FunctionType</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#get_ll_func_sig"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.get_ll_func_sig" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.get_str_from_p_as_int">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">get_str_from_p_as_int</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#get_str_from_p_as_int"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.get_str_from_p_as_int" title="Link to this definition"></a></dt>
+<dd><p>Given pointer to null-terminated array of characters as an integer <cite>p</cite>,
+return unicode string object copying the original string’s data.</p>
+<p>Bytes are read through an unsigned 8-bit view, so each byte maps to its own
+codepoint 0..255 (per-byte Latin-1). A multi-byte UTF-8 payload is returned
+byte-for-byte, not decoded to its Unicode text.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.get_unicode_data_p">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">get_unicode_data_p</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">s</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#get_unicode_data_p"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.get_unicode_data_p" title="Link to this definition"></a></dt>
+<dd><p>Given Python unicode string, return pointer to its data payload,
+array of null-terminated characters.
+See <a class="reference external" href="https://github.com/numba/numba/blob/release0.61/numba/cpython/unicode.py#L83">https://github.com/numba/numba/blob/release0.61/numba/cpython/unicode.py#L83</a></p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.load_at">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">load_at</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#load_at"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.load_at" title="Link to this definition"></a></dt>
+<dd><p>Load a value of type <code class="docutils literal notranslate"><span class="pre">ty</span></code> from raw pointer <code class="docutils literal notranslate"><span class="pre">p</span></code> (carried as <code class="docutils literal notranslate"><span class="pre">intp</span></code>).</p>
+<p>Caller is responsible for <code class="docutils literal notranslate"><span class="pre">p</span></code> pointing at a live region of memory whose
+LLVM layout matches <code class="docutils literal notranslate"><span class="pre">ty</span></code>.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.load_unaligned">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">load_unaligned</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ty</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#load_unaligned"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.load_unaligned" title="Link to this definition"></a></dt>
+<dd><p>Like <a class="reference internal" href="#numbox.utils.lowlevel.load_at" title="numbox.utils.lowlevel.load_at"><code class="xref py py-func docutils literal notranslate"><span class="pre">load_at()</span></code></a> but emits an <code class="docutils literal notranslate"><span class="pre">align=1</span></code> load, legal on a misaligned
+address (e.g. a packed structured-dtype field) where <code class="docutils literal notranslate"><span class="pre">load_at</span></code> is UB.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.populate_structref">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">populate_structref</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">context</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">builder</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">signature</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">structref_type_</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">structref_</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ordered_args_names</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">decref_old</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#populate_structref"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.populate_structref" title="Link to this definition"></a></dt>
+<dd><p>Store <cite>args</cite> with the corresponding ordered names <cite>ordered_args_names</cite>
+in structref with type <cite>structref_type_</cite> and payload at <cite>data_pointer</cite>.</p>
+<p>Based on numba.experimental.structref::define_attributes::struct_setattr_impl</p>
+<p>Do not call <cite>decref_old</cite> when populating a newly-created structref, as there’s nothing to decref there.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.store_at">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">store_at</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">v</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#store_at"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.store_at" title="Link to this definition"></a></dt>
+<dd><p>Store <code class="docutils literal notranslate"><span class="pre">v</span></code> at raw pointer <code class="docutils literal notranslate"><span class="pre">p</span></code> (LLVM type derived from <code class="docutils literal notranslate"><span class="pre">v</span></code>’s numba type).</p>
+<p>Caller is responsible for <code class="docutils literal notranslate"><span class="pre">p</span></code> pointing at a writable region of memory
+whose LLVM layout matches <code class="docutils literal notranslate"><span class="pre">v</span></code>’s type, and for casting <code class="docutils literal notranslate"><span class="pre">v</span></code> to the
+intended width (e.g. <code class="docutils literal notranslate"><span class="pre">store_at(p,</span> <span class="pre">int32(value))</span></code> to write 4 bytes).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.store_unaligned">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">store_unaligned</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">v</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#store_unaligned"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.store_unaligned" title="Link to this definition"></a></dt>
+<dd><p>Like <a class="reference internal" href="#numbox.utils.lowlevel.store_at" title="numbox.utils.lowlevel.store_at"><code class="xref py py-func docutils literal notranslate"><span class="pre">store_at()</span></code></a> but emits an <code class="docutils literal notranslate"><span class="pre">align=1</span></code> store, legal on a misaligned
+address (e.g. a packed structured-dtype field) where <code class="docutils literal notranslate"><span class="pre">store_at</span></code> is UB.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.tuple_of_struct_ptrs_as_int">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">tuple_of_struct_ptrs_as_int</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tup</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#tuple_of_struct_ptrs_as_int"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.tuple_of_struct_ptrs_as_int" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.lowlevel.uniformize_tuple_of_structs">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.lowlevel.</span></span><span class="sig-name descname"><span class="pre">uniformize_tuple_of_structs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tup</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">uniform_ty</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">numba.VoidTypeClass()</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/lowlevel.html#uniformize_tuple_of_structs"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.lowlevel.uniformize_tuple_of_structs" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="numbox-utils-cstrings">
+<h2>numbox.utils.cstrings<a class="headerlink" href="#numbox-utils-cstrings" title="Link to this heading"></a></h2>
+<section id="allocating-c-strings-for-the-bindings-layer">
+<h3>Allocating C strings for the bindings layer<a class="headerlink" href="#allocating-c-strings-for-the-bindings-layer" title="Link to this heading"></a></h3>
+<p>The bindings family (<code class="docutils literal notranslate"><span class="pre">numbox.core.bindings.libc</span></code>, <code class="docutils literal notranslate"><span class="pre">numbox.core.bindings.sqlite.*</span></code>, etc.)
+takes <code class="docutils literal notranslate"><span class="pre">intp</span></code> pointers for every text argument. Producing a valid
+NUL-terminated UTF-8 C string from a Python <code class="docutils literal notranslate"><span class="pre">str</span></code> is non-trivial:
+<a class="reference internal" href="#numbox.utils.lowlevel.get_unicode_data_p" title="numbox.utils.lowlevel.get_unicode_data_p"><code class="xref py py-func docutils literal notranslate"><span class="pre">get_unicode_data_p()</span></code></a> returns a pointer to
+the Python string’s internal data payload, which CPython stores as
+UCS-1/2/4 depending on contents – only safe for ASCII inputs.</p>
+<p><a class="reference internal" href="#numbox.utils.cstrings.c_string" title="numbox.utils.cstrings.c_string"><code class="xref py py-func docutils literal notranslate"><span class="pre">c_string()</span></code></a> is a Python-side context
+manager that allocates a real C buffer with the UTF-8 encoding of the
+input and yields the pointer with safe lifetime tied to the <code class="docutils literal notranslate"><span class="pre">with</span></code>
+block:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.cstrings</span><span class="w"> </span><span class="kn">import</span> <span class="n">c_string</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.exec</span><span class="w"> </span><span class="kn">import</span> <span class="n">sqlite3_exec</span>
+
+<span class="k">with</span> <span class="n">c_string</span><span class="p">(</span><span class="s2">&quot;CREATE TABLE t(x INTEGER)&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">sql_p</span><span class="p">:</span>
+    <span class="n">sqlite3_exec</span><span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">sql_p</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+<span class="c1"># buffer freed here automatically</span>
+</pre></div>
+</div>
+<p>For concurrent multi-string calls, use a single <code class="docutils literal notranslate"><span class="pre">with</span></code> with multiple
+context managers, or <code class="xref py py-class docutils literal notranslate"><span class="pre">contextlib.ExitStack</span></code> when the count is
+dynamic:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">with</span> <span class="n">c_string</span><span class="p">(</span><span class="s2">&quot;main&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">schema_p</span><span class="p">,</span> <span class="n">c_string</span><span class="p">(</span><span class="s2">&quot;t&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">table_p</span><span class="p">,</span> <span class="n">c_string</span><span class="p">(</span><span class="s2">&quot;b&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">col_p</span><span class="p">:</span>
+    <span class="n">sqlite3_blob_open</span><span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">schema_p</span><span class="p">,</span> <span class="n">table_p</span><span class="p">,</span> <span class="n">col_p</span><span class="p">,</span> <span class="n">rowid</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span>
+                      <span class="n">addressof</span><span class="p">(</span><span class="n">blob_p</span><span class="p">))</span>
+</pre></div>
+</div>
+<p><strong>Python-only.</strong> <code class="docutils literal notranslate"><span class="pre">c_string</span></code> cannot be used inside <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> – numba
+does not support arbitrary context managers (raises
+<code class="docutils literal notranslate"><span class="pre">UnsupportedBytecodeError</span></code>), and <code class="docutils literal notranslate"><span class="pre">ctypes</span></code> objects can’t be
+manipulated under JIT anyway. For <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> callers that need a C
+string, pre-allocate a numpy <code class="docutils literal notranslate"><span class="pre">uint8</span></code> buffer containing the UTF-8
+bytes plus a trailing NUL at Python level, then pass
+<a class="reference internal" href="#numbox.utils.lowlevel.array_data_p" title="numbox.utils.lowlevel.array_data_p"><code class="xref py py-func docutils literal notranslate"><span class="pre">array_data_p()</span></code></a> into the JIT kernel.</p>
+<p id="module-numbox.utils.cstrings">Python-side helpers for passing C strings into the bindings layer.</p>
+<p>The bindings layer (<code class="docutils literal notranslate"><span class="pre">numbox.core.bindings.sqlite.*</span></code>, <code class="docutils literal notranslate"><span class="pre">numbox.core.bindings.libc</span></code>, etc.)
+takes <code class="docutils literal notranslate"><span class="pre">intp</span></code> pointers for every text argument. Producing a valid
+NUL-terminated UTF-8 C string from a Python <code class="docutils literal notranslate"><span class="pre">str</span></code> is non-trivial:
+<code class="docutils literal notranslate"><span class="pre">get_unicode_data_p</span></code> in <code class="docutils literal notranslate"><span class="pre">lowlevel.py</span></code> returns a pointer to the
+Python string’s internal data payload, which CPython stores as
+UCS-1/2/4 depending on contents – only safe for ASCII inputs.</p>
+<p>This module’s <a class="reference internal" href="#numbox.utils.cstrings.c_string" title="numbox.utils.cstrings.c_string"><code class="xref py py-func docutils literal notranslate"><span class="pre">c_string()</span></code></a> allocates a real C buffer with the
+UTF-8 encoding of the input and yields the pointer with safe
+lifetime management via the <code class="docutils literal notranslate"><span class="pre">with</span></code> statement.</p>
+<p><strong>Python-only.</strong> <code class="docutils literal notranslate"><span class="pre">c_string</span></code> is a context manager; numba does not
+support arbitrary context managers inside <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> (raises
+<code class="docutils literal notranslate"><span class="pre">UnsupportedBytecodeError</span></code>), and <code class="docutils literal notranslate"><span class="pre">ctypes</span></code> objects can’t be
+manipulated under JIT anyway. For <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> callers that need a C
+string, pre-allocate a numpy <code class="docutils literal notranslate"><span class="pre">uint8</span></code> buffer containing the UTF-8
+bytes + a trailing NUL outside the JIT scope, then pass
+<code class="docutils literal notranslate"><span class="pre">array_data_p(buf)</span></code> from <code class="docutils literal notranslate"><span class="pre">numbox.utils.lowlevel</span></code> into the JIT
+kernel.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.cstrings.c_string">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.cstrings.</span></span><span class="sig-name descname"><span class="pre">c_string</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">s</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/cstrings.html#c_string"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.cstrings.c_string" title="Link to this definition"></a></dt>
+<dd><p>Yield an <code class="docutils literal notranslate"><span class="pre">intp</span></code> pointer to a freshly-allocated NUL-terminated
+UTF-8 C string for <code class="docutils literal notranslate"><span class="pre">s</span></code>.</p>
+<p>Usage:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.cstrings</span><span class="w"> </span><span class="kn">import</span> <span class="n">c_string</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.exec</span><span class="w"> </span><span class="kn">import</span> <span class="n">sqlite3_exec</span>
+
+<span class="k">with</span> <span class="n">c_string</span><span class="p">(</span><span class="s2">&quot;CREATE TABLE t(x INTEGER)&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">sql_p</span><span class="p">:</span>
+    <span class="n">sqlite3_exec</span><span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">sql_p</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+<span class="c1"># buffer freed here</span>
+</pre></div>
+</div>
+<p>The underlying <code class="docutils literal notranslate"><span class="pre">ctypes</span></code> buffer lives for the duration of the
+<code class="docutils literal notranslate"><span class="pre">with</span></code> block. Once the block exits, the Python reference is
+dropped and ctypes frees the memory; the pointer is then dangling
+and must not be used.</p>
+<p>Embedded NULs in <code class="docutils literal notranslate"><span class="pre">s</span></code> are rejected with <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>. Passing a
+string containing <code class="docutils literal notranslate"><span class="pre">&quot;\x00&quot;</span></code> would silently truncate the C string
+at the first NUL — a footgun that CPython’s own <code class="docutils literal notranslate"><span class="pre">sqlite3.connect</span></code>
+rejects similarly on filename inputs.</p>
+<p>For concurrent multi-string needs, nest <code class="docutils literal notranslate"><span class="pre">with</span></code> statements or use
+<code class="docutils literal notranslate"><span class="pre">contextlib.ExitStack</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">contextlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExitStack</span>
+<span class="k">with</span> <span class="n">ExitStack</span><span class="p">()</span> <span class="k">as</span> <span class="n">stack</span><span class="p">:</span>
+    <span class="n">a_p</span> <span class="o">=</span> <span class="n">stack</span><span class="o">.</span><span class="n">enter_context</span><span class="p">(</span><span class="n">c_string</span><span class="p">(</span><span class="s2">&quot;a&quot;</span><span class="p">))</span>
+    <span class="n">b_p</span> <span class="o">=</span> <span class="n">stack</span><span class="o">.</span><span class="n">enter_context</span><span class="p">(</span><span class="n">c_string</span><span class="p">(</span><span class="s2">&quot;b&quot;</span><span class="p">))</span>
+    <span class="c1"># both pointers valid here</span>
+</pre></div>
+</div>
+<p>Python-only – not callable inside <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code>. See module docstring
+for the JIT alternative.</p>
+</dd></dl>
+
+</section>
+</section>
+<section id="numbox-utils-pysqlite-bridge">
+<h2>numbox.utils.pysqlite_bridge<a class="headerlink" href="#numbox-utils-pysqlite-bridge" title="Link to this heading"></a></h2>
+<section id="bridging-python-sqlite3-connections-to-the-bindings-layer">
+<h3>Bridging Python <code class="docutils literal notranslate"><span class="pre">sqlite3</span></code> connections to the bindings layer<a class="headerlink" href="#bridging-python-sqlite3-connections-to-the-bindings-layer" title="Link to this heading"></a></h3>
+<p>CPython’s stdlib <code class="docutils literal notranslate"><span class="pre">sqlite3.Connection</span></code> holds the underlying
+<code class="docutils literal notranslate"><span class="pre">sqlite3</span> <span class="pre">*db</span></code> C handle as a private field inside its PyObject
+struct. <a class="reference internal" href="#numbox.utils.pysqlite_bridge.extract_connection_ptr" title="numbox.utils.pysqlite_bridge.extract_connection_ptr"><code class="xref py py-func docutils literal notranslate"><span class="pre">extract_connection_ptr()</span></code></a>
+reads that field via <code class="docutils literal notranslate"><span class="pre">ctypes</span></code> so callers can pass the handle into
+numbox’s JIT-callable SQLite bindings:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numbox.utils.pysqlite_bridge</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pysqlite_bridge</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sqlite3</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.conn</span><span class="w"> </span><span class="kn">import</span> <span class="n">sqlite3_changes</span>
+
+<span class="n">conn</span> <span class="o">=</span> <span class="n">sqlite3</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="s2">&quot;app.db&quot;</span><span class="p">)</span>
+<span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;CREATE TABLE t(x INTEGER)&quot;</span><span class="p">)</span>
+<span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;INSERT INTO t VALUES (1), (2), (3)&quot;</span><span class="p">)</span>
+<span class="n">db_p</span> <span class="o">=</span> <span class="n">pysqlite_bridge</span><span class="o">.</span><span class="n">extract_connection_ptr</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span>
+<span class="k">assert</span> <span class="n">sqlite3_changes</span><span class="p">(</span><span class="n">db_p</span><span class="p">)</span> <span class="o">==</span> <span class="mi">3</span>
+</pre></div>
+</div>
+<p>Mirrors the pattern in
+<a class="reference external" href="https://github.com/Goykhman/numbduck/blob/main/numbduck/pybridge.py">numbduck.pybridge</a>.</p>
+<p><strong>Build configurations are handled at runtime.</strong> The <code class="docutils literal notranslate"><span class="pre">sqlite3</span> <span class="pre">*db</span></code> field
+offset is computed by <code class="docutils literal notranslate"><span class="pre">_pyobject_head_fields()</span></code>, which adapts to the running
+interpreter: <code class="docutils literal notranslate"><span class="pre">Py_DEBUG</span></code> builds (detected via <code class="docutils literal notranslate"><span class="pre">sys.gettotalrefcount</span></code>)
+prepend the <code class="docutils literal notranslate"><span class="pre">_ob_next</span></code> / <code class="docutils literal notranslate"><span class="pre">_ob_prev</span></code> trace pointers, and free-threaded
+builds (<code class="docutils literal notranslate"><span class="pre">Py_GIL_DISABLED</span></code>) use the no-GIL object header — so release, debug,
+and free-threaded builds all read the field at the correct offset.</p>
+<p>The macOS shared-cache caveat and its <code class="docutils literal notranslate"><span class="pre">DYLD_INSERT_LIBRARIES</span></code> workaround are
+described in the module docstring below; <code class="xref py py-func docutils literal notranslate"><span class="pre">extract_connection_ptr()</span></code> also
+validates (via <code class="xref py py-func docutils literal notranslate"><span class="pre">libraries_coordinated()</span></code>) that numbox’s bindings and
+Python’s <code class="docutils literal notranslate"><span class="pre">sqlite3</span></code> resolve to the same libsqlite3 before returning a pointer,
+raising rather than handing back a pointer to a mismatched library.</p>
+<p id="module-numbox.utils.pysqlite_bridge">Extract raw SQLite C API pointers from Python <code class="docutils literal notranslate"><span class="pre">sqlite3</span></code> objects.</p>
+<p>Bridges CPython’s stdlib <code class="docutils literal notranslate"><span class="pre">sqlite3</span></code> module to the numba-callable bindings layer by exposing the underlying
+<code class="docutils literal notranslate"><span class="pre">sqlite3</span> <span class="pre">*db</span></code> handle that sits inside a Python <code class="docutils literal notranslate"><span class="pre">sqlite3.Connection</span></code>.  Mirrors the pattern in
+<a class="reference external" href="https://github.com/Goykhman/numbduck/blob/main/numbduck/pybridge.py">numbduck.pybridge</a>.</p>
+<section id="macos-caveat">
+<h4>macOS caveat<a class="headerlink" href="#macos-caveat" title="Link to this heading"></a></h4>
+<p>On macOS, the system sqlite is in the <a class="reference external" href="https://keith.github.io/xcode-man-pages/dyld.1.html">dyld shared cache</a> (structure defined in Apple’s
+<a class="reference external" href="https://github.com/apple-oss-distributions/dyld/blob/main/common/DyldSharedCache.h">DyldSharedCache.h</a>),
+mapped into every process at launch.  LLVM’s JIT linker resolves <code class="docutils literal notranslate"><span class="pre">sqlite3_*</span></code> symbols via
+<code class="docutils literal notranslate"><span class="pre">dlsym(RTLD_DEFAULT)</span></code>, which returns the first match in load order — the system copy.  Python’s
+<code class="docutils literal notranslate"><span class="pre">_sqlite3.so</span></code> may use a <em>different</em> sqlite (statically linked on python.org framework builds, or
+dynamically linked to Homebrew’s copy).</p>
+<p>If the system sqlite and Python’s sqlite differ enough in version or internal layout, passing the pointer from
+<a class="reference internal" href="#numbox.utils.pysqlite_bridge.extract_connection_ptr" title="numbox.utils.pysqlite_bridge.extract_connection_ptr"><code class="xref py py-func docutils literal notranslate"><span class="pre">extract_connection_ptr()</span></code></a> to numbox’s <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> bindings can produce wrong results or segfaults.</p>
+<p><strong>Workaround:</strong> force the process to load your Python’s sqlite first:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">DYLD_INSERT_LIBRARIES</span><span class="o">=/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">your</span><span class="o">/</span><span class="n">libsqlite3</span><span class="o">.</span><span class="n">dylib</span> <span class="n">python</span> <span class="n">my_script</span><span class="o">.</span><span class="n">py</span>
+</pre></div>
+</div>
+<p>Common paths:</p>
+<ul class="simple">
+<li><p>Homebrew (Apple Silicon): <code class="docutils literal notranslate"><span class="pre">/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib</span></code></p></li>
+<li><p>Homebrew (Intel): <code class="docutils literal notranslate"><span class="pre">/usr/local/opt/sqlite/lib/libsqlite3.dylib</span></code></p></li>
+<li><p>Conda-forge: <code class="docutils literal notranslate"><span class="pre">$CONDA_PREFIX/lib/libsqlite3.dylib</span></code></p></li>
+<li><p>python.org framework builds statically link sqlite — no external dylib available;
+install Homebrew sqlite and use its path.</p></li>
+</ul>
+<p>On Linux there is typically only one sqlite on the system, so no workaround is needed.</p>
+</section>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.pysqlite_bridge.extract_connection_ptr">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.pysqlite_bridge.</span></span><span class="sig-name descname"><span class="pre">extract_connection_ptr</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">conn</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/pysqlite_bridge.html#extract_connection_ptr"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.pysqlite_bridge.extract_connection_ptr" title="Link to this definition"></a></dt>
+<dd><p>Return the raw <code class="docutils literal notranslate"><span class="pre">sqlite3*</span></code> underlying a Python <code class="docutils literal notranslate"><span class="pre">sqlite3.Connection</span></code>.</p>
+<p>Uses <code class="xref py py-class docutils literal notranslate"><span class="pre">_PysqliteConnection</span></code> to read the <code class="docutils literal notranslate"><span class="pre">db</span></code> field at its
+platform-correct offset inside the PyObject struct, then validates
+the pointer by calling
+<a class="reference internal" href="numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_errmsg" title="numbox.core.bindings.sqlite.conn.sqlite3_errmsg"><code class="xref py py-func docutils literal notranslate"><span class="pre">sqlite3_errmsg()</span></code></a> (a
+healthy connection returns <code class="docutils literal notranslate"><span class="pre">&quot;not</span> <span class="pre">an</span> <span class="pre">error&quot;</span></code>).</p>
+<p>Before reading the pointer, checks (via <a class="reference internal" href="#numbox.utils.pysqlite_bridge.libraries_coordinated" title="numbox.utils.pysqlite_bridge.libraries_coordinated"><code class="xref py py-func docutils literal notranslate"><span class="pre">libraries_coordinated()</span></code></a>) that
+numbox’s bindings and Python’s <code class="docutils literal notranslate"><span class="pre">sqlite3</span></code> module resolve to the same
+libsqlite3.  If they differ — the macOS shared-cache situation in the module
+docstring — it raises rather than pass the pointer to a mismatched library,
+which could segfault.</p>
+<section id="parameters">
+<h4>Parameters<a class="headerlink" href="#parameters" title="Link to this heading"></a></h4>
+<p>conn : sqlite3.Connection</p>
+</section>
+<section id="returns">
+<h4>Returns<a class="headerlink" href="#returns" title="Link to this heading"></a></h4>
+<dl class="simple">
+<dt>int</dt><dd><p><code class="docutils literal notranslate"><span class="pre">sqlite3*</span></code> as a Python int (<code class="docutils literal notranslate"><span class="pre">intp</span></code>-compatible). The pointer is
+<strong>borrowed</strong> from <em>conn</em>: it is owned by the Python <code class="docutils literal notranslate"><span class="pre">Connection</span></code> and
+stays valid only while <em>conn</em> is alive and open. An <code class="docutils literal notranslate"><span class="pre">int</span></code> cannot keep
+<em>conn</em> referenced, so the keep-alive is the caller’s responsibility.</p>
+</dd>
+</dl>
+</section>
+<section id="warning">
+<h4>Warning<a class="headerlink" href="#warning" title="Link to this heading"></a></h4>
+<p>The caller must retain <em>conn</em> for the entire lifetime of any <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> use
+of the returned pointer, and must not use the pointer after <code class="docutils literal notranslate"><span class="pre">conn.close()</span></code>
+or after <em>conn</em> is garbage-collected — doing so is a use-after-free
+(dereferencing a dangling <code class="docutils literal notranslate"><span class="pre">sqlite3*</span></code>). This mirrors the <code class="docutils literal notranslate"><span class="pre">SQLITE_STATIC</span></code>
+ownership contract on <code class="docutils literal notranslate"><span class="pre">bind_text</span></code> / <code class="docutils literal notranslate"><span class="pre">bind_blob</span></code>: the borrowed memory
+must outlive every use.</p>
+</section>
+<section id="raises">
+<h4>Raises<a class="headerlink" href="#raises" title="Link to this heading"></a></h4>
+<dl class="simple">
+<dt>TypeError</dt><dd><p>If <em>conn</em> is not a <code class="docutils literal notranslate"><span class="pre">sqlite3.Connection</span></code>.</p>
+</dd>
+<dt>RuntimeError</dt><dd><p>If numbox’s bindings and Python’s <code class="docutils literal notranslate"><span class="pre">sqlite3</span></code> use different
+libsqlite3 instances, or if the extracted pointer fails the
+validation call.</p>
+</dd>
+</dl>
+</section>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.utils.pysqlite_bridge.libraries_coordinated">
+<span class="sig-prename descclassname"><span class="pre">numbox.utils.pysqlite_bridge.</span></span><span class="sig-name descname"><span class="pre">libraries_coordinated</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/pysqlite_bridge.html#libraries_coordinated"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.pysqlite_bridge.libraries_coordinated" title="Link to this definition"></a></dt>
+<dd><p>True if numbox’s <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> bindings and Python’s <code class="docutils literal notranslate"><span class="pre">sqlite3</span></code> resolve to the same libsqlite3.</p>
+<p>Compares <a class="reference internal" href="numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_libversion" title="numbox.core.bindings.sqlite.conn.sqlite3_libversion"><code class="xref py py-func docutils literal notranslate"><span class="pre">sqlite3_libversion()</span></code></a> (what numbox’s bindings
+link against) with <code class="docutils literal notranslate"><span class="pre">sqlite3.sqlite_version</span></code> (what Python’s <code class="docutils literal notranslate"><span class="pre">sqlite3</span></code> module links against).
+When they differ — the macOS shared-cache situation described in the module docstring — passing a
+connection pointer across the two is unsafe, and <a class="reference internal" href="#numbox.utils.pysqlite_bridge.extract_connection_ptr" title="numbox.utils.pysqlite_bridge.extract_connection_ptr"><code class="xref py py-func docutils literal notranslate"><span class="pre">extract_connection_ptr()</span></code></a> raises rather than
+proceed.</p>
+<section id="id2">
+<h4>Returns<a class="headerlink" href="#id2" title="Link to this heading"></a></h4>
+<p>bool</p>
+</section>
+</dd></dl>
+
+</section>
+</section>
+<section id="module-numbox.utils.timer">
+<span id="numbox-utils-timer"></span><h2>numbox.utils.timer<a class="headerlink" href="#module-numbox.utils.timer" title="Link to this heading"></a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.utils.timer.Timer">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.utils.timer.</span></span><span class="sig-name descname"><span class="pre">Timer</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">precision</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">3</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/utils/timer.html#Timer"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.utils.timer.Timer" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="numbox.utils.timer.Timer.times">
+<span class="sig-name descname"><span class="pre">times</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">{}</span></em><a class="headerlink" href="#numbox.utils.timer.Timer.times" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="numbox.core.work.html" class="btn btn-neutral float-left" title="numbox.core.work" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

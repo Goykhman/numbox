@@ -1,0 +1,216 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.vector &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/numbox.core.vector.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="numbox.core.work" href="numbox.core.work.html" />
+    <link rel="prev" title="numbox.core.variable" href="numbox.core.variable.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">numbox</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.any.html">numbox.core.any</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.html">numbox.core.bindings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.sqlite.html">numbox.core.bindings.sqlite</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.proxy.html">numbox.core.proxy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.variable.html">numbox.core.variable</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbox.core.vector</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#modules">Modules</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#module-numbox.core.vector.vector">numbox.core.vector.vector</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.work.html">numbox.core.work</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.utils.html">numbox.utils</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">numbox</a></li>
+      <li class="breadcrumb-item active">numbox.core.vector</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbox.core.vector.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbox-core-vector">
+<h1>numbox.core.vector<a class="headerlink" href="#numbox-core-vector" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>Generic growable numba vector backed by a numpy array.</p>
+<p>Compared to <code class="docutils literal notranslate"><span class="pre">numba.typed.List</span></code>:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">List</span></code> supports arbitrary element types (including other structrefs)
+and exposes a richer API (<code class="docutils literal notranslate"><span class="pre">append</span></code>, <code class="docutils literal notranslate"><span class="pre">pop</span></code>, <code class="docutils literal notranslate"><span class="pre">insert</span></code>, <code class="docutils literal notranslate"><span class="pre">remove</span></code>,
+slicing).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Vector</span></code> is restricted to scalar element types where <code class="docutils literal notranslate"><span class="pre">str(elem_type)</span></code>
+matches a numpy dtype (<code class="docutils literal notranslate"><span class="pre">float64</span></code>, <code class="docutils literal notranslate"><span class="pre">int64</span></code>, etc.).
+<code class="docutils literal notranslate"><span class="pre">make_vector</span></code> memoises instances by <code class="docutils literal notranslate"><span class="pre">elem_type.key</span></code>, so cached code
+keeps the same type identity across processes. Storage is a single
+<code class="docutils literal notranslate"><span class="pre">numpy.ndarray</span></code>, so per-element overhead is the scalar itself plus
+amortised geometric growth.</p></li>
+</ul>
+</section>
+<section id="modules">
+<h2>Modules<a class="headerlink" href="#modules" title="Link to this heading"></a></h2>
+<section id="module-numbox.core.vector.vector">
+<span id="numbox-core-vector-vector"></span><h3>numbox.core.vector.vector<a class="headerlink" href="#module-numbox.core.vector.vector" title="Link to this heading"></a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.Vector">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.vector.vector.</span></span><span class="sig-name descname"><span class="pre">Vector</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/vector/vector.html#Vector"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.vector.vector.Vector" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">StructRefProxy</span></code></p>
+<dl class="py property">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.Vector.buf">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">buf</span></span><a class="headerlink" href="#numbox.core.vector.vector.Vector.buf" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.Vector.size">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">size</span></span><a class="headerlink" href="#numbox.core.vector.vector.Vector.size" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.VectorTypeClass">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.vector.vector.</span></span><span class="sig-name descname"><span class="pre">VectorTypeClass</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/vector/vector.html#VectorTypeClass"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.vector.vector.VectorTypeClass" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">StructRef</span></code></p>
+<p>Single module-level class, parameterized per elem_type via field-tuple
+instances.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.VectorTypeClass.preprocess_fields">
+<span class="sig-name descname"><span class="pre">preprocess_fields</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fields</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/vector/vector.html#VectorTypeClass.preprocess_fields"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.vector.vector.VectorTypeClass.preprocess_fields" title="Link to this definition"></a></dt>
+<dd><p>Subclasses can override this to do additional clean up on fields.</p>
+<p>The default is an identity function.</p>
+<section id="parameters">
+<h4>Parameters:<a class="headerlink" href="#parameters" title="Link to this heading"></a></h4>
+<p>fields : Sequence[Tuple[str, Type]]</p>
+</section>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.make_vector">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.vector.vector.</span></span><span class="sig-name descname"><span class="pre">make_vector</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">elem_type</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/vector/vector.html#make_vector"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.vector.vector.make_vector" title="Link to this definition"></a></dt>
+<dd><p>Return <code class="docutils literal notranslate"><span class="pre">(create,</span> <span class="pre">type_instance)</span></code> for <code class="docutils literal notranslate"><span class="pre">Vector[elem_type]</span></code>.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">create</span></code>: an <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> factory taking a single <code class="docutils literal notranslate"><span class="pre">capacity</span></code> argument.
+Dtype is locked by the type — callers cannot pass a mismatched buffer.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">type_instance</span></code>: the <code class="docutils literal notranslate"><span class="pre">VectorType</span></code> instance with resolved field
+types.</p></li>
+</ul>
+<p>Results are memoized in <code class="docutils literal notranslate"><span class="pre">_vector_cache</span></code> keyed by <code class="docutils literal notranslate"><span class="pre">elem_type.key</span></code>.</p>
+<p>The numpy dtype is derived from <code class="docutils literal notranslate"><span class="pre">str(elem_type)</span></code> at build time. Works
+for standard scalar numba types (float64, int64, etc.). Exotic types
+where <code class="docutils literal notranslate"><span class="pre">str()</span></code> does not match a numpy dtype name are unsupported.</p>
+<p>Initial <code class="docutils literal notranslate"><span class="pre">capacity</span></code> must be <code class="docutils literal notranslate"><span class="pre">&gt;=</span> <span class="pre">1</span></code>. The <code class="docutils literal notranslate"><span class="pre">create</span></code> factory asserts
+this. Zero-capacity construction is rejected because the geometric
+growth in <code class="docutils literal notranslate"><span class="pre">vector_push</span></code> / <code class="docutils literal notranslate"><span class="pre">vector_extend</span></code> would produce <code class="docutils literal notranslate"><span class="pre">0</span> <span class="pre">*</span> <span class="pre">2</span> <span class="pre">=</span> <span class="pre">0</span></code>
+and either OOB or infinite-loop. Vectors only grow, never shrink, so a
+positive initial capacity guarantees a positive capacity for all time.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.vector_extend">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.vector.vector.</span></span><span class="sig-name descname"><span class="pre">vector_extend</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dst</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">src</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/vector/vector.html#vector_extend"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.vector.vector.vector_extend" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.vector_push">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.vector.vector.</span></span><span class="sig-name descname"><span class="pre">vector_push</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">v</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">val</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/vector/vector.html#vector_push"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.vector.vector.vector_push" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="numbox.core.variable.html" class="btn btn-neutral float-left" title="numbox.core.variable" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="numbox.core.work.html" class="btn btn-neutral float-right" title="numbox.core.work" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

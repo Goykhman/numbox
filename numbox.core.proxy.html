@@ -1,0 +1,266 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.proxy &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/numbox.core.proxy.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="numbox.core.variable" href="numbox.core.variable.html" />
+    <link rel="prev" title="numbox.core.bindings.sqlite" href="numbox.core.bindings.sqlite.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">numbox</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.any.html">numbox.core.any</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.html">numbox.core.bindings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.sqlite.html">numbox.core.bindings.sqlite</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbox.core.proxy</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#cache-anchor-mechanism">Cache-anchor mechanism</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#anchoring-at-the-user-s-file">Anchoring at the user’s file</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#the-hazard-this-avoids">The hazard this avoids</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#cache-invalidation">Cache invalidation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#multi-decorator-support">Multi-decorator support</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#modules">Modules</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#module-numbox.core.proxy.proxy">numbox.core.proxy.proxy</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.variable.html">numbox.core.variable</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.vector.html">numbox.core.vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.work.html">numbox.core.work</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.utils.html">numbox.utils</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">numbox</a></li>
+      <li class="breadcrumb-item active">numbox.core.proxy</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbox.core.proxy.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbox-core-proxy">
+<h1>numbox.core.proxy<a class="headerlink" href="#numbox-core-proxy" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>Implementation of <a class="reference internal" href="#module-numbox.core.proxy.proxy" title="numbox.core.proxy.proxy"><code class="xref py py-func docutils literal notranslate"><span class="pre">numbox.core.proxy.proxy()</span></code></a> decorator that swaps definition of a jit-compiled
+function in-place for a declaration (while delegating the actual implementation
+to a different function that is only accessible indirectly). As a result, statically linking in libraries
+corresponding to proxy-jitted functions called from other jitted functions will
+only paste a declaration rather than the entire LLVM IR code.</p>
+</section>
+<section id="cache-anchor-mechanism">
+<h2>Cache-anchor mechanism<a class="headerlink" href="#cache-anchor-mechanism" title="Link to this heading"></a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code> decorator generates a thin wrapper function via <code class="docutils literal notranslate"><span class="pre">exec()</span></code>.
+For numba to cache that wrapper across processes, the wrapper’s bytecode
+needs a <code class="docutils literal notranslate"><span class="pre">co_filename</span></code> and <code class="docutils literal notranslate"><span class="pre">co_firstlineno</span></code> that point at real Python
+source — both because numba’s cache stamp uses <code class="docutils literal notranslate"><span class="pre">(st_mtime,</span> <span class="pre">st_size)</span></code> of
+<code class="docutils literal notranslate"><span class="pre">co_filename</span></code> for invalidation, and because
+<code class="docutils literal notranslate"><span class="pre">inspect.getsourcelines(wrapper)</span></code> gets called during numba’s annotation
+pipeline.</p>
+<section id="anchoring-at-the-user-s-file">
+<h3>Anchoring at the user’s file<a class="headerlink" href="#anchoring-at-the-user-s-file" title="Link to this heading"></a></h3>
+<p>The wrapper anchors at <code class="docutils literal notranslate"><span class="pre">inspect.getfile(func)</span></code> — the user’s <code class="docutils literal notranslate"><span class="pre">.py</span></code>
+file where the <code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code> decoration sits. Blank lines are prepended to
+the generated wrapper source so the wrapper’s <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> decorator
+(which is what Python records as <code class="docutils literal notranslate"><span class="pre">co_firstlineno</span></code> for a decorated
+function) lands at <code class="docutils literal notranslate"><span class="pre">func.__code__.co_firstlineno</span></code> — i.e. exactly the
+line of the user’s <code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code> decorator. <code class="docutils literal notranslate"><span class="pre">inspect.findsource(wrapper)</span></code>
+then matches that <code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code> line on its first check via
+<code class="docutils literal notranslate"><span class="pre">r'^(\s*&#64;)'</span></code> — no backward scan needed, tokenization proceeds from
+real, syntactically valid Python.</p>
+</section>
+<section id="the-hazard-this-avoids">
+<h3>The hazard this avoids<a class="headerlink" href="#the-hazard-this-avoids" title="Link to this heading"></a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">inspect.findsource</span></code> searches backward from <code class="docutils literal notranslate"><span class="pre">co_firstlineno</span></code> for any
+line matching its pattern, <em>including</em> lines inside docstrings that
+happen to start with <code class="docutils literal notranslate"><span class="pre">&#64;</span></code>. A docstring mentioning
+<code class="docutils literal notranslate"><span class="pre">&#64;njit(parallel=True)</span> <span class="pre">workers</span></code> indented four spaces would be matched
+as if it were a real decorator, and the C tokenizer would then read
+<code class="docutils literal notranslate"><span class="pre">worker's</span></code> (the apostrophe) as an unterminated string literal and
+raise <code class="docutils literal notranslate"><span class="pre">TokenError</span></code>. Related to CPython issue
+<a class="reference external" href="https://github.com/python/cpython/issues/122981">#122981</a>.</p>
+<p>Placing the wrapper’s <code class="docutils literal notranslate"><span class="pre">co_firstlineno</span></code> directly at the user’s
+<code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code> line means <code class="docutils literal notranslate"><span class="pre">findsource</span></code> matches without scanning, and the
+docstring contents are never re-tokenized.</p>
+</section>
+<section id="cache-invalidation">
+<h3>Cache invalidation<a class="headerlink" href="#cache-invalidation" title="Link to this heading"></a></h3>
+<p>For a file-backed cached <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code>, numba’s source stamp is
+<code class="docutils literal notranslate"><span class="pre">(os.stat(co_filename).st_mtime,</span> <span class="pre">st_size)</span></code> — see
+<code class="docutils literal notranslate"><span class="pre">numba.core.caching._SourceFileBackedLocatorMixin.get_source_stamp</span></code>.
+Any edit to the user’s file (the file containing the <code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code>
+decoration) invalidates the wrapper’s cache. Edits to <code class="docutils literal notranslate"><span class="pre">proxy.py</span></code>’s
+wrapper template itself — without a corresponding user-file edit — do
+<em>not</em> invalidate the cache (the user file’s mtime is unchanged); treat
+wrapper-template changes as developer-managed (clear
+<code class="docutils literal notranslate"><span class="pre">~/.cache/numba/</span></code> when shipping a template change to numbox).</p>
+</section>
+<section id="multi-decorator-support">
+<h3>Multi-decorator support<a class="headerlink" href="#multi-decorator-support" title="Link to this heading"></a></h3>
+<p>When a user stacks decorators above <code class="docutils literal notranslate"><span class="pre">&#64;proxy(sig)</span></code>,
+<code class="docutils literal notranslate"><span class="pre">func.__code__.co_firstlineno</span></code> is the topmost decorator line (Python
+records a decorated function’s first line as its outermost decorator).
+The anchor lands the wrapper at that topmost decorator.
+<code class="docutils literal notranslate"><span class="pre">findsource</span></code> matches it directly because every decorator line begins
+with <code class="docutils literal notranslate"><span class="pre">&#64;</span></code>. Verified for single-, double-, and triple-stack outer
+decorators.</p>
+<p><code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code> itself must be the innermost decorator (closest to <code class="docutils literal notranslate"><span class="pre">def</span></code>).
+A wrapping decorator between <code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code> and <code class="docutils literal notranslate"><span class="pre">def</span></code> would hand
+<code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code> a wrapped function whose <code class="docutils literal notranslate"><span class="pre">__code__</span></code> lives in the wrapping
+decorator’s source file, and would also break numba’s ability to
+JIT-compile through the intermediate Python wrapper.</p>
+</section>
+</section>
+<section id="modules">
+<h2>Modules<a class="headerlink" href="#modules" title="Link to this heading"></a></h2>
+<section id="module-numbox.core.proxy.proxy">
+<span id="numbox-core-proxy-proxy"></span><h3>numbox.core.proxy.proxy<a class="headerlink" href="#module-numbox.core.proxy.proxy" title="Link to this heading"></a></h3>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.proxy.proxy.make_proxy_name">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.proxy.proxy.</span></span><span class="sig-name descname"><span class="pre">make_proxy_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/proxy/proxy.html#make_proxy_name"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.proxy.proxy.make_proxy_name" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.proxy.proxy.proxy">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.proxy.proxy.</span></span><span class="sig-name descname"><span class="pre">proxy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sig</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">jit_options</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/proxy/proxy.html#proxy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.proxy.proxy.proxy" title="Link to this definition"></a></dt>
+<dd><p>Create a proxy for the decorated function <cite>func</cite> with the given signature(s) <cite>sig</cite>.</p>
+<p>The original function <cite>func</cite> will be eagerly JIT-compiled with the given signature(s).
+A proxy with the name <cite>func_proxy_name</cite> will be created to call <cite>func</cite> in the LLVM scope.
+The original function’s variable will be bound to the proxy, i.e., calling the decorated
+function will call the proxy.</p>
+<p>The proxy is a JIT-compiled wrap that invokes the intrinsic that <em>declares</em> the <cite>func</cite>
+and calls it with the original arguments. Declaration instructions are relatively cheap
+to statically link into (potential) caller’s LLVM code, which is the main motivation behind
+this decorator.</p>
+<p>Machine code for <cite>func</cite> can be cached when so specified in <cite>jit_options</cite>, in which case its
+JIT-compilation will load the <cite>func</cite> into the LLVM scope. Caching option is the other major
+motivation for this decorator, without the need to cache one can avoid static linking
+of the callee’s LLVM code into the caller’s by simply ignoring the former.</p>
+<p>In case when more than one signature is provided as the <cite>sig</cite> parameter, it is assumed
+that the first signature is the ‘main’ one while the other ones are supplied to
+allow for the <cite>Omitted</cite> types with default values for (some of) the parameters.</p>
+<p>The returned dispatcher also exposes <code class="docutils literal notranslate"><span class="pre">.as_func</span></code>: a <code class="docutils literal notranslate"><span class="pre">CompileResultWAP</span></code>
+for the main signature. Cacheable as a called jitted function (via the
+dispatcher); passable as a function-type argument (via <code class="docutils literal notranslate"><span class="pre">.as_func</span></code>).</p>
+<p>See tests for some examples of the use cases.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.proxy.proxy.proxy_if_available">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.proxy.proxy.</span></span><span class="sig-name descname"><span class="pre">proxy_if_available</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lib</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sig</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">jit_options</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/proxy/proxy.html#proxy_if_available"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.proxy.proxy.proxy_if_available" title="Link to this definition"></a></dt>
+<dd><p>Like <code class="docutils literal notranslate"><span class="pre">proxy(sig,</span> <span class="pre">jit_options=...)</span></code>, but stubs out the wrapper if
+the C symbol matching <code class="docutils literal notranslate"><span class="pre">func.__name__</span></code> is absent from <code class="docutils literal notranslate"><span class="pre">lib</span></code>.</p>
+<p>Use for binding sets that target multiple library versions where some
+symbols only exist in newer releases. Python callers get a stub that raises
+<code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code> instead of a confusing LLVM link error at call
+time; <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> callers get a <code class="docutils literal notranslate"><span class="pre">TypingError</span></code> naming the binding and the
+missing-symbol cause at typing time (the untyped stub would otherwise
+surface an untyped-global failure that names the binding but not why it
+is unusable). Parallel to <code class="docutils literal notranslate"><span class="pre">cres_if_available</span></code> in
+<a class="reference internal" href="numbox.utils.html#module-numbox.utils.highlevel" title="numbox.utils.highlevel"><code class="xref py py-mod docutils literal notranslate"><span class="pre">numbox.utils.highlevel</span></code></a>.</p>
+<p>The stub does NOT expose <code class="docutils literal notranslate"><span class="pre">.as_func</span></code> — a function-value handle is
+meaningless without an underlying jitted body, and a stub one would
+have to either raise on attribute access (ugly) or pretend to be a
+function value (worse). Callers that pass <code class="docutils literal notranslate"><span class="pre">.as_func</span></code> to function-
+type arguments must guard the access:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">my_binding</span><span class="p">,</span> <span class="s2">&quot;as_func&quot;</span><span class="p">):</span>
+    <span class="n">use</span><span class="p">(</span><span class="n">my_binding</span><span class="o">.</span><span class="n">as_func</span><span class="p">)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="numbox.core.bindings.sqlite.html" class="btn btn-neutral float-left" title="numbox.core.bindings.sqlite" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="numbox.core.variable.html" class="btn btn-neutral float-right" title="numbox.core.variable" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
