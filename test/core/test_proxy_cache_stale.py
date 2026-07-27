@@ -8,7 +8,7 @@ that single missing name zeroes *every* external relocation in the object, and t
 argument-unpacking wrapper before any user code runs: a bare segfault with an empty stderr. The engine keeps that
 failure, so the next cached object loaded afterwards -- a sound one will do -- aborts the process instead, naming the
 alias that no longer exists.
-Both shapes are landmines for anyone who edits a proxied binding without first clearing the cache (fork issue #73).
+Both shapes are landmines for anyone who edits a proxied binding without first clearing the cache.
 
 The target behaviour is that the loader notices the unregistered alias, discards that one entry, warns, and recompiles.
 Each scenario therefore also carries a second binding that is never edited, with its own caller in the same file and

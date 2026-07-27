@@ -418,9 +418,12 @@ def test_type_identity_plain_type_is_cacheable():
 
 
 def test_type_identity_dispatcher_is_uncacheable_and_content_sensitive():
-    """A Dispatcher type is un-cacheable regardless of whether its wrapped body
-    fingerprints -- numba cannot cross-process-cache a Dispatcher signature -- yet
-    the hash stays content-sensitive so a changed body re-keys the in-process name.
+    """Both bodies are un-cacheable for the one reason that they are Dispatchers.
+
+    They differ only in which fingerprint branch supplies the hash: ``intrinsic_ref``
+    reaches an ``@intrinsic``, which has no canonical form, so the strict walker raises
+    and the best-effort one runs. That branch must still discriminate two bodies -- a
+    changed body has to re-key the in-process name.
     """
     @njit
     def plain(x):
@@ -428,13 +431,27 @@ def test_type_identity_dispatcher_is_uncacheable_and_content_sensitive():
 
     @njit
     def intrinsic_ref(x):
-        return _call_lib_func("cos", (x,))     # references an @intrinsic -> unfingerprintable body
+        return _call_lib_func("cos", (x,))
 
     h_plain, ok_plain = _type_identity(typeof(plain))
     h_intr, ok_intr = _type_identity(typeof(intrinsic_ref))
-    assert ok_plain is False and ok_intr is False
+    assert ok_plain is False and ok_intr is False   # Dispatcher-ness alone decides this
     assert len(h_plain) == 64 and len(h_intr) == 64
     assert h_plain != h_intr                   # distinct bodies -> distinct hashes
+
+
+def test_type_identity_cres_is_cacheable():
+    """A compiled function is not itself the problem -- a ``cres`` renders as
+    ``FunctionType[<sig>]``, which carries neither an address nor a creation-order id
+    and which numba can cross-process-cache. Only the Dispatcher spelling is dropped."""
+    @cres(float64(float64))
+    def compiled(x):
+        return x + 1.0
+
+    ty = typeof(compiled)
+    assert str(ty).startswith("FunctionType[")
+    h, ok = _type_identity(ty)
+    assert ok is True and len(h) == 64
 
 
 def test_type_identity_nested_dispatcher_is_uncacheable():
@@ -451,13 +468,26 @@ def test_type_identity_nested_dispatcher_is_uncacheable():
     assert ok is False
 
 
-def test_type_identity_record_is_cacheable():
+def test_type_identity_record_is_hashed_structurally_not_mangled():
+    """A Record must take the structural branch, not numba's mangle.
+
+    The mangle folds a creation-order ``_code``, so it differs between a cold process
+    and a warm one; hashing ``str(ty)`` instead is what makes a Record-typed node
+    process-stable. Asserting the hash simply *differs* from the mangled one pins that
+    the branch was taken -- deleting it makes this fail -- while the layout check pins
+    that going structural did not erase the field layout.
+    """
+    import hashlib
     import numpy as np
     from numba import from_dtype
+    from numba.core.itanium_mangler import mangle_type_or_value
+
     rec = from_dtype(np.dtype([("a", np.float64), ("b", np.int64)]))
+    swapped = from_dtype(np.dtype([("a", np.int64), ("b", np.float64)]))
     h, ok = _type_identity(rec)
     assert ok is True and len(h) == 64
-    assert "Record(" in str(rec)               # exercises the structural branch
+    assert h != hashlib.sha256(mangle_type_or_value(rec).encode("utf-8")).hexdigest()
+    assert _type_identity(swapped)[0] != h     # field layout still discriminates
 
 
 def test_signature_identity_folds_component_cacheability():
@@ -465,8 +495,16 @@ def test_signature_identity_folds_component_cacheability():
     def helper(x):
         return x + 1.0
 
+    @cres(float64(float64))
+    def compiled(x):
+        return x + 1.0
+
     text_plain, ok_plain = _signature_identity(float64(float64, float64))
     assert ok_plain is True and isinstance(text_plain, str)
+
+    # A function-typed component is not automatically fatal: a cres stays cacheable.
+    text_cres, ok_cres = _signature_identity(float64(float64, typeof(compiled)))
+    assert ok_cres is True and isinstance(text_cres, str)
 
     text_disp, ok_disp = _signature_identity(float64(float64, typeof(helper)))
     assert ok_disp is False                    # a Dispatcher component makes the sig un-cacheable
@@ -501,6 +539,13 @@ def test_method_identity_folds_ns_values_read_as_globals_only():
     ident_global, cacheable_global = _method_identity(reads_global, {"knob": Opaque()})
     assert cacheable_global is False           # genuinely read, and opaque -> uncacheable
     assert "ns:knob" in ident_global
+
+    # A genuinely-read global that *does* canonicalize stays cacheable, and its value
+    # (not merely its name) is folded, so changing it re-keys the struct.
+    ident_five, cacheable_five = _method_identity(reads_global, {"knob": 5})
+    assert cacheable_five is True
+    assert "ns:knob" in ident_five
+    assert _method_identity(reads_global, {"knob": 6})[0] != ident_five
 
 
 if __name__ == '__main__':

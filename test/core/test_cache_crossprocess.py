@@ -3,7 +3,7 @@
 Each test runs a probe in two separate interpreter processes against one shared
 ``NUMBA_CACHE_DIR``, changing an input the numba cache key does not cover between
 runs, and asserts the second process is not served a stale cached result. These
-guard the caching/hashing fixes from the 2026-07-09 review (fork issue #73).
+guard the caching/hashing fixes from the 2026-07-09 review.
 """
 import os
 import subprocess
@@ -22,7 +22,7 @@ def _run_probe(probe, env):
 
 def test_make_graph_derive_reading_global_is_not_stale_across_processes(tmp_path):
     """A make_graph derive that reads a module global must not serve a stale
-    cached result when the global changes in a later process (issue #73 H3).
+    cached result when the global changes in a later process.
 
     The derive compiles as a standalone dispatcher whose numba cache key covers
     only co_code + closure -- blind to the global -- so before the fix a second
@@ -56,13 +56,13 @@ def test_make_graph_derive_reading_global_is_not_stale_across_processes(tmp_path
 
     env["G_VAL"] = "3.0"
     got = _run_probe(probe, env)                       # process 2: shared cache, changed global
-    assert got == "3.0", f"derive served a stale cached global (H3): got {got}, expected 3.0"
+    assert got == "3.0", f"derive served a stale cached global: got {got}, expected 3.0"
 
 
 def test_make_structref_method_ns_value_is_not_stale_across_processes(tmp_path):
     """A make_structref method that captures a value through the ``ns`` argument
     must not serve a stale cached result when that value changes in a later
-    process (issue #73 H4).
+    process.
 
     The method source is identical across runs; only the ns-threaded value
     differs. Before the fix the source-only method hash matched, numba loaded
@@ -103,12 +103,12 @@ def test_make_structref_method_ns_value_is_not_stale_across_processes(tmp_path):
 
     env["G_VAL"] = "5.0"
     got = _run_probe(probe, env)                        # process 2: shared cache, changed ns value
-    assert got == "10.0", f"method served a stale ns value (H4): got {got}, expected 10.0"
+    assert got == "10.0", f"method served a stale ns value: got {got}, expected 10.0"
 
 
 def test_digest_fallback_is_pythonhashseed_stable(tmp_path):
     """The digest fallback for an un-fingerprintable function with a str-set
-    constant must be PYTHONHASHSEED-independent (issue #73 M11).
+    constant must be PYTHONHASHSEED-independent.
 
     A bare code-object hash embedded the frozenset in its (hash-seeded)
     iteration order, so the cache key varied per process -> cross-process cache
@@ -136,12 +136,12 @@ def test_digest_fallback_is_pythonhashseed_stable(tmp_path):
     d0 = _run_probe(probe, env)
     env["PYTHONHASHSEED"] = "123456789"
     d1 = _run_probe(probe, env)
-    assert d0 == d1, f"digest fallback leaked set iteration order (M11): {d0} != {d1}"
+    assert d0 == d1, f"digest fallback leaked set iteration order: {d0} != {d1}"
 
 
 def test_make_graph_kernel_is_not_stale_across_jit_flags(tmp_path):
     """A graph built under one ``error_model`` must not be served the binary
-    compiled under another in a later process (issue #73 H5).
+    compiled under another in a later process.
 
     ``error_model="numpy"`` makes ``x / 0`` evaluate to ``inf``; the default
     "python" model raises ZeroDivisionError, which ``calculate()`` surfaces by
@@ -192,7 +192,7 @@ def test_make_graph_kernel_is_not_stale_across_jit_flags(tmp_path):
     env["ERROR_MODEL"] = "python"
     got = _run_probe(probe, env)                       # process 2: shared cache, other model
     assert got == "0.0", (
-        f"kernel/derive served a binary compiled under another error_model (H5): "
+        f"kernel/derive served a binary compiled under another error_model: "
         f"got {got}, expected 0.0"
     )
 
@@ -207,8 +207,7 @@ def test_make_graph_kernel_is_not_stale_across_jit_flags(tmp_path):
 
 
 def test_dispatcher_typed_node_hash_is_process_stable(tmp_path):
-    """hash_type of a Dispatcher type must be the same in every process
-    (issue #73 M13/L18).
+    """hash_type of a Dispatcher type must be the same in every process.
 
     A Dispatcher type mangles through its repr --
     `type(CPUDispatcher(<function f at 0x7f...>))` -- which carries an ASLR
@@ -283,7 +282,7 @@ def test_unfingerprintable_derive_makes_kernel_uncached_no_growth(tmp_path):
     """A make_graph derive that references an un-canonicalizable global (here a
     numba Type used as a cast) cannot be fingerprinted; the kernel that folds its
     hash must compile without an on-disk cache, not mint a fresh id()-named
-    ``_make_<hash>`` entry every run (issue #73 M13/L18).
+    ``_make_<hash>`` entry every run.
 
     Before the fix ``_derive_fingerprint`` fell back to ``<repr> @{id(derive)}``
     while the kernel stayed ``cache=True``, so ``builder._make*.nbc`` grew
@@ -318,8 +317,8 @@ def test_unfingerprintable_derive_makes_kernel_uncached_no_growth(tmp_path):
         assert _run_probe(probe, env) == "4.0"                 # correct value, compiled uncached
         counts.append(sum(1 for _ in cache.rglob("builder._make*.nbc")))
     assert counts[1] == counts[0] and counts[2] == counts[0], (
-        f"an un-fingerprintable derive reminted the kernel per process (M13/L18 "
-        f"regression): builder._make*.nbc counts {counts}")
+        f"an un-fingerprintable derive reminted the kernel per process: "
+        f"builder._make*.nbc counts {counts}")
     assert counts[0] == 0, (
         f"an un-fingerprintable-derive kernel must be uncached (best-effort hash is "
         f"content-blind), but {counts[0]} _make .nbc were written")
@@ -328,7 +327,7 @@ def test_unfingerprintable_derive_makes_kernel_uncached_no_growth(tmp_path):
 def test_intrinsic_referencing_node_makes_kernel_uncached_no_growth(tmp_path):
     """A graph node typed as a Dispatcher whose wrapped body references an
     un-canonicalizable global has only a best-effort type identity; the kernel
-    folding it must drop its on-disk cache (issue #73 M13/L18).
+    folding it must drop its on-disk cache.
 
     Before the fix ``hash_type`` fell back to ``mangle_type_or_value``, whose
     Dispatcher form embeds an ASLR address, so ``builder._make*.nbc`` grew per
@@ -379,7 +378,7 @@ def test_intrinsic_referencing_node_makes_kernel_uncached_no_growth(tmp_path):
 def test_dispatcher_typed_component_is_uncached_no_growth(tmp_path):
     """A graph with a Dispatcher-typed component (here a source node holding an
     njit helper, feeding a cache=True derive) must not accrete a cache pair per
-    process -- for BOTH the fused kernel and the derive anchor (issue #73 M13/L18).
+    process -- for BOTH the fused kernel and the derive anchor.
 
     numba cannot cross-process-cache a Dispatcher-typed signature: even with a
     process-stable, content-addressed name, its on-disk index misses every run and
@@ -440,8 +439,8 @@ def test_dispatcher_typed_component_is_uncached_no_growth(tmp_path):
 
 def test_nested_dispatcher_node_kernel_and_derive_uncached_no_growth(tmp_path):
     """A node typed as a heterogeneous tuple that *contains* an njit dispatcher
-    must not accrete the numbox-named kernel / derive cache units either (issue #73
-    M13/L18). A nested Dispatcher escapes the top-level isinstance check, so before
+    must not accrete the numbox-named kernel / derive cache units either. A nested
+    Dispatcher escapes the top-level isinstance check, so before
     the guard it fell to the address-bearing mangle and both units stayed cache=True
     -> builder._make*.nbc and _derive_*.nbc grew 1 -> 2 -> 3. (numba's own Work
     structref-method cache still grows for a Dispatcher-typed node -- a separate,
@@ -492,7 +491,7 @@ def test_module_state_derive_keeps_kernel_cacheable(tmp_path):
     kernel stays cacheable -- its name folds the global's value -- so an unchanged
     re-run cache-hits rather than reminting. Guards that dropping the kernel cache
     for the *un-fingerprintable* path did not also drop it for the module-state
-    path (T4/H6): kernel_safe stays True when the derive fingerprints.
+    path: kernel_safe stays True when the derive fingerprints.
     """
     probe = tmp_path / "modstate_probe.py"
     probe.write_text(textwrap.dedent('''
@@ -523,6 +522,6 @@ def test_module_state_derive_keeps_kernel_cacheable(tmp_path):
     for _ in range(3):
         assert _run_probe(probe, env) == "6.0"
         counts.append(sum(1 for _ in cache.rglob("builder._make*.nbc")))
-    assert counts[0] > 0, "a module-state-reading graph's kernel must still cache (T4/H6)"
+    assert counts[0] > 0, "a module-state-reading graph's kernel must still cache"
     assert counts[1] == counts[0] and counts[2] == counts[0], (
         f"a module-state kernel reminted across processes with an unchanged global: {counts}")

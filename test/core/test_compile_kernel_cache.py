@@ -301,7 +301,7 @@ def test_dispatcher_typed_declared_sig_makes_unit_uncacheable():
     makes the unit uncacheable. ``declared_sigs`` folded raw ``repr`` of each type;
     a Dispatcher's ``type(CPUDispatcher(<function f at 0x...>))`` carried an ASLR
     address, orphaning a ``_kernel_`` cache pair per run, and numba cannot
-    cross-process-cache a Dispatcher signature anyway (issue #73 M13/L18). The
+    cross-process-cache a Dispatcher signature anyway. The
     declared types now route through ``_type_identity``, which reports a Dispatcher
     un-cacheable, so ``_compile`` drops the on-disk cache.
     """

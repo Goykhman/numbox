@@ -651,7 +651,7 @@ def test_make_graph_kernel_name_depends_on_declared_type(monkeypatch):
 
 def test_make_graph_kernel_name_depends_on_jit_flags(monkeypatch):
     """Two graphs identical except a jit flag must produce different
-    _make_<hash> kernel names (issue #73 H5).
+    _make_<hash> kernel names.
 
     numba caches the whole library, including the generated CPython wrapper,
     and the wrapper is flag-sensitive independently of the body: nogil=True
@@ -694,8 +694,8 @@ def test_make_graph_kernel_name_depends_on_jit_flags(monkeypatch):
 
 def test_make_graph_exec_defined_derive_is_cached_through_its_anchor():
     """A derive defined via exec has co_filename '<string>', which numba cannot
-    locate for caching. It used to degrade to uncached rather than raise (issue
-    #73 L19); it is now compiled through its own on-disk anchor, which gives
+    locate for caching. It used to degrade to uncached rather than raise; it is
+    now compiled through its own on-disk anchor, which gives
     numba a real source file, so it caches instead of degrading -- and the anchor
     digest folds the derive fingerprint, so two exec'd bodies never collide.
     """
@@ -722,7 +722,7 @@ def test_make_graph_exec_defined_derive_is_cached_through_its_anchor():
 
 def test_derive_anchor_degrade_drops_the_cache(monkeypatch):
     """When the derive anchor cannot be built, the fallback compile must drop
-    `cache` (issue #73 H5).
+    `cache`.
 
     The anchor is the only thing that makes a cached derive flag-safe: numba
     names a plain `cres(..., cache=True)` cache file after the derive's own

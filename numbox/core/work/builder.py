@@ -111,7 +111,7 @@ def _derive_fingerprint(derive) -> tuple[str, bool, bool]:
     an address, so the kernel name no longer explodes per run) but cannot be
     trusted to change when the un-canonicalizable state does. Both the derive and
     the enclosing kernel must therefore compile uncached (``kernel_safe`` False):
-    recompiled per process, never wrong. This is the M13/L18 orphan-per-run class
+    recompiled per process, never wrong. This is the orphan-per-run class
     -- ``@id``-based names and unconditional kernel caching re-opened it.
 
     "Reads module globals" is measured off the instruction stream
@@ -357,7 +357,7 @@ def make_graph(
         # Dispatcher wrapping an un-fingerprintable body, or a jit flag with no
         # canonical form has a content-blind identity folded into the kernel name;
         # compile the kernel without an on-disk cache so a stale binary cannot be
-        # linked (issue #73 M13/L18) -- recompiled per process, never wrong. The
+        # linked -- recompiled per process, never wrong. The
         # name (fed by type_sigs) is unchanged, so nothing else re-keys.
         ns["jit_options"] = {**jit_options, "cache": False}
     access_nodes_names = [n.name for n in access_nodes]

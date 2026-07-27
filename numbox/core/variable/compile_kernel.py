@@ -415,7 +415,7 @@ def _compile(
     # Each declared sig is a tuple of numba types; fold them through the
     # process-stable identity rather than raw repr, whose Dispatcher form
     # ``type(CPUDispatcher(<function f at 0x...>))`` carries an ASLR address and
-    # would orphan a cache pair per run (issue #73 M13/L18). An un-fingerprintable
+    # would orphan a cache pair per run. An un-fingerprintable
     # declared type (a Dispatcher wrapping an @intrinsic-referencing body) has only
     # a best-effort identity -> compile uncached.
     declared_ids = [[_type_identity(t) for t in s] for s in declared_sigs]

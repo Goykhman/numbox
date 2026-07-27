@@ -69,7 +69,7 @@ def test_digest_unfingerprintable_function_captures_closure():
     # When the strict walker aborts on an un-canonicalizable referenced value, the
     # fallback must still capture closure state: two functions with identical
     # source but different closure values yield different digests. The old
-    # fallback cloudpickled the bare __code__, dropping exactly that state (H7).
+    # fallback cloudpickled the bare __code__, dropping exactly that state.
     class Opaque:  # not a canonicalizable type -> forces the strict walker to abort
         pass
     marker = Opaque()
@@ -86,7 +86,7 @@ def test_digest_folds_dispatcher_jit_flags():
     # A Dispatcher's py_func is only half its identity: numba compiles a
     # different library per jit-flag set, so two dispatchers over one body must
     # key distinctly. The py_func shortcut saw only the Python body and collided
-    # all of these onto a single digest (M12).
+    # all of these onto a single digest.
     def cb(x):
         return x + 1
 
