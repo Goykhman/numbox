@@ -426,9 +426,9 @@ Format spec        Required output points at
                    family. ``%%n`` (a literal ``%`` followed by ``n``) is allowed.
 ================   =============================================
 
-The ``%ld`` row is the most common cross-platform footgun and the
-project's own ``CLAUDE.md`` flags it explicitly. Prefer ``%lld`` with
-an ``int64`` output slot when you want a portable 8-byte width.
+The ``%ld`` row is the most common cross-platform footgun. Prefer
+``%lld`` with an ``int64`` output slot when you want a portable
+8-byte width.
 
 Example — parse a "<int> <double>" pair into typed numpy slots:
 
