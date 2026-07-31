@@ -733,7 +733,7 @@ def test_strict_cache_mode_reads_the_env_truthily(value, expected, monkeypatch):
     """The knob's off values are a documented contract a user relies on to disable it per run (``=0``). Pin each
     one, so dropping an element of the falsey set -- which would turn ``export NUMBOX_PROXY_CACHE_STRICT=0`` into
     hard cache-load errors -- fails here rather than passing a suite that only ever sets the knob to ``1``."""
-    from numbox.core.proxy.proxy import _strict_cache_mode
+    from numbox.core.configurations import _strict_cache_mode
 
     if value is None:
         monkeypatch.delenv("NUMBOX_PROXY_CACHE_STRICT", raising=False)

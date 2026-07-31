@@ -1,6 +1,5 @@
 import hashlib
 import inspect
-import os
 import struct
 import warnings
 from llvmlite import binding as ll
@@ -14,6 +13,7 @@ from numba.extending import intrinsic, overload
 from types import FunctionType as PyFunctionType
 from typing import List, Optional, Tuple
 
+from numbox.core.configurations import _PROXY_CACHE_STRICT_ENV, _strict_cache_mode
 from numbox.utils.fingerprint import (
     _Unfingerprintable, _fingerprint_function, _fingerprint_function_best_effort,
 )
@@ -345,24 +345,6 @@ class UnvalidatedProxyCacheError(RuntimeError):
     """
 
 
-_STRICT_ENV = "NUMBOX_PROXY_CACHE_STRICT"
-
-
-def _strict_cache_mode():
-    """True when ``NUMBOX_PROXY_CACHE_STRICT`` selects strict validation.
-
-    Strict mode makes every fail-open path in the cache guard loud: a payload that cannot be read, or an
-    object whose container cannot be parsed, aborts the load with :class:`UnvalidatedProxyCacheError`
-    instead of loading unchecked; and a detected stale alias raises :class:`StaleProxyCacheError` before
-    the heal, leaving the stale entry on disk. It is a debugging aid, off by default. The value is read on
-    each load so the knob can be toggled within a process; the cost is one environment lookup against a
-    multi-millisecond cache load. Anything other than the unset/empty/``0``/``false``/``no``/``off`` set
-    (case-insensitive) enables it.
-    """
-    value = os.environ.get(_STRICT_ENV)
-    return value is not None and value.strip().lower() not in ("", "0", "false", "no", "off")
-
-
 _ELF_MAGIC = b"\x7fELF"
 # 32- and 64-bit, both byte orders, and both widths of the fat/universal container.
 _MACHO_MAGICS = frozenset((0xFEEDFACE, 0xFEEDFACF, 0xCEFAEDFE, 0xCFFAEDFE,
@@ -502,7 +484,7 @@ def _stale_proxy_aliases(payload, libdata_of_payload):
         if strict:
             raise UnvalidatedProxyCacheError(
                 f"numbox: could not check a numba cache payload for stale @proxy aliases ({exc!r}); "
-                f"{_STRICT_ENV} is set, so the load was aborted rather than proceeding unchecked"
+                f"{_PROXY_CACHE_STRICT_ENV} is set, so the load was aborted rather than proceeding unchecked"
             ) from exc
         # Say so once, though: abandoning the check silently is indistinguishable from passing it, and what
         # it silently restores is the crash this guard exists to prevent.
@@ -534,7 +516,7 @@ def _guarded_rebuild(orig_rebuild, libdata_of_payload):
             if _strict_cache_mode():
                 raise StaleProxyCacheError(
                     f"numbox: {filename_base} references @proxy cfunc alias(es) this process cannot call "
-                    f"({', '.join(stale)}); {_STRICT_ENV} is set, so the stale entry was left on disk for "
+                    f"({', '.join(stale)}); {_PROXY_CACHE_STRICT_ENV} is set, so the stale entry was left on disk for "
                     "inspection instead of being discarded and recompiled"
                 )
             warnings.warn(
