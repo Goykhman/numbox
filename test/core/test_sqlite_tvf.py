@@ -1,11 +1,15 @@
+import os
+import pickle
 from ctypes import addressof, c_char_p, c_int64, cast
 
 import pytest
 import numpy as np
 from numba import njit
+from numba.core import config
 
 from numbox.utils.cstrings import c_string
 from numbox.core.bindings.sqlite.conn import sqlite3_open, sqlite3_close
+from numbox.core.bindings.sqlite import tvf
 from numbox.core.bindings.sqlite.tvf import register_tvf
 from numbox.core.bindings.sqlite.stmt import sqlite3_prepare_v2, sqlite3_step, sqlite3_finalize
 from numbox.core.bindings.sqlite.column import (
@@ -386,3 +390,44 @@ _TWO_U_ROWS = np.array([("αβ", "héllo"), ("\U0001F600", "wörld")], dtype=_TW
 @njit
 def _two_u_series(start, stop):
     return _TWO_U_ROWS[start:stop]
+
+
+def _outer_xfilter_overloads():
+    """Cached overloads recorded for the outer, per-registration ``_tvf_xfilter``
+    cfunc, summed over every cache root numba may be writing to."""
+    roots = [os.path.dirname(tvf.__file__)]
+    if config.CACHE_DIR:
+        roots.append(config.CACHE_DIR)
+    total = 0
+    for root in roots:
+        for dirpath, _dirnames, filenames in os.walk(root):
+            for fn in filenames:
+                if not fn.startswith("tvf.register_tvf.locals._tvf_xfilter-"):
+                    continue
+                if not fn.endswith(".nbi"):
+                    continue
+                with open(os.path.join(dirpath, fn), "rb") as f:
+                    pickle.load(f)
+                    data = f.read()
+                try:
+                    _stamp, overloads = pickle.loads(data)
+                except Exception:
+                    continue
+                total += len(overloads)
+    return total
+
+
+def test_tvf_outer_xfilter_does_not_grow_the_numba_cache():
+    # The outer xfilter closes over xfilter_impl, a dispatcher minted per
+    # registration, so its cache key never repeats and a written entry could
+    # never be read back. Registering must therefore write none: with cache
+    # enabled this count grows by one per registration, forever.
+    before = _outer_xfilter_overloads()
+    db = _open()
+    h = register_tvf(db.value, "nocache", (np.int64, np.int64), _OUT, _series)
+    rc, rows = _select_int(db, "SELECT n FROM nocache(3, 6)")
+    assert rc == SQLITE_OK
+    assert rows == [(3,), (4,), (5,)]
+    assert _outer_xfilter_overloads() == before
+    sqlite3_close(db.value)
+    del h

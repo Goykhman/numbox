@@ -31,22 +31,37 @@ runtime-discovery path; a graph that declares nothing behaves exactly as today.
 
 The on-disk cache is content-addressed per compiled unit (the fused kernel, or
 each jit segment): the digest fingerprints each formula's code, constants,
-default arguments, closure-cell values, referenced globals, and the kernel's
-effective jit flags, so a stale binary is never reused and two distinct
-kernels never collide. The kernel source never mentions types, so declared
-signatures are appended to the digest as well: two declared-type variants of one
-graph therefore get distinct cache anchors. A formula with no canonical
-fingerprint forces its unit uncached (no anchor, no numba cache) -- never
-reused, never wrong.
+default arguments, closure-cell values, referenced globals and the values of
+referenced module attributes, plus the kernel's effective jit flags, any
+Dispatcher/DUFunc formula's targetoptions, and the process ``NUMBA_BOUNDSCHECK``
+setting. The kernel source never mentions types, so declared signatures are
+appended to the digest as well: two declared-type variants of one graph get
+distinct cache anchors. A formula with no canonical fingerprint forces its unit
+uncached (no anchor, no numba cache).
+
+This freshness guarantee covers the code numbox generates and njit-wraps from
+raw Python. It does *not* extend to a formula that carries its OWN numba on-disk
+cache -- a ``@njit(cache=True)`` Dispatcher -- whose cache key is blind to jit
+flags and global values: folding those into the outer kernel name cannot
+invalidate it, and a fresh outer would otherwise link (and serialize) the stale
+inner binary. Such a unit is compiled without an on-disk cache, with a warning:
+numbox refuses to compound numba's flag-blind inner cache but cannot cure it (a
+change to the user dispatcher's flags or globals still serves that dispatcher's
+own stale binary in-process). Env-level codegen knobs other than
+``NUMBA_BOUNDSCHECK`` are likewise outside the digest, as is a value or dispatcher
+a module exposes ONLY through a PEP 562 ``__getattr__`` (resolving it would fire
+unrelated modules' ``__getattr__`` on every compile) -- change such a value and
+clear the cache.
 """
 import hashlib
 import warnings
 
 from collections import OrderedDict
-from types import FunctionType
+from types import FunctionType, ModuleType
 from typing import Any, Callable, NamedTuple
 
 from numba import njit, typeof
+from numba.core.caching import NullCache
 from numba.core.ccallback import CFunc
 from numba.core.dispatcher import Dispatcher
 from numba.core.errors import NumbaError
@@ -64,8 +79,10 @@ from numbox.core.variable.variable import (
     QUAL_SEP, CompiledGraph, CompiledNode, Graph, Variable, make_qual_name,
 )
 from numbox.utils.fingerprint import (
-    _Unfingerprintable, _canon_value, _fingerprint_function, _safe_repr,
+    _Unfingerprintable, _canon_value, _codegen_env_canon, _effective_flags, _fingerprint_function,
+    _flags_canon, _referenced_global_names, _safe_repr,
 )
+from numbox.utils.highlevel import _type_identity
 from numbox.utils.preprocessing import (
     _anchor_root, _materialize_anchor, _orphan_anchor_sweep,
 )
@@ -84,15 +101,6 @@ class _KernelCtx(NamedTuple):
     external: set
 
 
-def _effective_flags(jit_options: dict | None) -> dict:
-    """The non-`cache` jit flags for the kernel. Threaded into the inner formula
-    njit-wraps too, so a plain-Python formula computes identically whether reached
-    via discovery, a fused segment, or the fully fused kernel (non-default flags such
-    as `fastmath`/`error_model` otherwise diverge across the discovery boundary)."""
-    opts = {**_default_jit_options, **(jit_options or {})}
-    return {k: v for k, v in opts.items() if k != "cache"}
-
-
 def _formula_fingerprint(formula) -> tuple[str, bool]:
     """Behavioral identity of a formula for the cache digest.
 
@@ -101,7 +109,7 @@ def _formula_fingerprint(formula) -> tuple[str, bool]:
     names, default-argument values, closure-cell values, the values of
     referenced module-level globals (recursing into helper functions and
     dispatchers, with cycle protection), the defining module, and
-    dispatcher targetoptions. Builtins resolve outside ``__globals__``
+    dispatcher / DUFunc targetoptions. Builtins resolve outside ``__globals__``
     and are deliberately not hashed. Any value with no canonical form
     makes the formula un-fingerprintable: the returned text is then a
     per-object placeholder and ``cacheable`` is False, so the kernel is
@@ -120,11 +128,110 @@ def _formula_fingerprint(formula) -> tuple[str, bool]:
     if not isinstance(target, FunctionType):
         return f"{_safe_repr(formula)} @{id(formula)}", False
     try:
-        if isinstance(formula, Dispatcher):
-            extra += ";targetoptions=" + _canon_value(dict(formula.targetoptions or {}), set())
+        if isinstance(formula, (Dispatcher, DUFunc)):
+            extra += ";targetoptions=" + _canon_value(dict(getattr(formula, "targetoptions", {}) or {}), set())
         return _fingerprint_function(target, set()) + extra, not isinstance(formula, CFunc)
     except (_Unfingerprintable, RecursionError):
         return f"{_safe_repr(formula)} @{id(formula)}", False
+
+
+def _is_self_cached(formula) -> bool:
+    """True if ``formula`` carries its own numba on-disk cache -- a Dispatcher
+    built with ``cache=True`` (its ``_cache`` is a ``FunctionCache``, not a
+    ``NullCache``). That cache is keyed by numba's flag- and global-blind
+    ``_index_key``, so folding flags into the outer kernel name cannot keep it
+    fresh: a fresh outer compile links -- and would serialize -- the stale inner
+    binary. Such a unit must not be disk-cached. A ``cache=False`` Dispatcher
+    recompiles in-process and is safe; a DUFunc's cache is not independently
+    introspectable, but its flag identity is folded into the digest so the outer
+    re-keys."""
+    if isinstance(formula, Dispatcher):
+        cache = getattr(formula, "_cache", None)
+        return cache is not None and not isinstance(cache, NullCache)
+    return False
+
+
+def _pyfunc_of(formula):
+    """The plain Python function underlying a formula (or None): the dispatcher's
+    ``py_func``, a DUFunc/CFunc's ``__wrapped__``, or a bare function itself."""
+    func = getattr(formula, "py_func", None)
+    if func is None and isinstance(formula, (DUFunc, CFunc)):
+        func = getattr(formula, "__wrapped__", None)
+    if func is None and isinstance(formula, FunctionType):
+        func = formula
+    return func if isinstance(func, FunctionType) else None
+
+
+def _references_self_cached(value, seen: set[int]) -> bool:
+    """True if ``value`` IS, or transitively holds/references, a Dispatcher with
+    its own numba cache. A formula that reaches a ``@njit(cache=True)`` dispatcher
+    -- through a call, a default argument, a container, a closure cell, or a global
+    -- links that dispatcher's flag- and global-blind binary; the outer digest
+    re-keys on it yet cannot invalidate the callee's cache, so the unit must not be
+    disk-cached either (else a stale inner is serialized into a fresh-digest
+    artifact). This mirrors ``_canon_value``'s traversal so every channel the
+    digest folds is also covered here -- a narrower walk leaves a poisoning gap."""
+    if id(value) in seen:
+        return False
+    seen.add(id(value))
+    if _is_self_cached(value):
+        return True
+    if isinstance(value, (tuple, list, set, frozenset)):
+        return any(_references_self_cached(v, seen) for v in value)
+    if isinstance(value, dict):
+        return any(_references_self_cached(v, seen) for v in value.values())
+    func = _pyfunc_of(value)
+    if func is None:
+        return False
+    for cell in func.__closure__ or ():
+        try:
+            contents = cell.cell_contents
+        except ValueError:
+            continue
+        if _references_self_cached(contents, seen):
+            return True
+    for default in (func.__defaults__ or ()) + tuple((func.__kwdefaults__ or {}).values()):
+        if _references_self_cached(default, seen):
+            return True
+    referenced = _referenced_global_names(func.__code__)
+    for name in referenced:
+        if name not in func.__globals__:
+            continue
+        gval = func.__globals__[name]
+        if isinstance(gval, ModuleType):
+            # a dispatcher reached as a (possibly chained) module attribute --
+            # e.g. helpers.helper(x) -- is linked just like a direct global one.
+            if _module_reaches_self_cached(gval, referenced, seen, set()):
+                return True
+        elif _references_self_cached(gval, seen):
+            return True
+    return False
+
+
+def _module_reaches_self_cached(mod, ref_names, seen: set[int], mods_seen: set[int]) -> bool:
+    """True if any referenced name in ``mod``'s ``__dict__`` (recursing into
+    referenced submodules) reaches a cache-carrying Dispatcher. Scanning is by
+    ``__dict__`` membership (never ``getattr``) to avoid triggering an unrelated
+    module's PEP 562 ``__getattr__`` on a co-name collision; a dispatcher a module
+    exposes ONLY via PEP 562 ``__getattr__`` is a documented uncovered case."""
+    if id(mod) in mods_seen:
+        return False
+    mods_seen.add(id(mod))
+    mod_dict = getattr(mod, "__dict__", {})
+    for name in ref_names:
+        if name not in mod_dict:
+            continue
+        val = mod_dict[name]
+        if isinstance(val, ModuleType):
+            if _module_reaches_self_cached(val, ref_names, seen, mods_seen):
+                return True
+        elif _references_self_cached(val, seen):
+            return True
+    return False
+
+
+def _self_cached_name(formula) -> str:
+    return getattr(getattr(formula, "py_func", formula), "__qualname__", None) or _safe_repr(formula)
 
 
 # Build-time return-type validations are memoized by (formula fingerprint,
@@ -276,25 +383,54 @@ def _compile(
     for undeclared (Case C) units."""
     fingerprints = []
     cacheable = True
+    self_cached = []
     for fg, formula in bindings.items():
         fp, ok = _formula_fingerprint(formula)
         fingerprints.append(f"{fg}: {fp}")
         cacheable = cacheable and ok
+        if _references_self_cached(formula, set()):
+            cacheable = False
+            self_cached.append(_self_cached_name(formula))
+    if self_cached:
+        warnings.warn(
+            "compile_kernel: formula(s) " + ", ".join(sorted(set(self_cached)))
+            + " are, or reference, a @njit(cache=True) dispatcher whose cache key is "
+            "blind to jit flags and referenced global values; compiling this kernel "
+            "without an on-disk cache so a stale inner binary cannot be linked into a "
+            "cached artifact. Pass cache=False to those dispatchers (or supply "
+            "plain-Python formulas) to restore caching."
+        )
     opts = {**_default_jit_options, **(jit_options or {})}
     if cache is not None:
         opts["cache"] = cache
     opts.setdefault("cache", True)
     flags = _effective_flags(jit_options)
-    try:
-        flags_canon = _canon_value(flags, set())
-    except (_Unfingerprintable, RecursionError):
-        flags_canon = repr(sorted(flags.items(), key=repr))
+    flags_canon, ok_flags = _flags_canon(flags)
+    if not ok_flags:
+        cacheable = False
+        warnings.warn(
+            f"compile_kernel: jit flags {sorted(flags)} have no canonical "
+            "fingerprint; compiling this kernel without an on-disk cache."
+        )
+    # Each declared sig is a tuple of numba types; fold them through the
+    # process-stable identity rather than raw repr, whose Dispatcher form
+    # ``type(CPUDispatcher(<function f at 0x...>))`` carries an ASLR address and
+    # would orphan a cache pair per run. An un-fingerprintable
+    # declared type (a Dispatcher wrapping an @intrinsic-referencing body) has only
+    # a best-effort identity -> compile uncached.
+    declared_ids = [[_type_identity(t) for t in s] for s in declared_sigs]
+    declared_canon = [[h for h, _ok in sig] for sig in declared_ids]
+    if not all(ok for sig in declared_ids for _h, ok in sig):
         cacheable = False
     hash_text = (
         "ck-digest-v3\n" + source
         + "\n# formulas:\n" + "\n".join(fingerprints)
         + "\n# flags: " + flags_canon
-        + "\n# declared_sigs: " + repr([repr(s) for s in declared_sigs])
+        # Env codegen knobs (BOUNDSCHECK, LOOP/SLP vectorize, ...) override even an
+        # explicit jit flag at lowering and are in neither the jit flags nor numba's
+        # own cache key.
+        + "\n# codegen_env: " + _codegen_env_canon()
+        + "\n# declared_sigs: " + repr(declared_canon)
     )
     if not cacheable:
         opts["cache"] = False
@@ -795,15 +931,22 @@ def compile_kernel(
 
     Caching: the kernel digest fingerprints each formula's bytecode,
     constants, default values, closure-cell values, referenced module-level
-    globals (including helper functions, recursively), defining module, and
-    the effective jit flags. Because the generated source never mentions types,
+    globals (including helper functions, recursively) and referenced
+    module-attribute values, defining module, the effective jit flags, any
+    Dispatcher/DUFunc formula's targetoptions, and the process
+    ``NUMBA_BOUNDSCHECK``. Because the generated source never mentions types,
     a declared graph's signatures are appended to the digest too (the consumed
     external signature for an eager fused kernel, each segment's live-in/out
     signature for an eager segment), so two declared-type variants of one
     type-free graph get distinct cache anchors and never reuse each other's
     binary. A formula whose state cannot be fingerprinted (e.g.
-    cres/CompileResultWAP objects, values with no canonical form) downgrades
-    that one kernel to cache=False: always recompiled, never stale. When caching
+    cres/CompileResultWAP objects, values with no canonical form), or that
+    carries -- or reaches -- its own numba cache (a `@njit(cache=True)` Dispatcher,
+    whose key is flag- and global-blind and cannot be invalidated from outside),
+    downgrades that one kernel to cache=False: always recompiled, never stale. The
+    self-cached-dispatcher and un-canonicalizable-flag degrades emit a warning; an
+    inherently unfingerprintable formula kind (CFunc, cres) degrades silently as
+    documented. See the module docstring for the guarantee's scope. When caching
     is enabled, a content-addressed anchor `.py` file is written under numba's
     cache directory; with caching off (or the cache dir unwritable, which warns
     and degrades) nothing is written.
@@ -862,6 +1005,7 @@ def compile_kernel(
     case, dispositions, consumed = _classify(compiled)
     idents = _assign_identifiers([n.variable for n in compiled.ordered_nodes])
     flags = _effective_flags(jit_options)
+    flags_key, _ = _flags_canon(flags)
     if case in ("A", "B"):
         for node in compiled.ordered_nodes:
             var = node.variable
@@ -869,7 +1013,7 @@ def compile_kernel(
                 continue
             in_types = tuple(i.params.type for i in node.inputs)
             fp, fingerprintable = _formula_fingerprint(var.formula)
-            key = (fp, in_types, var.params.type)
+            key = (fp, in_types, var.params.type, flags_key)
             if fingerprintable and key in _validated_returns:
                 continue
             _validate_declared_return(var.formula, in_types, var.params.type, flags)

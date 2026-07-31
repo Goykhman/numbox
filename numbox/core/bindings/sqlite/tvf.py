@@ -453,7 +453,14 @@ def register_tvf(db, name, arg_types, out_dtype, fn):
 
     xfilter_impl = _compile_xfilter(_stem(name), arg_tags, out_dtype, _prepare_fn(fn))
 
-    @cfunc(types.int32(types.intp, types.int32, types.intp, types.int32, types.intp), cache=_CACHE)
+    # cache=False, unlike every other cfunc here: this one closes over
+    # xfilter_impl, a dispatcher minted per registration, so its cache key never
+    # repeats. With cache=True it writes an index entry per registration per
+    # process and reads none of them back -- measured 1/2/3 overloads over three
+    # identical processes, and 4 over four registrations in one process, while
+    # the sibling cfuncs held at 1. The content-addressed xfilter_impl anchor
+    # (_compile_xfilter) is what actually caches this path.
+    @cfunc(types.int32(types.intp, types.int32, types.intp, types.int32, types.intp), cache=False)
     def _tvf_xfilter(cur, idx_num, idx_str, argc, argv):
         # A bare try/except (not try/finally, which reraises on numba 0.65.1)
         # converts a user-fn exception into SQLITE_ERROR via xFilter's own return

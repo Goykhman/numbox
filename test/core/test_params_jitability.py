@@ -451,7 +451,7 @@ def test_declared_exotic_node_wrong_declaration_raises_at_build():
 
 
 def test_declared_segmented_throughput_off_contract_reraises():
-    # H4: a declared segmented kernel must RE-RAISE on a later kernel() call whose
+    # A declared segmented kernel must RE-RAISE on a later kernel() call whose
     # off-contract input breaks a jit segment -- it must not silently re-discover
     # and overwrite the frozen _demoted set.
     ck = compile_kernel(_declared_mix(), "c.d")

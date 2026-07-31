@@ -216,7 +216,13 @@ def _compile_callbacks(stem, srcs, state_type, fns):
 
     ``fns`` maps generated global names (``_init``, ``_step``, ...) to user
     callables. Returns the exec namespace (contains ``_xstep_impl`` etc.)."""
-    udaf_digest = digest(state_type, list(fns.values()))
+    # repr(state_type) is only the class qualname + field list, so same-qualname
+    # StructRef classes in different modules would collide; fold the defining
+    # module + qualname into the digest subject. (An @overload_method attached to
+    # the type outside this registration is still not captured here -- for
+    # make_structref-built types its body is folded via the method hash.)
+    state_id = "%s.%s;%r" % (type(state_type).__module__, type(state_type).__qualname__, state_type)
+    udaf_digest = digest(state_id, list(fns.values()))
     code_txt = "# udaf-digest: %s\n%s" % (udaf_digest, "".join(srcs))
     # globals() is this module's __dict__; it carries __name__, which numba's
     # warm-cache Environment rebuild requires when reloading the cached impls.

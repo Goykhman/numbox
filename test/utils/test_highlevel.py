@@ -1,4 +1,5 @@
 import os
+import re
 import time
 from typing import Callable
 
@@ -13,9 +14,13 @@ from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
 from numbox.core.bindings.utils import load_lib_path
 from numbox.utils.highlevel import (
+    _method_identity,
+    _signature_identity,
+    _type_identity,
     cres,
     cres_if_available,
     determine_field_index,
+    hash_type,
     make_structref,
     make_structref_code_txt,
 )
@@ -89,6 +94,8 @@ def test_make_structref_2():
     assert aux_test_make_structref(s2_1) == 45
 
 
+_method_digest_re = re.compile(r"(?<=_)[0-9a-f]{64}\b")
+
 ref_s3_code_txt = """
 class S3(StructRefProxy):
     def __new__(cls, x, y):
@@ -108,17 +115,17 @@ class S3(StructRefProxy):
         return self.y
 
     def calculate_1(self, z, w=1):
-        return self.calculate_1_ce22f04cc18ac7c1059871d9675272b0766d329e8c416d9ec4ddf77b181ebcbc(z, w)
+        return self.calculate_1_<digest>(z, w)
 
     @njit(**jit_options)
-    def calculate_1_ce22f04cc18ac7c1059871d9675272b0766d329e8c416d9ec4ddf77b181ebcbc(self, z, w=1):
+    def calculate_1_<digest>(self, z, w=1):
         return self.calculate_1(z, w)
 
     def calculate_2(self):
-        return self.calculate_2_fab97c51f1b4a572251c56be8e4326cd39d00f328b4f85e3174b2b3d3fcff3f0()
+        return self.calculate_2_<digest>()
 
     @njit(**jit_options)
-    def calculate_2_fab97c51f1b4a572251c56be8e4326cd39d00f328b4f85e3174b2b3d3fcff3f0(self):
+    def calculate_2_<digest>(self):
         return self.calculate_2()
 
 define_boxing(S3TypeClass, S3)
@@ -169,7 +176,18 @@ def test_make_structref_3():
     def calculate_impl(self):
         return self.y * 3 + aux()
     m1 = {"calculate_1": calculate_1, "calculate_2": calculate_impl}
-    assert make_structref_code_txt("S3", ("x", "y"), S3TypeClass, struct_methods=m1)[0] == ref_s3_code_txt
+    code_txt = make_structref_code_txt("S3", ("x", "y"), S3TypeClass, struct_methods=m1)[0]
+    # The method-name suffix is a fingerprint that folds code.co_code, so it moves
+    # with every CPython bytecode change and can only ever match one interpreter.
+    # Pin what is portable -- the generated structure, that each call site names
+    # the method it defines, and that distinct methods get distinct suffixes --
+    # and normalise the suffix itself out of the comparison.
+    digests = _method_digest_re.findall(code_txt)
+    assert len(digests) == 4, digests
+    assert digests[0] == digests[1], digests
+    assert digests[2] == digests[3], digests
+    assert digests[0] != digests[2], digests
+    assert _method_digest_re.sub("<digest>", code_txt) == ref_s3_code_txt
     make_s3 = make_structref("S3", ("x", "y"), S3TypeClass, struct_methods=m1, ns={"aux": aux})
     s1 = make_s3(2.17, 3.14)
 
@@ -390,6 +408,144 @@ def test_materialize_anchor_writes_utf8_bytes(tmp_path):
     anchor = tmp_path / "anchor.py"
     _materialize_anchor(anchor, content)
     assert anchor.read_bytes() == content.encode("utf-8")
+
+
+def test_type_identity_plain_type_is_cacheable():
+    h, ok = _type_identity(float64)
+    assert ok is True
+    assert isinstance(h, str) and len(h) == 64
+    assert hash_type(float64) == h        # hash_type delegates to _type_identity
+
+
+def test_type_identity_dispatcher_is_uncacheable_and_content_sensitive():
+    """Both bodies are un-cacheable for the one reason that they are Dispatchers.
+
+    They differ only in which fingerprint branch supplies the hash: ``intrinsic_ref``
+    reaches an ``@intrinsic``, which has no canonical form, so the strict walker raises
+    and the best-effort one runs. That branch must still discriminate two bodies -- a
+    changed body has to re-key the in-process name.
+    """
+    @njit
+    def plain(x):
+        return x + 1.0
+
+    @njit
+    def intrinsic_ref(x):
+        return _call_lib_func("cos", (x,))
+
+    h_plain, ok_plain = _type_identity(typeof(plain))
+    h_intr, ok_intr = _type_identity(typeof(intrinsic_ref))
+    assert ok_plain is False and ok_intr is False   # Dispatcher-ness alone decides this
+    assert len(h_plain) == 64 and len(h_intr) == 64
+    assert h_plain != h_intr                   # distinct bodies -> distinct hashes
+
+
+def test_type_identity_cres_is_cacheable():
+    """A compiled function is not itself the problem -- a ``cres`` renders as
+    ``FunctionType[<sig>]``, which carries neither an address nor a creation-order id
+    and which numba can cross-process-cache. Only the Dispatcher spelling is dropped."""
+    @cres(float64(float64))
+    def compiled(x):
+        return x + 1.0
+
+    ty = typeof(compiled)
+    assert str(ty).startswith("FunctionType[")
+    h, ok = _type_identity(ty)
+    assert ok is True and len(h) == 64
+
+
+def test_type_identity_nested_dispatcher_is_uncacheable():
+    """A Dispatcher nested in a heterogeneous container escapes the top-level
+    ``isinstance`` check but must still be un-cacheable -- numba cannot
+    cross-process-cache a Dispatcher-carrying signature at any depth."""
+    @njit
+    def helper(x):
+        return x + 1.0
+
+    het = typeof((1.0, helper))                # Tuple(float64, Dispatcher)
+    assert "CPUDispatcher(" in str(het)        # the substring the guard keys on
+    _h, ok = _type_identity(het)
+    assert ok is False
+
+
+def test_type_identity_record_is_hashed_structurally_not_mangled():
+    """A Record must take the structural branch, not numba's mangle.
+
+    The mangle folds a creation-order ``_code``, so it differs between a cold process
+    and a warm one; hashing ``str(ty)`` instead is what makes a Record-typed node
+    process-stable. Asserting the hash simply *differs* from the mangled one pins that
+    the branch was taken -- deleting it makes this fail -- while the layout check pins
+    that going structural did not erase the field layout.
+    """
+    import hashlib
+    import numpy as np
+    from numba import from_dtype
+    from numba.core.itanium_mangler import mangle_type_or_value
+
+    rec = from_dtype(np.dtype([("a", np.float64), ("b", np.int64)]))
+    swapped = from_dtype(np.dtype([("a", np.int64), ("b", np.float64)]))
+    h, ok = _type_identity(rec)
+    assert ok is True and len(h) == 64
+    assert h != hashlib.sha256(mangle_type_or_value(rec).encode("utf-8")).hexdigest()
+    assert _type_identity(swapped)[0] != h     # field layout still discriminates
+
+
+def test_signature_identity_folds_component_cacheability():
+    @njit
+    def helper(x):
+        return x + 1.0
+
+    @cres(float64(float64))
+    def compiled(x):
+        return x + 1.0
+
+    text_plain, ok_plain = _signature_identity(float64(float64, float64))
+    assert ok_plain is True and isinstance(text_plain, str)
+
+    # A function-typed component is not automatically fatal: a cres stays cacheable.
+    text_cres, ok_cres = _signature_identity(float64(float64, typeof(compiled)))
+    assert ok_cres is True and isinstance(text_cres, str)
+
+    text_disp, ok_disp = _signature_identity(float64(float64, typeof(helper)))
+    assert ok_disp is False                    # a Dispatcher component makes the sig un-cacheable
+    assert isinstance(text_disp, str)
+
+
+def test_method_identity_folds_ns_values_read_as_globals_only():
+    """An `ns` value is folded when the method reads it as a global, and not
+    when the method merely names it as an attribute.
+
+    Deciding this off `co_names` cannot tell `LOAD_GLOBAL knob` from
+    `LOAD_ATTR knob`, so a method doing `self.knob` against an `ns` carrying an
+    unrelated `knob` folded a value it never reads -- and, when that value has no
+    canonical form, dropped the struct's on-disk cache for nothing.
+    """
+    class Opaque:
+        pass
+
+    def reads_attribute(self):
+        return self.knob
+
+    def reads_global(self):
+        return knob                            # noqa: F821 - resolved from the exec'd ns
+
+    ident_attr, cacheable_attr = _method_identity(reads_attribute, {"knob": Opaque()})
+    assert cacheable_attr is True, (
+        "an attribute name colliding with an ns key dropped the cache; only a "
+        "global read can reach an ns value"
+    )
+    assert "ns:knob" not in ident_attr
+
+    ident_global, cacheable_global = _method_identity(reads_global, {"knob": Opaque()})
+    assert cacheable_global is False           # genuinely read, and opaque -> uncacheable
+    assert "ns:knob" in ident_global
+
+    # A genuinely-read global that *does* canonicalize stays cacheable, and its value
+    # (not merely its name) is folded, so changing it re-keys the struct.
+    ident_five, cacheable_five = _method_identity(reads_global, {"knob": 5})
+    assert cacheable_five is True
+    assert "ns:knob" in ident_five
+    assert _method_identity(reads_global, {"knob": 6})[0] != ident_five
 
 
 if __name__ == '__main__':

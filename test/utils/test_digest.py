@@ -1,5 +1,7 @@
 import functools
 
+from numba import njit, vectorize
+
 from numbox.utils.digest import digest
 from test.auxiliary_utils import collect_and_run_tests
 
@@ -61,6 +63,68 @@ def test_digest_codeless_callable_captures_state():
 def test_digest_empty_inputs_deterministic():
     assert digest("", ()) == digest("", ())
     assert len(digest("", ())) == 16
+
+
+def test_digest_unfingerprintable_function_captures_closure():
+    # When the strict walker aborts on an un-canonicalizable referenced value, the
+    # fallback must still capture closure state: two functions with identical
+    # source but different closure values yield different digests. The old
+    # fallback cloudpickled the bare __code__, dropping exactly that state.
+    class Opaque:  # not a canonicalizable type -> forces the strict walker to abort
+        pass
+    marker = Opaque()
+
+    def make(k):
+        def cb(x):
+            return (marker, k, x)  # references the opaque global; k lives in the closure
+        return cb
+
+    assert digest("StateType", (make(1),)) != digest("StateType", (make(2),))
+
+
+def test_digest_folds_dispatcher_jit_flags():
+    # A Dispatcher's py_func is only half its identity: numba compiles a
+    # different library per jit-flag set, so two dispatchers over one body must
+    # key distinctly. The py_func shortcut saw only the Python body and collided
+    # all of these onto a single digest.
+    def cb(x):
+        return x + 1
+
+    variants = [
+        njit(cb),
+        njit(nogil=True)(cb),
+        njit(fastmath=True)(cb),
+        njit(error_model="numpy")(cb),
+        njit(boundscheck=True)(cb),
+    ]
+    digests = [digest("StateType", (v,)) for v in variants]
+    assert len(set(digests)) == len(digests)
+
+
+def test_digest_of_dispatcher_is_deterministic_and_body_sensitive():
+    def cb(x):
+        return x + 1
+
+    def other(x):
+        return x + 2
+
+    assert digest("StateType", (njit(cb),)) == digest("StateType", (njit(cb),))
+    assert digest("StateType", (njit(cb),)) != digest("StateType", (njit(other),))
+
+
+def test_digest_folds_dufunc_jit_flags():
+    # @vectorize freezes its scalar body at compile time, so its targetoptions
+    # belong in the key too. Note this holds on the cloudpickle path as well, so
+    # unlike the Dispatcher case above it does not by itself pin the _canon_value
+    # routing -- what routing buys DUFuncs is escaping cloudpickle's documented
+    # nondeterminism for __main__ objects.
+    def cb(x):
+        return x + 1
+
+    plain = digest("StateType", (vectorize(cb),))
+    checked = digest("StateType", (vectorize(boundscheck=True)(cb),))
+    assert plain != checked
+    assert plain == digest("StateType", (vectorize(cb),))
 
 
 if __name__ == '__main__':

@@ -1,5 +1,6 @@
 import importlib
 import math
+import os
 import re
 import subprocess
 import sys
@@ -272,6 +273,181 @@ def test_proxy_if_available_missing_symbol_njit_raises_clear_error():
     assert "C symbol missing" in message
 
 
+def test_proxy_factory_closures_dispatch_to_their_own_body():
+    """Same-qualname @proxy closures over different values must not collide.
+
+    A factory ``mk(c)`` produces two ``@proxy`` closures with an identical
+    module+qualname+signature but different closure value ``c``. Before the
+    alias folded a body fingerprint, both mapped to the same alias and
+    llvmlite's last-writer-wins ``add_symbol`` silently rebound BOTH jitted
+    callers to the second body (the review reproduced call_p1(10)=30 instead of
+    20). The folded fingerprint captures the closure cell, so each body gets its
+    own alias and each caller reaches its own body.
+    """
+    def mk(c):
+        @proxy(float64(float64))
+        def tmpl(x):
+            return c * x
+        return tmpl
+
+    p1 = mk(2.0)
+    p2 = mk(3.0)
+
+    @njit
+    def call_p1(x):
+        return p1(x)
+
+    @njit
+    def call_p2(x):
+        return p2(x)
+
+    assert p1(10.0) == 20.0 and p2(10.0) == 30.0
+    assert call_p1(10.0) == 20.0, "jitted caller of p1 reached the wrong body (alias collision)"
+    assert call_p2(10.0) == 30.0, "jitted caller of p2 reached the wrong body (alias collision)"
+
+
+def test_proxy_factory_over_c_symbols_dispatch_distinctly():
+    """Factory-made proxies over per-instance C symbol names must not collide.
+
+    The common numbox binding body references the ``@intrinsic``
+    ``_call_lib_func``, which the strict fingerprint cannot canonicalize; the
+    best-effort fallback still captures the per-instance closure (the C symbol
+    name), so two same-qualname bindings over different symbols reach their own
+    body. Before that fallback the alias collapsed to bytecode alone (identical
+    for both) and a caller of ``cos`` returned ``sin``'s result.
+    """
+    import numbox.core.bindings.libm  # noqa: F401 - loads libm so cos/sin resolve
+
+    def mk(fname):
+        @proxy(float64(float64))
+        def libfn(x):
+            return _call_lib_func(fname, (x,))
+        return libfn
+
+    p_cos = mk("cos")
+    p_sin = mk("sin")
+
+    @njit(float64(float64))
+    def call_cos(x):
+        return p_cos(x)
+
+    @njit(float64(float64))
+    def call_sin(x):
+        return p_sin(x)
+
+    assert abs(call_cos(1.0) - math.cos(1.0)) < 1e-12, "jitted caller of cos reached the wrong body"
+    assert abs(call_sin(1.0) - math.sin(1.0)) < 1e-12, "jitted caller of sin reached the wrong body"
+
+
+def test_proxy_redefinition_keeps_callers_on_their_own_body():
+    """Re-decorating a same module+qualname+sig function with a different body
+    must not rebind a stale dispatcher's later-compiled caller to the new body.
+
+    Reproduces the in-process redefinition hazard: with the pre-fix alias a
+    caller compiled after the redefinition but calling the FIRST dispatcher got
+    the SECOND body (the review reproduced caller_after(1.0)=101.0). The folded
+    body fingerprint gives the two bodies distinct aliases.
+    """
+    @proxy(float64(float64))
+    def g(x):
+        return x + 1.0
+
+    old_g = g
+
+    @proxy(float64(float64))
+    def g(x):  # noqa: F811 - deliberate same-name redefinition
+        return x + 100.0
+
+    @njit
+    def caller_after(x):
+        return old_g(x)
+
+    assert old_g(1.0) == 2.0
+    assert g(1.0) == 101.0
+    assert caller_after(1.0) == 2.0, "stale dispatcher's caller reached the redefined body"
+
+
+def test_proxy_absent_binding_caller_gets_loud_diagnostic_not_segfault(tmp_path):
+    """A cache=True caller of a proxy_if_available binding that is present when
+    the cache is written but absent on reload must fail loudly -- not segfault,
+    and not hand back a value.
+
+    numba's caller cache key is callee-blind, so a warm-cached caller cache-hits
+    even in a process where ``proxy_if_available`` took the absent (stub) path
+    and registered no real body. Before the trap the unresolved extern linked to
+    null and the call was a bare SIGSEGV (exit 139, zero diagnostics). The trap
+    keeps the alias resolvable, but reaching it is not enough on its own: the
+    ``RuntimeError`` it raises is raised inside a ``@cfunc``, where numba swallows
+    it and returns zero, so the caller went on to print a wrong answer and exit 0.
+    The cache guard now discards an entry whose alias resolves only to a trap, so
+    the recompile reaches the stub's typing error instead -- the same outcome a
+    cold cache gives.
+    """
+    pkg = tmp_path / "flip_pkg"
+    pkg.mkdir()
+    (pkg / "binding_flip.py").write_text(textwrap.dedent('''
+        import os
+        from numba.core.types import float64
+        from numbox.core.proxy.proxy import proxy_if_available
+
+        class FakeLib:
+            pass
+
+        lib = FakeLib()
+        if os.environ.get("HAVE_SYM") == "1":
+            lib.myfn = True
+
+        @proxy_if_available(lib, float64(float64), jit_options={"cache": True})
+        def myfn(x):
+            return x * 2.0
+    '''), encoding="utf-8")
+    (pkg / "caller_flip.py").write_text(textwrap.dedent('''
+        from numba import njit
+        from numba.core.types import float64
+        from binding_flip import myfn
+
+        @njit(float64(float64), cache=True)
+        def caller(x):
+            return myfn(x) + 1.0
+    '''), encoding="utf-8")
+    (pkg / "run_flip.py").write_text(textwrap.dedent('''
+        from caller_flip import caller
+        print("RESULT", caller(2.5), flush=True)
+    '''), encoding="utf-8")
+
+    cache_dir = tmp_path / "nbcache"
+    env = dict(os.environ)
+    env["NUMBA_CACHE_DIR"] = str(cache_dir)
+    env["PYTHONPATH"] = os.pathsep.join([str(pkg), *sys.path])
+
+    # Process 1: symbol available -> alias registered, caller cache written warm.
+    env["HAVE_SYM"] = "1"
+    r1 = subprocess.run(
+        [sys.executable, str(pkg / "run_flip.py")],
+        capture_output=True, text=True, encoding="utf-8", env=env,
+    )
+    assert r1.returncode == 0, f"warm-up failed:\n{r1.stderr}"
+    assert r1.stdout.strip() == "RESULT 6.0", r1.stdout
+
+    # Process 2: symbol absent -> stub path, alias never registered. The warm
+    # caller cache-hits and references the unregistered alias.
+    env["HAVE_SYM"] = "0"
+    r2 = subprocess.run(
+        [sys.executable, str(pkg / "run_flip.py")],
+        capture_output=True, text=True, encoding="utf-8", env=env,
+    )
+    assert r2.returncode not in (-11, 139), (
+        f"segfault instead of a loud diagnostic (returncode={r2.returncode})\n{r2.stderr}"
+    )
+    assert "RESULT" not in r2.stdout, (
+        f"the absent binding was called and produced a value: {r2.stdout!r}"
+    )
+    assert "TypingError" in r2.stderr and "myfn" in r2.stderr, (
+        f"expected a typing error naming the binding on stderr, got:\n{r2.stderr}"
+    )
+    assert "not available in the loaded library" in r2.stderr, r2.stderr
+
+
 def test_proxy_function_above_anchor_line_raises_clear_error(tmp_path):
     # The cache anchor prepends blank lines so the generated @njit lands at the
     # function's co_firstlineno; a function defined above that line can't be
@@ -296,3 +472,37 @@ def test_proxy_function_above_anchor_line_raises_clear_error(tmp_path):
 
 if __name__ == "__main__":
     collect_and_run_tests(__name__)
+
+
+def test_proxy_jit_flags_dispatch_to_their_own_body():
+    """Two decorations of one body differing only in jit flags must not collide.
+
+    The flags govern the machine code ``njit(sig, **jit_options)`` emits, but
+    they appear in neither the module+qualname+signature identity nor the body
+    fingerprint -- the body source is byte-identical here. Both decorations
+    therefore mapped to a single alias and llvmlite's last-writer-wins
+    ``add_symbol`` rebound every caller to whichever compiled last: a jitted
+    caller of the ``numpy`` error-model binding ran the ``python`` one, so
+    ``1.0 / 0.0`` returned 0.0 instead of inf, exit 0, with the
+    ``ZeroDivisionError`` swallowed at the cfunc boundary.
+    """
+    def mk(error_model):
+        @proxy(float64(float64), jit_options={"error_model": error_model})
+        def recip(x):
+            return 1.0 / x
+        return recip
+
+    p_np = mk("numpy")
+    p_py = mk("python")
+
+    assert p_np._numbox_proxy_alias != p_py._numbox_proxy_alias, (
+        "jit flags absent from the alias -- the two bodies collide"
+    )
+
+    @njit
+    def call_np(x):
+        return p_np(x)
+
+    assert math.isinf(call_np(0.0)), (
+        "jitted caller of the numpy error-model binding reached the python one"
+    )

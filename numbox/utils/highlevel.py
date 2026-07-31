@@ -15,12 +15,54 @@ from textwrap import dedent, indent
 from typing import Callable, Iterable, Optional
 
 from numbox.core.configurations import jit_options as jit_options_
+from numbox.utils.fingerprint import (
+    _Unfingerprintable, _canon_value, _fingerprint_function,
+    _fingerprint_function_best_effort, _loaded_global_names,
+)
 from numbox.utils.preprocessing import _materialize_anchor, _structref_anchor_path
 from numbox.utils.standard import make_params_strings
 
 
 def _file_anchor():
     raise NotImplementedError
+
+
+def _method_identity(method, user_ns) -> tuple[str, bool]:
+    """Return ``(identity_text, cacheable)`` for a structref method.
+
+    A ``make_structref`` method's source is inlined into a generated overload
+    exec'd against the merged namespace, so the values passed through the ``ns``
+    argument reach the compiled body but are invisible to ``getsource``. This
+    folds the method's deep fingerprint together with the values of the ``ns``
+    entries it references, so two methods with identical source but different
+    ``ns`` values get distinct hashes (which flow into the content-addressed
+    anchor file name, forcing numba to recompile rather than serve a stale
+    binary). Un-fingerprintable method, or an un-canonicalizable ``ns`` value,
+    makes it uncacheable -- the struct is then compiled without an on-disk
+    cache, never reused, never wrong.
+
+    Which ``ns`` entries the method references is read off the instruction
+    stream, not ``co_names``: the values arrive as globals of the exec'd
+    namespace, so only a global read can reach one, while ``co_names`` would also
+    offer up every attribute name. A method doing ``self.x`` against an ``ns``
+    that happens to carry an ``x`` would otherwise fold a value it never reads --
+    and drop the struct's cache entirely if that value were opaque.
+    """
+    try:
+        fingerprint = _fingerprint_function(method, set())
+        cacheable = True
+    except (_Unfingerprintable, RecursionError):
+        fingerprint = _fingerprint_function_best_effort(method)
+        cacheable = False
+    parts = [fingerprint]
+    if user_ns:
+        for name in sorted(n for n in _loaded_global_names(method.__code__) if n in user_ns):
+            try:
+                parts.append(f"ns:{name}={_canon_value(user_ns[name], set())}")
+            except (_Unfingerprintable, RecursionError):
+                parts.append(f"ns:{name}=<opaque:{type(user_ns[name]).__name__}>")
+                cacheable = False
+    return ";".join(parts), cacheable
 
 
 def cres(sig, **kwargs):
@@ -65,17 +107,54 @@ def determine_field_index(struct_ty, field_name):
     raise ValueError(f"{field_name} not in {struct_ty}")
 
 
-def hash_type(ty: Type):
-    mangled_ty = mangle_type_or_value(ty)
-    return hashlib.sha256(mangled_ty.encode("utf-8")).hexdigest()
+def _type_identity(ty: Type) -> tuple[str, bool]:
+    """Return ``(hash, cacheable)`` for a numba type, for folding into a
+    content-addressed name."""
+    cacheable = True
+    ty_str = str(ty)
+    if isinstance(ty, Dispatcher):
+        # numba's own on-disk index misses a Dispatcher-carrying signature every run
+        # and appends a fresh data entry, so the unit's .nbc grows per process forever.
+        cacheable = False
+        try:
+            body = "dispatcher(" + _fingerprint_function(ty.dispatcher.py_func, set()) + ")"
+        except (_Unfingerprintable, RecursionError):
+            body = "dispatcher-besteffort(" + _fingerprint_function_best_effort(ty.dispatcher.py_func) + ")"
+    elif "Record(" in ty_str:
+        # A Record mangles by a creation-order counter (_code), so it hashes differently
+        # in a cold process than a warm one. Its str is structural, so hash that instead.
+        body = "structural(" + ty_str + ")"
+    else:
+        body = mangle_type_or_value(ty)
+    if cacheable and "CPUDispatcher(" in ty_str:
+        # A Dispatcher nested in a container
+        cacheable = False
+    return hashlib.sha256(body.encode("utf-8")).hexdigest(), cacheable
+
+
+def hash_type(ty: Type) -> str:
+    """Process-stable content hash of a numba type; see :func:`_type_identity`."""
+    return _type_identity(ty)[0]
+
+
+def _signature_identity(sig: Signature) -> tuple[str, bool]:
+    """Return ``(canonical_text, cacheable)`` for a numba ``Signature``, folding every
+    argument and return type through :func:`_type_identity`."""
+    ret_hash, ret_ok = _type_identity(sig.return_type)
+    arg_ids = [_type_identity(a) for a in sig.args]
+    text = ret_hash + "(" + ",".join(h for h, _ok in arg_ids) + ")"
+    cacheable = ret_ok and all(ok for _h, ok in arg_ids)
+    return text, cacheable
 
 
 def make_structref_code_txt(
     struct_name: str,
     struct_fields: Iterable[str] | dict[str, Type],
     struct_type_class: type | Type,
-    struct_methods: Optional[dict[str, Callable]] = None
+    struct_methods: Optional[dict[str, Callable]] = None,
+    user_ns: Optional[dict] = None,
 ):
+    cacheable = True
     if isinstance(struct_fields, dict):
         struct_fields, fields_types = list(struct_fields.keys()), list(struct_fields.values())
     else:
@@ -111,7 +190,9 @@ class {struct_name}(StructRefProxy):
             self_name = names_params_lst[0]
             names_params_str_wo_self = ", ".join(names_params_lst[1:])
             method_source = dedent(getsource(method))
-            method_hash = hashlib.sha256(method_source.encode("utf-8")).hexdigest()
+            method_identity, method_cacheable = _method_identity(method, user_ns)
+            method_hash = hashlib.sha256(method_identity.encode("utf-8")).hexdigest()
+            cacheable = cacheable and method_cacheable
             code_txt.write(f"""
     def {method_name}({params_str}):
         return {self_name}.{method_name}_{method_hash}({names_params_str_wo_self})
@@ -168,7 +249,7 @@ def {make_name}({struct_fields_str}):
     return {struct_name}({struct_fields_str})
 """)
     code_txt = code_txt.getvalue() + methods_code_txt.getvalue()
-    return code_txt, fields_types
+    return code_txt, fields_types, cacheable
 
 
 def make_structref(
@@ -206,11 +287,16 @@ def make_structref(
     -- is used as the ``compile()`` anchor. See the "Cache-anchor
     mechanism" section in ``docs/numbox.utils.rst`` for the rationale.
     """
-    code_txt, fields_types = make_structref_code_txt(
-        struct_name, struct_fields, struct_type_class, struct_methods
+    code_txt, fields_types, cacheable = make_structref_code_txt(
+        struct_name, struct_fields, struct_type_class, struct_methods, user_ns=ns
     )
     if jit_options is None:
         jit_options = jit_options_
+    if not cacheable:
+        # A method (or an ns value it captures) has no canonical fingerprint, so
+        # its content-addressed identity cannot be trusted to change when the
+        # behaviour does; compile the struct without an on-disk cache.
+        jit_options = {**jit_options, "cache": False}
     ns = ns or {}
     ns = {
         **ns,

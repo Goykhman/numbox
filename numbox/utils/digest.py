@@ -21,7 +21,12 @@ from numba.core.serialize import cloudpickle
 
 import numbox
 from numbox.core.configurations import jit_options
-from numbox.utils.fingerprint import _Unfingerprintable, _fingerprint_function
+from numba.core.dispatcher import Dispatcher
+from numba.np.ufunc.dufunc import DUFunc
+
+from numbox.utils.fingerprint import (
+    _Unfingerprintable, _canon_value, _fingerprint_function, _fingerprint_function_best_effort,
+)
 
 
 def digest(subject, fns):
@@ -40,14 +45,35 @@ def digest(subject, fns):
     # (e.g. cache off) re-keys the digest; numba's own cache also keys on flags.
     h.update(repr(sorted(jit_options.items())).encode("utf-8"))
     for fn in fns:
+        if isinstance(fn, (Dispatcher, DUFunc)):
+            # Route jitted callables through the shared value canonicalizer,
+            # which folds targetoptions (and honours a @proxy's content-addressed
+            # alias). The py_func shortcut below sees only the Python body, so
+            # dispatchers over one body compiled with different jit flags --
+            # nogil, fastmath, error_model, boundscheck -- all collided.
+            try:
+                h.update(_canon_value(fn, set()).encode("utf-8"))
+                continue
+            except (_Unfingerprintable, RecursionError):
+                # Body not canonicalizable; fold the flags on their own so they
+                # still re-key, then fall through to the best-effort walker.
+                h.update(repr(sorted((getattr(fn, "targetoptions", None) or {}).items())).encode("utf-8"))
         py = getattr(fn, "py_func", fn)
         if isinstance(py, FunctionType):
             try:
                 h.update(_fingerprint_function(py, set()).encode("utf-8"))
-                continue
             except (_Unfingerprintable, RecursionError):
-                pass  # un-canonicalizable closure/global -> fall back below
-        # codeless callable (partial/builtin/callable object) or un-fingerprintable
-        # function: cloudpickle the object (captures bound state) or its code object.
-        h.update(cloudpickle.dumps(getattr(py, "__code__", py)))
+                # An un-canonicalizable closure/global aborts the strict walker;
+                # the best-effort walker still captures the constants, closure
+                # cells, defaults and globals it can (substituting opaque
+                # placeholders for the rest, and sorting sets so it is
+                # PYTHONHASHSEED-stable). A bare __code__ cloudpickle here dropped
+                # exactly the closure/default state that forced the fallback and
+                # leaked str-set iteration order.
+                h.update(_fingerprint_function_best_effort(py).encode("utf-8"))
+            continue
+        # Codeless callable (partial / builtin / callable object): cloudpickle the
+        # object to capture bound state. (Only these remain on the cloudpickle
+        # path, so its uuid4 nondeterminism for __main__ objects is confined here.)
+        h.update(cloudpickle.dumps(py))
     return h.hexdigest()[:16]

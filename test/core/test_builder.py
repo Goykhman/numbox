@@ -499,6 +499,97 @@ def test_make_graph_cache_key_content_independent(tmp_path):
         "contents (cache key depends on init values, not just types)")
 
 
+_ATTR_COLLIDE_DRIVER = textwrap.dedent('''
+    import numpy as np
+    from numbox.core.work.builder import End, Derived, make_graph
+
+    # A module global whose name collides with the array attribute the derive reads (``a_.size``),
+    # and which has no canonical fingerprint. Folding globals off co_names would fold -- and choke on --
+    # this, forcing the address-bearing derive fallback and a fresh kernel every process.
+    size = np.array([object()], dtype=object)
+
+
+    def derive_s(a_):
+        return a_.size * 1.0
+
+
+    a = End(name="a", init_value=np.zeros(4, dtype=np.float64))
+    s = Derived(name="s", init_value=0.0, sources=(a,), derive=derive_s)
+    acc = make_graph(s)
+    acc.s.calculate()
+    print("RESULT", acc.s.data)
+''')
+
+
+def test_attribute_named_global_does_not_grow_the_cache(tmp_path):
+    """A derive whose attribute access (``a_.size``) shares a name with an un-fingerprintable module global
+    must still fingerprint stably, so its graph kernel caches once and hits thereafter -- not a fresh
+    ``_make_<hash>`` per process. Uses a plain float64 array (no record dtype) to isolate the ``co_names``
+    vs ``LOAD_ATTR`` distinction from any type-mangling concern; running three fresh processes against one
+    cache dir must add zero kernels after the first."""
+    cache = tmp_path / "nbcache"
+    cache.mkdir()
+    script = tmp_path / "attr_collide_drv.py"
+    script.write_text(_ATTR_COLLIDE_DRIVER)
+    counts = []
+    for _ in range(3):
+        out = subprocess.run([sys.executable, str(script)],
+                             env=dict(os.environ, NUMBA_CACHE_DIR=str(cache)),
+                             capture_output=True, text=True, timeout=600)
+        assert out.returncode == 0, out.stderr
+        counts.append(sum(1 for _ in cache.rglob("builder._make*.nbc")))
+    assert counts[0] > 0, "the graph kernel was never cached"
+    assert counts[1] == counts[0] and counts[2] == counts[0], (
+        f"the kernel was reminted across processes (cache grows): {counts}")
+
+
+_RECORD_GRAPH_DRIVER = textwrap.dedent('''
+    import numpy as np
+    from numba import from_dtype
+    from numba.core.types import Array
+    from numbox.core.work.builder import End, Derived, make_graph
+
+    dt = np.dtype([("c1", np.float64), ("c2", np.float64)])
+    T = 4
+    tau = End(name="tau", init_value=np.arange(T))
+    a = End(name="a", init_value=np.zeros(T, dtype=dt), ty=Array(from_dtype(dt), 1, "C"))
+
+
+    def derive_c1(tau_, a_):
+        for t in tau_:
+            a_[t]["c1"] = t * 1.0
+        return 0
+
+
+    c1 = Derived(name="c1", init_value=0, sources=(tau, a), derive=derive_c1)
+    acc = make_graph(c1, a)
+    acc.c1.calculate()
+    print("RESULT", acc.a.data[2]["c1"])
+''')
+
+
+def test_record_typed_graph_kernel_is_process_stable(tmp_path):
+    """A graph node typed as an ``Array`` of a numpy record must produce the same ``_make_<hash>`` kernel in
+    every process. A ``Record`` mangles by a creation-order ``_code``, so its hash -- and the kernel name
+    folding it -- differed between a cold process (which compiles, hence creates, many types before this one)
+    and a warm one, reminting the kernel on the first warm run. Three fresh processes against one cache dir
+    must add zero kernels after the first."""
+    cache = tmp_path / "nbcache"
+    cache.mkdir()
+    script = tmp_path / "record_graph_drv.py"
+    script.write_text(_RECORD_GRAPH_DRIVER)
+    counts = []
+    for _ in range(3):
+        out = subprocess.run([sys.executable, str(script)],
+                             env=dict(os.environ, NUMBA_CACHE_DIR=str(cache)),
+                             capture_output=True, text=True, timeout=600)
+        assert out.returncode == 0, out.stderr
+        counts.append(sum(1 for _ in cache.rglob("builder._make*.nbc")))
+    assert counts[0] > 0, "the graph kernel was never cached"
+    assert counts[1] == counts[0] and counts[2] == counts[0], (
+        f"a record-typed graph kernel was reminted across processes (cache grows): {counts}")
+
+
 _TYPED_GRAPH_DRIVER = textwrap.dedent('''
     import sys
     from numbox.core.work.builder import End, Derived, make_graph
@@ -545,9 +636,9 @@ def test_make_graph_kernel_name_depends_on_declared_type(monkeypatch):
     orig = builder_mod._kernel_fingerprint
 
     def spy(*args, **kwargs):
-        h = orig(*args, **kwargs)
+        h, ok = orig(*args, **kwargs)
         captured.append(h)
-        return h
+        return h, ok
     monkeypatch.setattr(builder_mod, "_kernel_fingerprint", spy)
 
     reg32, reg64 = {}, {}
@@ -556,6 +647,166 @@ def test_make_graph_kernel_name_depends_on_declared_type(monkeypatch):
 
     assert len(captured) == 2
     assert captured[0] != captured[1]
+
+
+def test_make_graph_kernel_name_depends_on_jit_flags(monkeypatch):
+    """Two graphs identical except a jit flag must produce different
+    _make_<hash> kernel names.
+
+    numba caches the whole library, including the generated CPython wrapper,
+    and the wrapper is flag-sensitive independently of the body: nogil=True
+    emits PyEval_SaveThread/PyEval_RestoreThread around the call, nogil=False
+    does not. The derive anchor does not re-key the kernel, so only the flag
+    fold in _kernel_fingerprint keeps the two apart -- without it both share one
+    cache entry and the first writer wins.
+
+    nogil is used rather than error_model/fastmath/boundscheck precisely because
+    those three only affect arithmetic, of which the generated kernel body (a
+    sequence of ll_make_work calls and a tuple build) has none. `cache` itself
+    must NOT re-key: it does not change the emitted binary.
+    """
+    import numbox.core.work.builder as builder_mod
+    captured = []
+    orig = builder_mod._kernel_fingerprint
+
+    def spy(*args, **kwargs):
+        h, ok = orig(*args, **kwargs)
+        captured.append(h)
+        return h, ok
+    monkeypatch.setattr(builder_mod, "_kernel_fingerprint", spy)
+
+    # Identical graph every time -- only the jit flags vary, so the node name
+    # must stay constant or the body text alone would move the fingerprint.
+    for opts in ({"cache": False, "nogil": True},
+                 {"cache": False, "nogil": False},
+                 {"cache": True, "nogil": False}):
+        reg = {}
+        make_graph(End(name="flag_x", init_value=7, ty=int64, registry=reg),
+                   registry=reg, jit_options=opts)
+
+    assert len(captured) == 3
+    assert captured[0] != captured[1], "nogil absent from the kernel fingerprint"
+    assert captured[1] == captured[2], (
+        "`cache` re-keyed the kernel; it does not change the emitted binary and "
+        "folding it would split the cache for nothing"
+    )
+
+
+def test_make_graph_exec_defined_derive_is_cached_through_its_anchor():
+    """A derive defined via exec has co_filename '<string>', which numba cannot
+    locate for caching. It used to degrade to uncached rather than raise; it is
+    now compiled through its own on-disk anchor, which gives
+    numba a real source file, so it caches instead of degrading -- and the anchor
+    digest folds the derive fingerprint, so two exec'd bodies never collide.
+    """
+    reg = {}
+    exec_ns = {}
+    exec("def d(x):\n    return x + 1.0\n", exec_ns)  # nosec B102 - test fixture
+    x_ = End(name="exec_x", init_value=2.0, registry=reg)
+    y_ = Derived(name="exec_y", init_value=0.0, derive=exec_ns["d"], sources=(x_,), registry=reg)
+    access = make_graph(y_, registry=reg)
+    access.exec_y.calculate()
+    assert isclose(access.exec_y.data, 3.0)
+
+    # A second exec'd body differing only in a constant must get its own anchor,
+    # not the first one's binary.
+    reg2 = {}
+    exec_ns2 = {}
+    exec("def d(x):\n    return x + 100.0\n", exec_ns2)  # nosec B102 - test fixture
+    x2_ = End(name="exec_x2", init_value=2.0, registry=reg2)
+    y2_ = Derived(name="exec_y2", init_value=0.0, derive=exec_ns2["d"], sources=(x2_,), registry=reg2)
+    access2 = make_graph(y2_, registry=reg2)
+    access2.exec_y2.calculate()
+    assert isclose(access2.exec_y2.data, 102.0)
+
+
+def test_derive_anchor_degrade_drops_the_cache(monkeypatch):
+    """When the derive anchor cannot be built, the fallback compile must drop
+    `cache`.
+
+    The anchor is the only thing that makes a cached derive flag-safe: numba
+    names a plain `cres(..., cache=True)` cache file after the derive's own
+    source file and qualname, so it is shared across jit-flag variants. Falling
+    back to that on the degrade paths -- flags with no canonical form, or an
+    unwritable anchor -- would restore the exact staleness the anchor exists to
+    prevent, so the degrade compiles uncached instead.
+    """
+    from numbox.core.work import builder as builder_mod
+
+    recorded = {}
+    real_cres = builder_mod.cres
+
+    def recording_cres(sig, **kwargs):
+        recorded.update(kwargs)
+        return real_cres(sig, **kwargs)
+
+    monkeypatch.setattr(builder_mod, "cres", recording_cres)
+    monkeypatch.setattr(builder_mod, "_derive_anchor_cres", lambda *a, **k: None)
+
+    reg = {}
+    x = End(name="degrade_x", init_value=1.0, ty=float64, registry=reg)
+
+    def derive_degrade(x):
+        return x * 2.0
+
+    y = Derived(name="degrade_y", init_value=0.0, derive=derive_degrade,
+                sources=(x,), ty=float64, registry=reg)
+
+    builder_mod._derived_cres(
+        float64, y.sources, derive_degrade,
+        {"cache": True}, "fingerprint-placeholder",
+    )
+    assert recorded.get("cache") is False, (
+        f"anchor degrade compiled with cache={recorded.get('cache')!r}; a plain "
+        "cache=True compile is the flag-blind entry the anchor exists to avoid"
+    )
+
+
+def test_make_graph_uncanonical_jit_flags_drop_the_kernel_cache(monkeypatch):
+    """A jit flag with no canonical form must compile the outer kernel uncached.
+
+    `_flags_canon` degrades to `repr(sorted(flags.items(), key=repr))` for a
+    value it cannot canonicalize -- a `pipeline_class`, a numba-typed `locals`.
+    That repr is neither process-stable for a default-repr object nor guaranteed
+    to separate two behaviourally different values, so a `_make_<hash>` name
+    built on it can collide across variants or churn across processes. The derive
+    anchor and `compile_kernel` both already drop the cache on this flag; the
+    generated kernel is the third caller and must do the same.
+    """
+    from numba.core.compiler import Compiler
+    from numbox.core.work import builder as builder_mod
+
+    recorded = {}
+    real_njit = builder_mod.njit
+
+    def recording_njit(**kwargs):
+        recorded.update(kwargs)
+        return real_njit(**kwargs)
+
+    monkeypatch.setattr(builder_mod, "njit", recording_njit)
+
+    # Compiler is numba's own default pipeline, so the graph still compiles; it
+    # is passed explicitly to make the flag effective and un-canonicalizable.
+    reg = {}
+    make_graph(
+        End(name="uncanon_x", init_value=7, ty=int64, registry=reg),
+        registry=reg, jit_options={"cache": True, "pipeline_class": Compiler},
+    )
+    assert recorded.get("cache") is False, (
+        f"kernel compiled with cache={recorded.get('cache')!r} while its name folds a "
+        "repr-only flag value; the key cannot see what the flag changed"
+    )
+
+    recorded.clear()
+    reg_ok = {}
+    make_graph(
+        End(name="canon_x", init_value=7, ty=int64, registry=reg_ok),
+        registry=reg_ok, jit_options={"cache": True, "nogil": True},
+    )
+    assert recorded.get("cache") is True, (
+        "a fully canonicalizable flag set must keep the kernel cached; dropping it "
+        "here would disable graph caching outright"
+    )
 
 
 if __name__ == "__main__":
