@@ -508,6 +508,59 @@ are created and stored in their `node` attributes only once. Subsequent invocati
 of `as_node` on either the given `Work` node or any of nodes on its sub-graph
 will return the previously created `Node` objects stored as the `node` attribute.
 
+Exception handling
+******************
+
+A `derive` function must not let an exception escape. `derive` is invoked through a
+first-class `FunctionType` call, which numba lowers via the cfunc wrapper; that wrapper
+reports the exception on stderr as unraisable (``Exception ignored in:
+<numba.core.cpu.CPUContext ...>``) and returns a zero-initialized value **without
+unwinding into the caller**. Three consequences follow, none of them visible to the
+calling code:
+
+- `calculate` returns normally, so the failure cannot be detected by the caller.
+- The node's `data` becomes the zero value of its type. For numeric data that is a
+  silently wrong result; for `unicode_type` it is an all-zero string struct whose data
+  pointer is NULL, and reading `work.data` from Python dereferences it and terminates
+  the interpreter with a segmentation fault.
+- `derived` is set to `True` regardless, so the zero is cached — a subsequent
+  `calculate` is a no-op and the wrong value is permanent.
+
+Catch inside the `derive` and encode the failure in the returned value, for instance as
+a NaN, a sentinel, or a status field of a structured return::
+
+    from math import nan
+    from numba import float64
+    from numbox.utils.highlevel import cres
+
+    @cres(float64(float64))
+    def derive_reciprocal(x_):
+        try:
+            if x_ == 0.0:
+                raise ValueError("zero input")
+            return 1.0 / x_
+        except Exception:
+            return nan
+
+The handler must include an ``except`` clause. A ``try``/``finally`` with no ``except``
+does not catch: the re-raise trips ``AssertionError: Unreachable condition reached
+(op code RERAISE executed)``, which is itself swallowed at the same boundary, leaving
+the same zero-filled `data` behind two reported exceptions instead of one.
+``try``/``except``/``finally`` is fine. The exception's type and message are not
+recoverable inside a jitted body, so the encoded return value is the only channel back
+to the caller.
+
+The contract applies to every way of supplying a `derive`, not only to
+:func:`numbox.utils.highlevel.cres`: :func:`numbox.core.work.work.make_work`,
+:func:`numbox.core.work.lowlevel_work_utils.ll_make_work`,
+:func:`numbox.core.work.work_utils.make_work_helper` (whose `derive_py` argument is a
+plain Python function that the helper compiles with `cres`) and
+:class:`numbox.core.work.builder.Derived` all route the call through the same boundary.
+
+The cause is upstream: numba propagates an exception out of a first-class call only for
+`FunctionType` values backed by a dispatcher, and a `cres` result is address-backed.
+See `numba issue 8246 <https://github.com/numba/numba/issues/8246>`_.
+
 Graph manager
 *************
 
@@ -571,7 +624,10 @@ sources.
 To avoid repeated calculation of the same node, `Work` has `derived` boolean flag
 that is set to `True` once the node has been calculated, preventing subsequent
 re-derivation. In particular, this ensures that DFS calculation of the node's
-sources happens just once.
+sources happens just once. The flag is set unconditionally, including when the
+`derive` raised and its exception was swallowed at the first-class call boundary
+(see `Exception handling`_ above) — the zero-filled `data` is then cached like any
+other result.
 
 .. automodule:: numbox.core.work.work
    :members:

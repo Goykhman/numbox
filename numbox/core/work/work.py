@@ -46,6 +46,9 @@ class Work(NodeBase):
         Heterogeneous tuple of `Work` instances that this `Work` instance depends on.
     derive : FunctionType
         Function of the signature determined by the data types of `sources` and `data`.
+        Must not let an exception escape: it is called through the first-class function
+        boundary, which swallows the exception, leaves `data` zero-filled and still sets
+        `derived`. Catch inside the function and encode failure in the returned value.
     derived : int8
         Flag indicating whether the `data` has already been calculated.
     node : NodeType

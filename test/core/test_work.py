@@ -252,5 +252,28 @@ def test_explain_on_make_work_graph_uses_fallback():
     assert "outside builder.make_graph" in text
 
 
+def test_cres_requires_explicit_signature():
+    # cres pins the compiled return type to the declared one. Were a bare type
+    # accepted, the return could infer as a Literal and be delivered as a zero
+    # through the first-class call.
+    with pytest.raises(ValueError) as e:
+        @cres(float64)
+        def derive_no_sig():
+            return 3.14
+    assert str(e.value).startswith("Expected a single signature, found float64")
+
+
+@pytest.mark.parametrize("eager", [True, False])
+def test_make_work_rejects_bare_dispatcher(eager):
+    # a CPUDispatcher derive is the lazily-typed path that loses a Literal return
+    # value; make_work must refuse it rather than cast it to a FunctionType.
+    def derive_pi():
+        return 3.14
+    derive_jit = njit(float64())(derive_pi) if eager else njit(derive_pi)
+    with pytest.raises(AssertionError) as e:
+        make_work("w", 0.0, sources=(), derive=derive_jit)
+    assert "Either None or Compile Result supported, not CPUDispatcher" in str(e.value)
+
+
 if __name__ == "__main__":
     collect_and_run_tests(__name__)
