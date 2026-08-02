@@ -299,6 +299,14 @@ numbox.core.work.combine_utils
    :show-inheritance:
    :undoc-members:
 
+numbox.core.work.derive_wap
+---------------------------
+
+.. automodule:: numbox.core.work.derive_wap
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 numbox.core.work.loader_utils
 -----------------------------
 
@@ -511,55 +519,74 @@ will return the previously created `Node` objects stored as the `node` attribute
 Exception handling
 ******************
 
-A `derive` function must not let an exception escape. `derive` is invoked through a
-first-class `FunctionType` call, which numba lowers via the cfunc wrapper; that wrapper
-reports the exception on stderr as unraisable (``Exception ignored in:
-<numba.core.cpu.CPUContext ...>``) and returns a zero-initialized value **without
-unwinding into the caller**. Three consequences follow, none of them visible to the
-calling code:
+An exception raised inside a `derive` propagates out of `calculate` into the caller,
+carrying its original type and message. The node's `data` is left untouched and
+`derived` stays unset, so once the cause is addressed the node calculates again rather
+than serving a cached failure::
 
-- `calculate` returns normally, so the failure cannot be detected by the caller.
-- The node's `data` becomes the zero value of its type. For numeric data that is a
-  silently wrong result; for `unicode_type` it is an all-zero string struct whose data
-  pointer is NULL, and reading `work.data` from Python dereferences it and terminates
-  the interpreter with a segmentation fault.
-- `derived` is set to `True` regardless, so the zero is cached — a subsequent
-  `calculate` is a no-op and the wrong value is permanent.
+    from numbox.core.work.work_utils import make_work_helper
 
-Catch inside the `derive` and encode the failure in the returned value, for instance as
-a NaN, a sentinel, or a status field of a structured return::
-
-    from math import nan
-    from numba import float64
-    from numbox.utils.highlevel import cres
-
-    @cres(float64(float64))
     def derive_reciprocal(x_):
-        try:
-            if x_ == 0.0:
-                raise ValueError("zero input")
-            return 1.0 / x_
-        except Exception:
-            return nan
+        if x_ == 0.0:
+            raise ValueError("zero input")
+        return 1.0 / x_
 
-The handler must include an ``except`` clause. A ``try``/``finally`` with no ``except``
-does not catch: the re-raise trips ``AssertionError: Unreachable condition reached
-(op code RERAISE executed)``, which is itself swallowed at the same boundary, leaving
-the same zero-filled `data` behind two reported exceptions instead of one.
-``try``/``except``/``finally`` is fine. The exception's type and message are not
-recoverable inside a jitted body, so the encoded return value is the only channel back
-to the caller.
+    source = make_work_helper("source", 0.0)
+    node = make_work_helper("node", 1.0, sources=(source,), derive_py=derive_reciprocal)
+    try:
+        node.calculate()
+    except ValueError:
+        assert node.data == 1.0
+        assert node.derived == 0
 
-The contract applies to every way of supplying a `derive`, not only to
-:func:`numbox.utils.highlevel.cres`: :func:`numbox.core.work.work.make_work`,
+This holds for every way of supplying a `derive` that numbox itself compiles:
+:func:`numbox.core.work.work.make_work`,
 :func:`numbox.core.work.lowlevel_work_utils.ll_make_work`,
 :func:`numbox.core.work.work_utils.make_work_helper` (whose `derive_py` argument is a
 plain Python function that the helper compiles with `cres`) and
-:class:`numbox.core.work.builder.Derived` all route the call through the same boundary.
+:class:`numbox.core.work.builder.Derived`.
 
-The cause is upstream: numba propagates an exception out of a first-class call only for
-`FunctionType` values backed by a dispatcher, and a `cres` result is address-backed.
-See `numba issue 8246 <https://github.com/numba/numba/issues/8246>`_.
+This needs a numbox-owned type, for the following reason.
+`derive` is invoked through a first-class `FunctionType` call. numba can lower such a
+call two ways, choosing on the `jit_addr` slot of the function's data model: a populated
+slot selects the numba calling convention, which unwinds normally, while an empty one
+selects a C wrapper that numba documents as not supporting exceptions. That wrapper
+reports the exception on stderr as unraisable (``Exception ignored in:
+<numba.core.cpu.CPUContext ...>``) and returns a zero-initialized value without
+unwinding.
+
+numba populates `jit_addr` only for a dispatcher, leaving it empty for the compile
+result that :func:`numbox.utils.highlevel.cres` produces. :mod:`numbox.core.work.derive_wap`
+therefore defines its own :class:`~numbox.core.work.derive_wap.DeriveWAP`, which captures
+the calling convention entry point, and :class:`~numbox.core.work.derive_wap.DeriveFunctionType`,
+which fills the slot from it. Everything uses numba's public extension API; no numba
+internals are patched.
+
+Three limits are worth knowing:
+
+- On numba 0.60 the `jit_addr` slot does not exist. `cres` returns a plain
+  ``CompileResultWAP`` there and the exception is still discarded, leaving a zero-filled
+  `data` and a set `derived`. See
+  `numba issue 8246 <https://github.com/numba/numba/issues/8246>`_ for the underlying
+  behaviour.
+- A `derive` built directly against numba as a ``CompileResultWAP`` rather than through
+  `cres` carries no entry point to call. :func:`numbox.core.work.work.make_work` upgrades
+  such a value when it is passed from Python, because the check is on the object's class.
+  One reached from jitted scope cannot be upgraded and keeps the old behaviour.
+- The exception's type and message are not recoverable *inside* a jitted body: numba
+  rejects both ``except ... as e`` and any typed ``except`` clause other than
+  ``Exception``. Code that needs to react to a specific failure in jitted scope still has
+  to encode it in the returned value.
+
+Compiling the `derive` itself with ``parallel`` or ``nogil`` changes nothing, including
+when the raise sits inside the `derive`'s own ``prange``. One case does differ: a caller
+that invokes `calculate` from *inside* a ``prange`` body sees numba's
+``SystemError: ... returned a result with an exception set``, with the original exception
+reachable through ``__cause__``, so an ``except ValueError`` around such a call does not
+match. That is numba's handling of any exception escaping a parallel region rather than
+anything specific to a `derive`: a plain jitted function raising inside ``prange``
+behaves identically with numbox uninvolved. The node itself is unaffected either way,
+keeping its `data` and its unset `derived`.
 
 Graph manager
 *************
@@ -624,10 +651,9 @@ sources.
 To avoid repeated calculation of the same node, `Work` has `derived` boolean flag
 that is set to `True` once the node has been calculated, preventing subsequent
 re-derivation. In particular, this ensures that DFS calculation of the node's
-sources happens just once. The flag is set unconditionally, including when the
-`derive` raised and its exception was swallowed at the first-class call boundary
-(see `Exception handling`_ above) — the zero-filled `data` is then cached like any
-other result.
+sources happens just once. The flag is set after the `derive` returns, so a `derive`
+that raises leaves it unset and the node stays calculable (see `Exception handling`_
+above).
 
 .. automodule:: numbox.core.work.work
    :members:

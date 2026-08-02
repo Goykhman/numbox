@@ -135,10 +135,15 @@ def test_get_func_tuple():
     func_tup = get_func_tuple(func)
     assert func_tup[0] == _get_wrapper_address(func, func_sig)
     assert func_tup[1] == id(func)
-    assert func_tup[2] == 0, "void `jit_addr` in `FunctionModel` for cres"
-    assert func_tup[2] == _get_jit_address(func, func_sig), """
-void `jit_addr` in `FunctionModel` for cres, added to FunctionType data model in numba==0.61
-https://github.com/numba/numba/blob/release0.61/numba/experimental/function_type.py#L65
+    assert func_tup[2] != 0, "populated `jit_addr` in `FunctionModel` for cres"
+    assert func_tup[2] == func.jit_address, """
+`jit_addr` holds the numba calling convention entry point, which is the one that can carry
+an exception out of a first-class call. The slot was added to the FunctionType data model in
+numba==0.61, https://github.com/numba/numba/blob/release0.61/numba/experimental/function_type.py#L65
+"""
+    assert _get_jit_address(func, func_sig) == 0, """
+numba fills the slot only for a Dispatcher and yields 0 for everything else, so a cres would
+keep the exception-discarding convention. numbox captures the entry point itself instead.
 """
 
 

@@ -1,6 +1,8 @@
 import os
 import json
 
+from importlib.metadata import version
+
 
 def get_jit_options():
     """
@@ -39,3 +41,16 @@ def _strict_cache_mode():
 
 
 MAX_STR_LENGTH = 2 ** 31 - 1
+
+
+numba_version = int(version("numba").split(".")[1])
+assert numba_version >= 60, numba_version
+
+#: See the `FunctionModel` struct: (c_addr, py_addr[, jit_addr]). The third slot
+#: arrived in numba 0.61.
+#:
+#: Kept here rather than beside its users in `numbox.utils.lowlevel`, because
+#: importing that module compiles a cached `@proxy`, and both this constant and
+#: `numbox.core.work.derive_wap` are needed on paths that must stay free of
+#: compilation side effects.
+function_struct_size = 3 if numba_version >= 61 else 2

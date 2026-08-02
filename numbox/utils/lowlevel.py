@@ -1,4 +1,3 @@
-from importlib.metadata import version
 from llvmlite import ir
 from llvmlite.ir.builder import IRBuilder
 from numba import carray, njit
@@ -15,14 +14,10 @@ from numba.core.errors import TypingError
 from numba.core.typing.context import Context
 from numba.extending import intrinsic
 
-from numbox.core.configurations import jit_options, MAX_STR_LENGTH
+from numbox.core.configurations import function_struct_size, jit_options, MAX_STR_LENGTH
+from numbox.core.configurations import numba_version  # noqa: F401  re-exported for existing importers
 from numbox.utils.void_type import VoidType
 from numbox.utils.highlevel import determine_field_index
-
-
-numba_version = int(version("numba").split(".")[1])
-assert numba_version >= 60, numba_version
-function_struct_size = 3 if numba_version >= 61 else 2  # See `FunctionModel` struct (c_addr, py_addr[, jit_addr])
 
 
 @intrinsic
