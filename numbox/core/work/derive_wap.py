@@ -145,6 +145,11 @@ def _lower_get_derive_jit_address(context, builder, func, sig):
     pyapi.decref(mod)
     sig_obj = pyapi.unserialize(pyapi.serialize_object(sig))
     addr = pyapi.call_function_objargs(fn, (func, sig_obj))
+    # `fn` and `sig_obj` are new references and `addr` does not borrow from either,
+    # so release them before the branch below: the null path returns early, and
+    # unboxing runs on every call for a derive passed as an argument.
+    pyapi.decref(fn)
+    pyapi.decref(sig_obj)
     with builder.if_then(cgutils.is_null(builder, addr), likely=False):
         builder.ret(pyapi.get_null_object())
     return addr
@@ -179,10 +184,16 @@ def box_derive_function_type(typ, val, c):
 def lower_constant_derive_function_type(context, builder, typ, pyval):
     """Lower a derive reached as a compile-time constant from jitted code.
 
-    ``jit_addr`` is declared symbolically and the compile result's library is
-    linked in, which is the pattern numba uses for its own
-    ``Dispatcher -> FunctionType`` cast. A baked runtime address would not
-    survive caching, since it is randomized per process.
+    ``c_addr`` and ``py_addr`` follow numba's own lowering for a
+    ``WrapperAddressProtocol`` value. ``jit_addr`` is declared symbolically and
+    the compile result's library is linked in, which is the pattern numba uses
+    for its ``Dispatcher -> FunctionType`` cast, and which is what makes the
+    entry point resolve as a symbol rather than as a bare pointer.
+
+    There is deliberately no fallback to a baked address. A value of this type
+    always takes the propagating call, so a `jit_addr` that failed to resolve
+    would be called unconditionally, and failing the compilation is the only
+    honest outcome.
     """
     typ = typ.get_precise()
     assert typ.check_signature(pyval.signature())
@@ -191,14 +202,9 @@ def lower_constant_derive_function_type(context, builder, typ, pyval):
         builder, pyval.__wrapper_address__(), info=str(typ))
     sfunc.py_addr = context.add_dynamic_addr(
         builder, id(pyval), info=type(pyval).__name__)
-    try:
-        fn = context.declare_function(builder.module, pyval.cres.fndesc)
-        sfunc.jit_addr = builder.bitcast(
-            fn, context.get_value_type(types.voidptr))
-        context.active_code_library.add_linking_library(pyval.cres.library)
-    except Exception:
-        sfunc.jit_addr = context.add_dynamic_addr(
-            builder, pyval.jit_address, info="jit_addr:" + str(typ))
+    fn = context.declare_function(builder.module, pyval.cres.fndesc)
+    sfunc.jit_addr = builder.bitcast(fn, context.get_value_type(types.voidptr))
+    context.active_code_library.add_linking_library(pyval.cres.library)
     return sfunc._getvalue()
 
 
