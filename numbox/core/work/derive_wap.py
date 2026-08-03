@@ -195,6 +195,17 @@ def lower_constant_derive_function_type(context, builder, typ, pyval):
     for its ``Dispatcher -> FunctionType`` cast, and which is what makes the
     entry point resolve as a symbol rather than as a bare pointer.
 
+    Resolving it as a symbol is also what makes a constant-lowered derive
+    cacheable at all: the dead ``c_addr``/``py_addr`` globals are eliminated
+    before numba scans the final module, so a caller that only calls the derive
+    reports no dynamic globals and caches. A baked address would leave them live
+    and numba would refuse to cache the caller rather than store an address that
+    is randomized per process.
+
+    That caching is not free: the caller's cached binary binds the derive's
+    code, so editing the derive's body in another module serves a stale binary
+    until the cache is cleared.
+
     There is deliberately no fallback to a baked address. A value of this type
     always takes the propagating call, so a `jit_addr` that failed to resolve
     would be called unconditionally, and failing the compilation is the only
