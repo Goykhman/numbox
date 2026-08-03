@@ -579,14 +579,20 @@ Three limits are worth knowing:
   to encode it in the returned value.
 
 Compiling the `derive` itself with ``parallel`` or ``nogil`` changes nothing, including
-when the raise sits inside the `derive`'s own ``prange``. One case does differ: a caller
-that invokes `calculate` from *inside* a ``prange`` body sees numba's
+when the raise sits inside the `derive`'s own ``prange``.
+
+Invoking `calculate` from *inside* a ``prange`` body is the one case that does differ,
+and it differs by platform. On Linux the failure arrives as numba's
 ``SystemError: ... returned a result with an exception set``, with the original exception
 reachable through ``__cause__``, so an ``except ValueError`` around such a call does not
-match. That is numba's handling of any exception escaping a parallel region rather than
-anything specific to a `derive`: a plain jitted function raising inside ``prange``
-behaves identically with numbox uninvolved. The node itself is unaffected either way,
-keeping its `data` and its unset `derived`.
+match. On macOS nothing is raised at all, so the loop finishes and the caller reads the
+node's previous `data` with no indication that the `derive` failed. Neither behaviour is
+specific to a `derive`: this is numba's handling of an exception escaping a parallel
+region, and a plain jitted function raising inside ``prange`` behaves the same way with
+numbox uninvolved. What holds on every platform is that the node is left alone, keeping
+its `data` and its unset `derived`, so the failure is not cached and a later `calculate`
+outside the parallel region raises normally. **Do not rely on a raise to detect a failed
+`derive` when `calculate` is called inside a ``prange`` body.**
 
 Graph manager
 *************

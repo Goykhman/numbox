@@ -171,11 +171,11 @@ def test_a_parallel_derive_still_propagates():
 
 
 def test_calculate_inside_a_prange_body_keeps_the_node_intact():
-    """numba wraps any exception escaping a parallel region, so a caller that
-    invokes `calculate` inside `prange` sees numba's wrapper with the original as
-    `__cause__` rather than the original itself. That is numba's behaviour for any
-    raise in a parallel region, not something specific to a derive. What still
-    holds is the part that matters: the node is not poisoned."""
+    """What escapes a parallel region is numba's business, and it varies by platform:
+    on Linux the failure arrives as numba's `SystemError` carrying the original as
+    `__cause__`, while on macOS nothing is raised at all. A derive cannot influence
+    either. The invariant that must hold everywhere is that the node is not poisoned,
+    so whatever the caller saw, `data` is intact and `derived` is unset."""
     source = make_work_helper("source", 5.0)
     node = make_work_helper("node", 99.0, sources=(source,), derive_py=_raise_when_positive)
 
@@ -187,13 +187,12 @@ def test_calculate_inside_a_prange_body_keeps_the_node_intact():
             total += work_.data + i
         return total
 
-    with pytest.raises(Exception) as caught:
+    try:
         calculate_in_parallel(node)
-
-    raised = caught.value
-    original = raised if isinstance(raised, ValueError) else raised.__cause__
-    assert isinstance(original, ValueError)
-    assert "derive boom" in str(original)
+    except Exception as escaped:
+        original = escaped if isinstance(escaped, ValueError) else escaped.__cause__
+        assert isinstance(original, ValueError)
+        assert "derive boom" in str(original)
 
     assert node.data == 99.0
     assert node.derived == 0
