@@ -1,4 +1,8 @@
 import gc
+import os
+import subprocess
+import sys
+import textwrap
 import weakref
 
 import numpy
@@ -7,6 +11,7 @@ from numba import njit, prange
 from numba.core.types import float64
 from numba.core.types.function_type import CompileResultWAP
 
+import numbox.core.work.derive_wap as derive_wap_module
 from numbox.core.configurations import numba_version
 from numbox.core.work.derive_wap import DeriveFunctionType, DeriveWAP, rewrap_derive
 from numbox.core.work.work import make_work
@@ -254,3 +259,145 @@ def test_unicode_derive_still_works_when_it_succeeds():
     node = make_work_helper("node", "initial", sources=(source,), derive_py=make_text)
     node.calculate()
     assert node.data.startswith("value ")
+
+
+def test_the_unbox_helper_releases_both_temporaries():
+    """Unboxing must not leak a reference per call.
+
+    ``_lower_get_derive_jit_address`` takes two new references, the module
+    attribute it calls and the unserialized ``Signature`` it passes, and unboxing
+    runs on every call for a derive passed as an argument, so a missing release
+    grows without bound. Both are checked separately, because dropping either
+    decref alone leaks one per call and the whole suite otherwise passes.
+
+    The module attribute is looked up at run time on each call, so replacing it
+    with a delegating spy both intercepts the ``Signature`` numba unserializes
+    and gives the attribute probe an object nothing else holds.
+
+    The two probes are not symmetric. Nothing but this unboxer touches the spy,
+    so its release is pinned exactly. The ``Signature`` is a single object numba
+    memoizes and hands to ``lower_get_wrapper_address`` as well, which numbox
+    calls for ``c_addr`` and which never releases it, so one reference per call
+    is a floor numba imposes and numbox cannot remove. Failing to release the
+    numbox-side reference would double that, which is what the ceiling catches.
+    """
+    @cres(float64(float64))
+    def derive(x):
+        return x + 1.0
+
+    @njit
+    def call_derive(f, x):
+        return f(x)
+
+    call_derive(derive, 1.0)  # compile the unboxer before measuring
+
+    original = derive_wap_module._get_derive_jit_address
+    captured, identical = [], []
+
+    def spy(func, sig):
+        if captured:
+            identical.append(sig is captured[0])
+        else:
+            captured.append(sig)
+        return original(func, sig)
+
+    calls = 200
+    derive_wap_module._get_derive_jit_address = spy
+    try:
+        call_derive(derive, 1.0)  # capture the signature object
+        signature_obj = captured[0]
+        before_attr = sys.getrefcount(spy)
+        before_sig = sys.getrefcount(signature_obj)
+        for _ in range(calls):
+            call_derive(derive, 1.0)
+        attr_delta = sys.getrefcount(spy) - before_attr
+        sig_delta = sys.getrefcount(signature_obj) - before_sig
+    finally:
+        derive_wap_module._get_derive_jit_address = original
+
+    assert identical and all(identical), (
+        "numba handed a fresh Signature per call, so the refcount probe below "
+        "measures nothing"
+    )
+    assert attr_delta == 0, (
+        f"the module attribute leaked {attr_delta} references over {calls} unboxing "
+        f"calls; the `decref(fn)` in _lower_get_derive_jit_address is missing"
+    )
+    assert sig_delta <= calls, (
+        f"the unserialized Signature gained {sig_delta} references over {calls} "
+        f"unboxing calls, above the one per call numba's own "
+        f"lower_get_wrapper_address contributes on the same memoized object; "
+        f"the `decref(sig_obj)` in _lower_get_derive_jit_address is missing"
+    )
+
+
+def _run_derive_probe(probe, env):
+    r = subprocess.run(
+        [sys.executable, str(probe)],
+        capture_output=True, text=True, encoding="utf-8", env=env,
+    )
+    assert r.returncode == 0, f"probe failed:\n{r.stdout}\n{r.stderr}"
+    return r.stdout.strip()
+
+
+def test_a_cached_caller_of_a_derive_caches_and_still_propagates(tmp_path):
+    """Lowering ``jit_addr`` as a symbol rather than a baked address is what lets
+    a caller of a constant-reached derive be cached at all, and the exception
+    contract has to survive the cache hit.
+
+    A baked address is a dynamic global, so numba refuses to cache the caller and
+    writes nothing. Declaring the entry point symbolically leaves ``c_addr`` and
+    ``py_addr`` dead, they are eliminated before numba scans the final module, and
+    the caller caches. Reverting the constant lowering to a baked address
+    otherwise passes the entire suite.
+
+    Both processes are asserted, because a caller that merely recompiled every
+    time would still propagate and would still report no dynamic globals.
+    """
+    probe = tmp_path / "derive_cache_probe.py"
+    probe.write_text(textwrap.dedent('''
+        from numba import njit
+        from numba.core.types import float64
+        from numbox.utils.highlevel import cres
+
+        @cres(float64(float64))
+        def const_derive(x):
+            if x > 0.0:
+                raise ValueError("derive boom")
+            return x + 1.0
+
+        @njit(cache=True)
+        def uses_const(x):
+            return const_derive(x)
+
+        value = uses_const(-2.0)
+
+        propagated = False
+        try:
+            uses_const(3.0)
+        except ValueError:
+            propagated = True
+
+        dynamic = any(c.library.has_dynamic_globals for c in uses_const.overloads.values())
+        hits = sum(uses_const.stats.cache_hits.values())
+        print(f"{value} {dynamic} {hits} {propagated}")
+    '''), encoding="utf-8")
+
+    env = dict(os.environ)
+    env["NUMBA_CACHE_DIR"] = str(tmp_path / "nbcache")
+    env["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+    first = _run_derive_probe(probe, env)      # cold: compiles and writes the cache
+    assert first == "-1.0 False 0 True", (
+        f"cold run: expected value -1.0, no dynamic globals, 0 cache hits and a "
+        f"propagated exception, got {first!r}. A baked `jit_addr` would report "
+        f"dynamic globals and numba would refuse to cache the caller."
+    )
+
+    second = _run_derive_probe(probe, env)     # warm: must be served from the cache
+    assert second == "-1.0 False 1 True", (
+        f"warm run: expected a cache hit that still propagates, got {second!r}"
+    )
+
+    written = sorted(p.name for p in (tmp_path / "nbcache").rglob("*.nbi"))
+    assert written, "no cache index was written, so the cache-hit count proves nothing"
