@@ -582,6 +582,21 @@ These limits are worth knowing:
   rejects both ``except ... as e`` and any typed ``except`` clause other than
   ``Exception``. Code that needs to react to a specific failure in jitted scope still has
   to encode it in the returned value.
+- A container that mixes a `cres` derive with a differently typed function value: a tuple
+  holding a `cres` alongside a plain ``CompileResultWAP``, an njit dispatcher or a
+  ``cfunc``. numba unifies the element types before any of numbox's conversions apply, and
+  ``numba.core.utils.unified_function_type`` requires every function type it meets to equal
+  the first through a bare ``assert``, so the failure arrives as an ``AssertionError``
+  carrying no message. Homogeneous containers are unaffected, including a tuple of two
+  `cres` derives. This is not specific to numbox: two plain ``CompileResultWAP`` values of
+  different signatures but the same argument count fail identically with numbox uninvolved.
+  What numbox changes is how easily the case is reached, since `DeriveFunctionType` is a
+  distinct type from ``FunctionType`` and numba compares function types by class. Making the
+  two compare equal is not available as a fix. numba interns types in a cache keyed by a
+  weak reference, whose equality is the referent's, so equal types collapse onto whichever
+  was interned first: either the derive type resolves to the plain one and every derive goes
+  back to discarding its exception, or the plain type resolves to the derive one and every
+  plain function value fails to unbox.
 - Upgrading numbox does not invalidate numba's own on-disk cache. A module of your own
   compiled with ``cache=True`` against an older numbox keeps cache-hitting after the
   upgrade, and where it takes a plain ``FunctionType`` `derive` it goes on discarding the

@@ -301,6 +301,55 @@ def test_a_plain_function_type_derive_propagates_through_the_runtime_branch():
         build_and_calculate(raising)
 
 
+def test_the_derive_type_stays_distinct_from_the_plain_function_type():
+    """``DeriveFunctionType`` must never compare equal to the ``FunctionType`` of the
+    same signature, however tempting that looks.
+
+    The two already hash alike, because numba hashes a type on its key, and they are kept
+    apart by ``Type.__eq__`` comparing classes. Making them compare equal to smooth over
+    mixed function-value containers would not work: numba interns types in a cache keyed
+    by a weak reference, and a weak reference's equality is the referent's, so two equal
+    types collapse onto whichever was interned first. Measured both ways, the outcome is
+    catastrophic and depends on import order. With the plain type interned first,
+    ``DeriveFunctionType(sig)`` hands back the plain type and every derive silently
+    reverts to discarding its exception; with the derive type first, ``FunctionType(sig)``
+    hands back the derive type and every plain function value fails to unbox.
+    """
+    sig = float64(float64)
+    plain = FunctionType(sig)
+    derive = DeriveFunctionType(sig)
+
+    assert type(derive) is DeriveFunctionType, (
+        "DeriveFunctionType was interned onto another type; numbox's propagating "
+        "convention is selected on this type and would be unreachable"
+    )
+    assert derive is not plain
+    assert derive != plain, "an __eq__ making these equal collapses them in numba's type cache"
+    assert plain != derive, "the reflected comparison must not collapse them either"
+
+
+def test_a_container_of_two_derives_still_unifies():
+    """Homogeneous containers of `cres` derives keep working.
+
+    numba unifies the element types of a function-value container before any of numbox's
+    conversions apply, so the supported case is worth pinning separately from the mixed
+    one, which numba refuses (see the limits in the docs).
+    """
+    @cres(float64(float64))
+    def first(x):
+        return x + 1.0
+
+    @cres(float64(float64))
+    def second(x):
+        return x + 2.0
+
+    @njit
+    def use_both(pair, x):
+        return pair[0](x) + pair[1](x)
+
+    assert use_both((first, second), 1.0) == 5.0
+
+
 def test_a_cres_derive_is_accepted_where_a_plain_function_type_is_declared():
     """``DeriveFunctionType`` has to remain substitutable for the plain
     ``FunctionType`` of the same signature.
