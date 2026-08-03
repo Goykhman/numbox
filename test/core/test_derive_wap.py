@@ -8,7 +8,7 @@ import weakref
 import numpy
 import pytest
 from numba import njit, prange
-from numba.core.types import float64
+from numba.core.types import FunctionType, float64
 from numba.core.types.function_type import CompileResultWAP
 
 import numbox.core.work.derive_wap as derive_wap_module
@@ -259,6 +259,68 @@ def test_unicode_derive_still_works_when_it_succeeds():
     node = make_work_helper("node", "initial", sources=(source,), derive_py=make_text)
     node.calculate()
     assert node.data.startswith("value ")
+
+
+def test_a_plain_function_type_derive_propagates_through_the_runtime_branch():
+    """A derive field typed as a plain ``FunctionType`` must still propagate when
+    the value behind it carries an entry point.
+
+    ``rewrap_derive`` can only upgrade from Python scope, so a jitted caller that
+    builds its own ``Work`` fixes the field at whatever type it declared. numba's
+    unboxing populates ``jit_addr`` for an njit dispatcher passed as a
+    ``FunctionType``-typed argument, so the value can propagate even though the
+    numbox-owned type is nowhere in sight, which is why ``_call_derive`` tests the
+    slot at run time instead of selecting purely on the field type.
+
+    Deleting that runtime branch passes the rest of the suite: every other
+    ``_call_derive`` typing in it is a ``DeriveFunctionType``, so the branch is not
+    merely unasserted, it is never compiled.
+    """
+    @njit(float64(float64))
+    def raising(a):
+        if a > 0.0:
+            raise ValueError("plain boom")
+        return a + 1.0
+
+    @njit(float64(float64))
+    def succeeding(a):
+        return a + 1.0
+
+    @njit(float64(FunctionType(float64(float64))))
+    def build_and_calculate(f):
+        source = make_work("source", 5.0)
+        node = make_work("node", 99.0, sources=(source,), derive=f)
+        node.calculate()
+        return node.data
+
+    # Same compiled function for both, because the declared argument type is the
+    # plain FunctionType rather than either dispatcher.
+    assert build_and_calculate(succeeding) == 6.0
+
+    with pytest.raises(ValueError, match="plain boom"):
+        build_and_calculate(raising)
+
+
+def test_a_cres_derive_is_accepted_where_a_plain_function_type_is_declared():
+    """``DeriveFunctionType`` has to remain substitutable for the plain
+    ``FunctionType`` of the same signature.
+
+    ``typeof`` on a cres derive now yields the numbox-owned type, so an explicitly
+    typed ``njit`` that names ``FunctionType`` would stop accepting it without the
+    conversion, which is a break in code that predates this change. Disabling
+    ``can_convert_to`` passes the whole suite while breaking exactly this call.
+    """
+    @cres(float64(float64))
+    def derive(x):
+        return x + 1.0
+
+    assert isinstance(derive, DeriveWAP)
+
+    @njit(float64(FunctionType(float64(float64)), float64))
+    def call_through_plain(f, x):
+        return f(x)
+
+    assert call_through_plain(derive, 2.0) == 3.0
 
 
 def test_the_unbox_helper_releases_both_temporaries():
