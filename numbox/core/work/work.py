@@ -51,12 +51,13 @@ class Work(NodeBase):
         Heterogeneous tuple of `Work` instances that this `Work` instance depends on.
     derive : FunctionType
         Function of the signature determined by the data types of `sources` and `data`.
-        An exception raised inside it propagates out of `calculate`, leaving `data`
-        untouched and `derived` unset, so the node can be calculated again once the
-        cause is addressed. A derive built directly against numba rather than through
-        `numbox.utils.highlevel.cres`, and reached from jitted scope where it cannot be
-        upgraded, is the one case that still discards the exception and caches a
-        zero-filled `data`.
+        On numba 0.61 and later an exception raised inside it propagates out of
+        `calculate`, leaving `data` untouched and `derived` unset, so the node can be
+        calculated again once the cause is addressed. Two cases still discard the
+        exception and cache a zero-filled `data`: numba 0.60, which has no `jit_addr`
+        slot to carry the entry point that can unwind, and a derive built directly
+        against numba rather than through `numbox.utils.highlevel.cres` and reached from
+        jitted scope, where it cannot be upgraded.
     derived : int8
         Flag indicating whether the `data` has already been calculated.
     node : NodeType

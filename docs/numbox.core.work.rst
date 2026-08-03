@@ -559,10 +559,12 @@ numba populates `jit_addr` only for a dispatcher, leaving it empty for the compi
 result that :func:`numbox.utils.highlevel.cres` produces. :mod:`numbox.core.work.derive_wap`
 therefore defines its own :class:`~numbox.core.work.derive_wap.DeriveWAP`, which captures
 the calling convention entry point, and :class:`~numbox.core.work.derive_wap.DeriveFunctionType`,
-which fills the slot from it. Everything uses numba's public extension API; no numba
-internals are patched.
+which fills the slot from it. The registrations go through numba's public extension API,
+though the data model, wrapper protocol and conversion types they build on sit outside
+``numba.extending``. No numba internals are patched: nothing replaces numba behaviour, it
+only registers against it.
 
-Three limits are worth knowing:
+These limits are worth knowing:
 
 - On numba 0.60 the `jit_addr` slot does not exist. `cres` returns a plain
   ``CompileResultWAP`` there and the exception is still discarded, leaving a zero-filled
@@ -580,6 +582,17 @@ Three limits are worth knowing:
   rejects both ``except ... as e`` and any typed ``except`` clause other than
   ``Exception``. Code that needs to react to a specific failure in jitted scope still has
   to encode it in the returned value.
+- Upgrading numbox does not invalidate numba's own on-disk cache. A module of your own
+  compiled with ``cache=True`` against an older numbox keeps cache-hitting after the
+  upgrade, and where it takes a plain ``FunctionType`` `derive` it goes on discarding the
+  exception, because numba keys the entry on your source rather than on the version of the
+  library that compiled it. **Clear** ``NUMBA_CACHE_DIR`` **after upgrading.** A `cres`
+  derive is unaffected: its type name changes, so the entry re-keys on its own.
+- Downgrading numbox below this feature, after a cached compile has seen a `derive`,
+  leaves that cache unreadable rather than merely stale. numba unpickles the stored type
+  index before it checks the freshness stamp, so the load fails outright with
+  ``ModuleNotFoundError: No module named 'numbox.core.work.derive_wap'``. Editing or
+  touching your own source does not clear it; deleting the cache directory does.
 
 Compiling the `derive` itself with ``parallel`` or ``nogil`` changes nothing, including
 when the raise sits inside the `derive`'s own ``prange``.

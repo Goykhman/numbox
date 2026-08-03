@@ -35,8 +35,14 @@ had populated its ``jit_addr``. That is why ``_call_derive`` also branches at
 runtime for plain ``FunctionType`` fields rather than selecting purely on the
 numbox-owned type.
 
-Every registration below uses numba's public extension API. No numba internals
-are patched.
+The decorators below are numba's public extension API, but what they register
+against is not: ``FunctionModel``, ``CompileResultWAP``, ``Conversion``,
+``box_function_type`` and ``lower_get_wrapper_address`` all sit outside
+``numba.extending``, ``JIT_ADDR_SLOT`` hardcodes ``FunctionModel``'s field order,
+and the constant lowering drives ``context.declare_function`` and
+``context.active_code_library`` directly. What does hold is that no numba
+internals are patched: nothing here replaces numba behaviour, it only registers
+against it.
 """
 from numba.core import cgutils, types
 from numba.core.imputils import lower_cast, lower_constant
