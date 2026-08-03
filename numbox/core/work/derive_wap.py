@@ -57,6 +57,11 @@ __all__ = ["DeriveFunctionType", "DeriveWAP", "jit_addr_supported", "rewrap_deri
 #: Index of ``jit_addr`` in the ``FunctionModel`` struct ``(c_addr, py_addr, jit_addr)``.
 JIT_ADDR_SLOT = 2
 
+#: Where :func:`rewrap_derive` parks the upgraded wrapper on the object it upgrades,
+#: so that the address stored in ``py_addr`` stays backed for as long as the caller
+#: holds the original.
+_UPGRADED_ATTR = "_numbox_derive_wap"
+
 
 def jit_addr_supported() -> bool:
     """Whether the running numba exposes the ``jit_addr`` slot.
@@ -222,9 +227,20 @@ def rewrap_derive(derive):
     On a numba without the ``jit_addr`` slot there is nothing to upgrade into: the
     struct has no field to hold the entry point, so producing a
     :class:`DeriveWAP` there would only yield a value that cannot be unboxed.
+
+    The upgraded wrapper is memoized onto the object it upgrades, and that is
+    required rather than an optimization. ``py_addr`` holds the derive's address
+    without taking a reference, so a wrapper minted fresh per call would be freed
+    as soon as the caller returned, leaving every `Work` built from it pointing at
+    released memory. Hanging it off the original ties its lifetime to the object
+    the caller already holds, which is the lifetime the address assumed all along.
     """
     if not jit_addr_supported():
         return derive
-    if isinstance(derive, CompileResultWAP) and not isinstance(derive, DeriveWAP):
-        return DeriveWAP(derive.cres)
-    return derive
+    if not isinstance(derive, CompileResultWAP) or isinstance(derive, DeriveWAP):
+        return derive
+    upgraded = getattr(derive, _UPGRADED_ATTR, None)
+    if upgraded is None:
+        upgraded = DeriveWAP(derive.cres)
+        setattr(derive, _UPGRADED_ATTR, upgraded)
+    return upgraded

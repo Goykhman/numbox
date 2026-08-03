@@ -572,7 +572,10 @@ Three limits are worth knowing:
 - A `derive` built directly against numba as a ``CompileResultWAP`` rather than through
   `cres` carries no entry point to call. :func:`numbox.core.work.work.make_work` upgrades
   such a value when it is passed from Python, because the check is on the object's class.
-  One reached from jitted scope cannot be upgraded and keeps the old behaviour.
+  One reached from jitted scope cannot be upgraded and keeps the old behaviour. The upgrade
+  is attached to the object it upgrades and reused, so the node's `derive` attribute reads
+  back as the upgraded wrapper rather than as the object that was passed in. It wraps the
+  same compile result and is called identically; only the identity differs.
 - The exception's type and message are not recoverable *inside* a jitted body: numba
   rejects both ``except ... as e`` and any typed ``except`` clause other than
   ``Exception``. Code that needs to react to a specific failure in jitted scope still has

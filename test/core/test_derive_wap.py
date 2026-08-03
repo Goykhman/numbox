@@ -1,3 +1,6 @@
+import gc
+import weakref
+
 import numpy
 import pytest
 from numba import njit, prange
@@ -117,6 +120,43 @@ def test_make_work_upgrades_a_foreign_compile_result_wap():
         node.calculate()
     assert node.data == 99.0
     assert node.derived == 0
+
+
+def test_the_upgraded_wrapper_outlives_the_call_that_made_it():
+    """`py_addr` records the derive's address without taking a reference, so an
+    upgrade minted fresh per call would be freed the moment the caller returned and
+    every `Work` built from it would point at released memory. The upgrade has to be
+    anchored to the object it upgrades."""
+    jitted = njit(float64(float64))(_raise_when_positive)
+    foreign = CompileResultWAP(jitted.get_compile_result(jitted.nopython_signatures[0]))
+
+    tracker = weakref.ref(rewrap_derive(foreign))
+    gc.collect()
+
+    assert tracker() is not None, "the upgraded wrapper was freed while its address was still in use"
+
+
+def test_upgrading_the_same_derive_twice_yields_the_same_wrapper():
+    jitted = njit(float64(float64))(_raise_when_positive)
+    foreign = CompileResultWAP(jitted.get_compile_result(jitted.nopython_signatures[0]))
+    assert rewrap_derive(foreign) is rewrap_derive(foreign)
+
+
+def test_a_foreign_derive_survives_a_round_trip_through_jitted_scope():
+    """Reading the derive back out dereferences `py_addr`, which is where a freed
+    wrapper shows up as a crash rather than as a wrong answer."""
+    jitted = njit(float64(float64))(_raise_when_positive)
+    foreign = CompileResultWAP(jitted.get_compile_result(jitted.nopython_signatures[0]))
+
+    source = make_work("source", 5.0)
+    node = make_work("node", 99.0, sources=(source,), derive=foreign)
+    gc.collect()
+
+    @njit
+    def read_derive(work_):
+        return work_.derive
+
+    assert isinstance(read_derive(node), DeriveWAP)
 
 
 def test_rewrap_derive_leaves_everything_else_alone():
