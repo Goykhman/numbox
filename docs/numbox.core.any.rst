@@ -7,6 +7,9 @@ Overview
 Implementation of `Any` type counterpart of C++
 `std::any <https://en.cppreference.com/w/cpp/utility/any.html>`_
 leveraging the type-erasure technique.
+Use :class:`numbox.core.any.any_lite.Any` for a light version
+that skips storing type info and doesn't do type check
+at dereferencing.
 
 Modules
 ++++++++
