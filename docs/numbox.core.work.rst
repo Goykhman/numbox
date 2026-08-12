@@ -560,9 +560,9 @@ result that :func:`numbox.utils.highlevel.cres` produces. :mod:`numbox.core.work
 therefore defines its own :class:`~numbox.core.work.derive_wap.DeriveWAP`, which captures
 the calling convention entry point, and :class:`~numbox.core.work.derive_wap.DeriveFunctionType`,
 which fills the slot from it. The registrations go through numba's public extension API,
-though the data model, wrapper protocol and conversion types they build on sit outside
-``numba.extending``. No numba internals are patched: nothing replaces numba behaviour, it
-only registers against it.
+save for ``lower_constant``, which ``numba.extending`` does not re-export; the data
+model, wrapper protocol and conversion types they build on sit outside it too. No numba
+internals are patched: nothing replaces numba behaviour, it only registers against it.
 
 These limits are worth knowing:
 
@@ -583,13 +583,17 @@ These limits are worth knowing:
   ``Exception``. Code that needs to react to a specific failure in jitted scope still has
   to encode it in the returned value.
 - A container that mixes a `cres` derive with a differently typed function value: a tuple
-  holding a `cres` alongside a plain ``CompileResultWAP``, an njit dispatcher or a
-  ``cfunc``. numba unifies the element types before any of numbox's conversions apply, and
-  ``numba.core.utils.unified_function_type`` requires every function type it meets to equal
-  the first through a bare ``assert``, so the failure arrives as an ``AssertionError``
-  carrying no message. Homogeneous containers are unaffected, including a tuple of two
-  `cres` derives. This is not specific to numbox: two plain ``CompileResultWAP`` values of
-  different signatures but the same argument count fail identically with numbox uninvolved.
+  holding a `cres` alongside a plain ``CompileResultWAP``, a signature-declared njit
+  dispatcher or a ``cfunc``. numba unifies the element types before any of numbox's
+  conversions apply, and ``numba.core.utils.unified_function_type`` requires every
+  function type it meets to equal the first through a bare ``assert``, so the failure
+  arrives as an ``AssertionError`` carrying no message. A lazily compiled ``@njit``
+  dispatcher in the mix is the one subcase that reads differently: unification accepts
+  it, and numbox's guard then rejects it at the unboxing boundary with a ``TypeError``
+  naming the offending type.
+  Homogeneous containers are unaffected, including a tuple of two `cres` derives. This
+  is not specific to numbox: two plain ``CompileResultWAP`` values of different
+  signatures but the same argument count fail identically with numbox uninvolved.
   What numbox changes is how easily the case is reached, since `DeriveFunctionType` is a
   distinct type from ``FunctionType`` and numba compares function types by class. Making the
   two compare equal is not available as a fix. numba interns types in a cache keyed by a
@@ -659,7 +663,8 @@ One option to build a graph manager would be via the constructor such as::
 
 Here :func:`numbox.core.work.lowlevel_work_utils.ll_make_work` is the intrinsic
 `Work` constructor — it inlines directly into the calling jitted scope, whereas
-:func:`numbox.core.work.work.make_work` is the convenience ``@njit`` wrapper around it.
+:func:`numbox.core.work.work.make_work` is the Python-scope convenience wrapper around it,
+a plain function whose jitted callers reach an ``@overload`` of the same shape.
 The utility registry module can be defined as
 
 .. literalinclude:: ./_static/work_registry.py
