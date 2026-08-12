@@ -372,6 +372,28 @@ def test_a_cres_derive_is_accepted_where_a_plain_function_type_is_declared():
     assert call_through_plain(derive, 2.0) == 3.0
 
 
+def test_a_cres_derive_casts_to_plain_function_type_inside_jitted_scope():
+    """The Python-boundary conversion above never reaches the ``lower_cast``
+    registration; a cast emitted in lowering does. A jitted caller holds the
+    derive as `DeriveFunctionType` and hands it to a callee declared with the
+    plain ``FunctionType``; deleting the registration fails exactly this call
+    with ``NumbaNotImplementedError`` while the rest of the suite stays green.
+    """
+    @cres(float64(float64))
+    def derive(x):
+        return x + 1.0
+
+    @njit(float64(FunctionType(float64(float64)), float64))
+    def declared_plain(f, x):
+        return f(x)
+
+    @njit
+    def jitted_caller(f, x):
+        return declared_plain(f, x)
+
+    assert jitted_caller(derive, 2.0) == 3.0
+
+
 def test_the_unbox_helper_releases_both_temporaries():
     """Unboxing must not leak a reference per call.
 
