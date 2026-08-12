@@ -33,7 +33,7 @@ class Any(StructRefProxy):
     @property
     @njit(**jit_options)
     def type_info(self):
-        return self.t
+        return self._get_type_info()
 
 
 def _any_deleted_ctor(p):
@@ -43,27 +43,54 @@ def _any_deleted_ctor(p):
 overload(Any, jit_options=jit_options)(_any_deleted_ctor)
 define_boxing(AnyTypeClass, Any)
 AnyType = AnyTypeClass([("p", ErasedType), ("t", unicode_type)])
+AnyTypeLite = AnyTypeClass([("p", ErasedType)])
+
+
+@overload_method(AnyTypeClass, "_get_type_info", strict=False, jit_options=jit_options)
+def ol_get_type_info(self_ty):
+    if self_ty == AnyType:
+        def _(self):
+            return self.t
+        return _
+
+    if self_ty == AnyTypeLite:
+        raise AttributeError("AnyTypeLite instance does not store type info.")
 
 
 @overload_method(AnyTypeClass, "get_as", strict=False, jit_options=jit_options)
 def ol_get_as(self_ty, ty_ref: TypeRef):
-    ty_code = str(ty_ref.instance_type)
+    if self_ty == AnyType:
+        ty_code = str(ty_ref.instance_type)
 
-    def _(self, ty):
-        if ty_code != self.t:
-            raise NumbaError(f"Any stored type {self.t}, cannot decode as {ty_code}")
-        return _deref_payload(self.p, ty)
-    return _
+        def _(self, ty):
+            if ty_code != self.t:
+                raise NumbaError(f"Any stored type {self.t}, cannot decode as {ty_code}")
+            return _deref_payload(self.p, ty)
+
+        return _
+
+    if self_ty == AnyTypeLite:
+        def _(self, ty):
+            return _deref_payload(self.p, ty)
+
+        return _
 
 
 @overload_method(AnyTypeClass, "reset", strict=False, jit_options=jit_options)
 def ol_reset(self_ty, x_ty):
-    ty_code = str(x_ty)
+    if self_ty == AnyType:
+        ty_code = str(x_ty)
 
-    def _(self, x):
-        self.p = _cast(_Content(x), ErasedType)
-        self.t = ty_code
-    return _
+        def _(self, x):
+            self.p = _cast(_Content(x), ErasedType)
+            self.t = ty_code
+        return _
+
+    if self_ty == AnyTypeLite:
+        def _(self, x):
+            self.p = _cast(_Content(x), ErasedType)
+
+        return _
 
 
 def _make_any(x):
@@ -82,6 +109,24 @@ def ol_make_any(x_ty):
     return _
 
 
+def _make_any_lite(x):
+    raise NotImplementedError("Not callable from Python")
+
+
+@overload(_make_any_lite, strict=False, jit_options=jit_options)
+def ol_make_any_lite(x_ty):
+    def _(x):
+        any_ = new(AnyTypeLite)
+        any_.p = _cast(_Content(x), ErasedType)
+        return any_
+    return _
+
+
 @njit(**jit_options)
 def make_any(x):
     return _make_any(x)
+
+
+@njit(**jit_options)
+def make_any_lite(x):
+    return _make_any_lite(x)

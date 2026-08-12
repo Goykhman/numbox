@@ -1,9 +1,9 @@
 import numpy
 
-from numba import float64, int32, int64, njit, typeof
+from numba import float64, int8, int32, int64, njit, typeof
 from numba.core import types
 from numba.typed import Dict
-from numbox.core.any.any_type import AnyType, make_any
+from numbox.core.any.any_type import AnyType, AnyTypeLite, make_any, make_any_lite
 from numba.core.errors import NumbaError
 from numbox.utils.meminfo import get_nrt_refcount, structref_meminfo
 from numbox.utils.highlevel import cres
@@ -20,6 +20,21 @@ def test_1():
         any1.get_as(float64)
     except NumbaError as e:
         assert ansi_escape.sub("", str(e)) == "Any stored type int64, cannot decode as float64"
+    assert any1.type_info == "int64"
+    y = 1.41
+    any1.reset(y)
+    assert any1.type_info == "float64"
+
+    any2 = make_any_lite(x)
+    assert any2.get_as(int64) == x
+    assert any2.get_as(int8) == x
+    any2.reset(y)
+    assert any2.get_as(float64) == y
+    assert any2.get_as(float64) == y
+    try:
+        _ = any2.type_info
+    except AttributeError:
+        pass
 
 
 def test_2():
@@ -158,6 +173,18 @@ def test_10():
     assert get_nrt_refcount(s1) == 1, \
         "resetting onto a different value released `any`'s ref to the old `s1` payload exactly once " \
         "(== 2 would be a leak, == 0 a double-free)"
+
+
+def test_11():
+    x = make_any(1.41)
+    y = make_any_lite(1.72)
+
+    @njit(cache=True)
+    def aux(x_, y_):
+        return x_.get_as(float64) ** 2 + y_.get_as(float64) ** 2
+
+    assert abs(aux(x, y) - 5) < 0.1
+    assert aux.nopython_signatures[0].args == (AnyType, AnyTypeLite)
 
 
 if __name__ == '__main__':
