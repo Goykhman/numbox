@@ -53,7 +53,10 @@ class Work(NodeBase):
         Function of the signature determined by the data types of `sources` and `data`.
         On numba 0.61 and later an exception raised inside it propagates out of
         `calculate`, leaving `data` untouched and `derived` unset, so the node can be
-        calculated again once the cause is addressed. Two cases still discard the
+        calculated again once the cause is addressed. numba's error path holds the
+        references it took, so a node whose derive has ever failed stays pinned, along
+        with what it references, for the life of the process; retrying the same node
+        adds nothing further. Two cases still discard the
         exception and cache a zero-filled `data`: numba 0.60, which has no `jit_addr`
         slot to carry the entry point that can unwind, and a derive built directly
         against numba rather than through `numbox.utils.highlevel.cres` and reached from
@@ -170,6 +173,9 @@ def make_work(name, data, sources=(), derive=None):
 
     Jitted callers reach the overload below, which takes the value as given: by
     then the type is fixed and nothing can be re-wrapped.
+
+    ``make_work.py_func`` is preserved from when this function was itself a
+    dispatcher and remains the undecorated implementation.
     """
     return _make_work_jit(name, data, sources, rewrap_derive(derive))
 
@@ -179,6 +185,9 @@ def ol_make_work(name, data, sources=(), derive=None):
     def _(name, data, sources=(), derive=None):
         return ll_make_work(name, data, sources, derive)
     return _
+
+
+make_work.py_func = _make_work_jit.py_func
 
 
 @intrinsic
