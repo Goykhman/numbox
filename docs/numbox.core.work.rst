@@ -544,7 +544,9 @@ This holds for every way of supplying a `derive` that numbox itself compiles:
 :func:`numbox.core.work.lowlevel_work_utils.ll_make_work`,
 :func:`numbox.core.work.work_utils.make_work_helper` (whose `derive_py` argument is a
 plain Python function that the helper compiles with `cres`) and
-:class:`numbox.core.work.builder.Derived`.
+:class:`numbox.core.work.builder.Derived`, provided the `derive` reaches them with its
+numbox type intact. Handing one from Python to a jitted parameter that is *declared* as
+a plain ``FunctionType`` degrades it before it ever gets there; see the limits below.
 
 This needs a numbox-owned type, for the following reason.
 `derive` is invoked through a first-class `FunctionType` call. numba can lower such a
@@ -578,6 +580,18 @@ These limits are worth knowing:
   is attached to the object it upgrades and reused, so the node's `derive` attribute reads
   back as the upgraded wrapper rather than as the object that was passed in. It wraps the
   same compile result and is called identically; only the identity differs.
+- A `derive` handed from Python into a jitted function whose parameter is *declared* as a
+  plain ``FunctionType`` degrades to the C convention on the way in, so the exception is
+  discarded even though the node was built with `make_work` and calculated normally. An
+  inferred-signature ``njit`` keeps the numbox type and propagates, and a cast to
+  ``FunctionType`` reached from within jitted scope keeps it too, because that cast is an
+  identity on a shared data model. It is specifically the declared parameter, crossed from
+  Python, that degrades.
+- Wherever the exception is discarded, the zero fill is not merely a wrong number. For
+  `unicode_type` `data` it is an all-zero string struct whose data pointer is NULL, so
+  reading `work.data` back from Python dereferences it and terminates the interpreter with
+  a segmentation fault. `derived` is set regardless, so a later `calculate` is a no-op and
+  the value is permanent.
 - The exception's type and message are not recoverable *inside* a jitted body: numba
   rejects both ``except ... as e`` and any typed ``except`` clause other than
   ``Exception``. Code that needs to react to a specific failure in jitted scope still has

@@ -56,11 +56,13 @@ class Work(NodeBase):
         calculated again once the cause is addressed. numba's error path holds the
         references it took, so a node whose derive has ever failed stays pinned, along
         with what it references, for the life of the process; retrying the same node
-        adds nothing further. Two cases still discard the
+        adds nothing further. Several cases still discard the
         exception and cache a zero-filled `data`: numba 0.60, which has no `jit_addr`
-        slot to carry the entry point that can unwind, and a derive built directly
+        slot to carry the entry point that can unwind; a derive built directly
         against numba rather than through `numbox.utils.highlevel.cres` and reached from
-        jitted scope, where it cannot be upgraded.
+        jitted scope, where it cannot be upgraded; a `cfunc`, which is not upgraded
+        either; and a derive handed from Python to a jitted parameter that is declared
+        as a plain `FunctionType`, which degrades on the way in.
     derived : int8
         Flag indicating whether the `data` has already been calculated.
     node : NodeType
