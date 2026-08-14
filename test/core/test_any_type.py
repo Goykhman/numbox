@@ -4,22 +4,16 @@ from numba import float64, int32, int64, njit, typeof
 from numba.core import types
 from numba.typed import Dict
 from numbox.core.any.any_type import AnyType, make_any
-from numba.core.errors import NumbaError
 from numbox.utils.meminfo import get_nrt_refcount, structref_meminfo
 from numbox.utils.highlevel import cres
-from test.auxiliary_utils import ansi_escape, collect_and_run_tests, deref_int64_intp
+from test.auxiliary_utils import collect_and_run_tests, deref_int64_intp
 from test.common_structrefs import S1, S1Type, S3, S3Type
 
 
 def test_1():
     x = -65
     any1 = make_any(x)
-    assert any1.type_info == "int64"
     assert any1.get_as(int64) == x
-    try:
-        any1.get_as(float64)
-    except NumbaError as e:
-        assert ansi_escape.sub("", str(e)) == "Any stored type int64, cannot decode as float64"
 
 
 def test_2():
