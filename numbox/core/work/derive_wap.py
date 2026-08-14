@@ -92,9 +92,15 @@ class DeriveFunctionType(FunctionType):
         """Permit passing a :class:`DeriveWAP` where a plain ``FunctionType`` of
         the same signature is declared.
 
-        The value degrades to the C convention there, which is the behaviour
-        those call sites had before, so an explicit-signature ``njit`` that names
-        ``FunctionType`` keeps working unchanged.
+        Such a call site keeps working unchanged, which is the point, but it
+        keeps its *old* behaviour too: crossing the Python boundary into a
+        parameter declared as a plain ``FunctionType`` degrades the value to the
+        C convention, so a `derive` supplied that way still discards its
+        exception. Reaching the same declared type by a cast within jitted scope
+        does not degrade it, because :func:`lower_cast_derive_to_function_type`
+        is an identity on a shared ``FunctionModel`` and the populated
+        ``jit_addr`` survives. One source-level call site therefore has two
+        different exception semantics depending on where the value came from.
         """
         if type(other) is FunctionType and other.signature == self.signature:
             return Conversion.safe
@@ -118,6 +124,9 @@ class DeriveWAP(CompileResultWAP):
         super().__init__(cres)
         self.jit_address = cres.library.get_pointer_to_function(
             cres.fndesc.llvm_func_name)
+        if self.jit_address <= 0:
+            raise ValueError(
+                f"no callconv entry point for {cres.fndesc.llvm_func_name}")
 
 
 @typeof_impl.register(DeriveWAP)
