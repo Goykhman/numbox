@@ -232,15 +232,20 @@ def test_calculate_inside_a_prange_body_keeps_the_node_intact():
             total += work_.data + i
         return total
 
+    escaped_something = True
     try:
         calculate_in_parallel(node)
     except Exception as escaped:
         original = escaped if isinstance(escaped, ValueError) else escaped.__cause__
         assert isinstance(original, ValueError)
         assert "derive boom" in str(original)
+    else:
+        escaped_something = False
 
     assert node.data == 99.0
     assert node.derived == 0
+    if not escaped_something:
+        pytest.skip("nothing escaped the parallel region, so only the node invariant was checked")
 
 
 def test_a_succeeding_derive_is_unaffected():
@@ -534,3 +539,44 @@ def test_a_cached_caller_of_a_derive_caches_and_still_propagates(tmp_path):
 
     written = sorted(p.name for p in (tmp_path / "nbcache").rglob("*.nbi"))
     assert written, "no cache index was written, so the cache-hit count proves nothing"
+
+
+def test_a_foreign_wrapper_reached_from_jitted_scope_still_discards():
+    """The residual case the `Work.derive` docstring names, and the only thing that
+    reaches the null arm of `_call_derive`'s runtime dispatch. A `CompileResultWAP`
+    built directly against numba carries no callconv entry point, and one that first
+    becomes visible inside jitted scope cannot be upgraded on the way in, so the
+    exception is discarded. Deleting that arm leaves the rest of the suite green."""
+    jitted = njit(float64(float64))(_raise_when_positive)
+    foreign = CompileResultWAP(jitted.get_compile_result(jitted.nopython_signatures[0]))
+
+    @njit
+    def build_and_calculate_in_jit(derive_):
+        source = make_work("source", 5.0)
+        node = make_work("node", 7.5, (source,), derive_)
+        node.calculate()
+        return node.data, node.derived
+
+    data, derived = build_and_calculate_in_jit(foreign)
+    assert data == 0.0, (
+        f"expected the discarded-exception zero fill, got {data!r}. A non-zero value here "
+        f"means the derive was upgraded after all and this test no longer covers the arm."
+    )
+    assert derived == 1
+
+
+def test_propagation_through_a_multi_level_chain():
+    """Every other propagation test uses a two-node graph whose source has no derive of
+    its own, while the mainline shape is a chain. The failure has to surface from depth
+    without poisoning the nodes that already succeeded."""
+    source = make_work_helper("source", -1.0)
+    level1 = make_work_helper("level1", 0.0, sources=(source,), derive_py=_raise_when_positive)
+    level2 = make_work_helper("level2", 0.0, sources=(level1,), derive_py=_raise_when_positive)
+    level3 = make_work_helper("level3", 99.0, sources=(level2,), derive_py=_raise_when_positive)
+
+    with pytest.raises(ValueError, match="derive boom"):
+        level3.calculate()
+
+    assert level1.data == 0.0 and level1.derived == 1, "a level that succeeded was rolled back"
+    assert level2.data == 1.0 and level2.derived == 1, "a level that succeeded was rolled back"
+    assert level3.data == 99.0 and level3.derived == 0, "the failing node was poisoned"

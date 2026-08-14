@@ -9,6 +9,7 @@ import pytest
 from numba import njit, cfunc, vectorize
 from numba.core.dispatcher import Dispatcher
 from numba.core.types import float64
+from numbox.core.configurations import numba_version
 from numbox.core.variable.compile_kernel import (
     _generate_body, _compile, compile_kernel, CompiledKernel,
 )
@@ -293,6 +294,38 @@ def test_cres_formula():
         external_source_names=["ext"],
     )
     ck = compile_kernel(g, ["variables.u"])
+    assert ck.execute({"ext": {"p": 1.5, "q": 2.0}}) == {"variables.u": -0.5}
+
+
+@pytest.mark.skipif(
+    numba_version < 61, reason="`jit_addr` slot added to `FunctionModel` in numba 0.61"
+)
+def test_a_raising_cres_formula_propagates():
+    """`cres` is a general utility, not a `Work` detail, so the exception contract it
+    carries reaches this subsystem too. A formula that raises used to leave a
+    zero-filled result and no signal at all; it now surfaces to the caller of
+    `execute`, with no `Work` anywhere in the picture.
+
+    Skipped on numba 0.60, which has no `jit_addr` slot: `cres` returns a plain
+    `CompileResultWAP` there and the formula still discards its exception, which is
+    the documented behaviour rather than a regression."""
+    def blow_up(a, b):
+        if a > b:
+            raise ValueError("formula boom")
+        return a - b
+
+    formula = cres(float64(float64, float64))(blow_up)
+    g = Graph(
+        variables_lists={"variables": [
+            {"name": "u", "inputs": {"p": "ext", "q": "ext"}, "formula": formula},
+        ]},
+        external_source_names=["ext"],
+    )
+    ck = compile_kernel(g, ["variables.u"])
+
+    with pytest.raises(ValueError, match="formula boom"):
+        ck.execute({"ext": {"p": 3.0, "q": 2.0}})
+
     assert ck.execute({"ext": {"p": 1.5, "q": 2.0}}) == {"variables.u": -0.5}
 
 
