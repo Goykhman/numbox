@@ -11,9 +11,9 @@ from numba import njit, prange
 from numba.core.types import FunctionType, float64
 from numba.core.types.function_type import CompileResultWAP
 
-import numbox.core.work.derive_wap as derive_wap_module
+import numbox.utils.derive_wap as derive_wap_module
 from numbox.core.configurations import numba_version
-from numbox.core.work.derive_wap import DeriveFunctionType, DeriveWAP, rewrap_derive
+from numbox.utils.derive_wap import DeriveFunctionType, DeriveWAP, rewrap_derive
 from numbox.core.work.work import make_work
 from numbox.core.work.work_utils import make_work_helper
 from numbox.utils.highlevel import cres

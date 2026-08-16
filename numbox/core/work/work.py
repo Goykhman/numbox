@@ -15,12 +15,12 @@ from numba.core import cgutils
 
 from numbox.core.any.erased_type import ErasedType
 from numbox.core.configurations import jit_options
-from numbox.core.work.derive_wap import (
-    DeriveFunctionType, JIT_ADDR_SLOT, jit_addr_supported, rewrap_derive
-)
 from numbox.core.work.lowlevel_work_utils import ll_make_work, WorkTypeClass
 from numbox.core.work.node import NodeType
 from numbox.core.work.node_base import NodeBase, NodeBaseType
+from numbox.utils.derive_wap import (
+    DeriveFunctionType, jit_addr_supported, rewrap_derive
+)
 from numbox.utils.lowlevel import (
     extract_struct_member, _cast, _get_func_tuple, is_not_null, get_func_p_from_func_struct, get_ll_func_sig
 )
@@ -177,7 +177,10 @@ def make_work(name, data, sources=(), derive=None):
     then the type is fixed and nothing can be re-wrapped.
 
     ``make_work.py_func`` is preserved from when this function was itself a
-    dispatcher and remains the undecorated implementation.
+    dispatcher, since that attribute was part of the surface callers could reach for.
+    It is not callable, then or now: the body it exposes calls the `ll_make_work`
+    intrinsic and raises `NotImplementedError`. Note it is `_make_work_jit`'s body
+    rather than this one, so it does not carry the `rewrap_derive` call above.
     """
     return _make_work_jit(name, data, sources, rewrap_derive(derive))
 
@@ -196,7 +199,9 @@ make_work.py_func = _make_work_jit.py_func
 def _call_derive(typingctx: Context, derive_ty: FunctionType, sources_ty: Tuple):
     """Call the derive, propagating an exception it raises where possible.
 
-    Three cases, in decreasing order of what is known at compile time:
+    Three cases, and only the second needs a runtime test. The first is settled once
+    the field's type is known. The third is reached both statically, on a numba with
+    no ``jit_addr`` slot at all, and at runtime, where the slot is null:
 
     - a ``DeriveFunctionType`` field carries a populated ``jit_addr`` by
       construction, so the propagating convention is selected outright with no
@@ -236,7 +241,8 @@ def _call_derive(typingctx: Context, derive_ty: FunctionType, sources_ty: Tuple)
         if not jit_addr_supported():
             return emit_c_call()
 
-        jit_addr = builder.extract_value(derive_struct, JIT_ADDR_SLOT)
+        jit_addr = cgutils.create_struct_proxy(derive_ty)(
+            context, builder, value=derive_struct).jit_addr
         if isinstance(derive_ty, DeriveFunctionType):
             return emit_propagating_call(jit_addr)
 

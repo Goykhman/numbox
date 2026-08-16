@@ -57,6 +57,62 @@ Then in a *different module* main.py define::
    :show-inheritance:
    :undoc-members:
 
+numbox.utils.derive_wap
+-----------------------
+
+A first-class ``FunctionType`` value carries three addresses in its data model, and which
+one numba calls decides whether an exception can leave the call. The ``jit_addr`` slot holds
+the numba calling convention entry point, which unwinds; when it is empty numba calls the C
+wrapper instead, which it documents as not supporting exceptions.
+
+numba populates that slot for a ``Dispatcher`` and leaves it empty for everything else, so
+the compile result behind :func:`numbox.utils.highlevel.cres` would arrive with the slot
+unset. :class:`~numbox.utils.derive_wap.DeriveWAP` captures the entry point from the compile
+result and :class:`~numbox.utils.derive_wap.DeriveFunctionType` fills the slot from it, on
+both unboxing and constant lowering.
+
+The three slots are directly observable through
+:func:`numbox.utils.lowlevel.get_func_tuple`, which is the clearest way to see what the type
+adds. ``jit_addr`` is populated and matches the entry point the wrapper captured, while
+numba's own ``_get_jit_address`` still yields 0 for the same value, because it resolves an
+address only for a ``Dispatcher``. The example needs numba 0.61 or later:
+
+.. code-block:: python
+
+    from numba import float64
+    from numba.experimental.function_type import _get_jit_address
+
+    from numbox.utils.derive_wap import DeriveWAP
+    from numbox.utils.highlevel import cres
+    from numbox.utils.lowlevel import get_func_tuple
+
+    sig = float64(float64, float64)
+
+    @cres(sig, cache=True)
+    def add(x, y):
+        return x + y
+
+    assert isinstance(add, DeriveWAP)
+
+    c_addr, py_addr, jit_addr = get_func_tuple(add)
+    assert jit_addr != 0
+    assert jit_addr == add.jit_address
+    assert _get_jit_address(add, sig) == 0
+
+Nothing above runs on an earlier numba. ``_get_jit_address`` does not exist there to import,
+the tuple has two entries rather than three, and ``cres`` returns a plain
+``CompileResultWAP`` rather than a :class:`~numbox.utils.derive_wap.DeriveWAP`, because
+without the slot there is nothing for the mechanism to populate.
+
+``test/utils/test_lowlevel.py::test_get_func_tuple`` pins every assertion above except the
+first; the wrapper's type is pinned separately by
+``test/utils/test_derive_wap.py::test_cres_mints_a_derive_wap``.
+
+.. automodule:: numbox.utils.derive_wap
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 numbox.utils.preprocessing
 --------------------------
 

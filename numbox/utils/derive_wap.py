@@ -1,49 +1,69 @@
-"""First-class derive values that carry a numba-callconv entry point.
+"""First-class function values whose exceptions propagate out of the call.
 
-Why this exists
----------------
+The mechanism
+-------------
 
-A ``Work.derive`` is invoked through a numba first-class ``FunctionType`` call.
-numba's own lowering for such a call branches on the function model's
-``jit_addr`` slot: non-null selects the numba calling convention plus
-``return_status_propagate``, so an exception unwinds into the caller; null
-selects the C wrapper, which numba documents as not supporting exceptions and
-which discards the exception, zero-fills the return value and reports the
+numba lowers a first-class ``FunctionType`` call two ways and picks between them on
+the function model's ``jit_addr`` slot. A populated slot selects the numba calling
+convention plus ``return_status_propagate``, so an exception unwinds into the caller.
+An empty slot selects the C wrapper, which numba documents as not supporting
+exceptions: it discards the exception, zero-fills the return value and reports the
 failure only as an unraisable on stderr.
 
-:func:`numbox.utils.highlevel.cres` produces a ``CompileResultWAP``, and numba's
-``_get_jit_address`` yields an address only for a ``Dispatcher``, returning 0 for
-everything else. A cres-backed derive therefore always took the swallowing path:
-``calculate()`` returned normally, ``data`` was left zero-filled, and ``derived``
-was set anyway so the wrong value was cached permanently. For ``unicode_type``
-data the zeroed string struct has a NULL data pointer, so reading it back from
-Python segfaulted the interpreter.
+numba fills the slot for a ``Dispatcher`` and leaves it empty for everything else,
+``_get_jit_address`` returning 0. A bare compile result therefore arrives at a call
+site with no entry point that could carry an exception out.
 
-:class:`DeriveWAP` captures the compile result's numba-callconv entry point and
+:class:`DeriveWAP` captures the compile result's numba-callconv entry point, and
 :class:`DeriveFunctionType` populates ``jit_addr`` from it on both unboxing and
-constant lowering, which lets :func:`numbox.core.work.work._call_derive` emit the
-propagating call.
+constant lowering. A value of this type carries a usable entry point wherever it
+goes.
 
-Two details worth knowing
--------------------------
+Using it
+--------
 
-``_call_derive`` never consulted ``jit_addr`` at all: it read function-struct
-slot 0 unconditionally. So the swallow on the ``Work`` path came from numbox's
-own intrinsic rather than from numba's lowering, and an njit dispatcher passed as
-an explicitly ``FunctionType``-typed argument swallowed there even though numba
-had populated its ``jit_addr``. That is why ``_call_derive`` also branches at
-runtime for plain ``FunctionType`` fields rather than selecting purely on the
-numbox-owned type.
+:func:`numbox.utils.highlevel.cres` mints these values, so a `cres`-compiled function
+is already one::
 
-The decorators below are numba's public extension API, save for
-``lower_constant``, which ``numba.extending`` does not re-export, but what they
-register against is not: ``FunctionModel``, ``CompileResultWAP``, ``Conversion``,
-``box_function_type`` and ``lower_get_wrapper_address`` all sit outside
-``numba.extending``, ``JIT_ADDR_SLOT`` hardcodes ``FunctionModel``'s field order,
-and the constant lowering drives ``context.declare_function`` and
-``context.active_code_library`` directly. What does hold is that no numba
-internals are patched: nothing here replaces numba behaviour, it only registers
-against it.
+    @cres(float64(float64))
+    def f(x):
+        if x < 0:
+            raise ValueError("negative")
+        return x
+
+Filling the slot is necessary but not sufficient: the *call site* decides which
+convention it emits, and one that reads the wrapper address unconditionally gets the
+C wrapper however the slot is filled. A consumer opts in by reading ``jit_addr`` and
+emitting ``call_conv.call_function`` plus ``return_status_propagate`` when it is
+non-null; numba's own version of that is
+``numba.core.lowering.Lower.__call_first_class_function_pointer``.
+
+``numbox.core.work.work._call_derive`` is the worked example in this repository, and
+:doc:`numbox.core.work` walks through it. It selects the propagating convention at
+compile time for a :class:`DeriveFunctionType`, and tests the slot at runtime for a
+plain ``FunctionType``, which numba does populate for an njit dispatcher passed as a
+``FunctionType``-typed argument.
+
+Limits
+------
+
+:meth:`DeriveFunctionType.can_convert_to` documents the one direction that does not
+survive: a value handed from Python into a parameter *declared* as a plain
+``FunctionType`` degrades to the C convention on the way in.
+
+Where numba has no such slot :func:`jit_addr_supported` is false, the whole mechanism
+is inert and ``cres`` returns a plain ``CompileResultWAP``.
+
+Standing on numba
+-----------------
+
+The decorators below are numba's public extension API, save for ``lower_constant``,
+which ``numba.extending`` does not re-export. What they register against is not:
+``FunctionModel``, ``CompileResultWAP``, ``Conversion``, ``box_function_type`` and
+``lower_get_wrapper_address`` all sit outside ``numba.extending``, and the constant
+lowering drives ``context.declare_function`` and ``context.active_code_library``
+directly. What does hold is that no numba internals are patched: nothing here
+replaces numba behaviour, it only registers against it.
 """
 from numba.core import cgutils, types
 from numba.core.imputils import lower_cast, lower_constant
@@ -55,14 +75,11 @@ from numba.experimental.function_type import (
 )
 from numba.extending import NativeValue, box, register_model, unbox
 
-from numbox.core.configurations import function_struct_size
+from numbox.core.configurations import function_struct_has
 
 
 __all__ = ["DeriveFunctionType", "DeriveWAP", "jit_addr_supported", "rewrap_derive"]
 
-
-#: Index of ``jit_addr`` in the ``FunctionModel`` struct ``(c_addr, py_addr, jit_addr)``.
-JIT_ADDR_SLOT = 2
 
 #: Where :func:`rewrap_derive` parks the upgraded wrapper on the object it upgrades,
 #: so that the address stored in ``py_addr`` stays backed for as long as the caller
@@ -73,11 +90,11 @@ _UPGRADED_ATTR = "_numbox_derive_wap"
 def jit_addr_supported() -> bool:
     """Whether the running numba exposes the ``jit_addr`` slot.
 
-    The slot was added to ``FunctionModel`` in numba 0.61. On 0.60 the mechanism
-    does not exist, so numbox keeps its previous behaviour there rather than
-    shipping a half-installed variant.
+    The slot was added to ``FunctionModel`` in numba 0.61. Where it is absent the
+    mechanism has nothing to populate, so numbox leaves first-class calls to numba
+    rather than shipping a half-installed variant.
     """
-    return function_struct_size >= 3
+    return function_struct_has("jit_addr")
 
 
 class DeriveFunctionType(FunctionType):

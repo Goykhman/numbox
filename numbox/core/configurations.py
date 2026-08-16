@@ -3,6 +3,10 @@ import json
 
 from importlib.metadata import version
 
+import numba.experimental.function_type  # noqa: F401  registers `FunctionModel` against `FunctionType`
+from numba.core.datamodel import default_manager
+from numba.core.types import FunctionType, void
+
 
 def get_jit_options():
     """
@@ -46,12 +50,26 @@ MAX_STR_LENGTH = 2 ** 31 - 1
 numba_version = int(version("numba").split(".")[1])
 assert numba_version >= 60, numba_version
 
-#: See the `FunctionModel` struct: three slots (c_addr, py_addr, jit_addr) on numba
-#: 0.61 and later, two on 0.60, where they are named (addr, pyaddr). Only the count
-#: is consumed here.
-#:
-#: Kept here rather than beside its users in `numbox.utils.lowlevel`, because
-#: importing that module compiles a cached eager `@njit` helper, and both this constant and
-#: `numbox.core.work.derive_wap` are needed on paths that must stay free of
-#: compilation side effects.
-function_struct_size = 3 if numba_version >= 61 else 2
+#: numba's `FunctionModel`, resolved once. Looking a data model up is type machinery and
+#: compiles nothing, which is what lets the layout be read here: `numbox.utils.lowlevel` and
+#: `numbox.utils.derive_wap` both need it on paths that must stay free of compilation side
+#: effects, and importing the former compiles a cached eager `@njit` helper.
+_function_model = default_manager.lookup(FunctionType(void()))
+
+#: Number of slots in the `FunctionModel` struct: (c_addr, py_addr, jit_addr) on numba 0.61
+#: and later, (addr, pyaddr) before it. Read off the data model rather than inferred from the
+#: numba version, so the layout is discovered rather than assumed.
+function_struct_size = _function_model.field_count
+
+
+def function_struct_has(field: str) -> bool:
+    """Whether numba's `FunctionModel` carries a slot named `field`.
+
+    `get_field_position` is numba's own accessor for the question and raises `KeyError` when
+    the slot is absent, which is how a numba predating it reads.
+    """
+    try:
+        _function_model.get_field_position(field)
+    except KeyError:
+        return False
+    return True

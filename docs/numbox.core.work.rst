@@ -299,14 +299,6 @@ numbox.core.work.combine_utils
    :show-inheritance:
    :undoc-members:
 
-numbox.core.work.derive_wap
----------------------------
-
-.. automodule:: numbox.core.work.derive_wap
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
 numbox.core.work.loader_utils
 -----------------------------
 
@@ -558,9 +550,9 @@ reports the exception on stderr as unraisable (``Exception ignored in:
 unwinding.
 
 numba populates `jit_addr` only for a dispatcher, leaving it empty for the compile
-result that :func:`numbox.utils.highlevel.cres` produces. :mod:`numbox.core.work.derive_wap`
-therefore defines its own :class:`~numbox.core.work.derive_wap.DeriveWAP`, which captures
-the calling convention entry point, and :class:`~numbox.core.work.derive_wap.DeriveFunctionType`,
+result that :func:`numbox.utils.highlevel.cres` produces. :mod:`numbox.utils.derive_wap`
+therefore defines its own :class:`~numbox.utils.derive_wap.DeriveWAP`, which captures
+the calling convention entry point, and :class:`~numbox.utils.derive_wap.DeriveFunctionType`,
 which fills the slot from it. The registrations go through numba's public extension API,
 save for ``lower_constant``, which ``numba.extending`` does not re-export; the data
 model, wrapper protocol and conversion types they build on sit outside it too. No numba
@@ -624,7 +616,7 @@ These limits are worth knowing:
 - Downgrading numbox below this feature, after a cached compile has seen a `derive`,
   leaves that cache unreadable rather than merely stale. numba unpickles the stored type
   index before it checks the freshness stamp, so the load fails outright with
-  ``ModuleNotFoundError: No module named 'numbox.core.work.derive_wap'``. Editing or
+  ``ModuleNotFoundError: No module named 'numbox.utils.derive_wap'``. Editing or
   touching your own source does not clear it; deleting the cache directory does.
 
 Compiling the `derive` itself with ``parallel`` or ``nogil`` changes nothing, including
