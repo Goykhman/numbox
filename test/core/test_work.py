@@ -4,7 +4,7 @@ from numba import njit
 from numba.core.errors import NumbaError
 from numba.core.types import Array, float64, int64
 
-from numbox.core.work.work import make_work
+from numbox.core.work.work import _make_work_jit, make_work
 from numbox.core.work.explain import explain
 from numbox.utils.highlevel import cres
 from test.auxiliary_utils import collect_and_run_tests
@@ -273,6 +273,12 @@ def test_make_work_rejects_bare_dispatcher(eager):
     with pytest.raises(AssertionError) as e:
         make_work("w", 0.0, sources=(), derive=derive_jit)
     assert "Either None or Compile Result supported, not CPUDispatcher" in str(e.value)
+
+
+def test_make_work_exposes_py_func():
+    """`make_work` stopped being a dispatcher; the attribute callers introspected
+    survives as the undecorated implementation."""
+    assert make_work.py_func is _make_work_jit.py_func
 
 
 if __name__ == "__main__":

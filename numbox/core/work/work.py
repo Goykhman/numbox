@@ -11,11 +11,16 @@ from numba.extending import intrinsic, overload, overload_method
 from numba.typed.typeddict import Dict
 from numba.typed.typedlist import List
 
+from numba.core import cgutils
+
 from numbox.core.any.erased_type import ErasedType
 from numbox.core.configurations import jit_options
 from numbox.core.work.lowlevel_work_utils import ll_make_work, WorkTypeClass
 from numbox.core.work.node import NodeType
 from numbox.core.work.node_base import NodeBase, NodeBaseType
+from numbox.utils.derive_wap import (
+    DeriveFunctionType, jit_addr_supported, rewrap_derive
+)
 from numbox.utils.lowlevel import (
     extract_struct_member, _cast, _get_func_tuple, is_not_null, get_func_p_from_func_struct, get_ll_func_sig
 )
@@ -46,9 +51,18 @@ class Work(NodeBase):
         Heterogeneous tuple of `Work` instances that this `Work` instance depends on.
     derive : FunctionType
         Function of the signature determined by the data types of `sources` and `data`.
-        Must not let an exception escape: it is called through the first-class function
-        boundary, which swallows the exception, leaves `data` zero-filled and still sets
-        `derived`. Catch inside the function and encode failure in the returned value.
+        On numba 0.61 and later an exception raised inside it propagates out of
+        `calculate`, leaving `data` untouched and `derived` unset, so the node can be
+        calculated again once the cause is addressed. numba's error path holds the
+        references it took, so a node whose derive has ever failed stays pinned, along
+        with what it references, for the life of the process; retrying the same node
+        adds nothing further. Several cases still discard the
+        exception and cache a zero-filled `data`: numba 0.60, which has no `jit_addr`
+        slot to carry the entry point that can unwind; a derive built directly
+        against numba rather than through `numbox.utils.highlevel.cres` and reached from
+        jitted scope, where it cannot be upgraded; a `cfunc`, which is not upgraded
+        either; and a derive handed from Python to a jitted parameter that is declared
+        as a plain `FunctionType`, which degrades on the way in.
     derived : int8
         Flag indicating whether the `data` has already been calculated.
     node : NodeType
@@ -147,12 +161,59 @@ overload(Work, jit_options=jit_options)(_deleted_work_ctor)
 
 
 @njit(**jit_options)
-def make_work(name, data, sources=(), derive=None):
+def _make_work_jit(name, data, sources=(), derive=None):
     return ll_make_work(name, data, sources, derive)
+
+
+def make_work(name, data, sources=(), derive=None):
+    """Create a `Work` from Python scope.
+
+    A derive compiled by :func:`~numbox.utils.highlevel.cres` already propagates
+    its exceptions. One built directly against numba does not, so it is upgraded
+    here. The upgrade has to happen in Python because the check is on the object's
+    class, which a jitted body cannot see.
+
+    Jitted callers reach the overload below, which takes the value as given: by
+    then the type is fixed and nothing can be re-wrapped.
+
+    ``make_work.py_func`` is preserved from when this function was itself a
+    dispatcher, since that attribute was part of the surface callers could reach for.
+    It is not callable, then or now: the body it exposes calls the `ll_make_work`
+    intrinsic and raises `NotImplementedError`. Note it is `_make_work_jit`'s body
+    rather than this one, so it does not carry the `rewrap_derive` call above.
+    """
+    return _make_work_jit(name, data, sources, rewrap_derive(derive))
+
+
+@overload(make_work, strict=False, jit_options=jit_options)
+def ol_make_work(name, data, sources=(), derive=None):
+    def _(name, data, sources=(), derive=None):
+        return ll_make_work(name, data, sources, derive)
+    return _
+
+
+make_work.py_func = _make_work_jit.py_func
 
 
 @intrinsic
 def _call_derive(typingctx: Context, derive_ty: FunctionType, sources_ty: Tuple):
+    """Call the derive, propagating an exception it raises where possible.
+
+    Three cases, and only the second needs a runtime test. The first is settled once
+    the field's type is known. The third is reached both statically, on a numba with
+    no ``jit_addr`` slot at all, and at runtime, where the slot is null:
+
+    - a ``DeriveFunctionType`` field carries a populated ``jit_addr`` by
+      construction, so the propagating convention is selected outright with no
+      runtime branch;
+    - a plain ``FunctionType`` field may still carry one, because numba's own
+      unboxing populates it for an njit dispatcher passed as a
+      ``FunctionType``-typed argument, so ``jit_addr`` is tested at runtime;
+    - a null ``jit_addr`` has no entry point that can carry an exception, so the
+      previous C call is emitted unchanged.
+    """
+    fsig = derive_ty.signature
+
     def codegen(context, builder, signature, arguments):
         derive_struct, sources = arguments
         derive_args = []
@@ -160,12 +221,39 @@ def _call_derive(typingctx: Context, derive_ty: FunctionType, sources_ty: Tuple)
             source = builder.extract_value(sources, source_ind)
             data = extract_struct_member(context, builder, source_ty, source, "data")
             derive_args.append(data)
-        derive_p_raw = get_func_p_from_func_struct(builder, derive_struct)
-        derive_ty_ll = get_ll_func_sig(context, derive_ty)
-        derive_p = builder.bitcast(derive_p_raw, derive_ty_ll.as_pointer())
-        res = builder.call(derive_p, derive_args)
-        return res
-    sig = derive_ty.signature.return_type(derive_ty, sources_ty)
+
+        def emit_propagating_call(jit_addr):
+            func_ty = context.call_conv.get_function_type(fsig.return_type, fsig.args)
+            derive_p = builder.bitcast(jit_addr, func_ty.as_pointer())
+            status, res = context.call_conv.call_function(
+                builder, derive_p, fsig.return_type, fsig.args, derive_args
+            )
+            with cgutils.if_unlikely(builder, status.is_error):
+                context.call_conv.return_status_propagate(builder, status)
+            return res
+
+        def emit_c_call():
+            derive_p_raw = get_func_p_from_func_struct(builder, derive_struct)
+            derive_ty_ll = get_ll_func_sig(context, derive_ty)
+            derive_p = builder.bitcast(derive_p_raw, derive_ty_ll.as_pointer())
+            return builder.call(derive_p, derive_args)
+
+        if not jit_addr_supported():
+            return emit_c_call()
+
+        jit_addr = cgutils.create_struct_proxy(derive_ty)(
+            context, builder, value=derive_struct).jit_addr
+        if isinstance(derive_ty, DeriveFunctionType):
+            return emit_propagating_call(jit_addr)
+
+        res_slot = cgutils.alloca_once(builder, context.get_value_type(fsig.return_type))
+        with builder.if_else(cgutils.is_null(builder, jit_addr), likely=False) as (null, populated):
+            with null:
+                builder.store(emit_c_call(), res_slot)
+            with populated:
+                builder.store(emit_propagating_call(jit_addr), res_slot)
+        return builder.load(res_slot)
+    sig = fsig.return_type(derive_ty, sources_ty)
     return sig, codegen
 
 

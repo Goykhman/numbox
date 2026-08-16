@@ -15,6 +15,7 @@ from textwrap import dedent, indent
 from typing import Callable, Iterable, Optional
 
 from numbox.core.configurations import jit_options as jit_options_
+from numbox.utils.derive_wap import DeriveWAP, jit_addr_supported
 from numbox.utils.fingerprint import (
     _Unfingerprintable, _canon_value, _fingerprint_function,
     _fingerprint_function_best_effort, _loaded_global_names,
@@ -66,7 +67,15 @@ def _method_identity(method, user_ns) -> tuple[str, bool]:
 
 
 def cres(sig, **kwargs):
-    """ Returns Python proxy to `FunctionType` rather than `CPUDispatcher` returned by `njit` """
+    """ Returns Python proxy to `FunctionType` rather than `CPUDispatcher` returned by `njit`
+
+    The proxy is a ``DeriveWAP``, typed as ``DeriveFunctionType``, so that an
+    exception raised inside the compiled body propagates out of a first-class
+    call instead of being discarded. See
+    :mod:`numbox.utils.derive_wap` for why that requires a numbox-owned
+    type. On numba 0.60, which has no ``jit_addr`` slot to populate, a plain
+    ``CompileResultWAP`` is returned and the previous behaviour is kept.
+    """
     if not isinstance(sig, Signature):
         raise ValueError(f"Expected a single signature, found {sig} of type {type(sig)}")
 
@@ -75,8 +84,9 @@ def cres(sig, **kwargs):
         sigs = func_jit.nopython_signatures
         assert len(sigs) == 1, f"Ambiguous signature, {sigs}"
         func_cres = func_jit.get_compile_result(sigs[0])
-        cres_wap = CompileResultWAP(func_cres)
-        return cres_wap
+        if jit_addr_supported():
+            return DeriveWAP(func_cres)
+        return CompileResultWAP(func_cres)
     return _
 
 
