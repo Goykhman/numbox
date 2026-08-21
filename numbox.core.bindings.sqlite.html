@@ -1,0 +1,1106 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.sqlite &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/numbox.core.bindings.sqlite.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="numbox.core.proxy" href="numbox.core.proxy.html" />
+    <link rel="prev" title="numbox.core.bindings" href="numbox.core.bindings.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">numbox</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.any.html">numbox.core.any</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.html">numbox.core.bindings</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbox.core.bindings.sqlite</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite.conn">numbox.core.bindings.sqlite.conn</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_changes"><code class="docutils literal notranslate"><span class="pre">sqlite3_changes()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_changes64"><code class="docutils literal notranslate"><span class="pre">sqlite3_changes64()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_close"><code class="docutils literal notranslate"><span class="pre">sqlite3_close()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_db_filename"><code class="docutils literal notranslate"><span class="pre">sqlite3_db_filename()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_db_handle"><code class="docutils literal notranslate"><span class="pre">sqlite3_db_handle()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_db_readonly"><code class="docutils literal notranslate"><span class="pre">sqlite3_db_readonly()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_errcode"><code class="docutils literal notranslate"><span class="pre">sqlite3_errcode()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_errmsg"><code class="docutils literal notranslate"><span class="pre">sqlite3_errmsg()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_extended_errcode"><code class="docutils literal notranslate"><span class="pre">sqlite3_extended_errcode()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_last_insert_rowid"><code class="docutils literal notranslate"><span class="pre">sqlite3_last_insert_rowid()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_libversion"><code class="docutils literal notranslate"><span class="pre">sqlite3_libversion()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_libversion_number"><code class="docutils literal notranslate"><span class="pre">sqlite3_libversion_number()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_open"><code class="docutils literal notranslate"><span class="pre">sqlite3_open()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_open_v2"><code class="docutils literal notranslate"><span class="pre">sqlite3_open_v2()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_threadsafe"><code class="docutils literal notranslate"><span class="pre">sqlite3_threadsafe()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_total_changes"><code class="docutils literal notranslate"><span class="pre">sqlite3_total_changes()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.conn.sqlite3_total_changes64"><code class="docutils literal notranslate"><span class="pre">sqlite3_total_changes64()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite.stmt">numbox.core.bindings.sqlite.stmt</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.stmt.sqlite3_expanded_sql"><code class="docutils literal notranslate"><span class="pre">sqlite3_expanded_sql()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.stmt.sqlite3_finalize"><code class="docutils literal notranslate"><span class="pre">sqlite3_finalize()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.stmt.sqlite3_prepare_v2"><code class="docutils literal notranslate"><span class="pre">sqlite3_prepare_v2()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.stmt.sqlite3_reset"><code class="docutils literal notranslate"><span class="pre">sqlite3_reset()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.stmt.sqlite3_sql"><code class="docutils literal notranslate"><span class="pre">sqlite3_sql()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.stmt.sqlite3_step"><code class="docutils literal notranslate"><span class="pre">sqlite3_step()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.stmt.sqlite3_stmt_busy"><code class="docutils literal notranslate"><span class="pre">sqlite3_stmt_busy()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite.bind">numbox.core.bindings.sqlite.bind</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_blob"><code class="docutils literal notranslate"><span class="pre">sqlite3_bind_blob()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_double"><code class="docutils literal notranslate"><span class="pre">sqlite3_bind_double()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_int"><code class="docutils literal notranslate"><span class="pre">sqlite3_bind_int()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_int64"><code class="docutils literal notranslate"><span class="pre">sqlite3_bind_int64()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_null"><code class="docutils literal notranslate"><span class="pre">sqlite3_bind_null()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_parameter_count"><code class="docutils literal notranslate"><span class="pre">sqlite3_bind_parameter_count()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_parameter_index"><code class="docutils literal notranslate"><span class="pre">sqlite3_bind_parameter_index()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_parameter_name"><code class="docutils literal notranslate"><span class="pre">sqlite3_bind_parameter_name()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_text"><code class="docutils literal notranslate"><span class="pre">sqlite3_bind_text()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite.column">numbox.core.bindings.sqlite.column</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.column.sqlite3_column_blob"><code class="docutils literal notranslate"><span class="pre">sqlite3_column_blob()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.column.sqlite3_column_bytes"><code class="docutils literal notranslate"><span class="pre">sqlite3_column_bytes()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.column.sqlite3_column_count"><code class="docutils literal notranslate"><span class="pre">sqlite3_column_count()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.column.sqlite3_column_database_name"><code class="docutils literal notranslate"><span class="pre">sqlite3_column_database_name()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.column.sqlite3_column_decltype"><code class="docutils literal notranslate"><span class="pre">sqlite3_column_decltype()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.column.sqlite3_column_double"><code class="docutils literal notranslate"><span class="pre">sqlite3_column_double()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.column.sqlite3_column_int"><code class="docutils literal notranslate"><span class="pre">sqlite3_column_int()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.column.sqlite3_column_int64"><code class="docutils literal notranslate"><span class="pre">sqlite3_column_int64()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.column.sqlite3_column_name"><code class="docutils literal notranslate"><span class="pre">sqlite3_column_name()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.column.sqlite3_column_origin_name"><code class="docutils literal notranslate"><span class="pre">sqlite3_column_origin_name()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.column.sqlite3_column_table_name"><code class="docutils literal notranslate"><span class="pre">sqlite3_column_table_name()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.column.sqlite3_column_text"><code class="docutils literal notranslate"><span class="pre">sqlite3_column_text()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.column.sqlite3_column_type"><code class="docutils literal notranslate"><span class="pre">sqlite3_column_type()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite.exec">numbox.core.bindings.sqlite.exec</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.exec.sqlite3_exec"><code class="docutils literal notranslate"><span class="pre">sqlite3_exec()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.exec.sqlite3_free"><code class="docutils literal notranslate"><span class="pre">sqlite3_free()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.exec.sqlite3_malloc"><code class="docutils literal notranslate"><span class="pre">sqlite3_malloc()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite.blob">numbox.core.bindings.sqlite.blob</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.blob.sqlite3_blob_bytes"><code class="docutils literal notranslate"><span class="pre">sqlite3_blob_bytes()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.blob.sqlite3_blob_close"><code class="docutils literal notranslate"><span class="pre">sqlite3_blob_close()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.blob.sqlite3_blob_open"><code class="docutils literal notranslate"><span class="pre">sqlite3_blob_open()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.blob.sqlite3_blob_read"><code class="docutils literal notranslate"><span class="pre">sqlite3_blob_read()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.blob.sqlite3_blob_reopen"><code class="docutils literal notranslate"><span class="pre">sqlite3_blob_reopen()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.blob.sqlite3_blob_write"><code class="docutils literal notranslate"><span class="pre">sqlite3_blob_write()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite.hooks">numbox.core.bindings.sqlite.hooks</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.hooks.sqlite3_busy_handler"><code class="docutils literal notranslate"><span class="pre">sqlite3_busy_handler()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.hooks.sqlite3_commit_hook"><code class="docutils literal notranslate"><span class="pre">sqlite3_commit_hook()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.hooks.sqlite3_progress_handler"><code class="docutils literal notranslate"><span class="pre">sqlite3_progress_handler()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.hooks.sqlite3_rollback_hook"><code class="docutils literal notranslate"><span class="pre">sqlite3_rollback_hook()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.hooks.sqlite3_trace_v2"><code class="docutils literal notranslate"><span class="pre">sqlite3_trace_v2()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.hooks.sqlite3_update_hook"><code class="docutils literal notranslate"><span class="pre">sqlite3_update_hook()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite.constants">numbox.core.bindings.sqlite.constants</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite.value">numbox.core.bindings.sqlite.value</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.value.sqlite3_value_blob"><code class="docutils literal notranslate"><span class="pre">sqlite3_value_blob()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.value.sqlite3_value_bytes"><code class="docutils literal notranslate"><span class="pre">sqlite3_value_bytes()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.value.sqlite3_value_double"><code class="docutils literal notranslate"><span class="pre">sqlite3_value_double()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.value.sqlite3_value_dup"><code class="docutils literal notranslate"><span class="pre">sqlite3_value_dup()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.value.sqlite3_value_free"><code class="docutils literal notranslate"><span class="pre">sqlite3_value_free()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.value.sqlite3_value_frombind"><code class="docutils literal notranslate"><span class="pre">sqlite3_value_frombind()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.value.sqlite3_value_int"><code class="docutils literal notranslate"><span class="pre">sqlite3_value_int()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.value.sqlite3_value_int64"><code class="docutils literal notranslate"><span class="pre">sqlite3_value_int64()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.value.sqlite3_value_nochange"><code class="docutils literal notranslate"><span class="pre">sqlite3_value_nochange()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.value.sqlite3_value_numeric_type"><code class="docutils literal notranslate"><span class="pre">sqlite3_value_numeric_type()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.value.sqlite3_value_subtype"><code class="docutils literal notranslate"><span class="pre">sqlite3_value_subtype()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.value.sqlite3_value_text"><code class="docutils literal notranslate"><span class="pre">sqlite3_value_text()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.value.sqlite3_value_type"><code class="docutils literal notranslate"><span class="pre">sqlite3_value_type()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite.result">numbox.core.bindings.sqlite.result</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_blob"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_blob()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_blob64"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_blob64()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_double"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_double()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_error"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_error()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_error_code"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_error_code()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_error_nomem"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_error_nomem()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_error_toobig"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_error_toobig()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_int"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_int()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_int64"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_int64()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_null"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_null()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_subtype"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_subtype()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_text"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_text()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_text64"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_text64()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_value"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_value()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_zeroblob"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_zeroblob()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.result.sqlite3_result_zeroblob64"><code class="docutils literal notranslate"><span class="pre">sqlite3_result_zeroblob64()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite.udf">numbox.core.bindings.sqlite.udf</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.udf.sqlite3_aggregate_context"><code class="docutils literal notranslate"><span class="pre">sqlite3_aggregate_context()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.udf.sqlite3_context_db_handle"><code class="docutils literal notranslate"><span class="pre">sqlite3_context_db_handle()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.udf.sqlite3_create_function_v2"><code class="docutils literal notranslate"><span class="pre">sqlite3_create_function_v2()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.udf.sqlite3_create_window_function"><code class="docutils literal notranslate"><span class="pre">sqlite3_create_window_function()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.udf.sqlite3_user_data"><code class="docutils literal notranslate"><span class="pre">sqlite3_user_data()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite.udf_helpers">numbox.core.bindings.sqlite.udf_helpers</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.udf_helpers.register_aggregate"><code class="docutils literal notranslate"><span class="pre">register_aggregate()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.udf_helpers.register_window"><code class="docutils literal notranslate"><span class="pre">register_window()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite.vtable">numbox.core.bindings.sqlite.vtable</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.vtable.register_table"><code class="docutils literal notranslate"><span class="pre">register_table()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite.query">numbox.core.bindings.sqlite.query</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.query.query_to_array"><code class="docutils literal notranslate"><span class="pre">query_to_array()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite.tvf">numbox.core.bindings.sqlite.tvf</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite.tvf.register_tvf"><code class="docutils literal notranslate"><span class="pre">register_tvf()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#module-numbox.core.bindings.sqlite._typemap">numbox.core.bindings.sqlite._typemap</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite._typemap.utf32_to_utf8"><code class="docutils literal notranslate"><span class="pre">utf32_to_utf8()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#numbox.core.bindings.sqlite._typemap.utf8_to_utf32"><code class="docutils literal notranslate"><span class="pre">utf8_to_utf32()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.proxy.html">numbox.core.proxy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.variable.html">numbox.core.variable</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.vector.html">numbox.core.vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.work.html">numbox.core.work</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.utils.html">numbox.utils</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">numbox</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.sqlite</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbox.core.bindings.sqlite.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbox-core-bindings-sqlite">
+<h1>numbox.core.bindings.sqlite<a class="headerlink" href="#numbox-core-bindings-sqlite" title="Link to this heading"></a></h1>
+<p>SQLite bindings, grouped in the <code class="docutils literal notranslate"><span class="pre">numbox.core.bindings.sqlite</span></code> subpackage.
+Import from the specific module, e.g.
+<code class="docutils literal notranslate"><span class="pre">from</span> <span class="pre">numbox.core.bindings.sqlite.conn</span> <span class="pre">import</span> <span class="pre">sqlite3_open</span></code>. The package
+<code class="docutils literal notranslate"><span class="pre">__init__</span></code> is empty, so importing one module does not pull in (or compile)
+the rest of the SQLite subsystem.</p>
+<section id="module-numbox.core.bindings.sqlite.conn">
+<span id="numbox-core-bindings-sqlite-conn"></span><h2>numbox.core.bindings.sqlite.conn<a class="headerlink" href="#module-numbox.core.bindings.sqlite.conn" title="Link to this heading"></a></h2>
+<p>SQLite connection + metadata bindings.</p>
+<p>Resolves the shared library via <code class="docutils literal notranslate"><span class="pre">load_lib(&quot;sqlite3&quot;)</span></code> from
+<code class="docutils literal notranslate"><span class="pre">utils._loaded_libs</span></code>. Other <code class="docutils literal notranslate"><span class="pre">sqlite/*.py</span></code> modules (currently
+<code class="docutils literal notranslate"><span class="pre">column</span></code>) call the same getter rather than importing
+<code class="docutils literal notranslate"><span class="pre">_sqlite3_lib</span></code> from here, so there’s no cross-module dependency on
+which file happens to load the library first.</p>
+<p>Two functions are decorated with <code class="docutils literal notranslate"><span class="pre">proxy_if_available</span></code>:
+<code class="docutils literal notranslate"><span class="pre">sqlite3_changes64</span></code> and <code class="docutils literal notranslate"><span class="pre">sqlite3_total_changes64</span></code>, both added in
+SQLite 3.37 (Nov 2021). Older library versions lack these symbols —
+notably the SQLite 3.34 shipped with CPython 3.10 on Windows, and
+distro-shipped system sqlite3 on Linux / macOS that predates 3.37.
+The wrappers stub to <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code> so callers can
+<code class="docutils literal notranslate"><span class="pre">hasattr(...,&quot;as_func&quot;)</span></code> to decide whether to use them or fall back
+to the int32 variants.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_changes">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_changes</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_changes"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_changes" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_changes64">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_changes64</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_changes64"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_changes64" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_close">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_close</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_close"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_close" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_db_filename">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_db_filename</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_db_filename"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_db_filename" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_db_handle">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_db_handle</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_db_handle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_db_handle" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_db_readonly">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_db_readonly</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_db_readonly"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_db_readonly" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_errcode">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_errcode</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_errcode"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_errcode" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_errmsg">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_errmsg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_errmsg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_errmsg" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_extended_errcode">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_extended_errcode</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_extended_errcode"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_extended_errcode" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_last_insert_rowid">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_last_insert_rowid</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_last_insert_rowid"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_last_insert_rowid" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_libversion">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_libversion</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_libversion"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_libversion" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_libversion_number">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_libversion_number</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_libversion_number"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_libversion_number" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_open">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_open</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">db_pp</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_open"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_open" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_open_v2">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_open_v2</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">filename_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">db_pp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flags</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vfs_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_open_v2"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_open_v2" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_threadsafe">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_threadsafe</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_threadsafe"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_threadsafe" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_total_changes">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_total_changes</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_total_changes"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_total_changes" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.conn.sqlite3_total_changes64">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.conn.</span></span><span class="sig-name descname"><span class="pre">sqlite3_total_changes64</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/conn.html#sqlite3_total_changes64"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.conn.sqlite3_total_changes64" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-numbox.core.bindings.sqlite.stmt">
+<span id="numbox-core-bindings-sqlite-stmt"></span><h2>numbox.core.bindings.sqlite.stmt<a class="headerlink" href="#module-numbox.core.bindings.sqlite.stmt" title="Link to this heading"></a></h2>
+<p>SQLite statement-lifecycle bindings: prepare_v2 / finalize / reset / step /
+sql / expanded_sql / stmt_busy.</p>
+<p>Note: <code class="docutils literal notranslate"><span class="pre">sqlite3_expanded_sql</span></code> returns a <code class="docutils literal notranslate"><span class="pre">char</span> <span class="pre">*</span></code> the caller MUST free via
+<code class="docutils literal notranslate"><span class="pre">sqlite3_free</span></code> (bound in sqlite/exec.py). Document this with each call site
+rather than building a wrapper that auto-frees — the wrapper would hide
+ownership in a way the rest of the bindings don’t.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.stmt.sqlite3_expanded_sql">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.stmt.</span></span><span class="sig-name descname"><span class="pre">sqlite3_expanded_sql</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/stmt.html#sqlite3_expanded_sql"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.stmt.sqlite3_expanded_sql" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.stmt.sqlite3_finalize">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.stmt.</span></span><span class="sig-name descname"><span class="pre">sqlite3_finalize</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/stmt.html#sqlite3_finalize"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.stmt.sqlite3_finalize" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.stmt.sqlite3_prepare_v2">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.stmt.</span></span><span class="sig-name descname"><span class="pre">sqlite3_prepare_v2</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sql_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_byte</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">stmt_pp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">tail_pp</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/stmt.html#sqlite3_prepare_v2"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.stmt.sqlite3_prepare_v2" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.stmt.sqlite3_reset">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.stmt.</span></span><span class="sig-name descname"><span class="pre">sqlite3_reset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/stmt.html#sqlite3_reset"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.stmt.sqlite3_reset" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.stmt.sqlite3_sql">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.stmt.</span></span><span class="sig-name descname"><span class="pre">sqlite3_sql</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/stmt.html#sqlite3_sql"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.stmt.sqlite3_sql" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.stmt.sqlite3_step">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.stmt.</span></span><span class="sig-name descname"><span class="pre">sqlite3_step</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/stmt.html#sqlite3_step"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.stmt.sqlite3_step" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.stmt.sqlite3_stmt_busy">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.stmt.</span></span><span class="sig-name descname"><span class="pre">sqlite3_stmt_busy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/stmt.html#sqlite3_stmt_busy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.stmt.sqlite3_stmt_busy" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-numbox.core.bindings.sqlite.bind">
+<span id="numbox-core-bindings-sqlite-bind"></span><h2>numbox.core.bindings.sqlite.bind<a class="headerlink" href="#module-numbox.core.bindings.sqlite.bind" title="Link to this heading"></a></h2>
+<p>SQLite parameter-binding bindings.</p>
+<p>The destructor arg in bind_text / bind_blob (last intp) is one of:
+- SQLITE_STATIC = 0  -&gt; SQLite assumes the buffer outlives the statement
+- SQLITE_TRANSIENT = -1 -&gt; SQLite makes a copy
+- any other value -&gt; a C function pointer SQLite calls to free the buffer</p>
+<p>For numpy arrays passed via array_data_p, prefer SQLITE_TRANSIENT unless the
+caller can guarantee the array outlives the prepared statement.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.bind.sqlite3_bind_blob">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.bind.</span></span><span class="sig-name descname"><span class="pre">sqlite3_bind_blob</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">destructor</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/bind.html#sqlite3_bind_blob"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_blob" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.bind.sqlite3_bind_double">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.bind.</span></span><span class="sig-name descname"><span class="pre">sqlite3_bind_double</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">val</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/bind.html#sqlite3_bind_double"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_double" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.bind.sqlite3_bind_int">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.bind.</span></span><span class="sig-name descname"><span class="pre">sqlite3_bind_int</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">val</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/bind.html#sqlite3_bind_int"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_int" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.bind.sqlite3_bind_int64">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.bind.</span></span><span class="sig-name descname"><span class="pre">sqlite3_bind_int64</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">val</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/bind.html#sqlite3_bind_int64"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_int64" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.bind.sqlite3_bind_null">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.bind.</span></span><span class="sig-name descname"><span class="pre">sqlite3_bind_null</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/bind.html#sqlite3_bind_null"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_null" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.bind.sqlite3_bind_parameter_count">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.bind.</span></span><span class="sig-name descname"><span class="pre">sqlite3_bind_parameter_count</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/bind.html#sqlite3_bind_parameter_count"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_parameter_count" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.bind.sqlite3_bind_parameter_index">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.bind.</span></span><span class="sig-name descname"><span class="pre">sqlite3_bind_parameter_index</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/bind.html#sqlite3_bind_parameter_index"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_parameter_index" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.bind.sqlite3_bind_parameter_name">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.bind.</span></span><span class="sig-name descname"><span class="pre">sqlite3_bind_parameter_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/bind.html#sqlite3_bind_parameter_name"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_parameter_name" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.bind.sqlite3_bind_text">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.bind.</span></span><span class="sig-name descname"><span class="pre">sqlite3_bind_text</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">text_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">destructor</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/bind.html#sqlite3_bind_text"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.bind.sqlite3_bind_text" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-numbox.core.bindings.sqlite.column">
+<span id="numbox-core-bindings-sqlite-column"></span><h2>numbox.core.bindings.sqlite.column<a class="headerlink" href="#module-numbox.core.bindings.sqlite.column" title="Link to this heading"></a></h2>
+<p>SQLite column accessors.</p>
+<p>Three metadata accessors (column_database_name / column_table_name /
+column_origin_name) require SQLite to be compiled with
+SQLITE_ENABLE_COLUMN_METADATA. CPython’s bundled sqlite3.dll on Windows
+has it enabled, and we use only that bundled DLL on Windows (see
+<code class="docutils literal notranslate"><span class="pre">_resolve_lib_path</span></code> in <code class="docutils literal notranslate"><span class="pre">utils.py</span></code>); the system sqlite3 picked up
+via <code class="docutils literal notranslate"><span class="pre">find_library</span></code> on Linux / macOS may or may not, depending on the
+distribution. proxy_if_available stubs the accessors out when absent so
+callers can hasattr-guard or fall back.</p>
+<p>All other accessors are universally available across the matrix.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.column.sqlite3_column_blob">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.column.</span></span><span class="sig-name descname"><span class="pre">sqlite3_column_blob</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/column.html#sqlite3_column_blob"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.column.sqlite3_column_blob" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.column.sqlite3_column_bytes">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.column.</span></span><span class="sig-name descname"><span class="pre">sqlite3_column_bytes</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/column.html#sqlite3_column_bytes"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.column.sqlite3_column_bytes" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.column.sqlite3_column_count">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.column.</span></span><span class="sig-name descname"><span class="pre">sqlite3_column_count</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/column.html#sqlite3_column_count"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.column.sqlite3_column_count" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.column.sqlite3_column_database_name">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.column.</span></span><span class="sig-name descname"><span class="pre">sqlite3_column_database_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/column.html#sqlite3_column_database_name"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.column.sqlite3_column_database_name" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.column.sqlite3_column_decltype">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.column.</span></span><span class="sig-name descname"><span class="pre">sqlite3_column_decltype</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/column.html#sqlite3_column_decltype"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.column.sqlite3_column_decltype" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.column.sqlite3_column_double">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.column.</span></span><span class="sig-name descname"><span class="pre">sqlite3_column_double</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/column.html#sqlite3_column_double"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.column.sqlite3_column_double" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.column.sqlite3_column_int">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.column.</span></span><span class="sig-name descname"><span class="pre">sqlite3_column_int</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/column.html#sqlite3_column_int"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.column.sqlite3_column_int" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.column.sqlite3_column_int64">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.column.</span></span><span class="sig-name descname"><span class="pre">sqlite3_column_int64</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/column.html#sqlite3_column_int64"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.column.sqlite3_column_int64" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.column.sqlite3_column_name">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.column.</span></span><span class="sig-name descname"><span class="pre">sqlite3_column_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/column.html#sqlite3_column_name"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.column.sqlite3_column_name" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.column.sqlite3_column_origin_name">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.column.</span></span><span class="sig-name descname"><span class="pre">sqlite3_column_origin_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/column.html#sqlite3_column_origin_name"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.column.sqlite3_column_origin_name" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.column.sqlite3_column_table_name">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.column.</span></span><span class="sig-name descname"><span class="pre">sqlite3_column_table_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/column.html#sqlite3_column_table_name"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.column.sqlite3_column_table_name" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.column.sqlite3_column_text">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.column.</span></span><span class="sig-name descname"><span class="pre">sqlite3_column_text</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/column.html#sqlite3_column_text"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.column.sqlite3_column_text" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.column.sqlite3_column_type">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.column.</span></span><span class="sig-name descname"><span class="pre">sqlite3_column_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">stmt_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">idx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/column.html#sqlite3_column_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.column.sqlite3_column_type" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-numbox.core.bindings.sqlite.exec">
+<span id="numbox-core-bindings-sqlite-exec"></span><h2>numbox.core.bindings.sqlite.exec<a class="headerlink" href="#module-numbox.core.bindings.sqlite.exec" title="Link to this heading"></a></h2>
+<p>SQLite exec + free bindings.</p>
+<p>sqlite3_exec is the one-shot SQL escape hatch — it parses, prepares, steps,
+and finalizes a (potentially multi-statement) SQL string. The third arg is a
+function pointer to a per-row callback; pass 0 for no callback.</p>
+<p>sqlite3_free releases memory SQLite allocated and returned to the caller —
+notably the errmsg buffer from sqlite3_exec’s out-param, and the result of
+sqlite3_expanded_sql. sqlite3_malloc is its allocation counterpart (used by the
+virtual-table machinery to allocate the vtab and cursor structs).</p>
+<p>Callback shape (informational):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="nb">int</span> <span class="p">(</span><span class="o">*</span><span class="n">sqlite3_exec_callback</span><span class="p">)(</span><span class="n">void</span> <span class="o">*</span><span class="n">ctx</span><span class="p">,</span> <span class="nb">int</span> <span class="n">ncol</span><span class="p">,</span>
+                             <span class="n">char</span> <span class="o">**</span><span class="n">col_values</span><span class="p">,</span> <span class="n">char</span> <span class="o">**</span><span class="n">col_names</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Return 0 to continue, nonzero to abort with SQLITE_ABORT.</p>
+<p>Produce the callback address from Python via:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="nd">@cfunc</span><span class="p">(</span><span class="n">int32</span><span class="p">(</span><span class="n">voidptr</span><span class="p">,</span> <span class="n">int32</span><span class="p">,</span> <span class="n">intp</span><span class="p">,</span> <span class="n">intp</span><span class="p">))</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">my_row_cb</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">values_pp</span><span class="p">,</span> <span class="n">names_pp</span><span class="p">):</span> <span class="o">...</span>
+<span class="n">sqlite3_exec</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">sql</span><span class="p">,</span> <span class="n">my_row_cb</span><span class="o">.</span><span class="n">address</span><span class="p">,</span> <span class="n">ctx_p</span><span class="p">,</span> <span class="n">errmsg_pp</span><span class="p">)</span>
+</pre></div>
+</div>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.exec.sqlite3_exec">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.exec.</span></span><span class="sig-name descname"><span class="pre">sqlite3_exec</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sql_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ctx_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">errmsg_pp</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/exec.html#sqlite3_exec"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.exec.sqlite3_exec" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.exec.sqlite3_free">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.exec.</span></span><span class="sig-name descname"><span class="pre">sqlite3_free</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mem_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/exec.html#sqlite3_free"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.exec.sqlite3_free" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.exec.sqlite3_malloc">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.exec.</span></span><span class="sig-name descname"><span class="pre">sqlite3_malloc</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">n</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/exec.html#sqlite3_malloc"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.exec.sqlite3_malloc" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-numbox.core.bindings.sqlite.blob">
+<span id="numbox-core-bindings-sqlite-blob"></span><h2>numbox.core.bindings.sqlite.blob<a class="headerlink" href="#module-numbox.core.bindings.sqlite.blob" title="Link to this heading"></a></h2>
+<p>SQLite BLOB incremental I/O bindings: blob_open / _close / _bytes / _read /
+_write / _reopen.</p>
+<p>All functions present in SQLite 3.4.0 (2007) except _reopen which arrived in
+3.7.4 (2010). No version gating needed — far below the matrix floor of 3.34.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.blob.sqlite3_blob_bytes">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.blob.</span></span><span class="sig-name descname"><span class="pre">sqlite3_blob_bytes</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">blob_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/blob.html#sqlite3_blob_bytes"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.blob.sqlite3_blob_bytes" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.blob.sqlite3_blob_close">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.blob.</span></span><span class="sig-name descname"><span class="pre">sqlite3_blob_close</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">blob_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/blob.html#sqlite3_blob_close"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.blob.sqlite3_blob_close" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.blob.sqlite3_blob_open">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.blob.</span></span><span class="sig-name descname"><span class="pre">sqlite3_blob_open</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">db_name_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">table_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">col_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rowid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flags</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">blob_pp</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/blob.html#sqlite3_blob_open"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.blob.sqlite3_blob_open" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.blob.sqlite3_blob_read">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.blob.</span></span><span class="sig-name descname"><span class="pre">sqlite3_blob_read</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">blob_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">buf_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">offset</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/blob.html#sqlite3_blob_read"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.blob.sqlite3_blob_read" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.blob.sqlite3_blob_reopen">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.blob.</span></span><span class="sig-name descname"><span class="pre">sqlite3_blob_reopen</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">blob_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">new_rowid</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/blob.html#sqlite3_blob_reopen"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.blob.sqlite3_blob_reopen" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.blob.sqlite3_blob_write">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.blob.</span></span><span class="sig-name descname"><span class="pre">sqlite3_blob_write</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">blob_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">buf_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">offset</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/blob.html#sqlite3_blob_write"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.blob.sqlite3_blob_write" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-numbox.core.bindings.sqlite.hooks">
+<span id="numbox-core-bindings-sqlite-hooks"></span><h2>numbox.core.bindings.sqlite.hooks<a class="headerlink" href="#module-numbox.core.bindings.sqlite.hooks" title="Link to this heading"></a></h2>
+<p>SQLite callback hooks: update_hook / progress_handler / busy_handler /
+commit_hook / rollback_hook / trace_v2.</p>
+<p>Each takes a function pointer (intp) the caller produces via &#64;cfunc(…).address.
+The cfunc instance MUST outlive the hook registration — keep it at module scope
+in the caller.</p>
+<p>Callback shapes (informational; signatures are caller’s responsibility):
+- update_hook:       void(void*, int op, const char* db, const char* tbl, sqlite3_int64 rowid)
+- progress_handler:  int(void*) – nonzero aborts
+- busy_handler:      int(void*, int) – 0 to abort, nonzero to retry
+- commit_hook:       int(void*) – nonzero vetoes commit
+- rollback_hook:     void(void*)
+- trace_v2:          int(unsigned, void*, void*, void*)</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.hooks.sqlite3_busy_handler">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.hooks.</span></span><span class="sig-name descname"><span class="pre">sqlite3_busy_handler</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ctx_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/hooks.html#sqlite3_busy_handler"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.hooks.sqlite3_busy_handler" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.hooks.sqlite3_commit_hook">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.hooks.</span></span><span class="sig-name descname"><span class="pre">sqlite3_commit_hook</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ctx_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/hooks.html#sqlite3_commit_hook"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.hooks.sqlite3_commit_hook" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.hooks.sqlite3_progress_handler">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.hooks.</span></span><span class="sig-name descname"><span class="pre">sqlite3_progress_handler</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_ops</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ctx_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/hooks.html#sqlite3_progress_handler"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.hooks.sqlite3_progress_handler" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.hooks.sqlite3_rollback_hook">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.hooks.</span></span><span class="sig-name descname"><span class="pre">sqlite3_rollback_hook</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ctx_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/hooks.html#sqlite3_rollback_hook"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.hooks.sqlite3_rollback_hook" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.hooks.sqlite3_trace_v2">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.hooks.</span></span><span class="sig-name descname"><span class="pre">sqlite3_trace_v2</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ctx_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/hooks.html#sqlite3_trace_v2"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.hooks.sqlite3_trace_v2" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.hooks.sqlite3_update_hook">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.hooks.</span></span><span class="sig-name descname"><span class="pre">sqlite3_update_hook</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cb_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ctx_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/hooks.html#sqlite3_update_hook"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.hooks.sqlite3_update_hook" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-numbox.core.bindings.sqlite.constants">
+<span id="numbox-core-bindings-sqlite-constants"></span><h2>numbox.core.bindings.sqlite.constants<a class="headerlink" href="#module-numbox.core.bindings.sqlite.constants" title="Link to this heading"></a></h2>
+<p>SQLite numeric constants (result codes, type codes, open flags, blob flags,
+trace flags, destructor sentinels).</p>
+<p>Public surface — import directly, e.g.
+<code class="docutils literal notranslate"><span class="pre">from</span> <span class="pre">numbox.core.bindings.sqlite.constants</span> <span class="pre">import</span> <span class="pre">SQLITE_OK</span></code>.
+All names are uppercase <code class="docutils literal notranslate"><span class="pre">SQLITE_*</span></code> to avoid collision with the lowercase
+C-function-named wrappers.</p>
+<p>Numba handles Python integer literals natively in <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> code, so these
+constants are usable inside JITed functions without further wrapping. The
+underlying SQLite values are API-stable across all matrix versions
+(3.34.0 through current).</p>
+</section>
+<section id="module-numbox.core.bindings.sqlite.value">
+<span id="numbox-core-bindings-sqlite-value"></span><h2>numbox.core.bindings.sqlite.value<a class="headerlink" href="#module-numbox.core.bindings.sqlite.value" title="Link to this heading"></a></h2>
+<p>SQLite value accessor bindings.</p>
+<p>Read UDF arguments inside xFunc / xStep / xInverse callbacks. Each function
+takes a sqlite3_value* (as intp) obtained by dereferencing the argv_pp array
+at the appropriate index.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.value.sqlite3_value_blob">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.value.</span></span><span class="sig-name descname"><span class="pre">sqlite3_value_blob</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/value.html#sqlite3_value_blob"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.value.sqlite3_value_blob" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.value.sqlite3_value_bytes">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.value.</span></span><span class="sig-name descname"><span class="pre">sqlite3_value_bytes</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/value.html#sqlite3_value_bytes"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.value.sqlite3_value_bytes" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.value.sqlite3_value_double">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.value.</span></span><span class="sig-name descname"><span class="pre">sqlite3_value_double</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/value.html#sqlite3_value_double"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.value.sqlite3_value_double" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.value.sqlite3_value_dup">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.value.</span></span><span class="sig-name descname"><span class="pre">sqlite3_value_dup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/value.html#sqlite3_value_dup"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.value.sqlite3_value_dup" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.value.sqlite3_value_free">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.value.</span></span><span class="sig-name descname"><span class="pre">sqlite3_value_free</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/value.html#sqlite3_value_free"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.value.sqlite3_value_free" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.value.sqlite3_value_frombind">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.value.</span></span><span class="sig-name descname"><span class="pre">sqlite3_value_frombind</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/value.html#sqlite3_value_frombind"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.value.sqlite3_value_frombind" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.value.sqlite3_value_int">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.value.</span></span><span class="sig-name descname"><span class="pre">sqlite3_value_int</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/value.html#sqlite3_value_int"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.value.sqlite3_value_int" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.value.sqlite3_value_int64">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.value.</span></span><span class="sig-name descname"><span class="pre">sqlite3_value_int64</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/value.html#sqlite3_value_int64"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.value.sqlite3_value_int64" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.value.sqlite3_value_nochange">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.value.</span></span><span class="sig-name descname"><span class="pre">sqlite3_value_nochange</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/value.html#sqlite3_value_nochange"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.value.sqlite3_value_nochange" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.value.sqlite3_value_numeric_type">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.value.</span></span><span class="sig-name descname"><span class="pre">sqlite3_value_numeric_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/value.html#sqlite3_value_numeric_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.value.sqlite3_value_numeric_type" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.value.sqlite3_value_subtype">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.value.</span></span><span class="sig-name descname"><span class="pre">sqlite3_value_subtype</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/value.html#sqlite3_value_subtype"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.value.sqlite3_value_subtype" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.value.sqlite3_value_text">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.value.</span></span><span class="sig-name descname"><span class="pre">sqlite3_value_text</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/value.html#sqlite3_value_text"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.value.sqlite3_value_text" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.value.sqlite3_value_type">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.value.</span></span><span class="sig-name descname"><span class="pre">sqlite3_value_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/value.html#sqlite3_value_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.value.sqlite3_value_type" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-numbox.core.bindings.sqlite.result">
+<span id="numbox-core-bindings-sqlite-result"></span><h2>numbox.core.bindings.sqlite.result<a class="headerlink" href="#module-numbox.core.bindings.sqlite.result" title="Link to this heading"></a></h2>
+<p>SQLite result setter bindings.</p>
+<p>Write the UDF return value inside xFunc / xFinal / xValue callbacks.
+Each function takes a sqlite3_context* (as intp) as the first argument.</p>
+<p>The destructor arg in result_text / result_blob (last intp before any
+trailing args) is one of:
+- SQLITE_STATIC = 0  -&gt; SQLite assumes the buffer outlives the call
+- SQLITE_TRANSIENT = -1 -&gt; SQLite makes a copy
+- any other value -&gt; a C function pointer SQLite calls to free the buffer</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_blob">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_blob</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_bytes</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">destructor</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_blob"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_blob" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_blob64">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_blob64</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_bytes</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">destructor</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_blob64"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_blob64" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_double">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_double</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">val</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_double"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_double" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_error">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_error</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">msg_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_bytes</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_error"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_error" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_error_code">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_error_code</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">errcode</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_error_code"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_error_code" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_error_nomem">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_error_nomem</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_error_nomem"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_error_nomem" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_error_toobig">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_error_toobig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_error_toobig"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_error_toobig" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_int">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_int</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">val</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_int"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_int" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_int64">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_int64</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">val</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_int64"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_int64" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_null">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_null</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_null"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_null" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_subtype">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_subtype</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subtype</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_subtype"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_subtype" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_text">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_text</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">text_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_bytes</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">destructor</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_text"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_text" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_text64">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_text64</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">text_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_bytes</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">destructor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">encoding</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_text64"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_text64" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_value">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_value</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value_p</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_value"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_value" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_zeroblob">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_zeroblob</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_zeroblob"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_zeroblob" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.result.sqlite3_result_zeroblob64">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.result.</span></span><span class="sig-name descname"><span class="pre">sqlite3_result_zeroblob64</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/result.html#sqlite3_result_zeroblob64"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.result.sqlite3_result_zeroblob64" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-numbox.core.bindings.sqlite.udf">
+<span id="numbox-core-bindings-sqlite-udf"></span><h2>numbox.core.bindings.sqlite.udf<a class="headerlink" href="#module-numbox.core.bindings.sqlite.udf" title="Link to this heading"></a></h2>
+<p>SQLite UDF registration and context bindings.</p>
+<p>sqlite3_create_function_v2 – register scalar (xFunc) and aggregate (xStep/xFinal) UDFs.
+sqlite3_create_window_function – register window UDFs (xStep/xFinal/xValue/xInverse).
+sqlite3_aggregate_context – allocate per-group state for aggregate/window UDFs.
+sqlite3_user_data – retrieve pApp from context.
+sqlite3_context_db_handle – retrieve db pointer from context.</p>
+<p>Callback function pointers are passed as intp obtained from &#64;cfunc(…).address.
+Pass 0 for NULL (no callback / no pApp / no xDestroy).</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.udf.sqlite3_aggregate_context">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.udf.</span></span><span class="sig-name descname"><span class="pre">sqlite3_aggregate_context</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_bytes</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/udf.html#sqlite3_aggregate_context"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.udf.sqlite3_aggregate_context" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.udf.sqlite3_context_db_handle">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.udf.</span></span><span class="sig-name descname"><span class="pre">sqlite3_context_db_handle</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/udf.html#sqlite3_context_db_handle"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.udf.sqlite3_context_db_handle" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.udf.sqlite3_create_function_v2">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.udf.</span></span><span class="sig-name descname"><span class="pre">sqlite3_create_function_v2</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_arg</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">e_text_rep</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">p_app</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x_func</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x_step</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x_final</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x_destroy</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/udf.html#sqlite3_create_function_v2"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.udf.sqlite3_create_function_v2" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.udf.sqlite3_create_window_function">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.udf.</span></span><span class="sig-name descname"><span class="pre">sqlite3_create_window_function</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_arg</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">e_text_rep</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">p_app</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x_step</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x_final</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x_value</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x_inverse</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x_destroy</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/udf.html#sqlite3_create_window_function"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.udf.sqlite3_create_window_function" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.udf.sqlite3_user_data">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.udf.</span></span><span class="sig-name descname"><span class="pre">sqlite3_user_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ctx</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/udf.html#sqlite3_user_data"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.udf.sqlite3_user_data" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-numbox.core.bindings.sqlite.udf_helpers">
+<span id="numbox-core-bindings-sqlite-udf-helpers"></span><h2>numbox.core.bindings.sqlite.udf_helpers<a class="headerlink" href="#module-numbox.core.bindings.sqlite.udf_helpers" title="Link to this heading"></a></h2>
+<p>Higher-level registration helpers for structref-backed SQLite UDAFs.</p>
+<p><code class="docutils literal notranslate"><span class="pre">register_aggregate</span></code> / <code class="docutils literal notranslate"><span class="pre">register_window</span></code> generate the SQLite callback
+functions (xStep/xInverse/xValue/xFinal) that perform the per-group state
+lifecycle – <code class="docutils literal notranslate"><span class="pre">sqlite3_aggregate_context</span></code> allocation + NULL guard, the single
+intp slot, init-on-first-step via <code class="docutils literal notranslate"><span class="pre">export_meminfo</span></code>, <code class="docutils literal notranslate"><span class="pre">borrow_structref</span></code>, and
+the release-in-xFinal-but-NOT-xValue rule – so callers write only their
+<code class="docutils literal notranslate"><span class="pre">init</span></code>/<code class="docutils literal notranslate"><span class="pre">step</span></code>/<code class="docutils literal notranslate"><span class="pre">finalize</span></code> (and <code class="docutils literal notranslate"><span class="pre">inverse</span></code>/<code class="docutils literal notranslate"><span class="pre">value</span></code> for windows) state
+logic, as plain Python or already-jitted (<code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code>/<code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code>) functions.</p>
+<p><strong>Exception handling.</strong> Each generated callback wraps the user
+step/inverse/value/finalize call in a <code class="docutils literal notranslate"><span class="pre">try</span></code>/<code class="docutils literal notranslate"><span class="pre">except</span></code> that reports a
+descriptive error via <code class="docutils literal notranslate"><span class="pre">sqlite3_result_error</span></code> (e.g. “error in user step
+callback”, with code <code class="docutils literal notranslate"><span class="pre">SQLITE_ERROR</span></code>) when the user callback raises.
+A numba <code class="docutils literal notranslate"><span class="pre">&#64;cfunc</span></code> otherwise SWALLOWS the exception (it prints “Exception
+ignored” and returns the zero default without unwinding into SQLite), which would
+be a silent wrong result; the in-body catch also lets numba run the borrowed
+state’s reference-count decrement, which the unwind would otherwise skip – a
+per-group meminfo leak. Only <code class="docutils literal notranslate"><span class="pre">xFinal</span></code> releases the slot.</p>
+<p>Mechanism: per-UDAF callback source is generated with the state type and the user functions
+baked in as module globals (so the calls inline), written to a content-addressed
+anchor file under numba’s cache dir (reusing numbox.utils.preprocessing), and the
+impls (<code class="docutils literal notranslate"><span class="pre">&#64;njit(**jit_options)</span></code> – the numbox-wide config, default <code class="docutils literal notranslate"><span class="pre">cache=True</span></code>)
+cache across processes. The anchor’s content hash
+folds a cloudpickle of the user functions’ code objects so editing a body –
+including a numeric literal – invalidates correctly.</p>
+<p><strong>Caller requirements.</strong> Callbacks may be plain Python functions or already-jitted
+callables (<code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code>/<code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code>); plain ones are compiled with <code class="docutils literal notranslate"><span class="pre">njit</span></code> (see
+<code class="docutils literal notranslate"><span class="pre">_prepare_callbacks</span></code>). The generated impls (<code class="docutils literal notranslate"><span class="pre">&#64;njit(**jit_options)</span></code>, default
+<code class="docutils literal notranslate"><span class="pre">cache=True</span></code>) cache and invalidate correctly even when the state-type class and
+the callbacks are defined in <code class="docutils literal notranslate"><span class="pre">__main__</span></code> – the anchor key is content-addressed
+on a <code class="docutils literal notranslate"><span class="pre">cloudpickle</span></code> of each callback’s <code class="docutils literal notranslate"><span class="pre">__code__</span></code> (plus <code class="docutils literal notranslate"><span class="pre">repr(state_type)</span></code>,
+the resolved <code class="docutils literal notranslate"><span class="pre">jit_options</span></code>, and the numba/numbox versions), never on
+<code class="docutils literal notranslate"><span class="pre">__module__</span></code> (see <code class="docutils literal notranslate"><span class="pre">numbox.utils.digest.digest</span></code>); the
+subprocess tests <code class="docutils literal notranslate"><span class="pre">test_xprocess_cache_no_growth</span></code> /
+<code class="docutils literal notranslate"><span class="pre">test_invalidation_on_literal_edit</span></code> exercise this <code class="docutils literal notranslate"><span class="pre">__main__</span></code> path. The one
+case that does require a stable <code class="docutils literal notranslate"><span class="pre">__module__</span></code> is a <em>caller-side</em>
+<code class="docutils literal notranslate"><span class="pre">&#64;njit(cache=True)</span></code> callback – numba refuses to cache functions defined in
+<code class="docutils literal notranslate"><span class="pre">__main__</span></code> – so for deployments where callbacks are themselves cached, define
+the state-type class and callbacks in an importable module.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.udf_helpers.register_aggregate">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.udf_helpers.</span></span><span class="sig-name descname"><span class="pre">register_aggregate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_arg</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">state_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">init</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">step</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">finalize</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">deterministic</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/udf_helpers.html#register_aggregate"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.udf_helpers.register_aggregate" title="Link to this definition"></a></dt>
+<dd><p>Register a structref-backed aggregate UDAF.</p>
+<p>Callbacks may be plain Python or already-jitted (<code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code>/<code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code>); plain
+functions are compiled with <code class="docutils literal notranslate"><span class="pre">njit</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>db</strong> – connection pointer (intp), as returned by <code class="docutils literal notranslate"><span class="pre">sqlite3_open</span></code>.</p></li>
+<li><p><strong>name</strong> – SQL function name (str); the C-string lifetime is handled here.</p></li>
+<li><p><strong>n_arg</strong> – argument count, or -1 for variadic.</p></li>
+<li><p><strong>state_type</strong> – the numba structref <em>instance</em> type for per-group state.</p></li>
+<li><p><strong>init</strong> – <code class="docutils literal notranslate"><span class="pre">()</span> <span class="pre">-&gt;</span> <span class="pre">state</span></code> returning a fresh state.</p></li>
+<li><p><strong>step</strong> – <code class="docutils literal notranslate"><span class="pre">(state,</span> <span class="pre">ctx,</span> <span class="pre">argc,</span> <span class="pre">argv_pp)</span></code> updating state.</p></li>
+<li><p><strong>finalize</strong> – <code class="docutils literal notranslate"><span class="pre">(state,</span> <span class="pre">ctx)</span></code> writing the result.</p></li>
+<li><p><strong>deterministic</strong> – OR-in <code class="docutils literal notranslate"><span class="pre">SQLITE_DETERMINISTIC</span></code>.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Returns <code class="docutils literal notranslate"><span class="pre">None</span></code>; the generated callbacks need not be retained – numba keeps
+the compiled cfunc code and dispatchers resident for the process lifetime.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.udf_helpers.register_window">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.udf_helpers.</span></span><span class="sig-name descname"><span class="pre">register_window</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_arg</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">state_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">init</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">step</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">inverse</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">value</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">finalize</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">deterministic</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/udf_helpers.html#register_window"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.udf_helpers.register_window" title="Link to this definition"></a></dt>
+<dd><p>Register a structref-backed window UDAF.</p>
+<p>Same as <a class="reference internal" href="#numbox.core.bindings.sqlite.udf_helpers.register_aggregate" title="numbox.core.bindings.sqlite.udf_helpers.register_aggregate"><code class="xref py py-func docutils literal notranslate"><span class="pre">register_aggregate()</span></code></a> plus <code class="docutils literal notranslate"><span class="pre">inverse(state,</span> <span class="pre">ctx,</span> <span class="pre">argc,</span>
+<span class="pre">argv_pp)</span></code> (un-applies a row; state already exists) and <code class="docutils literal notranslate"><span class="pre">value(state,</span>
+<span class="pre">ctx)</span></code> (emits the running result WITHOUT releasing). Only <code class="docutils literal notranslate"><span class="pre">xFinal</span></code>
+releases the meminfo.</p>
+</dd></dl>
+
+</section>
+<section id="module-numbox.core.bindings.sqlite.vtable">
+<span id="numbox-core-bindings-sqlite-vtable"></span><h2>numbox.core.bindings.sqlite.vtable<a class="headerlink" href="#module-numbox.core.bindings.sqlite.vtable" title="Link to this heading"></a></h2>
+<p>Expose a numpy array or a mapping of 1-D arrays as a read-only SQLite virtual table (register_table).</p>
+<p>A single generic sqlite3_module (built once at import) serves every table; the
+per-column base pointers / strides / dtype tags / schema live in a numpy
+structured-array descriptor whose data pointer is passed as pClientData.</p>
+<p>The sqlite3_vtab and sqlite3_vtab_cursor that our xCreate/xOpen callbacks
+allocate are C structs whose first member is the SQLite-owned base; we append
+our own members after it. Each is modelled as a numpy structured dtype with that
+base nested as field ‘base’. See <a class="reference external" href="https://www.sqlite.org/vtab.html">https://www.sqlite.org/vtab.html</a>.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.vtable.register_table">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.vtable.</span></span><span class="sig-name descname"><span class="pre">register_table</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">columns</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">text_as_blob</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/vtable.html#register_table"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.vtable.register_table" title="Link to this definition"></a></dt>
+<dd><p>Expose tabular data as a read-only eponymous SQLite virtual table
+(queryable directly as <code class="docutils literal notranslate"><span class="pre">name</span></code> with no CREATE VIRTUAL TABLE, since the
+module’s xCreate is its xConnect).</p>
+<p><code class="docutils literal notranslate"><span class="pre">data</span></code> may be:</p>
+<ul class="simple">
+<li><p>a 1-D numpy <strong>structured array</strong> (row-major; column names from the dtype,
+optionally renamed by <code class="docutils literal notranslate"><span class="pre">columns</span></code> (column order always follows the dtype
+field order; to reorder, reindex the array or pass a mapping));</p></li>
+<li><p>a 2-D numpy <strong>array</strong> (row-major; <code class="docutils literal notranslate"><span class="pre">columns</span></code> required, one name per column);</p></li>
+<li><p>a <strong>mapping</strong> (e.g. a <code class="docutils literal notranslate"><span class="pre">dict</span></code>) of column-name -&gt; 1-D numpy array (columnar;
+all arrays must share one length; the keys name the columns, so passing
+<code class="docutils literal notranslate"><span class="pre">columns</span></code> raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> – rename/reorder by building the mapping
+with the desired keys and order before calling). Mapping values must already
+be <code class="docutils literal notranslate"><span class="pre">numpy.ndarray</span></code> (no coercion); a non-array value raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code> and
+a non-1-D array raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code>.</p></li>
+</ul>
+<p>The registration’s keep-alive lives in the module-level <code class="docutils literal notranslate"><span class="pre">_DATA_ANCHOR</span></code> and is
+released by SQLite via <code class="docutils literal notranslate"><span class="pre">xDestroy</span></code> (on connection close or re-registration of
+the same name). The caller must not mutate or resize the array(s) while the
+table is registered – the view is zero-copy, so queries read each column’s
+buffer directly (numeric reads alias it, and <code class="docutils literal notranslate"><span class="pre">'S'</span></code>/BLOB values are handed to
+SQLite as <code class="docutils literal notranslate"><span class="pre">SQLITE_STATIC</span></code> pointers into it).</p>
+<p>Value semantics:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">uint64</span></code> values &gt;= 2**63 are stored as SQLite’s signed INTEGER and
+therefore wrap to negative.</p></li>
+<li><p>Floats pass through as REAL, including +/-inf – EXCEPT NaN: SQLite coerces a
+NaN <code class="docutils literal notranslate"><span class="pre">REAL</span></code> to SQL NULL (via <code class="docutils literal notranslate"><span class="pre">sqlite3IsNaN</span></code>), so a NaN cell reads back as
+NULL. numpy has no missing value, so every non-NaN cell is non-NULL. Masked
+arrays are unsupported: the mask is ignored.</p></li>
+</ul>
+<p>String columns:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">text_as_blob</span></code> affects only bytes (<code class="docutils literal notranslate"><span class="pre">'S'</span></code>) columns; unicode (<code class="docutils literal notranslate"><span class="pre">'U'</span></code>) is
+always TEXT. By default <code class="docutils literal notranslate"><span class="pre">'S'</span></code> becomes TEXT and its raw bytes pass through
+unvalidated – pass <code class="docutils literal notranslate"><span class="pre">text_as_blob=True</span></code> for non-UTF-8 bytes so they are
+stored as BLOB rather than malformed TEXT.</p></li>
+<li><p>Fixed-width <code class="docutils literal notranslate"><span class="pre">'S'</span></code>/<code class="docutils literal notranslate"><span class="pre">'U'</span></code> columns are NUL-padded by numpy; trailing NUL
+padding is trimmed on read while interior NULs are preserved.</p></li>
+<li><p>A TEXT value with an interior NUL is stored faithfully (an explicit byte
+length is passed), but C-string readers and most SQL text functions truncate
+at the first NUL; read it via <code class="docutils literal notranslate"><span class="pre">sqlite3_column_bytes</span></code> + the text/blob
+pointer, or use <code class="docutils literal notranslate"><span class="pre">text_as_blob=True</span></code> for full fidelity.</p></li>
+</ul>
+</dd></dl>
+
+</section>
+<section id="module-numbox.core.bindings.sqlite.query">
+<span id="numbox-core-bindings-sqlite-query"></span><h2>numbox.core.bindings.sqlite.query<a class="headerlink" href="#module-numbox.core.bindings.sqlite.query" title="Link to this heading"></a></h2>
+<p>query_to_array: collect SELECT results into a numpy structured array.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.query.query_to_array">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.query.</span></span><span class="sig-name descname"><span class="pre">query_to_array</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sql_p</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dtype</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/query.html#query_to_array"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.query.query_to_array" title="Link to this definition"></a></dt>
+<dd><p>Run the NUL-terminated SQL text at pointer <code class="docutils literal notranslate"><span class="pre">sql_p</span></code> on <code class="docutils literal notranslate"><span class="pre">db</span></code> and return
+its rows as a 1-D numpy structured array of <code class="docutils literal notranslate"><span class="pre">dtype</span></code> (one field per result
+column, by position). <code class="docutils literal notranslate"><span class="pre">sql_p</span></code> is a char* pointer (e.g. from
+<code class="docutils literal notranslate"><span class="pre">numbox.utils.cstrings.c_string</span></code> or <code class="docutils literal notranslate"><span class="pre">get_unicode_data_p</span></code>), not a Python
+str. NULL -&gt; NaN (float) / 0 (int) / empty (text/blob).</p>
+</dd></dl>
+
+</section>
+<section id="module-numbox.core.bindings.sqlite.tvf">
+<span id="numbox-core-bindings-sqlite-tvf"></span><h2>numbox.core.bindings.sqlite.tvf<a class="headerlink" href="#module-numbox.core.bindings.sqlite.tvf" title="Link to this heading"></a></h2>
+<p>Expose a per-query-computed numpy structured array as a SQLite table-valued
+function (register_tvf).</p>
+<p><code class="docutils literal notranslate"><span class="pre">register_tvf(db,</span> <span class="pre">name,</span> <span class="pre">arg_types,</span> <span class="pre">out_dtype,</span> <span class="pre">fn)</span></code> registers an eponymous
+virtual table whose rows are NOT static – they are produced per query by the
+user’s <code class="docutils literal notranslate"><span class="pre">fn(*args)</span></code>, which returns a 1-D numpy structured array of <code class="docutils literal notranslate"><span class="pre">out_dtype</span></code>.
+The function arguments are exposed as HIDDEN columns: <code class="docutils literal notranslate"><span class="pre">SELECT</span> <span class="pre">*</span> <span class="pre">FROM</span> <span class="pre">f(2,</span> <span class="pre">5)</span></code>
+turns <code class="docutils literal notranslate"><span class="pre">2</span></code>/<code class="docutils literal notranslate"><span class="pre">5</span></code> into EQ constraints on the hidden columns, which <code class="docutils literal notranslate"><span class="pre">xBestIndex</span></code>
+binds into <code class="docutils literal notranslate"><span class="pre">argv</span></code> (in declaration order) and <code class="docutils literal notranslate"><span class="pre">xFilter</span></code> decodes and feeds to
+<code class="docutils literal notranslate"><span class="pre">fn</span></code>. The returned array is held alive for the cursor’s lifetime via an
+NRT-backed <code class="docutils literal notranslate"><span class="pre">[meminfo_p,</span> <span class="pre">data_p]</span></code> slot (pinned with the inlined
+<code class="docutils literal notranslate"><span class="pre">_incref_meminfo</span></code> intrinsic so numba’s refcount pass cannot strip it), and
+released exactly once in <code class="docutils literal notranslate"><span class="pre">xClose</span></code>.</p>
+<p>Unlike the read-only <code class="docutils literal notranslate"><span class="pre">register_table</span></code> (one shared module), each
+<code class="docutils literal notranslate"><span class="pre">register_tvf</span></code> GENERATES its own <code class="docutils literal notranslate"><span class="pre">xFilter</span></code> / <code class="docutils literal notranslate"><span class="pre">xColumn</span></code> (the user <code class="docutils literal notranslate"><span class="pre">fn</span></code> and
+<code class="docutils literal notranslate"><span class="pre">out_dtype</span></code> are baked in as codegen globals so the allocator specialises on the
+dtype and the impls cache cross-process) and builds its own <code class="docutils literal notranslate"><span class="pre">sqlite3_module</span></code>
+from this registration’s cfunc addresses. The handle retains the module struct,
+every cfunc object (SQLite stores their addresses), the descriptor buffers, and
+<code class="docutils literal notranslate"><span class="pre">fn</span></code>; its keep-alive lives in the module-level <code class="docutils literal notranslate"><span class="pre">_DATA_ANCHOR</span></code> (released by
+SQLite via <code class="docutils literal notranslate"><span class="pre">xDestroy</span></code>).</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite.tvf.register_tvf">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite.tvf.</span></span><span class="sig-name descname"><span class="pre">register_tvf</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">db</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">arg_types</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">out_dtype</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fn</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/tvf.html#register_tvf"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite.tvf.register_tvf" title="Link to this definition"></a></dt>
+<dd><p>Register an eponymous table-valued function backed by a computed array.</p>
+<p><code class="docutils literal notranslate"><span class="pre">SELECT</span> <span class="pre">*</span> <span class="pre">FROM</span> <span class="pre">name(&lt;args&gt;)</span></code> calls <code class="docutils literal notranslate"><span class="pre">fn(*args)</span></code> – a plain Python or
+<code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> callable returning a 1-D numpy structured array of <code class="docutils literal notranslate"><span class="pre">out_dtype</span></code> –
+and serves that array’s rows. The <code class="docutils literal notranslate"><span class="pre">arg_types</span></code> (numpy scalar dtypes; integer
+kinds are read via <code class="docutils literal notranslate"><span class="pre">sqlite3_value_int64</span></code>, floating kinds via
+<code class="docutils literal notranslate"><span class="pre">sqlite3_value_double</span></code>) are exposed as trailing HIDDEN columns and must each
+be supplied with an equality value in the query; a call form that leaves a
+hidden arg unbound is rejected with a SQLite constraint error (no rows).</p>
+<p>The registration’s keep-alive lives in the module-level <code class="docutils literal notranslate"><span class="pre">_DATA_ANCHOR</span></code>
+and is released by SQLite via <code class="docutils literal notranslate"><span class="pre">xDestroy</span></code> (on connection close
+or re-registration of the same name). <code class="docutils literal notranslate"><span class="pre">out_dtype</span></code> is baked
+into the generated allocator (so it caches cross-process); a NaN <code class="docutils literal notranslate"><span class="pre">float</span></code>
+cell reads back as SQL NULL (SQLite coerces NaN REAL to NULL), as in
+<code class="docutils literal notranslate"><span class="pre">register_table</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">fn</span></code> must return a 1-D numpy structured array whose dtype is <code class="docutils literal notranslate"><span class="pre">out_dtype</span></code>;
+a slice / strided / offset view is handled (the row stride is honored), but a
+return whose <em>dtype</em> differs from <code class="docutils literal notranslate"><span class="pre">out_dtype</span></code> is read through <code class="docutils literal notranslate"><span class="pre">out_dtype</span></code>’s
+layout and yields undefined values.</p>
+</dd></dl>
+
+</section>
+<section id="module-numbox.core.bindings.sqlite._typemap">
+<span id="numbox-core-bindings-sqlite-typemap"></span><h2>numbox.core.bindings.sqlite._typemap<a class="headerlink" href="#module-numbox.core.bindings.sqlite._typemap" title="Link to this heading"></a></h2>
+<p>Shared numpy-dtype ↔ SQLite type mapping + fixed-width string helpers.</p>
+<p>Used by the read-only vtable (sqlite.vtable), the table-valued-function
+mechanism, and query_to_array. The dtype tags are the single source of truth
+for how a numpy column maps to a SQLite column type and how its bytes are
+read/written.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite._typemap.utf32_to_utf8">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite._typemap.</span></span><span class="sig-name descname"><span class="pre">utf32_to_utf8</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">src</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_codepoints</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dst</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/_typemap.html#utf32_to_utf8"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite._typemap.utf32_to_utf8" title="Link to this definition"></a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">dst</span></code> must hold at least <code class="docutils literal notranslate"><span class="pre">4</span> <span class="pre">*</span> <span class="pre">n_codepoints</span> <span class="pre">+</span> <span class="pre">1</span></code> bytes.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.bindings.sqlite._typemap.utf8_to_utf32">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.bindings.sqlite._typemap.</span></span><span class="sig-name descname"><span class="pre">utf8_to_utf32</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">src</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">nbytes</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dst</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">width_cp</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/bindings/sqlite/_typemap.html#utf8_to_utf32"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.bindings.sqlite._typemap.utf8_to_utf32" title="Link to this definition"></a></dt>
+<dd><p>Decode the UTF-8 bytes at <code class="docutils literal notranslate"><span class="pre">src</span></code> (length <code class="docutils literal notranslate"><span class="pre">nbytes</span></code>) into up to
+<code class="docutils literal notranslate"><span class="pre">width_cp</span></code> little-endian uint32 code points at <code class="docutils literal notranslate"><span class="pre">dst</span></code>; NUL-pad the
+remainder. Malformed input (bad continuation byte, surrogate, overlong
+encoding, out-of-range) decodes to U+FFFD. Returns the number of code points
+written. <code class="docutils literal notranslate"><span class="pre">dst</span></code> may be misaligned (writes are align=1).</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="numbox.core.bindings.html" class="btn btn-neutral float-left" title="numbox.core.bindings" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="numbox.core.proxy.html" class="btn btn-neutral float-right" title="numbox.core.proxy" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

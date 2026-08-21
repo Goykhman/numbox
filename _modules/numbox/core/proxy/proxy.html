@@ -1,0 +1,688 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.proxy.proxy &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/proxy/proxy.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.proxy.proxy</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.proxy.proxy</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">inspect</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">struct</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llvmlite</span><span class="w"> </span><span class="kn">import</span> <span class="n">binding</span> <span class="k">as</span> <span class="n">ll</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llvmlite</span><span class="w"> </span><span class="kn">import</span> <span class="n">ir</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">cfunc</span><span class="p">,</span> <span class="n">njit</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">cgutils</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">TypingError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types.function_type</span><span class="w"> </span><span class="kn">import</span> <span class="n">CompileResultWAP</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.typing.templates</span><span class="w"> </span><span class="kn">import</span> <span class="n">Signature</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">intrinsic</span><span class="p">,</span> <span class="n">overload</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">types</span><span class="w"> </span><span class="kn">import</span> <span class="n">FunctionType</span> <span class="k">as</span> <span class="n">PyFunctionType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">_PROXY_CACHE_STRICT_ENV</span><span class="p">,</span> <span class="n">_strict_cache_mode</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.fingerprint</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">_Unfingerprintable</span><span class="p">,</span> <span class="n">_fingerprint_function</span><span class="p">,</span> <span class="n">_fingerprint_function_best_effort</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.standard</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_params_strings</span>
+
+
+<span class="n">_ALIAS_PREFIX</span> <span class="o">=</span> <span class="s2">"numbox_pxy_"</span>
+
+
+<div class="viewcode-block" id="make_proxy_name">
+<a class="viewcode-back" href="../../../../numbox.core.proxy.html#numbox.core.proxy.proxy.make_proxy_name">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">make_proxy_name</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s1">'__</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s1">'</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_body_fingerprint</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Content fingerprint of ``func``'s body, for alias disambiguation.</span>
+
+<span class="sd">    Reuses the deep walker so bytecode, constants, default arguments, closure</span>
+<span class="sd">    cell values and referenced-global values all count. The common numbox</span>
+<span class="sd">    binding body references the ``@intrinsic`` ``_call_lib_func``, which has no</span>
+<span class="sd">    canonical form, so the strict walker raises; the best-effort walker then</span>
+<span class="sd">    still captures the constants/closure/defaults/globals it *can* canonicalize</span>
+<span class="sd">    (substituting an opaque type placeholder for the rest). Two bodies that</span>
+<span class="sd">    differ only in a captured value -- a factory over per-instance C symbol</span>
+<span class="sd">    names, or a literal-only redefinition -- therefore get distinct aliases,</span>
+<span class="sd">    not one collapsed to bytecode alone.</span>
+<span class="sd">    """</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_fingerprint_function</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="nb">set</span><span class="p">())</span>
+    <span class="k">except</span> <span class="p">(</span><span class="n">_Unfingerprintable</span><span class="p">,</span> <span class="ne">RecursionError</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_fingerprint_function_best_effort</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_stable_cfunc_alias</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">main_sig</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Deterministic, process-stable LLVM symbol name for ``func``'s cfunc wrapper.</span>
+
+<span class="sd">    numba mangles the wrapper name (``fndesc.llvm_cfunc_wrapper_name``) with a</span>
+<span class="sd">    process-local unique-id abi-tag (``v&lt;N&gt;`` from ``FunctionIdentity.unique_id``,</span>
+<span class="sd">    an ``itertools.count``). That tag is not part of the numba cache key, so two</span>
+<span class="sd">    processes give the same function different wrapper names. Persisting a</span>
+<span class="sd">    reference to that name — in this proxy, or in any ``cache=True`` caller that</span>
+<span class="sd">    inlines the ``inline='always'`` proxy — lets concurrently-built caches pair a</span>
+<span class="sd">    body object defining ``v&lt;Na&gt;`` with a caller referencing ``v&lt;Nb&gt;``, which</span>
+<span class="sd">    aborts on load with ``LLVM ERROR: Symbol not found: cfunc...``. Referencing</span>
+<span class="sd">    this deterministic alias instead (resolved per-process via</span>
+<span class="sd">    ``llvmlite.binding.add_symbol``) keeps cached references valid</span>
+<span class="sd">    across processes.</span>
+
+<span class="sd">    The alias folds a body fingerprint alongside ``module + qualname + sig``:</span>
+<span class="sd">    without it, two different bodies sharing one identity (factory-made</span>
+<span class="sd">    same-qualname closures, in-process redefinition, or fork twins on a shared</span>
+<span class="sd">    cache) collapse onto one alias, and the last-writer-wins ``add_symbol``</span>
+<span class="sd">    silently rebinds callers to the wrong body. Folding the body gives each body</span>
+<span class="sd">    its own alias. A consequence is that a body/signature change renames the</span>
+<span class="sd">    alias, so a warm ``cache=True`` caller in another file (numba's cache key is</span>
+<span class="sd">    callee-blind) references a symbol this process never registered. The load-time</span>
+<span class="sd">    guard heals this automatically -- it discards that one cache entry and</span>
+<span class="sd">    recompiles it, warning once with :class:`StaleProxyCacheWarning`; no manual</span>
+<span class="sd">    cache clearing is needed (set ``NUMBOX_PROXY_CACHE_STRICT`` to raise</span>
+<span class="sd">    :class:`StaleProxyCacheError` before the heal instead). The one variant that</span>
+<span class="sd">    leaves the alias unchanged, an absent ``proxy_if_available`` binding, is</span>
+<span class="sd">    covered by a diagnostic trap (see ``_register_absent_alias_trap``); the guard</span>
+<span class="sd">    treats such an alias as stale too, so a warm caller reaches the same clean</span>
+<span class="sd">    typing error a cold cache gives rather than the trap's swallowed-in-a-cfunc</span>
+<span class="sd">    zero.</span>
+
+<span class="sd">    The resolved ``jit_options`` are folded too. They govern the machine code</span>
+<span class="sd">    ``njit(sig, **jit_options)`` emits, but appear nowhere in the identity above,</span>
+<span class="sd">    so two decorations of one body differing only in a flag -- ``error_model``,</span>
+<span class="sd">    ``fastmath``, ``boundscheck`` -- collapsed onto a single alias and</span>
+<span class="sd">    last-writer-wins ``add_symbol`` sent every caller to whichever compiled last.</span>
+<span class="sd">    That is silent and total: a caller of the ``numpy`` error-model binding ran</span>
+<span class="sd">    the ``python`` one, so a division by zero returned 0.0 instead of inf with the</span>
+<span class="sd">    exception swallowed at the cfunc boundary.</span>
+<span class="sd">    """</span>
+    <span class="n">raw</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">func</span><span class="o">.</span><span class="vm">__module__</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="s1">''</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">func</span><span class="o">.</span><span class="vm">__qualname__</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">main_sig</span><span class="si">}</span><span class="s2">."</span>
+        <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">_body_fingerprint</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s2">."</span>
+        <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="nb">sorted</span><span class="p">((</span><span class="n">jit_options</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="p">{})</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span><span class="w"> </span><span class="n">key</span><span class="o">=</span><span class="nb">repr</span><span class="p">)</span><span class="si">!r}</span><span class="s2">"</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">)</span>
+    <span class="n">safe_name</span> <span class="o">=</span> <span class="s2">""</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">c</span> <span class="k">if</span> <span class="n">c</span><span class="o">.</span><span class="n">isascii</span><span class="p">()</span> <span class="ow">and</span> <span class="n">c</span><span class="o">.</span><span class="n">isalnum</span><span class="p">()</span> <span class="k">else</span> <span class="s2">"_"</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">func</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">_ALIAS_PREFIX</span><span class="si">}{</span><span class="n">safe_name</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()[:</span><span class="mi">16</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_call_proxied_alias</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">main_sig</span><span class="p">,</span> <span class="n">alias_name</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Emit a call to the proxied body's process-stable cfunc alias.</span>
+
+<span class="sd">    Factored out of the generated codegen so the exec'd template stays short:</span>
+<span class="sd">    every line above its ``@njit`` raises the minimum source line a ``@proxy``</span>
+<span class="sd">    function may occupy (the ``co_firstlineno`` cache anchor).</span>
+<span class="sd">    """</span>
+    <span class="n">func_ty_ll</span> <span class="o">=</span> <span class="n">ir</span><span class="o">.</span><span class="n">FunctionType</span><span class="p">(</span>
+        <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">main_sig</span><span class="o">.</span><span class="n">return_type</span><span class="p">),</span>
+        <span class="p">[</span><span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">arg</span><span class="p">)</span> <span class="k">for</span> <span class="n">arg</span> <span class="ow">in</span> <span class="n">main_sig</span><span class="o">.</span><span class="n">args</span><span class="p">],</span>
+    <span class="p">)</span>
+    <span class="n">f</span> <span class="o">=</span> <span class="n">cgutils</span><span class="o">.</span><span class="n">get_or_insert_function</span><span class="p">(</span><span class="n">builder</span><span class="o">.</span><span class="n">module</span><span class="p">,</span> <span class="n">func_ty_ll</span><span class="p">,</span> <span class="n">alias_name</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">args</span><span class="p">)</span>
+
+
+<span class="c1"># The cfunc traps below must outlive the add_symbol registrations that publish</span>
+<span class="c1"># their addresses, so keep a process-lifetime reference to each.</span>
+<span class="n">_PROXY_TRAP_KEEPALIVE</span> <span class="o">=</span> <span class="p">[]</span>
+
+<span class="c1"># Aliases currently standing for an ABSENT binding. A trap registration makes the alias resolve without</span>
+<span class="c1"># there being a body behind it, so presence alone stops meaning "safe to call" -- see _stale_proxy_aliases.</span>
+<span class="n">_ABSENT_ALIASES</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_register_absent_alias_trap</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">main_sig</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Register a diagnostic trap under the alias ``proxy(sig)(func)`` would use.</span>
+
+<span class="sd">    A ``cache=True`` caller compiled when the binding was present bakes that</span>
+<span class="sd">    alias into its cached object; numba's cache key is callee-blind, so the</span>
+<span class="sd">    caller cache-hits even in a process where ``proxy_if_available`` took the</span>
+<span class="sd">    absent (stub) path and registered no real body. With no symbol there the</span>
+<span class="sd">    baked extern call is a null-pointer jump -- a bare SIGSEGV with zero</span>
+<span class="sd">    diagnostics. Registering a cfunc that raises a named ``RuntimeError`` under</span>
+<span class="sd">    the same alias turns that into a clear message on stderr instead. The trap</span>
+<span class="sd">    matches ``main_sig``'s arity with plain positional parameters (the cfunc</span>
+<span class="sd">    wrapper the caller invokes is positional, even for ``Omitted`` bindings).</span>
+<span class="sd">    """</span>
+    <span class="n">alias</span> <span class="o">=</span> <span class="n">_stable_cfunc_alias</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">main_sig</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">)</span>
+    <span class="n">msg</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"numbox @proxy binding </span><span class="si">{</span><span class="n">func</span><span class="o">.</span><span class="vm">__name__</span><span class="si">!r}</span><span class="s2"> is not available in the loaded library "</span>
+        <span class="sa">f</span><span class="s2">"(C symbol missing), but a cache=True caller compiled when it was present is "</span>
+        <span class="sa">f</span><span class="s2">"calling it -- clear the numba cache (NUMBA_CACHE_DIR) and rebuild."</span>
+    <span class="p">)</span>
+    <span class="n">trap_params</span> <span class="o">=</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">"_a</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">"</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">main_sig</span><span class="o">.</span><span class="n">args</span><span class="p">)))</span>
+    <span class="n">trap_ns</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"cfunc"</span><span class="p">:</span> <span class="n">cfunc</span><span class="p">,</span> <span class="s2">"main_sig"</span><span class="p">:</span> <span class="n">main_sig</span><span class="p">,</span> <span class="s2">"_trap_msg"</span><span class="p">:</span> <span class="n">msg</span><span class="p">}</span>
+    <span class="n">exec</span><span class="p">(</span>  <span class="c1"># nosec B102 - internal codegen of a fixed-shape trap body</span>
+        <span class="sa">f</span><span class="s2">"def _trap(</span><span class="si">{</span><span class="n">trap_params</span><span class="si">}</span><span class="s2">):</span><span class="se">\n</span><span class="s2">"</span>
+        <span class="sa">f</span><span class="s2">"    raise RuntimeError(_trap_msg)</span><span class="se">\n</span><span class="s2">"</span>
+        <span class="sa">f</span><span class="s2">"_trap_cfunc = cfunc(main_sig)(_trap)</span><span class="se">\n</span><span class="s2">"</span><span class="p">,</span>
+        <span class="n">trap_ns</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">_PROXY_TRAP_KEEPALIVE</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">trap_ns</span><span class="p">[</span><span class="s2">"_trap_cfunc"</span><span class="p">])</span>
+    <span class="n">_ABSENT_ALIASES</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">alias</span><span class="p">)</span>
+    <span class="n">ll</span><span class="o">.</span><span class="n">add_symbol</span><span class="p">(</span><span class="n">alias</span><span class="p">,</span> <span class="n">trap_ns</span><span class="p">[</span><span class="s2">"_trap_cfunc"</span><span class="p">]</span><span class="o">.</span><span class="n">address</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="proxy">
+<a class="viewcode-back" href="../../../../numbox.core.proxy.html#numbox.core.proxy.proxy.proxy">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">proxy</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">""" Create a proxy for the decorated function `func` with the given signature(s) `sig`.</span>
+
+<span class="sd">    The original function `func` will be eagerly JIT-compiled with the given signature(s).</span>
+<span class="sd">    A proxy with the name `func_proxy_name` will be created to call `func` in the LLVM scope.</span>
+<span class="sd">    The original function's variable will be bound to the proxy, i.e., calling the decorated</span>
+<span class="sd">    function will call the proxy.</span>
+
+<span class="sd">    The proxy is a JIT-compiled wrap that invokes the intrinsic that *declares* the `func`</span>
+<span class="sd">    and calls it with the original arguments. Declaration instructions are relatively cheap</span>
+<span class="sd">    to statically link into (potential) caller's LLVM code, which is the main motivation behind</span>
+<span class="sd">    this decorator.</span>
+
+<span class="sd">    Machine code for `func` can be cached when so specified in `jit_options`, in which case its</span>
+<span class="sd">    JIT-compilation will load the `func` into the LLVM scope. Caching option is the other major</span>
+<span class="sd">    motivation for this decorator, without the need to cache one can avoid static linking</span>
+<span class="sd">    of the callee's LLVM code into the caller's by simply ignoring the former.</span>
+
+<span class="sd">    In case when more than one signature is provided as the `sig` parameter, it is assumed</span>
+<span class="sd">    that the first signature is the 'main' one while the other ones are supplied to</span>
+<span class="sd">    allow for the `Omitted` types with default values for (some of) the parameters.</span>
+
+<span class="sd">    The returned dispatcher also exposes ``.as_func``: a ``CompileResultWAP``</span>
+<span class="sd">    for the main signature. Cacheable as a called jitted function (via the</span>
+<span class="sd">    dispatcher); passable as a function-type argument (via ``.as_func``).</span>
+
+<span class="sd">    See tests for some examples of the use cases.</span>
+<span class="sd">    """</span>
+    <span class="n">main_sig</span> <span class="o">=</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="n">Signature</span><span class="p">)</span> <span class="ow">and</span> <span class="n">sig</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="p">(</span><span class="n">List</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">))</span> <span class="ow">and</span> <span class="n">sig</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">jit_options</span> <span class="o">=</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">jit_options</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="ow">and</span> <span class="n">jit_options</span> <span class="ow">or</span> <span class="p">{}</span>
+    <span class="n">jit_opts</span> <span class="o">=</span> <span class="n">jit_options</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">jit_opts</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">jit_opts</span><span class="p">,</span> <span class="n">inline</span><span class="o">=</span><span class="s1">'always'</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">wrap</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">PyFunctionType</span><span class="p">)</span>
+        <span class="n">func_jit</span> <span class="o">=</span> <span class="n">njit</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="o">**</span><span class="n">jit_options</span><span class="p">)(</span><span class="n">func</span><span class="p">)</span>
+        <span class="n">cres</span> <span class="o">=</span> <span class="n">func_jit</span><span class="o">.</span><span class="n">get_compile_result</span><span class="p">(</span><span class="n">main_sig</span><span class="p">)</span>
+        <span class="c1"># Register a process-stable alias for the body's cfunc wrapper and reference</span>
+        <span class="c1"># that instead of numba's process-local ``v&lt;uid&gt;`` name (see _stable_cfunc_alias).</span>
+        <span class="n">cfunc_alias</span> <span class="o">=</span> <span class="n">_stable_cfunc_alias</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">main_sig</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">)</span>
+        <span class="n">_ABSENT_ALIASES</span><span class="o">.</span><span class="n">discard</span><span class="p">(</span><span class="n">cfunc_alias</span><span class="p">)</span>
+        <span class="n">ll</span><span class="o">.</span><span class="n">add_symbol</span><span class="p">(</span><span class="n">cfunc_alias</span><span class="p">,</span> <span class="n">cres</span><span class="o">.</span><span class="n">library</span><span class="o">.</span><span class="n">get_pointer_to_function</span><span class="p">(</span><span class="n">cres</span><span class="o">.</span><span class="n">fndesc</span><span class="o">.</span><span class="n">llvm_cfunc_wrapper_name</span><span class="p">))</span>
+        <span class="n">func_args_str</span><span class="p">,</span> <span class="n">func_names_args_str</span> <span class="o">=</span> <span class="n">make_params_strings</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+        <span class="n">func_proxy_name</span> <span class="o">=</span> <span class="n">make_proxy_name</span><span class="p">(</span><span class="n">func</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
+        <span class="c1"># The alias resolution lives in _call_proxied_alias so this generated</span>
+        <span class="c1"># source stays short: every line above the @njit raises the minimum source</span>
+        <span class="c1"># line a @proxy function may occupy (the co_firstlineno cache anchor below).</span>
+        <span class="n">code_txt</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"""</span>
+<span class="s2">@intrinsic</span>
+<span class="s2">def _</span><span class="si">{</span><span class="n">func_proxy_name</span><span class="si">}</span><span class="s2">(typingctx, </span><span class="si">{</span><span class="n">func_names_args_str</span><span class="si">}</span><span class="s2">):</span>
+<span class="s2">    def codegen(context, builder, signature, args):</span>
+<span class="s2">        return _call_proxied_alias(context, builder, main_sig, "</span><span class="si">{</span><span class="n">cfunc_alias</span><span class="si">}</span><span class="s2">", args)</span>
+<span class="s2">    return main_sig, codegen</span>
+
+<span class="s2">@njit(sig, **jit_opts)</span>
+<span class="s2">def </span><span class="si">{</span><span class="n">func_proxy_name</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">func_args_str</span><span class="si">}</span><span class="s2">):</span>
+<span class="s2">    return _</span><span class="si">{</span><span class="n">func_proxy_name</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">func_names_args_str</span><span class="si">}</span><span class="s2">)</span>
+<span class="s2">"""</span>
+        <span class="n">ns</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="o">**</span><span class="n">inspect</span><span class="o">.</span><span class="n">getmodule</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="o">.</span><span class="vm">__dict__</span><span class="p">,</span>
+            <span class="o">**</span><span class="p">{</span>
+                <span class="s1">'cgutils'</span><span class="p">:</span> <span class="n">cgutils</span><span class="p">,</span> <span class="s1">'intrinsic'</span><span class="p">:</span> <span class="n">intrinsic</span><span class="p">,</span> <span class="s1">'ir'</span><span class="p">:</span> <span class="n">ir</span><span class="p">,</span> <span class="s1">'jit_opts'</span><span class="p">:</span> <span class="n">jit_opts</span><span class="p">,</span> <span class="s1">'njit'</span><span class="p">:</span> <span class="n">njit</span><span class="p">,</span>
+                <span class="s1">'sig'</span><span class="p">:</span> <span class="n">sig</span><span class="p">,</span> <span class="s1">'main_sig'</span><span class="p">:</span> <span class="n">main_sig</span><span class="p">,</span> <span class="s1">'_call_proxied_alias'</span><span class="p">:</span> <span class="n">_call_proxied_alias</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="n">ns</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">func_proxy_name</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Name </span><span class="si">{</span><span class="n">func_proxy_name</span><span class="si">}</span><span class="s2"> in module </span><span class="si">{</span><span class="n">inspect</span><span class="o">.</span><span class="n">getmodule</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s2"> is reserved"</span><span class="p">)</span>
+        <span class="c1"># Anchor the wrapper at func's source file: prepend blank lines so the</span>
+        <span class="c1"># wrapper's @njit decorator lands at func.__code__.co_firstlineno (the</span>
+        <span class="c1"># user's @proxy decorator line). See docs/numbox.core.proxy.rst —</span>
+        <span class="c1"># section "Cache-anchor mechanism" — for the design rationale + the</span>
+        <span class="c1"># findsource-finds-@-in-docstring hazard this avoids.</span>
+        <span class="n">code_lines</span> <span class="o">=</span> <span class="n">code_txt</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">'</span><span class="se">\n</span><span class="s1">'</span><span class="p">)</span>
+        <span class="n">njit_lineno_in_txt</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span>
+            <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">line</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">code_lines</span><span class="p">)</span> <span class="k">if</span> <span class="n">line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">'@njit('</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">co_firstlineno</span> <span class="o">=</span> <span class="n">func</span><span class="o">.</span><span class="vm">__code__</span><span class="o">.</span><span class="n">co_firstlineno</span>
+        <span class="k">if</span> <span class="n">co_firstlineno</span> <span class="o">&lt;</span> <span class="n">njit_lineno_in_txt</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"@proxy function </span><span class="si">{</span><span class="n">func</span><span class="o">.</span><span class="vm">__name__</span><span class="si">!r}</span><span class="s2"> is defined at line </span><span class="si">{</span><span class="n">co_firstlineno</span><span class="si">}</span><span class="s2"> of "</span>
+                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">inspect</span><span class="o">.</span><span class="n">getfile</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s2">, above the cache anchor's minimum line "</span>
+                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">njit_lineno_in_txt</span><span class="si">}</span><span class="s2">; the generated @njit cannot be anchored to its "</span>
+                <span class="sa">f</span><span class="s2">"co_firstlineno (a negative prepend would mis-anchor it). Move the "</span>
+                <span class="sa">f</span><span class="s2">"function further down in the file."</span>
+            <span class="p">)</span>
+        <span class="n">prepend</span> <span class="o">=</span> <span class="n">co_firstlineno</span> <span class="o">-</span> <span class="n">njit_lineno_in_txt</span>
+        <span class="n">prefixed</span> <span class="o">=</span> <span class="s1">'</span><span class="se">\n</span><span class="s1">'</span> <span class="o">*</span> <span class="n">prepend</span> <span class="o">+</span> <span class="n">code_txt</span>
+        <span class="n">code</span> <span class="o">=</span> <span class="nb">compile</span><span class="p">(</span><span class="n">prefixed</span><span class="p">,</span> <span class="n">inspect</span><span class="o">.</span><span class="n">getfile</span><span class="p">(</span><span class="n">func</span><span class="p">),</span> <span class="n">mode</span><span class="o">=</span><span class="s1">'exec'</span><span class="p">)</span>
+        <span class="n">exec</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>  <span class="c1"># nosec B102 - JIT codegen of internal source</span>
+        <span class="n">dispatcher</span> <span class="o">=</span> <span class="n">ns</span><span class="p">[</span><span class="n">func_proxy_name</span><span class="p">]</span>
+        <span class="n">dispatcher</span><span class="o">.</span><span class="n">as_func</span> <span class="o">=</span> <span class="n">CompileResultWAP</span><span class="p">(</span><span class="n">cres</span><span class="p">)</span>
+        <span class="c1"># Tag the dispatcher with its process-stable alias so the fingerprint</span>
+        <span class="c1"># walker can identify a @proxy binding by that alias instead of recursing</span>
+        <span class="c1"># into its wrapper's @intrinsic (which has no canonical form) -- otherwise</span>
+        <span class="c1"># a callback that calls a proxied binding is un-fingerprintable and its</span>
+        <span class="c1"># cache digest silently degrades to a coarse fallback.</span>
+        <span class="n">dispatcher</span><span class="o">.</span><span class="n">_numbox_proxy_alias</span> <span class="o">=</span> <span class="n">cfunc_alias</span>
+        <span class="k">return</span> <span class="n">dispatcher</span>
+    <span class="k">return</span> <span class="n">wrap</span></div>
+
+
+
+<div class="viewcode-block" id="proxy_if_available">
+<a class="viewcode-back" href="../../../../numbox.core.proxy.html#numbox.core.proxy.proxy.proxy_if_available">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">proxy_if_available</span><span class="p">(</span><span class="n">lib</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Like ``proxy(sig, jit_options=...)``, but stubs out the wrapper if</span>
+<span class="sd">    the C symbol matching ``func.__name__`` is absent from ``lib``.</span>
+
+<span class="sd">    Use for binding sets that target multiple library versions where some</span>
+<span class="sd">    symbols only exist in newer releases. Python callers get a stub that raises</span>
+<span class="sd">    ``NotImplementedError`` instead of a confusing LLVM link error at call</span>
+<span class="sd">    time; ``@njit`` callers get a ``TypingError`` naming the binding and the</span>
+<span class="sd">    missing-symbol cause at typing time (the untyped stub would otherwise</span>
+<span class="sd">    surface an untyped-global failure that names the binding but not why it</span>
+<span class="sd">    is unusable). Parallel to ``cres_if_available`` in</span>
+<span class="sd">    :mod:`numbox.utils.highlevel`.</span>
+
+<span class="sd">    The stub does NOT expose ``.as_func`` — a function-value handle is</span>
+<span class="sd">    meaningless without an underlying jitted body, and a stub one would</span>
+<span class="sd">    have to either raise on attribute access (ugly) or pretend to be a</span>
+<span class="sd">    function value (worse). Callers that pass ``.as_func`` to function-</span>
+<span class="sd">    type arguments must guard the access::</span>
+
+<span class="sd">        if hasattr(my_binding, "as_func"):</span>
+<span class="sd">            use(my_binding.as_func)</span>
+<span class="sd">    """</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">lib</span><span class="p">,</span> <span class="n">func</span><span class="o">.</span><span class="vm">__name__</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">proxy</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)(</span><span class="n">func</span><span class="p">)</span>
+
+        <span class="n">name</span> <span class="o">=</span> <span class="n">func</span><span class="o">.</span><span class="vm">__name__</span>
+        <span class="n">main_sig</span> <span class="o">=</span> <span class="n">sig</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="n">Signature</span><span class="p">)</span> <span class="k">else</span> <span class="n">sig</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="c1"># A warm cache=True caller from a process where the binding WAS present</span>
+        <span class="c1"># will cache-hit and call the alias; register a loud trap under it so that</span>
+        <span class="c1"># is a named error rather than a null-pointer SIGSEGV. See the helper.</span>
+        <span class="n">_register_absent_alias_trap</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">main_sig</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">)</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">stub</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">_kwargs</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2"> is not available"</span><span class="p">)</span>
+        <span class="n">stub</span><span class="o">.</span><span class="vm">__name__</span> <span class="o">=</span> <span class="n">make_proxy_name</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+        <span class="n">stub</span><span class="o">.</span><span class="vm">__qualname__</span> <span class="o">=</span> <span class="n">func</span><span class="o">.</span><span class="vm">__qualname__</span>
+        <span class="n">stub</span><span class="o">.</span><span class="vm">__doc__</span> <span class="o">=</span> <span class="n">func</span><span class="o">.</span><span class="vm">__doc__</span>
+
+        <span class="c1"># The stub is untyped, so a bare @njit call to it fails typing with an</span>
+        <span class="c1"># untyped-global error that names the binding but not why it is unusable.</span>
+        <span class="c1"># Register an @overload that raises a clear, named TypingError instead.</span>
+        <span class="nd">@overload</span><span class="p">(</span><span class="n">stub</span><span class="p">)</span>
+        <span class="k">def</span><span class="w"> </span><span class="nf">_unavailable</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2"> is not available in the loaded library "</span>
+                <span class="sa">f</span><span class="s2">"(C symbol missing)"</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">stub</span>
+    <span class="k">return</span> <span class="n">_</span></div>
+
+
+
+<div class="viewcode-block" id="StaleProxyCacheWarning">
+<a class="viewcode-back" href="../../../../numbox.core.proxy.html#numbox.core.proxy.proxy.StaleProxyCacheWarning">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">StaleProxyCacheWarning</span><span class="p">(</span><span class="ne">RuntimeWarning</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""A cached numba function referenced a ``@proxy`` alias this process never registered, so the entry was</span>
+<span class="sd">    discarded and recompiled.</span>
+
+<span class="sd">    To make it fatal instead, filter it programmatically --</span>
+<span class="sd">    ``warnings.filterwarnings("error", category=StaleProxyCacheWarning)`` -- or, under pytest, with</span>
+<span class="sd">    ``-W error::numbox.core.proxy.proxy.StaleProxyCacheWarning``. The interpreter's own ``-W`` cannot name this</span>
+<span class="sd">    class: CLI warning filters are resolved before the import system can reach numbox, so the category is rejected</span>
+<span class="sd">    as an invalid module name. The blanket ``-W error::RuntimeWarning`` does work.</span>
+<span class="sd">    """</span></div>
+
+
+
+<div class="viewcode-block" id="UnvalidatedProxyCacheWarning">
+<a class="viewcode-back" href="../../../../numbox.core.proxy.html#numbox.core.proxy.proxy.UnvalidatedProxyCacheWarning">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">UnvalidatedProxyCacheWarning</span><span class="p">(</span><span class="ne">RuntimeWarning</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""A cached payload could not be read, so it was loaded without being checked for stale ``@proxy``</span>
+<span class="sd">    aliases. Reported once per process: the condition is a property of the environment, not of one entry."""</span></div>
+
+
+
+<div class="viewcode-block" id="StaleProxyCacheError">
+<a class="viewcode-back" href="../../../../numbox.core.proxy.html#numbox.core.proxy.proxy.StaleProxyCacheError">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">StaleProxyCacheError</span><span class="p">(</span><span class="ne">RuntimeError</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Strict mode found a stale ``@proxy`` alias and refused to heal it.</span>
+
+<span class="sd">    Raised in place of :class:`StaleProxyCacheWarning` when ``NUMBOX_PROXY_CACHE_STRICT`` is set. The load</span>
+<span class="sd">    is aborted *before* the discard-and-recompile, so the stale entry is left on disk for inspection rather</span>
+<span class="sd">    than being replaced -- the opposite of the default heal, which silently overwrites it. Clear the numba</span>
+<span class="sd">    cache (``NUMBA_CACHE_DIR``) or unset the knob to recover.</span>
+<span class="sd">    """</span></div>
+
+
+
+<div class="viewcode-block" id="UnvalidatedProxyCacheError">
+<a class="viewcode-back" href="../../../../numbox.core.proxy.html#numbox.core.proxy.proxy.UnvalidatedProxyCacheError">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">UnvalidatedProxyCacheError</span><span class="p">(</span><span class="ne">RuntimeError</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Strict mode could not read a cache payload and refused to load it unchecked.</span>
+
+<span class="sd">    Raised in place of :class:`UnvalidatedProxyCacheWarning` when ``NUMBOX_PROXY_CACHE_STRICT`` is set and</span>
+<span class="sd">    unpacking the payload raises -- a shape a future numba might introduce, or a malformed object. The</span>
+<span class="sd">    default degrades this to loading unchecked; strict mode makes it loud so a validation gap cannot hide.</span>
+<span class="sd">    A well-formed object that the reader parses cleanly but finds no stale alias in is *not* a gap and is</span>
+<span class="sd">    loaded normally, in strict mode as by default: it cannot be told apart from a healthy object that merely</span>
+<span class="sd">    carries the alias prefix in a string constant.</span>
+<span class="sd">    """</span></div>
+
+
+
+<span class="n">_ELF_MAGIC</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">"</span><span class="se">\x7f</span><span class="s2">ELF"</span>
+<span class="c1"># 32- and 64-bit, both byte orders, and both widths of the fat/universal container.</span>
+<span class="n">_MACHO_MAGICS</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">((</span><span class="mh">0xFEEDFACE</span><span class="p">,</span> <span class="mh">0xFEEDFACF</span><span class="p">,</span> <span class="mh">0xCEFAEDFE</span><span class="p">,</span> <span class="mh">0xCFFAEDFE</span><span class="p">,</span>
+                           <span class="mh">0xCAFEBABE</span><span class="p">,</span> <span class="mh">0xBEBAFECA</span><span class="p">,</span> <span class="mh">0xCAFEBABF</span><span class="p">,</span> <span class="mh">0xBFBAFECA</span><span class="p">))</span>
+<span class="n">_unvalidated_reported</span> <span class="o">=</span> <span class="kc">False</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_elf_undefined_symbols</span><span class="p">(</span><span class="n">obj</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Names of the undefined (imported) symbols of an ELF64 little-endian relocatable object.</span>
+
+<span class="sd">    A 32-bit or big-endian ELF is left unread and yields nothing, the same contract ``_undefined_symbols``</span>
+<span class="sd">    documents for a container format it cannot parse.</span>
+<span class="sd">    """</span>
+    <span class="n">und</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mh">0x40</span> <span class="ow">or</span> <span class="n">obj</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span> <span class="o">!=</span> <span class="mi">2</span> <span class="ow">or</span> <span class="n">obj</span><span class="p">[</span><span class="mi">5</span><span class="p">]</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">und</span>
+    <span class="p">(</span><span class="n">e_shoff</span><span class="p">,)</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s2">"&lt;Q"</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="mh">0x28</span><span class="p">)</span>
+    <span class="n">e_shentsize</span><span class="p">,</span> <span class="n">e_shnum</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s2">"&lt;HH"</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="mh">0x3A</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">e_shnum</span><span class="p">):</span>
+        <span class="n">sh</span> <span class="o">=</span> <span class="n">e_shoff</span> <span class="o">+</span> <span class="n">i</span> <span class="o">*</span> <span class="n">e_shentsize</span>
+        <span class="p">(</span><span class="n">sh_type</span><span class="p">,)</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s2">"&lt;I"</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">sh</span> <span class="o">+</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">sh_type</span> <span class="o">!=</span> <span class="mi">2</span><span class="p">:</span>  <span class="c1"># SHT_SYMTAB</span>
+            <span class="k">continue</span>
+        <span class="n">sym_off</span><span class="p">,</span> <span class="n">sym_size</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s2">"&lt;QQ"</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">sh</span> <span class="o">+</span> <span class="mi">24</span><span class="p">)</span>
+        <span class="p">(</span><span class="n">sh_link</span><span class="p">,)</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s2">"&lt;I"</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">sh</span> <span class="o">+</span> <span class="mi">40</span><span class="p">)</span>
+        <span class="p">(</span><span class="n">sh_entsize</span><span class="p">,)</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s2">"&lt;Q"</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">sh</span> <span class="o">+</span> <span class="mi">56</span><span class="p">)</span>
+        <span class="p">(</span><span class="n">str_off</span><span class="p">,)</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s2">"&lt;Q"</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">e_shoff</span> <span class="o">+</span> <span class="n">sh_link</span> <span class="o">*</span> <span class="n">e_shentsize</span> <span class="o">+</span> <span class="mi">24</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">sym_size</span> <span class="o">//</span> <span class="n">sh_entsize</span><span class="p">):</span>
+            <span class="p">(</span><span class="n">st_name</span><span class="p">,)</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s2">"&lt;I"</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">sym_off</span> <span class="o">+</span> <span class="n">j</span> <span class="o">*</span> <span class="n">sh_entsize</span><span class="p">)</span>
+            <span class="p">(</span><span class="n">st_shndx</span><span class="p">,)</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s2">"&lt;H"</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">sym_off</span> <span class="o">+</span> <span class="n">j</span> <span class="o">*</span> <span class="n">sh_entsize</span> <span class="o">+</span> <span class="mi">6</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">st_shndx</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">st_name</span><span class="p">:</span>  <span class="c1"># SHN_UNDEF and named</span>
+                <span class="n">end</span> <span class="o">=</span> <span class="n">obj</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="sa">b</span><span class="s2">"</span><span class="se">\x00</span><span class="s2">"</span><span class="p">,</span> <span class="n">str_off</span> <span class="o">+</span> <span class="n">st_name</span><span class="p">)</span>
+                <span class="n">und</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">obj</span><span class="p">[</span><span class="n">str_off</span> <span class="o">+</span> <span class="n">st_name</span><span class="p">:</span><span class="n">end</span><span class="p">]</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">,</span> <span class="s2">"replace"</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">und</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_macho_undefined_symbols</span><span class="p">(</span><span class="n">obj</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Names of the undefined external symbols of a 64-bit little-endian Mach-O relocatable object.</span>
+
+<span class="sd">    Mach-O prefixes C symbols with an underscore, and it is stripped here so the names come back as numbox</span>
+<span class="sd">    registered them. A reader that skipped that step would test ``_numbox_pxy_...`` against the prefix, match</span>
+<span class="sd">    nothing, and quietly pass every stale object -- the failure mode this whole guard exists to prevent, in the</span>
+<span class="sd">    one place it would look like success. Other widths, byte orders and the fat container are left unread, as</span>
+<span class="sd">    in the ELF reader.</span>
+<span class="sd">    """</span>
+    <span class="n">und</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">32</span> <span class="ow">or</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s2">"&lt;I"</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="mi">0</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="mh">0xFEEDFACF</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">und</span>
+    <span class="p">(</span><span class="n">ncmds</span><span class="p">,)</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s2">"&lt;I"</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span>
+    <span class="n">off</span> <span class="o">=</span> <span class="mi">32</span>
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">ncmds</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">off</span> <span class="o">+</span> <span class="mi">8</span> <span class="o">&gt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">obj</span><span class="p">):</span>
+            <span class="k">break</span>
+        <span class="n">cmd</span><span class="p">,</span> <span class="n">cmdsize</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s2">"&lt;II"</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">off</span><span class="p">)</span>
+        <span class="c1"># Both bounds are about a corrupt or foreign object, not a real one: cmdsize is what advances the</span>
+        <span class="c1"># walk, so a zero would spin here forever, and this runs on every cache load. Fail-open cannot</span>
+        <span class="c1"># rescue a hang the way it rescues an exception.</span>
+        <span class="k">if</span> <span class="n">cmdsize</span> <span class="o">&lt;</span> <span class="mi">8</span> <span class="ow">or</span> <span class="n">off</span> <span class="o">+</span> <span class="n">cmdsize</span> <span class="o">&gt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">obj</span><span class="p">):</span>
+            <span class="k">break</span>
+        <span class="k">if</span> <span class="n">cmd</span> <span class="o">==</span> <span class="mh">0x2</span><span class="p">:</span>  <span class="c1"># LC_SYMTAB</span>
+            <span class="n">symoff</span><span class="p">,</span> <span class="n">nsyms</span><span class="p">,</span> <span class="n">stroff</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s2">"&lt;III"</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">off</span> <span class="o">+</span> <span class="mi">8</span><span class="p">)</span>
+            <span class="n">nsyms</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">nsyms</span><span class="p">,</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span> <span class="o">-</span> <span class="n">symoff</span><span class="p">)</span> <span class="o">//</span> <span class="mi">16</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nsyms</span><span class="p">):</span>
+                <span class="n">n_strx</span><span class="p">,</span> <span class="n">n_type</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s2">"&lt;IB"</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">symoff</span> <span class="o">+</span> <span class="n">i</span> <span class="o">*</span> <span class="mi">16</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">n_type</span> <span class="o">&amp;</span> <span class="mh">0xE0</span><span class="p">:</span>  <span class="c1"># N_STAB: a debugging entry, never a link-time import</span>
+                    <span class="k">continue</span>
+                <span class="k">if</span> <span class="p">(</span><span class="n">n_type</span> <span class="o">&amp;</span> <span class="mh">0x0E</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="p">(</span><span class="n">n_type</span> <span class="o">&amp;</span> <span class="mh">0x01</span><span class="p">):</span>  <span class="c1"># not N_UNDF, or not N_EXT</span>
+                    <span class="k">continue</span>
+                <span class="n">end</span> <span class="o">=</span> <span class="n">obj</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="sa">b</span><span class="s2">"</span><span class="se">\x00</span><span class="s2">"</span><span class="p">,</span> <span class="n">stroff</span> <span class="o">+</span> <span class="n">n_strx</span><span class="p">)</span>
+                <span class="n">name</span> <span class="o">=</span> <span class="n">obj</span><span class="p">[</span><span class="n">stroff</span> <span class="o">+</span> <span class="n">n_strx</span><span class="p">:</span><span class="n">end</span><span class="p">]</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">,</span> <span class="s2">"replace"</span><span class="p">)</span>
+                <span class="n">und</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">name</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span> <span class="k">if</span> <span class="n">name</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">"_"</span><span class="p">)</span> <span class="k">else</span> <span class="n">name</span><span class="p">)</span>
+        <span class="n">off</span> <span class="o">+=</span> <span class="n">cmdsize</span>
+    <span class="k">return</span> <span class="n">und</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_coff_undefined_symbols</span><span class="p">(</span><span class="n">obj</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""COFF/PE (Windows). Not read yet -- see ``_undefined_symbols`` for what an empty result means here."""</span>
+    <span class="k">return</span> <span class="nb">set</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_undefined_symbols</span><span class="p">(</span><span class="n">object_code</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Undefined (imported) symbol names of one relocatable object, dispatched on its container format.</span>
+
+<span class="sd">    A format this cannot read yields an empty set, which degrades the caller to "nothing to check" rather than</span>
+<span class="sd">    to a false verdict: an unreadable object is loaded exactly as it was before this guard existed. COFF is the</span>
+<span class="sd">    fallback because a COFF object begins with a machine-type word rather than a distinctive magic.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">object_code</span><span class="p">[:</span><span class="mi">4</span><span class="p">]</span> <span class="o">==</span> <span class="n">_ELF_MAGIC</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_elf_undefined_symbols</span><span class="p">(</span><span class="n">object_code</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">object_code</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">4</span> <span class="ow">and</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack_from</span><span class="p">(</span><span class="s2">"&lt;I"</span><span class="p">,</span> <span class="n">object_code</span><span class="p">,</span> <span class="mi">0</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="n">_MACHO_MAGICS</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_macho_undefined_symbols</span><span class="p">(</span><span class="n">object_code</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_coff_undefined_symbols</span><span class="p">(</span><span class="n">object_code</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_stale_proxy_aliases</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">libdata_of_payload</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""``@proxy`` aliases a serialized code library references that this process cannot correctly call.</span>
+
+<span class="sd">    A non-empty result means the payload must not be loaded. It is *every* stale alias the object imports,</span>
+<span class="sd">    not the first -- an object that calls two edited proxies carries two unregistered names, and the caller</span>
+<span class="sd">    joins the whole list into one warning, so the diagnostic never undercounts within an object. (What the</span>
+<span class="sd">    guard cannot enumerate is stale entries never loaded: a proxied body whose own source changed recompiles</span>
+<span class="sd">    fresh, overwriting its cache file, and is never handed to ``rebuild`` -- correctly drawing no warning.)</span>
+<span class="sd">    ``ll.address_of_symbol`` is nearly an exact oracle: these names live only in llvmlite's explicit-symbol</span>
+<span class="sd">    map, and because the alias encodes the body, signature and jit options, a resolving alias is normally the</span>
+<span class="sd">    right body to call. The exception is an alias standing for an absent ``proxy_if_available`` binding, which</span>
+<span class="sd">    resolves to a trap holding no body at all. Loading that object is worse than discarding it -- the trap's</span>
+<span class="sd">    error is raised inside a ``@cfunc``, where numba swallows it and returns zero, so the caller silently</span>
+<span class="sd">    computes on a wrong value, while discarding yields the same clean typing error a cold cache gives.</span>
+
+<span class="sd">    The payload is unpacked inside the handler rather than by the caller, because its shape is precisely the</span>
+<span class="sd">    thing a future numba might change.</span>
+
+<span class="sd">    Under ``NUMBOX_PROXY_CACHE_STRICT`` a payload that cannot be *read* raises :class:`UnvalidatedProxyCacheError`</span>
+<span class="sd">    instead of degrading to unchecked. A well-formed object the reader parses cleanly is not forced to raise</span>
+<span class="sd">    even when it yields no stale alias: an object that carries the prefix only as a string constant parses</span>
+<span class="sd">    exactly like one that carries it as an unresolved import would if the reader went blind, so there is no</span>
+<span class="sd">    way to escalate the second without also aborting the first -- a healthy, entirely non-proxy cached</span>
+<span class="sd">    function. Reader blindness is caught where it can be told apart, in CI, by a test that asserts the reader</span>
+<span class="sd">    parses the objects numba actually emits; it is not guessed at here on live loads.</span>
+<span class="sd">    """</span>
+    <span class="n">strict</span> <span class="o">=</span> <span class="n">_strict_cache_mode</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">_name</span><span class="p">,</span> <span class="n">kind</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="n">libdata_of_payload</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">kind</span> <span class="o">!=</span> <span class="s2">"object"</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[]</span>
+        <span class="n">object_code</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">_ALIAS_PREFIX</span><span class="o">.</span><span class="n">encode</span><span class="p">()</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">object_code</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[]</span>  <span class="c1"># fast path: the alias string appears nowhere in the object</span>
+        <span class="k">return</span> <span class="nb">sorted</span><span class="p">(</span>
+            <span class="n">s</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">_undefined_symbols</span><span class="p">(</span><span class="n">object_code</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">_ALIAS_PREFIX</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">s</span> <span class="ow">in</span> <span class="n">_ABSENT_ALIASES</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">ll</span><span class="o">.</span><span class="n">address_of_symbol</span><span class="p">(</span><span class="n">s</span><span class="p">))</span>
+        <span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="c1"># Fail open: this runs on EVERY numba cache load in the process, so a surprise -- a future numba</span>
+        <span class="c1"># changing the payload shape, a malformed object -- must degrade to "no validation", never to</span>
+        <span class="c1"># breaking unrelated caching. Under the strict knob a caller has asked for the opposite: surface it.</span>
+        <span class="k">if</span> <span class="n">strict</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">UnvalidatedProxyCacheError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"numbox: could not check a numba cache payload for stale @proxy aliases (</span><span class="si">{</span><span class="n">exc</span><span class="si">!r}</span><span class="s2">); "</span>
+                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">_PROXY_CACHE_STRICT_ENV</span><span class="si">}</span><span class="s2"> is set, so the load was aborted rather than proceeding unchecked"</span>
+            <span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">exc</span>
+        <span class="c1"># Say so once, though: abandoning the check silently is indistinguishable from passing it, and what</span>
+        <span class="c1"># it silently restores is the crash this guard exists to prevent.</span>
+        <span class="k">global</span> <span class="n">_unvalidated_reported</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_unvalidated_reported</span><span class="p">:</span>
+            <span class="n">_unvalidated_reported</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"numbox: could not check a numba cache payload for stale @proxy aliases (</span><span class="si">{</span><span class="n">exc</span><span class="si">!r}</span><span class="s2">); it was "</span>
+                <span class="s2">"loaded unchecked. Later payloads in this process are checked, but not reported again."</span><span class="p">,</span>
+                <span class="n">UnvalidatedProxyCacheWarning</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="p">[]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_guarded_rebuild</span><span class="p">(</span><span class="n">orig_rebuild</span><span class="p">,</span> <span class="n">libdata_of_payload</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Wrap a numba ``CacheImpl.rebuild`` so a payload is validated while it is still plain bytes.</span>
+
+<span class="sd">    This is the last point upstream of the execution engine. Once ``unserialize_library`` runs, the object's</span>
+<span class="sd">    externals are resolved in one batch and a single unregistered name zeroes every relocation in it, which is</span>
+<span class="sd">    unrecoverable and kills the process without a diagnostic. Returning ``None`` is numba's own contract for a</span>
+<span class="sd">    cache miss, so the stale entry is discarded and recompiled in place. Under</span>
+<span class="sd">    ``NUMBOX_PROXY_CACHE_STRICT`` the discard is refused and :class:`StaleProxyCacheError` is raised instead,</span>
+<span class="sd">    before the ``None`` return, so the stale entry stays on disk for inspection.</span>
+<span class="sd">    """</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">rebuild</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">target_context</span><span class="p">,</span> <span class="n">payload</span><span class="p">):</span>
+        <span class="n">stale</span> <span class="o">=</span> <span class="n">_stale_proxy_aliases</span><span class="p">(</span><span class="n">payload</span><span class="p">,</span> <span class="n">libdata_of_payload</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">stale</span><span class="p">:</span>
+            <span class="n">filename_base</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s1">'filename_base'</span><span class="p">,</span> <span class="s1">'?'</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">_strict_cache_mode</span><span class="p">():</span>
+                <span class="k">raise</span> <span class="n">StaleProxyCacheError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">"numbox: </span><span class="si">{</span><span class="n">filename_base</span><span class="si">}</span><span class="s2"> references @proxy cfunc alias(es) this process cannot call "</span>
+                    <span class="sa">f</span><span class="s2">"(</span><span class="si">{</span><span class="s1">', '</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">stale</span><span class="p">)</span><span class="si">}</span><span class="s2">); </span><span class="si">{</span><span class="n">_PROXY_CACHE_STRICT_ENV</span><span class="si">}</span><span class="s2"> is set, so the stale entry was left on disk for "</span>
+                    <span class="s2">"inspection instead of being discarded and recompiled"</span>
+                <span class="p">)</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                <span class="s2">"numbox: discarding a stale numba cache entry and recompiling: "</span>
+                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">filename_base</span><span class="si">}</span><span class="s2"> references @proxy cfunc alias(es) this process "</span>
+                <span class="s2">"cannot call (the proxied body, signature or jit_options changed since the caller was "</span>
+                <span class="s2">"cached, or the binding is no longer available): "</span>
+                <span class="o">+</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">stale</span><span class="p">),</span>
+                <span class="n">StaleProxyCacheWarning</span><span class="p">,</span>
+                <span class="n">stacklevel</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="n">orig_rebuild</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">target_context</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">rebuild</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_install_cache_alias_guard</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Validate every numba cache load in this process against the registered ``@proxy`` aliases.</span>
+
+<span class="sd">    Ordering is guaranteed without any coordination: a caller can only have been compiled against a ``@proxy``</span>
+<span class="sd">    binding whose module it imports, and importing that module imports this one. A cached function that</span>
+<span class="sd">    references no alias may load before numbox exists and needs no validation.</span>
+
+<span class="sd">    Every lookup happens before the first assignment, so a numba that does not offer one of these classes leaves</span>
+<span class="sd">    the process with no guard rather than half of one.</span>
+<span class="sd">    """</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">numba.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">caching</span>
+    <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">caching</span><span class="p">,</span> <span class="s2">"_numbox_proxy_alias_guard"</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+        <span class="k">return</span>
+    <span class="n">wrapped</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="p">(</span><span class="n">caching</span><span class="o">.</span><span class="n">CompileResultCacheImpl</span><span class="p">,</span> <span class="n">_guarded_rebuild</span><span class="p">(</span><span class="n">caching</span><span class="o">.</span><span class="n">CompileResultCacheImpl</span><span class="o">.</span><span class="n">rebuild</span><span class="p">,</span>
+                                                          <span class="k">lambda</span> <span class="n">payload</span><span class="p">:</span> <span class="n">payload</span><span class="p">[</span><span class="mi">0</span><span class="p">])),</span>
+        <span class="p">(</span><span class="n">caching</span><span class="o">.</span><span class="n">CodeLibraryCacheImpl</span><span class="p">,</span> <span class="n">_guarded_rebuild</span><span class="p">(</span><span class="n">caching</span><span class="o">.</span><span class="n">CodeLibraryCacheImpl</span><span class="o">.</span><span class="n">rebuild</span><span class="p">,</span>
+                                                        <span class="k">lambda</span> <span class="n">payload</span><span class="p">:</span> <span class="n">payload</span><span class="p">)),</span>
+    <span class="p">]</span>
+    <span class="n">caching</span><span class="o">.</span><span class="n">_numbox_proxy_alias_guard</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">for</span> <span class="n">impl</span><span class="p">,</span> <span class="n">rebuild</span> <span class="ow">in</span> <span class="n">wrapped</span><span class="p">:</span>
+        <span class="n">impl</span><span class="o">.</span><span class="n">rebuild</span> <span class="o">=</span> <span class="n">rebuild</span>
+
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">_install_cache_alias_guard</span><span class="p">()</span>
+<span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+    <span class="c1"># Fail open, as the per-load validator does. Losing the guard costs protection against a stale cache</span>
+    <span class="c1"># entry; letting an install-time surprise escape would cost the whole library its importability.</span>
+    <span class="k">pass</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

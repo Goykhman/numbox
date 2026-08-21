@@ -1,0 +1,407 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.utils.derive_wap &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/utils/derive_wap.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.utils.derive_wap</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.utils.derive_wap</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""First-class function values whose exceptions propagate out of the call.</span>
+
+<span class="sd">The mechanism</span>
+<span class="sd">-------------</span>
+
+<span class="sd">numba lowers a first-class ``FunctionType`` call two ways and picks between them on</span>
+<span class="sd">the function model's ``jit_addr`` slot. A populated slot selects the numba calling</span>
+<span class="sd">convention plus ``return_status_propagate``, so an exception unwinds into the caller.</span>
+<span class="sd">An empty slot selects the C wrapper, which numba documents as not supporting</span>
+<span class="sd">exceptions: it discards the exception, zero-fills the return value and reports the</span>
+<span class="sd">failure only as an unraisable on stderr.</span>
+
+<span class="sd">numba fills the slot for a ``Dispatcher`` and leaves it empty for everything else,</span>
+<span class="sd">``_get_jit_address`` returning 0. A bare compile result therefore arrives at a call</span>
+<span class="sd">site with no entry point that could carry an exception out.</span>
+
+<span class="sd">:class:`DeriveWAP` captures the compile result's numba-callconv entry point, and</span>
+<span class="sd">:class:`DeriveFunctionType` populates ``jit_addr`` from it on both unboxing and</span>
+<span class="sd">constant lowering. A value of this type carries a usable entry point wherever it</span>
+<span class="sd">goes.</span>
+
+<span class="sd">Using it</span>
+<span class="sd">--------</span>
+
+<span class="sd">:func:`numbox.utils.highlevel.cres` mints these values, so a `cres`-compiled function</span>
+<span class="sd">is already one::</span>
+
+<span class="sd">    @cres(float64(float64))</span>
+<span class="sd">    def f(x):</span>
+<span class="sd">        if x &lt; 0:</span>
+<span class="sd">            raise ValueError("negative")</span>
+<span class="sd">        return x</span>
+
+<span class="sd">Filling the slot is necessary but not sufficient: the *call site* decides which</span>
+<span class="sd">convention it emits, and one that reads the wrapper address unconditionally gets the</span>
+<span class="sd">C wrapper however the slot is filled. A consumer opts in by reading ``jit_addr`` and</span>
+<span class="sd">emitting ``call_conv.call_function`` plus ``return_status_propagate`` when it is</span>
+<span class="sd">non-null; numba's own version of that is</span>
+<span class="sd">``numba.core.lowering.Lower.__call_first_class_function_pointer``.</span>
+
+<span class="sd">``numbox.core.work.work._call_derive`` is the worked example in this repository, and</span>
+<span class="sd">:doc:`numbox.core.work` walks through it. It selects the propagating convention at</span>
+<span class="sd">compile time for a :class:`DeriveFunctionType`, and tests the slot at runtime for a</span>
+<span class="sd">plain ``FunctionType``, which numba does populate for an njit dispatcher passed as a</span>
+<span class="sd">``FunctionType``-typed argument.</span>
+
+<span class="sd">Limits</span>
+<span class="sd">------</span>
+
+<span class="sd">:meth:`DeriveFunctionType.can_convert_to` documents the one direction that does not</span>
+<span class="sd">survive: a value handed from Python into a parameter *declared* as a plain</span>
+<span class="sd">``FunctionType`` degrades to the C convention on the way in.</span>
+
+<span class="sd">Where numba has no such slot :func:`jit_addr_supported` is false, the whole mechanism</span>
+<span class="sd">is inert and ``cres`` returns a plain ``CompileResultWAP``.</span>
+
+<span class="sd">Standing on numba</span>
+<span class="sd">-----------------</span>
+
+<span class="sd">The decorators below are numba's public extension API, save for ``lower_constant``,</span>
+<span class="sd">which ``numba.extending`` does not re-export. What they register against is not:</span>
+<span class="sd">``FunctionModel``, ``CompileResultWAP``, ``Conversion``, ``box_function_type`` and</span>
+<span class="sd">``lower_get_wrapper_address`` all sit outside ``numba.extending``, and the constant</span>
+<span class="sd">lowering drives ``context.declare_function`` and ``context.active_code_library``</span>
+<span class="sd">directly. What does hold is that no numba internals are patched: nothing here</span>
+<span class="sd">replaces numba behaviour, it only registers against it.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">cgutils</span><span class="p">,</span> <span class="n">types</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.imputils</span><span class="w"> </span><span class="kn">import</span> <span class="n">lower_cast</span><span class="p">,</span> <span class="n">lower_constant</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.typeconv</span><span class="w"> </span><span class="kn">import</span> <span class="n">Conversion</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types.function_type</span><span class="w"> </span><span class="kn">import</span> <span class="n">CompileResultWAP</span><span class="p">,</span> <span class="n">FunctionType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.typing.typeof</span><span class="w"> </span><span class="kn">import</span> <span class="n">typeof_impl</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.experimental.function_type</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">FunctionModel</span><span class="p">,</span> <span class="n">box_function_type</span><span class="p">,</span> <span class="n">lower_get_wrapper_address</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">NativeValue</span><span class="p">,</span> <span class="n">box</span><span class="p">,</span> <span class="n">register_model</span><span class="p">,</span> <span class="n">unbox</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">function_struct_has</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"DeriveFunctionType"</span><span class="p">,</span> <span class="s2">"DeriveWAP"</span><span class="p">,</span> <span class="s2">"jit_addr_supported"</span><span class="p">,</span> <span class="s2">"rewrap_derive"</span><span class="p">]</span>
+
+
+<span class="c1">#: Where :func:`rewrap_derive` parks the upgraded wrapper on the object it upgrades,</span>
+<span class="c1">#: so that the address stored in ``py_addr`` stays backed for as long as the caller</span>
+<span class="c1">#: holds the original.</span>
+<span class="n">_UPGRADED_ATTR</span> <span class="o">=</span> <span class="s2">"_numbox_derive_wap"</span>
+
+
+<div class="viewcode-block" id="jit_addr_supported">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.derive_wap.jit_addr_supported">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">jit_addr_supported</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Whether the running numba exposes the ``jit_addr`` slot.</span>
+
+<span class="sd">    The slot was added to ``FunctionModel`` in numba 0.61. Where it is absent the</span>
+<span class="sd">    mechanism has nothing to populate, so numbox leaves first-class calls to numba</span>
+<span class="sd">    rather than shipping a half-installed variant.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">function_struct_has</span><span class="p">(</span><span class="s2">"jit_addr"</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="DeriveFunctionType">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.derive_wap.DeriveFunctionType">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">DeriveFunctionType</span><span class="p">(</span><span class="n">FunctionType</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""First-class function type whose values always carry a populated ``jit_addr``.</span>
+
+<span class="sd">    Kept distinct from ``FunctionType`` so that ``_call_derive`` can select the</span>
+<span class="sd">    propagating calling convention at compile time, with no runtime branch, for</span>
+<span class="sd">    every derive numbox itself compiled.</span>
+<span class="sd">    """</span>
+
+<div class="viewcode-block" id="DeriveFunctionType.can_convert_to">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.derive_wap.DeriveFunctionType.can_convert_to">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">can_convert_to</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">typingctx</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Permit passing a :class:`DeriveWAP` where a plain ``FunctionType`` of</span>
+<span class="sd">        the same signature is declared.</span>
+
+<span class="sd">        Such a call site keeps working unchanged, which is the point, but it</span>
+<span class="sd">        keeps its *old* behaviour too: crossing the Python boundary into a</span>
+<span class="sd">        parameter declared as a plain ``FunctionType`` degrades the value to the</span>
+<span class="sd">        C convention, so a `derive` supplied that way still discards its</span>
+<span class="sd">        exception. Reaching the same declared type by a cast within jitted scope</span>
+<span class="sd">        does not degrade it, because :func:`lower_cast_derive_to_function_type`</span>
+<span class="sd">        is an identity on a shared ``FunctionModel`` and the populated</span>
+<span class="sd">        ``jit_addr`` survives. One source-level call site therefore has two</span>
+<span class="sd">        different exception semantics depending on where the value came from.</span>
+<span class="sd">        """</span>
+        <span class="k">if</span> <span class="nb">type</span><span class="p">(</span><span class="n">other</span><span class="p">)</span> <span class="ow">is</span> <span class="n">FunctionType</span> <span class="ow">and</span> <span class="n">other</span><span class="o">.</span><span class="n">signature</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">signature</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">Conversion</span><span class="o">.</span><span class="n">safe</span>
+        <span class="k">return</span> <span class="kc">None</span></div>
+</div>
+
+
+
+<span class="nd">@lower_cast</span><span class="p">(</span><span class="n">DeriveFunctionType</span><span class="p">,</span> <span class="n">FunctionType</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">lower_cast_derive_to_function_type</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">fromty</span><span class="p">,</span> <span class="n">toty</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Identity cast. Both types use ``FunctionModel``, so the struct is shared."""</span>
+    <span class="k">return</span> <span class="n">val</span>
+
+
+<div class="viewcode-block" id="DeriveWAP">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.derive_wap.DeriveWAP">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">DeriveWAP</span><span class="p">(</span><span class="n">CompileResultWAP</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""``CompileResultWAP`` that also captures the numba-callconv entry point.</span>
+
+<span class="sd">    ``CompileResultWAP`` records only the cfunc wrapper address, which is the</span>
+<span class="sd">    entry point that cannot carry an exception out.</span>
+<span class="sd">    """</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cres</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">cres</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">jit_address</span> <span class="o">=</span> <span class="n">cres</span><span class="o">.</span><span class="n">library</span><span class="o">.</span><span class="n">get_pointer_to_function</span><span class="p">(</span>
+            <span class="n">cres</span><span class="o">.</span><span class="n">fndesc</span><span class="o">.</span><span class="n">llvm_func_name</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">jit_address</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"no callconv entry point for </span><span class="si">{</span><span class="n">cres</span><span class="o">.</span><span class="n">fndesc</span><span class="o">.</span><span class="n">llvm_func_name</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span></div>
+
+
+
+<span class="nd">@typeof_impl</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">DeriveWAP</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">typeof_derive_wap</span><span class="p">(</span><span class="n">val</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">DeriveFunctionType</span><span class="p">(</span><span class="n">val</span><span class="o">.</span><span class="n">signature</span><span class="p">())</span>
+
+
+<span class="n">register_model</span><span class="p">(</span><span class="n">DeriveFunctionType</span><span class="p">)(</span><span class="n">FunctionModel</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_get_derive_jit_address</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">sig</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Resolve the callconv entry address during unboxing.</span>
+
+<span class="sd">    Called from jitted unboxing code with the GIL held, mirroring how numba's own</span>
+<span class="sd">    first-class unboxing reaches back into Python. Raising here surfaces at the</span>
+<span class="sd">    unbox boundary rather than corrupting the struct, so a value that is not a</span>
+<span class="sd">    :class:`DeriveWAP` fails loudly instead of producing a null ``jit_addr`` that</span>
+<span class="sd">    would silently reinstate the swallow.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">DeriveWAP</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">func</span><span class="o">.</span><span class="n">jit_address</span>
+    <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"DeriveFunctionType value must be a DeriveWAP, got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_lower_get_derive_jit_address</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">func</span><span class="p">,</span> <span class="n">sig</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Emit the call to :func:`_get_derive_jit_address`.</span>
+
+<span class="sd">    Follows numba's ``_lower_get_address`` with ``failure_mode='return_null'``:</span>
+<span class="sd">    a null result returns NULL from the unboxing function, which propagates the</span>
+<span class="sd">    Python exception rather than swallowing it.</span>
+<span class="sd">    """</span>
+    <span class="n">pyapi</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">get_python_api</span><span class="p">(</span><span class="n">builder</span><span class="p">)</span>
+    <span class="n">modname</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">insert_const_string</span><span class="p">(</span><span class="n">builder</span><span class="o">.</span><span class="n">module</span><span class="p">,</span> <span class="vm">__name__</span><span class="p">)</span>
+    <span class="n">mod</span> <span class="o">=</span> <span class="n">pyapi</span><span class="o">.</span><span class="n">import_module</span><span class="p">(</span><span class="n">modname</span><span class="p">)</span>
+    <span class="n">fn</span> <span class="o">=</span> <span class="n">pyapi</span><span class="o">.</span><span class="n">object_getattr_string</span><span class="p">(</span><span class="n">mod</span><span class="p">,</span> <span class="s2">"_get_derive_jit_address"</span><span class="p">)</span>
+    <span class="n">pyapi</span><span class="o">.</span><span class="n">decref</span><span class="p">(</span><span class="n">mod</span><span class="p">)</span>
+    <span class="n">sig_obj</span> <span class="o">=</span> <span class="n">pyapi</span><span class="o">.</span><span class="n">unserialize</span><span class="p">(</span><span class="n">pyapi</span><span class="o">.</span><span class="n">serialize_object</span><span class="p">(</span><span class="n">sig</span><span class="p">))</span>
+    <span class="n">addr</span> <span class="o">=</span> <span class="n">pyapi</span><span class="o">.</span><span class="n">call_function_objargs</span><span class="p">(</span><span class="n">fn</span><span class="p">,</span> <span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">sig_obj</span><span class="p">))</span>
+    <span class="c1"># `fn` and `sig_obj` are new references and `addr` does not borrow from either,</span>
+    <span class="c1"># so release them before the branch below: the null path returns early, and</span>
+    <span class="c1"># unboxing runs on every call for a derive passed as an argument.</span>
+    <span class="n">pyapi</span><span class="o">.</span><span class="n">decref</span><span class="p">(</span><span class="n">fn</span><span class="p">)</span>
+    <span class="n">pyapi</span><span class="o">.</span><span class="n">decref</span><span class="p">(</span><span class="n">sig_obj</span><span class="p">)</span>
+    <span class="k">with</span> <span class="n">builder</span><span class="o">.</span><span class="n">if_then</span><span class="p">(</span><span class="n">cgutils</span><span class="o">.</span><span class="n">is_null</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">addr</span><span class="p">),</span> <span class="n">likely</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="n">builder</span><span class="o">.</span><span class="n">ret</span><span class="p">(</span><span class="n">pyapi</span><span class="o">.</span><span class="n">get_null_object</span><span class="p">())</span>
+    <span class="k">return</span> <span class="n">addr</span>
+
+
+<span class="nd">@unbox</span><span class="p">(</span><span class="n">DeriveFunctionType</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">unbox_derive_function_type</span><span class="p">(</span><span class="n">typ</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
+    <span class="n">typ</span> <span class="o">=</span> <span class="n">typ</span><span class="o">.</span><span class="n">get_precise</span><span class="p">()</span>
+    <span class="n">sfunc</span> <span class="o">=</span> <span class="n">cgutils</span><span class="o">.</span><span class="n">create_struct_proxy</span><span class="p">(</span><span class="n">typ</span><span class="p">)(</span><span class="n">c</span><span class="o">.</span><span class="n">context</span><span class="p">,</span> <span class="n">c</span><span class="o">.</span><span class="n">builder</span><span class="p">)</span>
+
+    <span class="n">addr</span> <span class="o">=</span> <span class="n">lower_get_wrapper_address</span><span class="p">(</span>
+        <span class="n">c</span><span class="o">.</span><span class="n">context</span><span class="p">,</span> <span class="n">c</span><span class="o">.</span><span class="n">builder</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">typ</span><span class="o">.</span><span class="n">signature</span><span class="p">,</span> <span class="n">failure_mode</span><span class="o">=</span><span class="s2">"return_null"</span><span class="p">)</span>
+    <span class="n">sfunc</span><span class="o">.</span><span class="n">c_addr</span> <span class="o">=</span> <span class="n">c</span><span class="o">.</span><span class="n">pyapi</span><span class="o">.</span><span class="n">long_as_voidptr</span><span class="p">(</span><span class="n">addr</span><span class="p">)</span>
+    <span class="n">c</span><span class="o">.</span><span class="n">pyapi</span><span class="o">.</span><span class="n">decref</span><span class="p">(</span><span class="n">addr</span><span class="p">)</span>
+
+    <span class="n">llty</span> <span class="o">=</span> <span class="n">c</span><span class="o">.</span><span class="n">context</span><span class="o">.</span><span class="n">get_value_type</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">voidptr</span><span class="p">)</span>
+    <span class="n">sfunc</span><span class="o">.</span><span class="n">py_addr</span> <span class="o">=</span> <span class="n">c</span><span class="o">.</span><span class="n">builder</span><span class="o">.</span><span class="n">ptrtoint</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">llty</span><span class="p">)</span>
+
+    <span class="n">addr</span> <span class="o">=</span> <span class="n">_lower_get_derive_jit_address</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">context</span><span class="p">,</span> <span class="n">c</span><span class="o">.</span><span class="n">builder</span><span class="p">,</span> <span class="n">obj</span><span class="p">,</span> <span class="n">typ</span><span class="o">.</span><span class="n">signature</span><span class="p">)</span>
+    <span class="n">sfunc</span><span class="o">.</span><span class="n">jit_addr</span> <span class="o">=</span> <span class="n">c</span><span class="o">.</span><span class="n">pyapi</span><span class="o">.</span><span class="n">long_as_voidptr</span><span class="p">(</span><span class="n">addr</span><span class="p">)</span>
+    <span class="n">c</span><span class="o">.</span><span class="n">pyapi</span><span class="o">.</span><span class="n">decref</span><span class="p">(</span><span class="n">addr</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">NativeValue</span><span class="p">(</span><span class="n">sfunc</span><span class="o">.</span><span class="n">_getvalue</span><span class="p">())</span>
+
+
+<span class="nd">@box</span><span class="p">(</span><span class="n">DeriveFunctionType</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">box_derive_function_type</span><span class="p">(</span><span class="n">typ</span><span class="p">,</span> <span class="n">val</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">box_function_type</span><span class="p">(</span><span class="n">typ</span><span class="p">,</span> <span class="n">val</span><span class="p">,</span> <span class="n">c</span><span class="p">)</span>
+
+
+<span class="nd">@lower_constant</span><span class="p">(</span><span class="n">DeriveFunctionType</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">lower_constant_derive_function_type</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">typ</span><span class="p">,</span> <span class="n">pyval</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Lower a derive reached as a compile-time constant from jitted code.</span>
+
+<span class="sd">    ``c_addr`` and ``py_addr`` follow numba's own lowering for a</span>
+<span class="sd">    ``WrapperAddressProtocol`` value. ``jit_addr`` is declared symbolically and</span>
+<span class="sd">    the compile result's library is linked in, which is the pattern numba uses</span>
+<span class="sd">    for its ``Dispatcher -&gt; FunctionType`` cast, and which is what makes the</span>
+<span class="sd">    entry point resolve as a symbol rather than as a bare pointer.</span>
+
+<span class="sd">    Resolving it as a symbol is also what makes a constant-lowered derive</span>
+<span class="sd">    cacheable at all: the dead ``c_addr``/``py_addr`` globals are eliminated</span>
+<span class="sd">    before numba scans the final module, so a caller that only calls the derive</span>
+<span class="sd">    reports no dynamic globals and caches. A baked address would leave them live</span>
+<span class="sd">    and numba would refuse to cache the caller rather than store an address that</span>
+<span class="sd">    is randomized per process.</span>
+
+<span class="sd">    That caching is not free: the caller's cached binary binds the derive's</span>
+<span class="sd">    code, so editing the derive's body in another module serves a stale binary</span>
+<span class="sd">    until the cache is cleared.</span>
+
+<span class="sd">    There is deliberately no fallback to a baked address. A value of this type</span>
+<span class="sd">    always takes the propagating call, so a `jit_addr` that failed to resolve</span>
+<span class="sd">    would be called unconditionally, and failing the compilation is the only</span>
+<span class="sd">    honest outcome.</span>
+<span class="sd">    """</span>
+    <span class="n">typ</span> <span class="o">=</span> <span class="n">typ</span><span class="o">.</span><span class="n">get_precise</span><span class="p">()</span>
+    <span class="k">assert</span> <span class="n">typ</span><span class="o">.</span><span class="n">check_signature</span><span class="p">(</span><span class="n">pyval</span><span class="o">.</span><span class="n">signature</span><span class="p">())</span>
+    <span class="n">sfunc</span> <span class="o">=</span> <span class="n">cgutils</span><span class="o">.</span><span class="n">create_struct_proxy</span><span class="p">(</span><span class="n">typ</span><span class="p">)(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">)</span>
+    <span class="n">sfunc</span><span class="o">.</span><span class="n">c_addr</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">add_dynamic_addr</span><span class="p">(</span>
+        <span class="n">builder</span><span class="p">,</span> <span class="n">pyval</span><span class="o">.</span><span class="n">__wrapper_address__</span><span class="p">(),</span> <span class="n">info</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">typ</span><span class="p">))</span>
+    <span class="n">sfunc</span><span class="o">.</span><span class="n">py_addr</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">add_dynamic_addr</span><span class="p">(</span>
+        <span class="n">builder</span><span class="p">,</span> <span class="nb">id</span><span class="p">(</span><span class="n">pyval</span><span class="p">),</span> <span class="n">info</span><span class="o">=</span><span class="nb">type</span><span class="p">(</span><span class="n">pyval</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
+    <span class="n">fn</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">declare_function</span><span class="p">(</span><span class="n">builder</span><span class="o">.</span><span class="n">module</span><span class="p">,</span> <span class="n">pyval</span><span class="o">.</span><span class="n">cres</span><span class="o">.</span><span class="n">fndesc</span><span class="p">)</span>
+    <span class="n">sfunc</span><span class="o">.</span><span class="n">jit_addr</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">bitcast</span><span class="p">(</span><span class="n">fn</span><span class="p">,</span> <span class="n">context</span><span class="o">.</span><span class="n">get_value_type</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">voidptr</span><span class="p">))</span>
+    <span class="n">context</span><span class="o">.</span><span class="n">active_code_library</span><span class="o">.</span><span class="n">add_linking_library</span><span class="p">(</span><span class="n">pyval</span><span class="o">.</span><span class="n">cres</span><span class="o">.</span><span class="n">library</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sfunc</span><span class="o">.</span><span class="n">_getvalue</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="rewrap_derive">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.derive_wap.rewrap_derive">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">rewrap_derive</span><span class="p">(</span><span class="n">derive</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Upgrade a foreign ``CompileResultWAP`` so its exceptions propagate.</span>
+
+<span class="sd">    A derive compiled by numbox's own :func:`~numbox.utils.highlevel.cres` is</span>
+<span class="sd">    already a :class:`DeriveWAP`. One built directly against numba is not, and</span>
+<span class="sd">    would keep the swallowing convention. The compile result it carries is all</span>
+<span class="sd">    that is needed to upgrade it.</span>
+
+<span class="sd">    Anything else, including ``None``, is returned unchanged so callers can apply</span>
+<span class="sd">    this unconditionally.</span>
+
+<span class="sd">    On a numba without the ``jit_addr`` slot there is nothing to upgrade into: the</span>
+<span class="sd">    struct has no field to hold the entry point, so producing a</span>
+<span class="sd">    :class:`DeriveWAP` there would only yield a value that cannot be unboxed.</span>
+
+<span class="sd">    The upgraded wrapper is memoized onto the object it upgrades, and that is</span>
+<span class="sd">    required rather than an optimization. ``py_addr`` holds the derive's address</span>
+<span class="sd">    without taking a reference, so a wrapper minted fresh per call would be freed</span>
+<span class="sd">    as soon as the caller returned, leaving every `Work` built from it pointing at</span>
+<span class="sd">    released memory. Hanging it off the original ties its lifetime to the object</span>
+<span class="sd">    the caller already holds, which is the lifetime the address assumed all along.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">jit_addr_supported</span><span class="p">():</span>
+        <span class="k">return</span> <span class="n">derive</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">derive</span><span class="p">,</span> <span class="n">CompileResultWAP</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">derive</span><span class="p">,</span> <span class="n">DeriveWAP</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">derive</span>
+    <span class="n">upgraded</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">derive</span><span class="p">,</span> <span class="n">_UPGRADED_ATTR</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">upgraded</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">upgraded</span> <span class="o">=</span> <span class="n">DeriveWAP</span><span class="p">(</span><span class="n">derive</span><span class="o">.</span><span class="n">cres</span><span class="p">)</span>
+        <span class="nb">setattr</span><span class="p">(</span><span class="n">derive</span><span class="p">,</span> <span class="n">_UPGRADED_ATTR</span><span class="p">,</span> <span class="n">upgraded</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">upgraded</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

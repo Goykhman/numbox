@@ -1,0 +1,462 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.utils.highlevel &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/utils/highlevel.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.utils.highlevel</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.utils.highlevel</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">inspect</span><span class="w"> </span><span class="kn">import</span> <span class="n">getmodule</span><span class="p">,</span> <span class="n">getsource</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">io</span><span class="w"> </span><span class="kn">import</span> <span class="n">StringIO</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">njit</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.itanium_mangler</span><span class="w"> </span><span class="kn">import</span> <span class="n">mangle_type_or_value</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">Type</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types.functions</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dispatcher</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types.function_type</span><span class="w"> </span><span class="kn">import</span> <span class="n">CompileResultWAP</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.typing.templates</span><span class="w"> </span><span class="kn">import</span> <span class="n">Signature</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.experimental.function_type</span><span class="w"> </span><span class="kn">import</span> <span class="n">FunctionType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.experimental.structref</span><span class="w"> </span><span class="kn">import</span> <span class="n">define_boxing</span><span class="p">,</span> <span class="n">new</span><span class="p">,</span> <span class="n">StructRefProxy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">overload</span><span class="p">,</span> <span class="n">overload_method</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">textwrap</span><span class="w"> </span><span class="kn">import</span> <span class="n">dedent</span><span class="p">,</span> <span class="n">indent</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Iterable</span><span class="p">,</span> <span class="n">Optional</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span> <span class="k">as</span> <span class="n">jit_options_</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.derive_wap</span><span class="w"> </span><span class="kn">import</span> <span class="n">DeriveWAP</span><span class="p">,</span> <span class="n">jit_addr_supported</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.fingerprint</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">_Unfingerprintable</span><span class="p">,</span> <span class="n">_canon_value</span><span class="p">,</span> <span class="n">_fingerprint_function</span><span class="p">,</span>
+    <span class="n">_fingerprint_function_best_effort</span><span class="p">,</span> <span class="n">_loaded_global_names</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.preprocessing</span><span class="w"> </span><span class="kn">import</span> <span class="n">_materialize_anchor</span><span class="p">,</span> <span class="n">_structref_anchor_path</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.standard</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_params_strings</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_file_anchor</span><span class="p">():</span>
+    <span class="k">raise</span> <span class="ne">NotImplementedError</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_method_identity</span><span class="p">(</span><span class="n">method</span><span class="p">,</span> <span class="n">user_ns</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">bool</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""Return ``(identity_text, cacheable)`` for a structref method.</span>
+
+<span class="sd">    A ``make_structref`` method's source is inlined into a generated overload</span>
+<span class="sd">    exec'd against the merged namespace, so the values passed through the ``ns``</span>
+<span class="sd">    argument reach the compiled body but are invisible to ``getsource``. This</span>
+<span class="sd">    folds the method's deep fingerprint together with the values of the ``ns``</span>
+<span class="sd">    entries it references, so two methods with identical source but different</span>
+<span class="sd">    ``ns`` values get distinct hashes (which flow into the content-addressed</span>
+<span class="sd">    anchor file name, forcing numba to recompile rather than serve a stale</span>
+<span class="sd">    binary). Un-fingerprintable method, or an un-canonicalizable ``ns`` value,</span>
+<span class="sd">    makes it uncacheable -- the struct is then compiled without an on-disk</span>
+<span class="sd">    cache, never reused, never wrong.</span>
+
+<span class="sd">    Which ``ns`` entries the method references is read off the instruction</span>
+<span class="sd">    stream, not ``co_names``: the values arrive as globals of the exec'd</span>
+<span class="sd">    namespace, so only a global read can reach one, while ``co_names`` would also</span>
+<span class="sd">    offer up every attribute name. A method doing ``self.x`` against an ``ns``</span>
+<span class="sd">    that happens to carry an ``x`` would otherwise fold a value it never reads --</span>
+<span class="sd">    and drop the struct's cache entirely if that value were opaque.</span>
+<span class="sd">    """</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">fingerprint</span> <span class="o">=</span> <span class="n">_fingerprint_function</span><span class="p">(</span><span class="n">method</span><span class="p">,</span> <span class="nb">set</span><span class="p">())</span>
+        <span class="n">cacheable</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">except</span> <span class="p">(</span><span class="n">_Unfingerprintable</span><span class="p">,</span> <span class="ne">RecursionError</span><span class="p">):</span>
+        <span class="n">fingerprint</span> <span class="o">=</span> <span class="n">_fingerprint_function_best_effort</span><span class="p">(</span><span class="n">method</span><span class="p">)</span>
+        <span class="n">cacheable</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="p">[</span><span class="n">fingerprint</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">user_ns</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">n</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">_loaded_global_names</span><span class="p">(</span><span class="n">method</span><span class="o">.</span><span class="vm">__code__</span><span class="p">)</span> <span class="k">if</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">user_ns</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">"ns:</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">=</span><span class="si">{</span><span class="n">_canon_value</span><span class="p">(</span><span class="n">user_ns</span><span class="p">[</span><span class="n">name</span><span class="p">],</span><span class="w"> </span><span class="nb">set</span><span class="p">())</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+            <span class="k">except</span> <span class="p">(</span><span class="n">_Unfingerprintable</span><span class="p">,</span> <span class="ne">RecursionError</span><span class="p">):</span>
+                <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">"ns:</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">=&lt;opaque:</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">user_ns</span><span class="p">[</span><span class="n">name</span><span class="p">])</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">&gt;"</span><span class="p">)</span>
+                <span class="n">cacheable</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="s2">";"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">parts</span><span class="p">),</span> <span class="n">cacheable</span>
+
+
+<div class="viewcode-block" id="cres">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.highlevel.cres">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">cres</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">""" Returns Python proxy to `FunctionType` rather than `CPUDispatcher` returned by `njit`</span>
+
+<span class="sd">    The proxy is a ``DeriveWAP``, typed as ``DeriveFunctionType``, so that an</span>
+<span class="sd">    exception raised inside the compiled body propagates out of a first-class</span>
+<span class="sd">    call instead of being discarded. See</span>
+<span class="sd">    :mod:`numbox.utils.derive_wap` for why that requires a numbox-owned</span>
+<span class="sd">    type. On numba 0.60, which has no ``jit_addr`` slot to populate, a plain</span>
+<span class="sd">    ``CompileResultWAP`` is returned and the previous behaviour is kept.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="n">Signature</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Expected a single signature, found </span><span class="si">{</span><span class="n">sig</span><span class="si">}</span><span class="s2"> of type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">sig</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+        <span class="n">func_jit</span> <span class="o">=</span> <span class="n">njit</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)(</span><span class="n">func</span><span class="p">)</span>
+        <span class="n">sigs</span> <span class="o">=</span> <span class="n">func_jit</span><span class="o">.</span><span class="n">nopython_signatures</span>
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">sigs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"Ambiguous signature, </span><span class="si">{</span><span class="n">sigs</span><span class="si">}</span><span class="s2">"</span>
+        <span class="n">func_cres</span> <span class="o">=</span> <span class="n">func_jit</span><span class="o">.</span><span class="n">get_compile_result</span><span class="p">(</span><span class="n">sigs</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">jit_addr_supported</span><span class="p">():</span>
+            <span class="k">return</span> <span class="n">DeriveWAP</span><span class="p">(</span><span class="n">func_cres</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">CompileResultWAP</span><span class="p">(</span><span class="n">func_cres</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_</span></div>
+
+
+
+<div class="viewcode-block" id="cres_if_available">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.highlevel.cres_if_available">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">cres_if_available</span><span class="p">(</span><span class="n">lib</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Like ``cres(sig, **kwargs)``, but stubs out the wrapper if the C</span>
+<span class="sd">    symbol matching ``func.__name__`` is absent from ``lib``.</span>
+
+<span class="sd">    Use for binding sets that target multiple library versions where some</span>
+<span class="sd">    symbols may only exist in newer releases. Callers get a stub that</span>
+<span class="sd">    raises ``NotImplementedError`` instead of a confusing LLVM link error</span>
+<span class="sd">    at call time.</span>
+<span class="sd">    """</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">lib</span><span class="p">,</span> <span class="n">func</span><span class="o">.</span><span class="vm">__name__</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">cres</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)(</span><span class="n">func</span><span class="p">)</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">stub</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">_kwargs</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">func</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2"> is not available"</span><span class="p">)</span>
+        <span class="n">stub</span><span class="o">.</span><span class="vm">__name__</span> <span class="o">=</span> <span class="n">func</span><span class="o">.</span><span class="vm">__name__</span>
+        <span class="k">return</span> <span class="n">stub</span>
+    <span class="k">return</span> <span class="n">_</span></div>
+
+
+
+<div class="viewcode-block" id="determine_field_index">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.highlevel.determine_field_index">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">determine_field_index</span><span class="p">(</span><span class="n">struct_ty</span><span class="p">,</span> <span class="n">field_name</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">i_</span><span class="p">,</span> <span class="n">field_pair</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">struct_ty</span><span class="o">.</span><span class="n">_fields</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">field_pair</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="n">field_name</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">i_</span>
+    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">field_name</span><span class="si">}</span><span class="s2"> not in </span><span class="si">{</span><span class="n">struct_ty</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_type_identity</span><span class="p">(</span><span class="n">ty</span><span class="p">:</span> <span class="n">Type</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">bool</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""Return ``(hash, cacheable)`` for a numba type, for folding into a</span>
+<span class="sd">    content-addressed name."""</span>
+    <span class="n">cacheable</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="n">ty_str</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">ty</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">ty</span><span class="p">,</span> <span class="n">Dispatcher</span><span class="p">):</span>
+        <span class="c1"># numba's own on-disk index misses a Dispatcher-carrying signature every run</span>
+        <span class="c1"># and appends a fresh data entry, so the unit's .nbc grows per process forever.</span>
+        <span class="n">cacheable</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">body</span> <span class="o">=</span> <span class="s2">"dispatcher("</span> <span class="o">+</span> <span class="n">_fingerprint_function</span><span class="p">(</span><span class="n">ty</span><span class="o">.</span><span class="n">dispatcher</span><span class="o">.</span><span class="n">py_func</span><span class="p">,</span> <span class="nb">set</span><span class="p">())</span> <span class="o">+</span> <span class="s2">")"</span>
+        <span class="k">except</span> <span class="p">(</span><span class="n">_Unfingerprintable</span><span class="p">,</span> <span class="ne">RecursionError</span><span class="p">):</span>
+            <span class="n">body</span> <span class="o">=</span> <span class="s2">"dispatcher-besteffort("</span> <span class="o">+</span> <span class="n">_fingerprint_function_best_effort</span><span class="p">(</span><span class="n">ty</span><span class="o">.</span><span class="n">dispatcher</span><span class="o">.</span><span class="n">py_func</span><span class="p">)</span> <span class="o">+</span> <span class="s2">")"</span>
+    <span class="k">elif</span> <span class="s2">"Record("</span> <span class="ow">in</span> <span class="n">ty_str</span><span class="p">:</span>
+        <span class="c1"># A Record mangles by a creation-order counter (_code), so it hashes differently</span>
+        <span class="c1"># in a cold process than a warm one. Its str is structural, so hash that instead.</span>
+        <span class="n">body</span> <span class="o">=</span> <span class="s2">"structural("</span> <span class="o">+</span> <span class="n">ty_str</span> <span class="o">+</span> <span class="s2">")"</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">body</span> <span class="o">=</span> <span class="n">mangle_type_or_value</span><span class="p">(</span><span class="n">ty</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">cacheable</span> <span class="ow">and</span> <span class="s2">"CPUDispatcher("</span> <span class="ow">in</span> <span class="n">ty_str</span><span class="p">:</span>
+        <span class="c1"># A Dispatcher nested in a container</span>
+        <span class="n">cacheable</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">(</span><span class="n">body</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">))</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">(),</span> <span class="n">cacheable</span>
+
+
+<div class="viewcode-block" id="hash_type">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.highlevel.hash_type">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">hash_type</span><span class="p">(</span><span class="n">ty</span><span class="p">:</span> <span class="n">Type</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Process-stable content hash of a numba type; see :func:`_type_identity`."""</span>
+    <span class="k">return</span> <span class="n">_type_identity</span><span class="p">(</span><span class="n">ty</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_signature_identity</span><span class="p">(</span><span class="n">sig</span><span class="p">:</span> <span class="n">Signature</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">bool</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""Return ``(canonical_text, cacheable)`` for a numba ``Signature``, folding every</span>
+<span class="sd">    argument and return type through :func:`_type_identity`."""</span>
+    <span class="n">ret_hash</span><span class="p">,</span> <span class="n">ret_ok</span> <span class="o">=</span> <span class="n">_type_identity</span><span class="p">(</span><span class="n">sig</span><span class="o">.</span><span class="n">return_type</span><span class="p">)</span>
+    <span class="n">arg_ids</span> <span class="o">=</span> <span class="p">[</span><span class="n">_type_identity</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">sig</span><span class="o">.</span><span class="n">args</span><span class="p">]</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">ret_hash</span> <span class="o">+</span> <span class="s2">"("</span> <span class="o">+</span> <span class="s2">","</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">h</span> <span class="k">for</span> <span class="n">h</span><span class="p">,</span> <span class="n">_ok</span> <span class="ow">in</span> <span class="n">arg_ids</span><span class="p">)</span> <span class="o">+</span> <span class="s2">")"</span>
+    <span class="n">cacheable</span> <span class="o">=</span> <span class="n">ret_ok</span> <span class="ow">and</span> <span class="nb">all</span><span class="p">(</span><span class="n">ok</span> <span class="k">for</span> <span class="n">_h</span><span class="p">,</span> <span class="n">ok</span> <span class="ow">in</span> <span class="n">arg_ids</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">text</span><span class="p">,</span> <span class="n">cacheable</span>
+
+
+<div class="viewcode-block" id="make_structref_code_txt">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.highlevel.make_structref_code_txt">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">make_structref_code_txt</span><span class="p">(</span>
+    <span class="n">struct_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">struct_fields</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Type</span><span class="p">],</span>
+    <span class="n">struct_type_class</span><span class="p">:</span> <span class="nb">type</span> <span class="o">|</span> <span class="n">Type</span><span class="p">,</span>
+    <span class="n">struct_methods</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Callable</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">user_ns</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">):</span>
+    <span class="n">cacheable</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">struct_fields</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="n">struct_fields</span><span class="p">,</span> <span class="n">fields_types</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">struct_fields</span><span class="o">.</span><span class="n">keys</span><span class="p">()),</span> <span class="nb">list</span><span class="p">(</span><span class="n">struct_fields</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">struct_fields</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)),</span> <span class="n">struct_fields</span>
+        <span class="n">fields_types</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">struct_fields_str</span> <span class="o">=</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">field</span> <span class="k">for</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">struct_fields</span><span class="p">])</span>
+    <span class="n">make_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"make_</span><span class="si">{</span><span class="n">struct_name</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="si">}</span><span class="s2">"</span>
+    <span class="n">new_returns</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">make_name</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">struct_fields_str</span><span class="si">}</span><span class="s2">)"</span>
+    <span class="n">repr_str</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"f'</span><span class="si">{</span><span class="n">struct_name</span><span class="si">}</span><span class="s2">("</span> <span class="o">+</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">field</span><span class="si">}</span><span class="s2">=</span><span class="se">{{</span><span class="s2">self.</span><span class="si">{</span><span class="n">field</span><span class="si">}</span><span class="se">}}</span><span class="s2">"</span> <span class="k">for</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">struct_fields</span><span class="p">])</span> <span class="o">+</span> <span class="s2">")'"</span>
+    <span class="n">code_txt</span> <span class="o">=</span> <span class="n">StringIO</span><span class="p">()</span>
+    <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"""</span>
+<span class="s2">class </span><span class="si">{</span><span class="n">struct_name</span><span class="si">}</span><span class="s2">(StructRefProxy):</span>
+<span class="s2">    def __new__(cls, </span><span class="si">{</span><span class="n">struct_fields_str</span><span class="si">}</span><span class="s2">):</span>
+<span class="s2">        return </span><span class="si">{</span><span class="n">new_returns</span><span class="si">}</span>
+
+<span class="s2">    def __repr__(self):</span>
+<span class="s2">        return </span><span class="si">{</span><span class="n">repr_str</span><span class="si">}</span>
+<span class="s2">"""</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">struct_fields</span><span class="p">:</span>
+        <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"""</span>
+<span class="s2">    @property</span>
+<span class="s2">    @njit(**jit_options)</span>
+<span class="s2">    def </span><span class="si">{</span><span class="n">field</span><span class="si">}</span><span class="s2">(self):</span>
+<span class="s2">        return self.</span><span class="si">{</span><span class="n">field</span><span class="si">}</span>
+<span class="s2">"""</span><span class="p">)</span>
+    <span class="n">methods_code_txt</span> <span class="o">=</span> <span class="n">StringIO</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">struct_methods</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">struct_methods</span><span class="p">,</span> <span class="nb">dict</span><span class="p">),</span> <span class="sa">f</span><span class="s2">"""</span>
+<span class="s2">    Expected dictionary of methods names to callable, got </span><span class="si">{</span><span class="n">struct_methods</span><span class="si">}</span><span class="s2">"""</span>
+        <span class="k">for</span> <span class="n">method_name</span><span class="p">,</span> <span class="n">method</span> <span class="ow">in</span> <span class="n">struct_methods</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">params_str</span><span class="p">,</span> <span class="n">names_params_str</span> <span class="o">=</span> <span class="n">make_params_strings</span><span class="p">(</span><span class="n">method</span><span class="p">)</span>
+            <span class="n">names_params_lst</span> <span class="o">=</span> <span class="n">names_params_str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">", "</span><span class="p">)</span>
+            <span class="n">self_name</span> <span class="o">=</span> <span class="n">names_params_lst</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">names_params_str_wo_self</span> <span class="o">=</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">names_params_lst</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>
+            <span class="n">method_source</span> <span class="o">=</span> <span class="n">dedent</span><span class="p">(</span><span class="n">getsource</span><span class="p">(</span><span class="n">method</span><span class="p">))</span>
+            <span class="n">method_identity</span><span class="p">,</span> <span class="n">method_cacheable</span> <span class="o">=</span> <span class="n">_method_identity</span><span class="p">(</span><span class="n">method</span><span class="p">,</span> <span class="n">user_ns</span><span class="p">)</span>
+            <span class="n">method_hash</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">(</span><span class="n">method_identity</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">))</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span>
+            <span class="n">cacheable</span> <span class="o">=</span> <span class="n">cacheable</span> <span class="ow">and</span> <span class="n">method_cacheable</span>
+            <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"""</span>
+<span class="s2">    def </span><span class="si">{</span><span class="n">method_name</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">params_str</span><span class="si">}</span><span class="s2">):</span>
+<span class="s2">        return </span><span class="si">{</span><span class="n">self_name</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">method_name</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">method_hash</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">names_params_str_wo_self</span><span class="si">}</span><span class="s2">)</span>
+
+<span class="s2">    @njit(**jit_options)</span>
+<span class="s2">    def </span><span class="si">{</span><span class="n">method_name</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">method_hash</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">params_str</span><span class="si">}</span><span class="s2">):</span>
+<span class="s2">        return </span><span class="si">{</span><span class="n">self_name</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">method_name</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">names_params_str_wo_self</span><span class="si">}</span><span class="s2">)</span>
+<span class="s2">"""</span><span class="p">)</span>
+            <span class="n">method_source</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">"\bdef\s+([a-zA-Z_]\w*)\b"</span><span class="p">,</span> <span class="s2">"def _"</span><span class="p">,</span> <span class="n">method_source</span><span class="p">)</span>
+            <span class="n">methods_code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"""</span>
+<span class="s2">@overload_method(</span><span class="si">{</span><span class="n">struct_type_class</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">, "</span><span class="si">{</span><span class="n">method_name</span><span class="si">}</span><span class="s2">", jit_options=jit_options)</span>
+<span class="s2">def ol_</span><span class="si">{</span><span class="n">method_name</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">params_str</span><span class="si">}</span><span class="s2">):</span>
+<span class="si">{</span><span class="n">indent</span><span class="p">(</span><span class="n">method_source</span><span class="p">,</span><span class="w"> </span><span class="s2">"    "</span><span class="p">)</span><span class="si">}</span>
+<span class="s2">    return _</span>
+<span class="s2">"""</span><span class="p">)</span>
+    <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"""</span>
+<span class="s2">define_boxing(</span><span class="si">{</span><span class="n">struct_type_class</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">struct_name</span><span class="si">}</span><span class="s2">)</span>
+<span class="s2">"""</span><span class="p">)</span>
+    <span class="n">struct_type_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">struct_name</span><span class="si">}</span><span class="s2">Type"</span>
+    <span class="n">struct_fields_ty_str</span> <span class="o">=</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">field</span><span class="si">}</span><span class="s2">_ty"</span> <span class="k">for</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">struct_fields</span><span class="p">])</span>
+    <span class="n">struct_type_code_block</span> <span class="o">=</span> <span class="s2">""</span>
+    <span class="k">if</span> <span class="n">fields_types</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">struct_type_code_block</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"""    fields_types = [</span><span class="si">{</span><span class="n">struct_fields_ty_str</span><span class="si">}</span><span class="s2">]</span>
+<span class="s2">    fields_and_their_types = list(zip(fields, fields_types))</span>
+<span class="s2">    </span><span class="si">{</span><span class="n">struct_name</span><span class="si">}</span><span class="s2">Type = </span><span class="si">{</span><span class="n">struct_type_class</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">(fields_and_their_types)</span>
+<span class="s2">"""</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"""</span>
+<span class="s2">fields_and_their_types = list(zip(fields, fields_types))</span>
+<span class="si">{</span><span class="n">struct_name</span><span class="si">}</span><span class="s2">Type = </span><span class="si">{</span><span class="n">struct_type_class</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">(fields_and_their_types)</span>
+<span class="s2">"""</span><span class="p">)</span>
+    <span class="n">ctor_code_block</span> <span class="o">=</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="sa">f</span><span class="s2">"        struct_.</span><span class="si">{</span><span class="n">field</span><span class="si">}</span><span class="s2"> = </span><span class="si">{</span><span class="n">field</span><span class="si">}</span><span class="s2">"</span> <span class="k">for</span> <span class="n">field</span> <span class="ow">in</span> <span class="n">struct_fields</span><span class="p">])</span>
+    <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"""</span>
+<span class="s2">@overload(</span><span class="si">{</span><span class="n">struct_name</span><span class="si">}</span><span class="s2">, strict=False, jit_options=jit_options)</span>
+<span class="s2">def ol_</span><span class="si">{</span><span class="n">struct_name</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">struct_fields_ty_str</span><span class="si">}</span><span class="s2">):</span>
+<span class="si">{</span><span class="n">struct_type_code_block</span><span class="si">}</span>
+<span class="s2">    def ctor(</span><span class="si">{</span><span class="n">struct_fields_str</span><span class="si">}</span><span class="s2">):</span>
+<span class="s2">        struct_ = new(</span><span class="si">{</span><span class="n">struct_type_name</span><span class="si">}</span><span class="s2">)</span>
+<span class="si">{</span><span class="n">ctor_code_block</span><span class="si">}</span>
+<span class="s2">        return struct_</span>
+<span class="s2">    return ctor</span>
+<span class="s2">"""</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">fields_types</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"""</span>
+<span class="si">{</span><span class="n">make_name</span><span class="si">}</span><span class="s2">_sig = </span><span class="si">{</span><span class="n">struct_name</span><span class="si">}</span><span class="s2">Type(*fields_types)</span>
+<span class="s2">"""</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"""</span>
+<span class="si">{</span><span class="n">make_name</span><span class="si">}</span><span class="s2">_sig = None</span>
+<span class="s2">"""</span><span class="p">)</span>
+    <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"""</span>
+<span class="s2">@njit(</span><span class="si">{</span><span class="n">make_name</span><span class="si">}</span><span class="s2">_sig, **jit_options)</span>
+<span class="s2">def </span><span class="si">{</span><span class="n">make_name</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">struct_fields_str</span><span class="si">}</span><span class="s2">):</span>
+<span class="s2">    return </span><span class="si">{</span><span class="n">struct_name</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">struct_fields_str</span><span class="si">}</span><span class="s2">)</span>
+<span class="s2">"""</span><span class="p">)</span>
+    <span class="n">code_txt</span> <span class="o">=</span> <span class="n">code_txt</span><span class="o">.</span><span class="n">getvalue</span><span class="p">()</span> <span class="o">+</span> <span class="n">methods_code_txt</span><span class="o">.</span><span class="n">getvalue</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">code_txt</span><span class="p">,</span> <span class="n">fields_types</span><span class="p">,</span> <span class="n">cacheable</span></div>
+
+
+
+<div class="viewcode-block" id="make_structref">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.highlevel.make_structref">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">make_structref</span><span class="p">(</span>
+    <span class="n">struct_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">struct_fields</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Type</span><span class="p">],</span>
+    <span class="n">struct_type_class</span><span class="p">:</span> <span class="nb">type</span> <span class="o">|</span> <span class="n">Type</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">struct_methods</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Callable</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">jit_options</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">ns</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    Makes structure type with `struct_name` and `struct_fields` from the StructRef type class.</span>
+
+<span class="sd">    A unique `struct_type_class` for each structref needs to be provided.</span>
+<span class="sd">    If caching of code that will be using the created struct type is desired,</span>
+<span class="sd">    these type class(es) need/s to be defined in a python module that is *not* executed.</span>
+<span class="sd">    (Same requirement is also to observed even when the full definition of StructRef</span>
+<span class="sd">    is entirely hard-coded rather than created dynamically.)</span>
+
+<span class="sd">    In particular, that's why `struct_type_class` cannot be incorporated into</span>
+<span class="sd">    the dynamic compile / exec routine here.</span>
+
+<span class="sd">    Dictionary of methods to be bound to the created structref can be provided as well.</span>
+<span class="sd">    Struct methods will get inlined into the caller if numba deems it to be optimal</span>
+<span class="sd">    (even if `jit_options` says otherwise), therefore changing the methods code</span>
+<span class="sd">    without poking the jitted caller can result in a stale cache - when the latter is</span>
+<span class="sd">    cached. This is not an exclusive limitation of a dynamic structref creation via</span>
+<span class="sd">    this function and is equally true when the structref definition is coded explicitly.</span>
+
+<span class="sd">    Anchor file</span>
+<span class="sd">    -----------</span>
+<span class="sd">    The generated ``code_txt`` is written to a content-addressed file</span>
+<span class="sd">    under numba's cache directory and that file -- not ``highlevel.py``</span>
+<span class="sd">    -- is used as the ``compile()`` anchor. See the "Cache-anchor</span>
+<span class="sd">    mechanism" section in ``docs/numbox.utils.rst`` for the rationale.</span>
+<span class="sd">    """</span>
+    <span class="n">code_txt</span><span class="p">,</span> <span class="n">fields_types</span><span class="p">,</span> <span class="n">cacheable</span> <span class="o">=</span> <span class="n">make_structref_code_txt</span><span class="p">(</span>
+        <span class="n">struct_name</span><span class="p">,</span> <span class="n">struct_fields</span><span class="p">,</span> <span class="n">struct_type_class</span><span class="p">,</span> <span class="n">struct_methods</span><span class="p">,</span> <span class="n">user_ns</span><span class="o">=</span><span class="n">ns</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="n">jit_options</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">jit_options</span> <span class="o">=</span> <span class="n">jit_options_</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">cacheable</span><span class="p">:</span>
+        <span class="c1"># A method (or an ns value it captures) has no canonical fingerprint, so</span>
+        <span class="c1"># its content-addressed identity cannot be trusted to change when the</span>
+        <span class="c1"># behaviour does; compile the struct without an on-disk cache.</span>
+        <span class="n">jit_options</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">jit_options</span><span class="p">,</span> <span class="s2">"cache"</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
+    <span class="n">ns</span> <span class="o">=</span> <span class="n">ns</span> <span class="ow">or</span> <span class="p">{}</span>
+    <span class="n">ns</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="o">**</span><span class="n">ns</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">getmodule</span><span class="p">(</span><span class="n">_file_anchor</span><span class="p">)</span><span class="o">.</span><span class="vm">__dict__</span><span class="p">,</span>
+        <span class="o">**</span><span class="p">{</span>
+            <span class="s2">"fields"</span><span class="p">:</span> <span class="n">struct_fields</span><span class="p">,</span>
+            <span class="s2">"fields_types"</span><span class="p">:</span> <span class="n">fields_types</span><span class="p">,</span>
+            <span class="s2">"define_boxing"</span><span class="p">:</span> <span class="n">define_boxing</span><span class="p">,</span>
+            <span class="s2">"jit_options"</span><span class="p">:</span> <span class="n">jit_options</span><span class="p">,</span>
+            <span class="s2">"new"</span><span class="p">:</span> <span class="n">new</span><span class="p">,</span>
+            <span class="s2">"njit"</span><span class="p">:</span> <span class="n">njit</span><span class="p">,</span>
+            <span class="s2">"overload"</span><span class="p">:</span> <span class="n">overload</span><span class="p">,</span>
+            <span class="s2">"overload_method"</span><span class="p">:</span> <span class="n">overload_method</span><span class="p">,</span>
+            <span class="s2">"StructRefProxy"</span><span class="p">:</span> <span class="n">StructRefProxy</span><span class="p">,</span>
+            <span class="n">struct_type_class</span><span class="o">.</span><span class="vm">__name__</span><span class="p">:</span> <span class="n">struct_type_class</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="n">anchor</span> <span class="o">=</span> <span class="n">_structref_anchor_path</span><span class="p">(</span><span class="n">struct_name</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">)</span>
+    <span class="n">_materialize_anchor</span><span class="p">(</span><span class="n">anchor</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">)</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="nb">compile</span><span class="p">(</span><span class="n">code_txt</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">anchor</span><span class="p">),</span> <span class="n">mode</span><span class="o">=</span><span class="s2">"exec"</span><span class="p">)</span>
+    <span class="n">exec</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>  <span class="c1"># nosec B102 - JIT codegen of internal source</span>
+    <span class="k">return</span> <span class="n">ns</span><span class="p">[</span><span class="n">struct_name</span><span class="p">]</span></div>
+
+
+
+<div class="viewcode-block" id="prune_type">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.highlevel.prune_type">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">prune_type</span><span class="p">(</span><span class="n">ty</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">ty</span><span class="p">,</span> <span class="n">Dispatcher</span><span class="p">):</span>
+        <span class="n">sigs</span> <span class="o">=</span> <span class="n">ty</span><span class="o">.</span><span class="n">get_call_signatures</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">sigs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"Ambiguous signature, </span><span class="si">{</span><span class="n">sigs</span><span class="si">}</span><span class="s2">"</span>
+        <span class="n">ty</span> <span class="o">=</span> <span class="n">FunctionType</span><span class="p">(</span><span class="n">sigs</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">ty</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
