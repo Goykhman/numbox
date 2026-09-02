@@ -56,6 +56,14 @@ jobs:
     needs: build-docs
     runs-on: ubuntu-latest
 
+    # Every deploy force-replaces the same gh-pages ref, so two pushes landing
+    # close together race and the one that finishes last wins, which is not
+    # necessarily the newer commit. Serialising on one group and dropping the
+    # superseded run leaves the newest content published.
+    concurrency:
+      group: docs-deploy
+      cancel-in-progress: true
+
     permissions:
       contents: write
 
