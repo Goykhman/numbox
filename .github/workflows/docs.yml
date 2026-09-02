@@ -45,6 +45,10 @@ jobs:
           # tree, both of which the published branch currently carries, and a
           # change to permissions would silently change what gets served.
           include-hidden-files: true
+          # deploy-docs consumes this within the same run, and on a pull request
+          # nothing consumes it at all, so the 90 day default is all storage and
+          # no benefit.
+          retention-days: 1
 
   deploy-docs:
     # Only a push publishes. A pull request stops after build-docs.
