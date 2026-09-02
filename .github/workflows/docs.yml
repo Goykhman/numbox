@@ -5,8 +5,12 @@ on:
     branches: [ "main" ]
   pull_request:
 
+# Read-only by default. A pull request build runs conf.py, every sphinx
+# extension and every doc dependency out of the branch under review, so it must
+# not hold a token that can push. Only deploy-docs widens this, and only a push
+# reaches that job.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-docs:
@@ -29,8 +33,40 @@ jobs:
       - name: Build docs
         run: sphinx-build -W -b html docs/ docs/_build/html
 
+      - name: Upload the built docs
+        uses: actions/upload-artifact@v7
+        with:
+          name: docs-html
+          path: docs/_build/html
+          # force_orphan below replaces gh-pages wholesale, so an artifact that
+          # arrived empty would erase the published site instead of failing.
+          if-no-files-found: error
+          # Without this the upload drops .buildinfo and the whole .doctrees
+          # tree, both of which the published branch currently carries, and a
+          # change to permissions would silently change what gets served.
+          include-hidden-files: true
+
+  deploy-docs:
+    # Only a push publishes. A pull request stops after build-docs.
+    if: github.event_name == 'push'
+    needs: build-docs
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      # actions-gh-pages pushes from a real checkout, so this has to land
+      # before the artifact is unpacked underneath it.
+      - uses: actions/checkout@v4
+
+      - name: Retrieve the built docs
+        uses: actions/download-artifact@v8
+        with:
+          name: docs-html
+          path: docs/_build/html
+
       - name: Deploy to GitHub Pages
-        if: github.event_name == 'push'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
