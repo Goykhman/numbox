@@ -13,6 +13,7 @@ from numba.core.types.function_type import CompileResultWAP
 
 import numbox.utils.derive_wap as derive_wap_module
 from numbox.core.configurations import numba_version
+from numbox.core.proxy.proxy import proxy
 from numbox.utils.derive_wap import DeriveFunctionType, DeriveWAP, rewrap_derive
 from numbox.core.work.work import make_work
 from numbox.core.work.work_utils import make_work_helper
@@ -563,6 +564,42 @@ def test_a_foreign_wrapper_reached_from_jitted_scope_still_discards():
         f"means the derive was upgraded after all and this test no longer covers the arm."
     )
     assert derived == 1
+
+
+def test_a_proxy_binding_reached_from_jitted_scope_propagates():
+    """A `Work` built inside jitted scope whose derive is a `@proxy` binding's `.as_func`.
+
+    This is the shape the propagating type exists for. A binding used from Python scope
+    propagated already, because `make_work` runs `rewrap_derive` over whatever it is handed
+    and upgrades a plain `CompileResultWAP` on the way in. A jitted builder reaches the
+    overload instead, which takes the value as given, so the `derive` field is fixed at
+    whatever type `.as_func` carried at decoration time and there is nothing left to
+    upgrade. With a plain `CompileResultWAP` there, `jit_addr` is null, `_call_derive`
+    emits the C call, and `calculate` returns normally having zero-filled `data` and set
+    `derived`: a wrong value is cached in the graph permanently and the failure is reported
+    only as an unraisable on stderr.
+
+    Nothing else in the repository builds a `Work` from a binding, so a change to what
+    `.as_func` is minted as shows up here and nowhere else.
+    """
+    @proxy(float64(float64))
+    def raising_binding(x):
+        if x > 0.0:
+            raise ValueError("proxy boom")
+        return x + 1.0
+
+    @njit
+    def build_in_jitted_scope(derive_):
+        source = make_work("source", 5.0)
+        return make_work("node", 99.0, (source,), derive_)
+
+    node = build_in_jitted_scope(raising_binding.as_func)
+
+    with pytest.raises(ValueError, match="proxy boom"):
+        node.calculate()
+
+    assert node.data == 99.0, "`data` must be untouched by a failed derive"
+    assert node.derived == 0, "`derived` must stay unset so the node can be calculated again"
 
 
 def test_propagation_through_a_multi_level_chain():

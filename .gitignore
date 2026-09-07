@@ -7,3 +7,4 @@ build/*
 html/
 _build/
 numbox.egg-info/
+.coverage

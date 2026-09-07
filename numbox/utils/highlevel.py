@@ -84,9 +84,12 @@ def cres(sig, **kwargs):
         sigs = func_jit.nopython_signatures
         assert len(sigs) == 1, f"Ambiguous signature, {sigs}"
         func_cres = func_jit.get_compile_result(sigs[0])
-        if jit_addr_supported():
-            return DeriveWAP(func_cres)
-        return CompileResultWAP(func_cres)
+        wrapper = DeriveWAP(func_cres) if jit_addr_supported() else CompileResultWAP(func_cres)
+        # Keep the body reachable from the wrapper. The compile result identifies it only by
+        # a compiled address and a mangled name carrying a per-process counter, so a body
+        # that captures this value has nothing process-stable to fingerprint without it.
+        wrapper._numbox_py_func = func
+        return wrapper
     return _
 
 

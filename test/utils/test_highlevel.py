@@ -12,7 +12,6 @@ from numpy import isclose
 
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
-from numbox.core.bindings.utils import load_lib_path
 from numbox.utils.highlevel import (
     _method_identity,
     _signature_identity,
@@ -30,7 +29,7 @@ from numbox.utils.preprocessing import (
     _materialize_anchor,
     _orphan_anchor_sweep,
 )
-from test.auxiliary_utils import collect_and_run_tests
+from test.auxiliary_utils import collect_and_run_tests, open_libm
 from test.common_structrefs import S1Type
 from test.utils.auxiliaries import aux_1
 from test.utils.common_struct_type_classes import S1TypeClass, S2TypeClass, S3TypeClass, S4TypeClass, S5TypeClass
@@ -318,24 +317,14 @@ def test_make_structref_5():
     assert str(s5_1) == "S5()"
 
 
-def _locate_cos_lib():
-    from numbox.core.bindings.utils import platform_
-    if platform_ == "Windows":
-        from ctypes.util import find_msvcrt
-        return find_msvcrt()
-    from ctypes.util import find_library
-    return find_library("m")
-
-
 def test_cres_if_available_present_symbol_returns_real_wrapper():
-    lib_path = _locate_cos_lib()
-    if lib_path is None:
+    lib = open_libm()
+    if lib is None:
         pytest.skip("No suitable math/C runtime library discoverable")
 
     prior = signatures.get("cos")
     try:
         signatures["cos"] = float64(float64)
-        lib = load_lib_path(lib_path)
 
         @cres_if_available(lib, signatures["cos"])
         def cos(x):
@@ -350,14 +339,13 @@ def test_cres_if_available_present_symbol_returns_real_wrapper():
 
 
 def test_cres_if_available_missing_symbol_returns_stub():
-    lib_path = _locate_cos_lib()
-    if lib_path is None:
+    lib = open_libm()
+    if lib is None:
         pytest.skip("No suitable math/C runtime library discoverable")
 
     prior = signatures.get("nonexistent_fn")
     try:
         signatures["nonexistent_fn"] = float64(float64)
-        lib = load_lib_path(lib_path)
 
         @cres_if_available(lib, signatures["nonexistent_fn"])
         def nonexistent_fn(x):

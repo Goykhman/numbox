@@ -58,9 +58,11 @@ class Work(NodeBase):
         with what it references, for the life of the process; retrying the same node
         adds nothing further. Several cases still discard the
         exception and cache a zero-filled `data`: numba 0.60, which has no `jit_addr`
-        slot to carry the entry point that can unwind; a derive built directly
-        against numba rather than through `numbox.utils.highlevel.cres` and reached from
-        jitted scope, where it cannot be upgraded; a `cfunc`, which is not upgraded
+        slot to carry the entry point that can unwind; a plain `CompileResultWAP` built
+        directly against numba rather than through `numbox.utils.highlevel.cres` and
+        reached from jitted scope, where it cannot be upgraded (a `@proxy` binding's
+        `.as_func` is not one of these on numba 0.61 and later: it is a `DeriveWAP` and
+        propagates on those same jitted-scope paths); a `cfunc`, which is not upgraded
         either; and a derive handed from Python to a jitted parameter that is declared
         as a plain `FunctionType`, which degrades on the way in.
     derived : int8

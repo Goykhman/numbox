@@ -597,7 +597,12 @@ These limits are worth knowing:
   dispatcher in the mix is the one subcase that reads differently: unification accepts
   it, and numbox's guard then rejects it at the unboxing boundary with a ``TypeError``
   naming the offending type.
-  Homogeneous containers are unaffected, including a tuple of two `cres` derives. This
+  From numba 0.61 onward a ``@proxy`` binding's ``.as_func`` is a `DeriveFunctionType`
+  value as well (see :doc:`numbox.core.proxy`), so it meets this limit identically: a
+  tuple mixing it with a plain ``CompileResultWAP`` fails on the same assertion, where
+  before it unified and returned a value.
+  Homogeneous containers are unaffected, including a tuple of two `cres` derives, or a
+  `cres` derive alongside a `@proxy` binding's `.as_func` of the same signature. This
   is not specific to numbox: two plain ``CompileResultWAP`` values of different
   signatures but the same argument count fail identically with numbox uninvolved.
   What numbox changes is how easily the case is reached, since `DeriveFunctionType` is a

@@ -34,6 +34,50 @@ def collect_and_run_tests(module_name):
                     val()
 
 
+def open_libm():
+    """Open the platform's math library and return a fresh handle, or ``None``.
+
+    The handle answers to ``ceil``, ``cos`` and ``floor``, every symbol a caller needs
+    to be present, or the result is ``None`` and there is nothing on this machine to run
+    those tests against. Returning ``None`` rather than raising is the point: a platform
+    with no usable C runtime should skip, the way one where ``find_library`` comes up
+    empty already does, not turn into a failure that reads like a defect in the code
+    under test. Gating on a subset gives that away, because a library holding only the
+    subset is admitted and the callers reaching past it fail instead of skipping.
+
+    ``find_library("m")`` resolves it on Linux (a soname) and on macOS (a path into
+    the dyld shared cache). On Windows the C runtime is not loadable by name --
+    ``find_msvcrt()`` returns ``None`` for every VS2015+ build -- so try ``msvcrt``,
+    the legacy CRT shim :func:`numbox.core.bindings.utils.load_lib` already falls back
+    to, and then ``ucrtbase``, the CRT the interpreter itself links. All three are C89,
+    so the shim carries them on any image that has the shim at all; ``ucrtbase`` is
+    there for an image that does not. Falling through rather than giving up on the
+    first candidate keeps the coverage a skip would give away.
+
+    Each call opens its own handle rather than sharing a cached one, so a caller
+    comparing two handles is comparing two.
+    """
+    import ctypes
+    from ctypes.util import find_library
+
+    from numbox.core.bindings.utils import load_lib_path, platform_
+
+    def _with_the_symbols(lib):
+        return lib if all(hasattr(lib, name) for name in ("ceil", "cos", "floor")) else None
+
+    if platform_ == "Windows":
+        for name in ("msvcrt", "ucrtbase"):
+            try:
+                lib = ctypes.CDLL(name)
+            except OSError:
+                continue
+            if _with_the_symbols(lib) is not None:
+                return lib
+        return None
+    path = find_library("m")
+    return _with_the_symbols(load_lib_path(path)) if path is not None else None
+
+
 @intrinsic
 def _deref_int64_intp(typingctx, p_int_ty):
     sig = types.int64(types.intp)

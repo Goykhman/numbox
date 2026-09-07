@@ -104,6 +104,11 @@ the tuple has two entries rather than three, and ``cres`` returns a plain
 ``CompileResultWAP`` rather than a :class:`~numbox.utils.derive_wap.DeriveWAP`, because
 without the slot there is nothing for the mechanism to populate.
 
+:func:`numbox.utils.highlevel.cres` is not the only source of one. From numba 0.61 onward a
+``@proxy`` binding's ``.as_func`` is a :class:`~numbox.utils.derive_wap.DeriveWAP` too,
+minted from the proxied body's compile result, with the same exception semantics and the
+same effect on a jitted caller that reaches it as a constant. See :doc:`numbox.core.proxy`.
+
 ``test/utils/test_lowlevel.py::test_get_func_tuple`` pins every assertion above except the
 first; the wrapper's type is pinned separately by
 ``test/utils/test_derive_wap.py::test_cres_mints_a_derive_wap``.

@@ -14,16 +14,19 @@ closure/global values fingerprint differently. Shared by
 decide how to degrade (compile_kernel marks the kernel uncached, digest falls
 back to cloudpickle of the code object).
 """
+import ctypes
 import dis
 import hashlib
 
 from types import CodeType, FunctionType, ModuleType
-from typing import Any
+from typing import Any, Optional, Sequence
 
 import numpy as np
 
 from numba.core import config as numba_config
 from numba.core.dispatcher import Dispatcher
+from numba.core.types import ExternalFunction
+from numba.core.types.function_type import CompileResultWAP
 from numba.np.ufunc.dufunc import DUFunc
 
 from numbox.core.configurations import jit_options as _default_jit_options
@@ -55,6 +58,31 @@ def _dtype_key(dtype: np.dtype) -> str:
     return dtype.str
 
 
+# Aliases that have stopped identifying the body they were minted for. Written by
+# `numbox.core.proxy.proxy`, which imports this module: the set lives on this side so the
+# walker can consult it without importing that one back. It holds both halves of a
+# collision, the shared name and the process-local one the newcomer is given, and the name
+# an absent-binding trap answers to.
+#
+# `_canon_value` refuses to fold one, and that is what keeps a collision from spreading.
+# Which of two colliding bodies ends up with which name is decided by the order this process
+# built them in, so a third body that captures one and folds `proxy(<alias>)` gets a
+# fingerprint that names the other body in a process that built the pair the other way round.
+# The colliding bodies are themselves protected, because their own names are retired and the
+# cache guard discards a warm caller of a retired name. A body derived from one of them is
+# not: it is published under a fresh name that resolves and sits in no retirement set, so it
+# keeps a cross-process cache that is now wrong, which is how a collision escapes one
+# composition step out. Refusing to fold drops the derived body onto the ordinary walk, where
+# the dispatcher it captured has no canonical form, so it meets `_opaque_values_match` like
+# any other pair the fingerprint cannot separate and its own alias is retired in turn.
+#
+# A derived body fingerprinted before the collision that retires its dependency is not
+# reached: it folded a name that still identified a body and is already published under one
+# of its own. Closing that would mean recording which aliases each fingerprint consumed and
+# retiring dependents transitively.
+_ABSENT_ALIASES: set[str] = set()
+
+
 def _canon_value(value: Any, seen: set[int]) -> str:
     if value is None or isinstance(value, (bool, int, float, complex, str, bytes)):
         return repr(value)
@@ -80,10 +108,11 @@ def _canon_value(value: Any, seen: set[int]) -> str:
         return f"module({value.__name__})"
     if isinstance(value, Dispatcher):
         proxy_alias = getattr(value, "_numbox_proxy_alias", None)
-        if proxy_alias is not None:
+        if proxy_alias is not None and proxy_alias not in _ABSENT_ALIASES:
             # A @proxy binding: its content-addressed alias fully identifies the
             # body and signature. Walking its wrapper would recurse into the
-            # @intrinsic it calls, which has no canonical form.
+            # @intrinsic it calls, which has no canonical form. A retired alias
+            # identifies nothing, so it falls through to that walk instead.
             return f"proxy({proxy_alias})"
         topts = _canon_value(dict(getattr(value, "targetoptions", {}) or {}), seen)
         return f"dispatcher({_fingerprint_function(value.py_func, seen)};{topts})"
@@ -96,7 +125,83 @@ def _canon_value(value: Any, seen: set[int]) -> str:
         return f"dufunc({body};{topts})"
     if isinstance(value, FunctionType):
         return f"function({_fingerprint_function(value, seen)})"
+    if isinstance(value, ExternalFunction):
+        # numba's own key for this type, (symbol, signature): strings and types,
+        # so it is the same in the next process and it separates two bindings a
+        # factory made over different C symbols.
+        return f"externalfunction({value.symbol};{value.sig})"
+    if isinstance(value, CompileResultWAP):
+        # A first-class function value. numbox tags the two it mints with what identifies
+        # them across processes, because the wrapper itself carries only a compiled address
+        # and a mangled name holding a per-process counter. Untagged ones -- built directly
+        # against numba -- keep falling through to the placeholder below.
+        proxy_alias = getattr(value, "_numbox_proxy_alias", None)
+        if proxy_alias is not None and proxy_alias not in _ABSENT_ALIASES:
+            return f"proxyfunc({proxy_alias})"
+        py_func = getattr(value, "_numbox_py_func", None)
+        if py_func is not None:
+            return f"cresfunc({_fingerprint_function(py_func, seen)};{value.cres.signature})"
+    if isinstance(value, ctypes._CFuncPtr):
+        return f"cfuncptr({_ctypes_func_key(value)})"
     raise _Unfingerprintable(type(value).__name__)
+
+
+def _ctypes_func_key(value: Any) -> str:
+    """Identity of a ctypes function pointer: the library it was opened under, and the symbol.
+
+    A pointer reached by attribute access on a loaded library carries both, and both
+    survive into the next process. What is folded is the *string* the library was opened
+    with rather than the library the loader resolved it to, so two handles on one library
+    opened under a soname and under an absolute path canonicalize differently. That is
+    over-discrimination: it costs a recompile the load-time guard heals, never a wrong
+    answer.
+
+    A pointer with no symbol name to fold carries no identity that means the same thing
+    next run. One built from a raw address is the common case, and two of those differ
+    only by an address ASLR moves; a prototype built over a library, ``proto(("floor",
+    lib))``, and a Windows lookup by ordinal are the same problem for a different reason,
+    since ctypes names neither. Folding an address would buy discrimination at the cost of
+    the process-stability the whole fingerprint exists for, so all three raise and the
+    caller decides what to do with a value it cannot tell apart from another.
+
+    The prototype over the symbol is folded alongside it, by :func:`_ctypes_call_shape`.
+    """
+    name = getattr(value, "__name__", None)
+    objects = getattr(value, "_objects", None)
+    lib = objects.get("0") if isinstance(objects, dict) else None
+    # Only a library carries ``_name``. A Python callback's ``_objects["0"]`` is its
+    # CThunkObject, which does not, and folding the None would collapse every callback
+    # sharing a ``__name__`` onto one key.
+    lib_name = getattr(lib, "_name", None)
+    if name is None or not isinstance(lib_name, str) or not lib_name:
+        raise _Unfingerprintable("ctypes function pointer with no library and symbol name")
+    return f"{lib_name}:{name};{_ctypes_call_shape(value)}"
+
+
+def _ctypes_call_shape(value: Any) -> str:
+    """The call a ctypes function pointer describes, apart from what it points at.
+
+    ``restype``, ``argtypes`` and the calling convention are what numba types the call from
+    and lowers it against, so two pointers agreeing on the symbol or the address but not on
+    these describe two different calls and compile to two different bodies. Every part of it
+    is a type name or a flag word, so it means the same thing in the next process and
+    :func:`_ctypes_func_key` can fold it; a pointer that key refuses for want of a
+    process-stable identity is compared on it by :func:`_opaque_values_match` instead, where
+    an address is admissible and this is what says whether the address is being called the
+    same way.
+
+    An unset ``argtypes`` and an empty one are different: numba rejects a call through the
+    first and accepts the second, so they must not fold together.
+
+    The calling convention is folded because numba selects the call's ABI from it on win32:
+    a symbol reached through ``CDLL`` and the same symbol reached through ``WinDLL`` are two
+    different calls, and sharing one alias would pair a caller with a body at the wrong
+    convention.
+    """
+    restype = getattr(getattr(value, "restype", None), "__name__", None)
+    argtypes = getattr(value, "argtypes", None)
+    args = "<unset>" if argtypes is None else ",".join(getattr(a, "__name__", "?") for a in argtypes)
+    return f"{restype}({args});flags={getattr(type(value), '_flags_', None)}"
 
 
 def _fingerprint_codeobj(code: CodeType, seen: set[int]) -> str:
@@ -246,7 +351,44 @@ def _fingerprint_function(func: FunctionType, seen: set[int]) -> str:
     )
 
 
-def _fingerprint_function_best_effort(func: FunctionType) -> str:
+def _opaque_values_match(old: Sequence[Any], new: Sequence[Any]) -> bool:
+    """Whether two runs of the best-effort walker stood on the same un-canonical values.
+
+    Two bodies that fingerprint alike are the same body except in whatever the walker
+    could not canonicalize, so comparing exactly those values answers whether they are
+    the same body. The comparison only has to hold within one process, which is why it
+    may do what the fingerprint may not and look at an address.
+
+    Identity settles the ordinary case: reloading a module rebinds the same
+    ``@intrinsic`` object, and a factory called twice closes over the same one.
+    Equality is tried next for values that define it. A ctypes function pointer defines
+    neither, so compare the address it holds together with the call the prototype over it
+    describes. The address alone is not the body: one symbol reached through two prototypes
+    is two calls numba types and lowers differently, so reading those as one value hands the
+    second body the alias the first was published under, silently and with no collision to
+    report. :func:`_ctypes_call_shape` is what the fingerprint itself folds for a pointer it
+    can name, so the two paths agree on what makes two pointers two calls.
+    """
+    if len(old) != len(new):
+        return False
+    for a, b in zip(old, new):
+        if a is b:
+            continue
+        if isinstance(a, ctypes._CFuncPtr) and isinstance(b, ctypes._CFuncPtr):
+            if (ctypes.cast(a, ctypes.c_void_p).value == ctypes.cast(b, ctypes.c_void_p).value
+                    and _ctypes_call_shape(a) == _ctypes_call_shape(b)):
+                continue
+            return False
+        try:
+            if bool(a == b):
+                continue
+        except Exception:  # nosec B112 - an object that cannot answer == is not a match
+            pass
+        return False
+    return True
+
+
+def _fingerprint_function_best_effort(func: FunctionType, opaque: Optional[list] = None) -> str:
     """Best-effort function fingerprint that never raises.
 
     ``_fingerprint_function`` raises ``_Unfingerprintable`` on the *first* value
@@ -261,6 +403,11 @@ def _fingerprint_function_best_effort(func: FunctionType) -> str:
     ``_fingerprint_function``'s raising contract serves (``compile_kernel``,
     ``digest``). Process-stable: every placeholder is derived from a type name,
     never an address.
+
+    A placeholder is where two different bodies can still meet on one fingerprint. Pass
+    ``opaque`` to collect the values that got one, in walk order, so a caller holding two
+    equal fingerprints can ask :func:`_opaque_values_match` whether they came from one
+    body or from two the fingerprint could not separate.
     """
     seen: set[int] = set()
 
@@ -268,6 +415,8 @@ def _fingerprint_function_best_effort(func: FunctionType) -> str:
         try:
             return _canon_value(value, seen)
         except (_Unfingerprintable, RecursionError):
+            if opaque is not None:
+                opaque.append(value)
             return f"<opaque:{type(value).__name__}>"
 
     def _canon_const(const: object) -> str:

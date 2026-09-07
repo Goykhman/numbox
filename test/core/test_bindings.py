@@ -51,18 +51,25 @@ def test_c():
 
 
 def test_load_lib_path_returns_handle_with_known_symbol():
-    from numbox.core.bindings.utils import load_lib_path
+    """``load_lib_path`` takes a path, so this needs one on every platform.
+
+    Windows has no path to the C runtime: it stopped being loadable by name with
+    VS2015 and ``find_msvcrt()`` returns None for every build since, so asking for one
+    skipped the test and left the ``winmode=0`` branch of ``load_lib_path`` unexecuted
+    there. The bundled ``sqlite3.dll`` is a path that does exist, and a hard
+    prerequisite of every working Python on Windows because ``_sqlite3.pyd`` links it.
+    """
+    from numbox.core.bindings.utils import _windows_bundled_dll_path, load_lib_path
 
     if platform_ == "Windows":
-        from ctypes.util import find_msvcrt
-        lib_path = find_msvcrt()
+        lib_path, known_symbol = _windows_bundled_dll_path("sqlite3"), "sqlite3_libversion"
     else:
         from ctypes.util import find_library
-        lib_path = find_library("m")
+        lib_path, known_symbol = find_library("m"), "cos"
     if lib_path is None:
-        pytest.skip("No suitable math/C runtime library discoverable")
+        pytest.skip("No library discoverable by path on this platform")
     lib = load_lib_path(lib_path)
-    assert hasattr(lib, "cos")
+    assert hasattr(lib, known_symbol)
 
 
 def test_load_lib_returns_queryable_handle():

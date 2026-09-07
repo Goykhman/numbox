@@ -235,9 +235,26 @@ def lower_constant_derive_function_type(context, builder, typ, pyval):
     and numba would refuse to cache the caller rather than store an address that
     is randomized per process.
 
-    That caching is not free: the caller's cached binary binds the derive's
-    code, so editing the derive's body in another module serves a stale binary
-    until the cache is cleared.
+    That caching is not free, on this constant-reference route alone: the
+    caller's cached binary binds the derive's code, linked in by the
+    ``add_linking_library`` below, so an edit to the derive's body in another
+    module is not reliably picked up, and which body such a caller runs is not
+    single-valued. The inline at work here is LLVM's, over that linked-in body.
+    It is not the numba-IR ``inline='always'`` that ``@proxy`` puts on its
+    generated wrapper, which fires only where a jitted caller calls the
+    dispatcher and which a constant reference never reaches. A body small enough
+    for LLVM to inline leaves no separate definition behind and the caller keeps
+    serving the old one. A larger body is embedded as a weak ``linkonce_odr``
+    definition under a mangled name carrying numba's per-process ``v<uid>``
+    abi-tag, which numba's cache key does not cover; the caller serves that
+    embedded copy when the name the body carries in the loading process differs
+    from it, and the body's current definition when it matches. That name comes
+    from whichever process last recompiled the body and is frozen in the body's
+    own cache entry, so the first process to recompile after an edit fixes the
+    outcome for every later one. A caller that reaches the same binding through
+    its dispatcher is unaffected: it goes through the alias and the stale-alias
+    guard heals it on load. For a caller holding the derive as a compile-time
+    constant, clearing the cache is the only remedy and nothing warns.
 
     There is deliberately no fallback to a baked address. A value of this type
     always takes the propagating call, so a `jit_addr` that failed to resolve
