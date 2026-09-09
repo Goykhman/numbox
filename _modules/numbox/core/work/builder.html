@@ -1,0 +1,499 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.work.builder &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/work/builder.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.work.builder</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.work.builder</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">namedtuple</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">hashlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">sha256</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">inspect</span><span class="w"> </span><span class="kn">import</span> <span class="n">getfile</span><span class="p">,</span> <span class="n">getmodule</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">io</span><span class="w"> </span><span class="kn">import</span> <span class="n">StringIO</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">itertools</span><span class="w"> </span><span class="kn">import</span> <span class="n">chain</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">njit</span><span class="p">,</span> <span class="n">typeof</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">Type</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">NamedTuple</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Sequence</span><span class="p">,</span> <span class="n">Tuple</span> <span class="k">as</span> <span class="n">PyTuple</span><span class="p">,</span> <span class="n">Union</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span> <span class="k">as</span> <span class="n">jit_options_</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.work.lowlevel_work_utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">ll_make_work</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.fingerprint</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">_Unfingerprintable</span><span class="p">,</span> <span class="n">_codegen_env_canon</span><span class="p">,</span> <span class="n">_effective_flags</span><span class="p">,</span> <span class="n">_fingerprint_function</span><span class="p">,</span>
+    <span class="n">_fingerprint_function_best_effort</span><span class="p">,</span> <span class="n">_flags_canon</span><span class="p">,</span> <span class="n">_loaded_global_names</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.highlevel</span><span class="w"> </span><span class="kn">import</span> <span class="n">cres</span><span class="p">,</span> <span class="n">_signature_identity</span><span class="p">,</span> <span class="n">_type_identity</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.preprocessing</span><span class="w"> </span><span class="kn">import</span> <span class="n">_anchor_root</span><span class="p">,</span> <span class="n">_materialize_anchor</span><span class="p">,</span> <span class="n">_orphan_anchor_sweep</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_file_anchor</span><span class="p">():</span>
+    <span class="k">raise</span> <span class="ne">NotImplementedError</span>
+
+
+<span class="n">_specs_registry</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_End</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">init_value</span><span class="p">:</span> <span class="n">Any</span>
+    <span class="n">registry</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">ty</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">type</span> <span class="o">|</span> <span class="n">Type</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_new</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">super_proxy</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"name"</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">name</span><span class="p">,</span> <span class="s2">"`name` key-word argument has not been provided"</span>
+    <span class="n">registry</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"registry"</span><span class="p">,</span> <span class="n">_specs_registry</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">registry</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Node '</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">' has already been defined on this graph. Pick a different name."</span><span class="p">)</span>
+    <span class="n">spec_</span> <span class="o">=</span> <span class="n">super_proxy</span><span class="o">.</span><span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="n">registry</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">spec_</span>
+    <span class="k">return</span> <span class="n">spec_</span>
+
+
+<div class="viewcode-block" id="End">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.builder.End">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">End</span><span class="p">(</span><span class="n">_End</span><span class="p">):</span>
+    <span class="vm">__slots__</span> <span class="o">=</span> <span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_new</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="nb">super</span><span class="p">(),</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_Derived</span><span class="p">(</span><span class="n">NamedTuple</span><span class="p">):</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">init_value</span><span class="p">:</span> <span class="n">Any</span>
+    <span class="n">derive</span><span class="p">:</span> <span class="n">Callable</span>
+    <span class="n">sources</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="s1">'Derived'</span><span class="p">,</span> <span class="n">End</span><span class="p">]]</span> <span class="o">=</span> <span class="p">()</span>
+    <span class="n">registry</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">ty</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">type</span> <span class="o">|</span> <span class="n">Type</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+
+<div class="viewcode-block" id="Derived">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.builder.Derived">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Derived</span><span class="p">(</span><span class="n">_Derived</span><span class="p">):</span>
+    <span class="vm">__slots__</span> <span class="o">=</span> <span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_new</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="nb">super</span><span class="p">(),</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+
+<span class="n">SpecTy</span> <span class="o">=</span> <span class="n">Derived</span> <span class="o">|</span> <span class="n">End</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_input_line</span><span class="p">(</span><span class="n">input_</span><span class="p">:</span> <span class="n">End</span><span class="p">,</span> <span class="n">ns</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">initializers</span><span class="p">:</span> <span class="nb">dict</span><span class="p">):</span>
+    <span class="n">name_</span> <span class="o">=</span> <span class="n">input_</span><span class="o">.</span><span class="n">name</span>
+    <span class="n">init_</span> <span class="o">=</span> <span class="n">input_</span><span class="o">.</span><span class="n">init_value</span>
+    <span class="n">init_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">name_</span><span class="si">}</span><span class="s2">_init"</span>
+    <span class="n">ns</span><span class="p">[</span><span class="n">init_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">init_</span>
+    <span class="n">initializers</span><span class="p">[</span><span class="n">init_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">init_</span>
+    <span class="n">ty_</span> <span class="o">=</span> <span class="n">input_</span><span class="o">.</span><span class="n">ty</span>
+    <span class="k">if</span> <span class="n">ty_</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">type_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">name_</span><span class="si">}</span><span class="s2">_ty"</span>
+        <span class="n">ns</span><span class="p">[</span><span class="n">type_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">ty_</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">"""</span><span class="si">{</span><span class="n">name_</span><span class="si">}</span><span class="s2"> = ll_make_work("</span><span class="si">{</span><span class="n">name_</span><span class="si">}</span><span class="s2">", </span><span class="si">{</span><span class="n">init_name</span><span class="si">}</span><span class="s2">, (), None, </span><span class="si">{</span><span class="n">type_name</span><span class="si">}</span><span class="s2">)"""</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"""</span><span class="si">{</span><span class="n">name_</span><span class="si">}</span><span class="s2"> = ll_make_work("</span><span class="si">{</span><span class="n">name_</span><span class="si">}</span><span class="s2">", </span><span class="si">{</span><span class="n">init_name</span><span class="si">}</span><span class="s2">, (), None)"""</span>
+
+
+<div class="viewcode-block" id="get_ty">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.builder.get_ty">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_ty</span><span class="p">(</span><span class="n">spec_</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">spec_</span><span class="o">.</span><span class="n">ty</span> <span class="ow">or</span> <span class="n">typeof</span><span class="p">(</span><span class="n">spec_</span><span class="o">.</span><span class="n">init_value</span><span class="p">)</span></div>
+
+
+
+<span class="n">_derive_funcs</span> <span class="o">=</span> <span class="p">{}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_derive_fingerprint</span><span class="p">(</span><span class="n">derive</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">bool</span><span class="p">,</span> <span class="nb">bool</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""Return ``(fingerprint, derive_cacheable, kernel_safe)`` for a derive.</span>
+
+<span class="sd">    Routes the derive through the deep walker so its referenced-global *values*</span>
+<span class="sd">    enter the kernel fingerprint, replacing a bare ``sha256(getsource(...))``</span>
+<span class="sd">    that was blind to them (and raised ``OSError`` on exec/REPL-defined derives).</span>
+
+<span class="sd">    A derive that reads module globals is fingerprinted but **not** cacheable:</span>
+<span class="sd">    it is compiled as a standalone dispatcher (not inlined into the</span>
+<span class="sd">    content-addressed kernel), and numba's own cache key covers only</span>
+<span class="sd">    ``co_code`` + closure, so a changed global would silently serve a stale</span>
+<span class="sd">    binary. Such a derive is compiled uncached -- recompiled per process,</span>
+<span class="sd">    never wrong -- mirroring ``compile_kernel``'s degrade path. Its fingerprint</span>
+<span class="sd">    is still process-stable and captures the global's value at build time, so</span>
+<span class="sd">    the enclosing kernel stays cacheable (``kernel_safe`` True): a changed global</span>
+<span class="sd">    re-keys the kernel.</span>
+
+<span class="sd">    An **un-fingerprintable** derive is different: ``_fingerprint_function``</span>
+<span class="sd">    raises, and the best-effort placeholder used instead is process-stable (never</span>
+<span class="sd">    an address, so the kernel name no longer explodes per run) but cannot be</span>
+<span class="sd">    trusted to change when the un-canonicalizable state does. Both the derive and</span>
+<span class="sd">    the enclosing kernel must therefore compile uncached (``kernel_safe`` False):</span>
+<span class="sd">    recompiled per process, never wrong. This is the orphan-per-run class</span>
+<span class="sd">    -- ``@id``-based names and unconditional kernel caching re-opened it.</span>
+
+<span class="sd">    "Reads module globals" is measured off the instruction stream</span>
+<span class="sd">    (``_loaded_global_names``), not ``co_names``: a record-field access such as</span>
+<span class="sd">    ``a_[t].c1`` is a ``LOAD_ATTR`` whose name would otherwise collide with a</span>
+<span class="sd">    module global of the same name, spuriously marking the derive uncacheable</span>
+<span class="sd">    (and, via ``_fingerprint_function``, forcing the best-effort fallback below).</span>
+<span class="sd">    A genuine ``cfg.SCALE`` read still counts -- its base ``cfg`` is a real</span>
+<span class="sd">    ``LOAD_GLOBAL`` -- so module-state derives stay uncacheable.</span>
+<span class="sd">    """</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">fingerprint</span> <span class="o">=</span> <span class="n">_fingerprint_function</span><span class="p">(</span><span class="n">derive</span><span class="p">,</span> <span class="nb">set</span><span class="p">())</span>
+    <span class="k">except</span> <span class="p">(</span><span class="n">_Unfingerprintable</span><span class="p">,</span> <span class="ne">RecursionError</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_fingerprint_function_best_effort</span><span class="p">(</span><span class="n">derive</span><span class="p">),</span> <span class="kc">False</span><span class="p">,</span> <span class="kc">False</span>
+    <span class="n">reads_module_state</span> <span class="o">=</span> <span class="nb">any</span><span class="p">(</span>
+        <span class="n">name</span> <span class="ow">in</span> <span class="n">derive</span><span class="o">.</span><span class="vm">__globals__</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">_loaded_global_names</span><span class="p">(</span><span class="n">derive</span><span class="o">.</span><span class="vm">__code__</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">fingerprint</span><span class="p">,</span> <span class="ow">not</span> <span class="n">reads_module_state</span><span class="p">,</span> <span class="kc">True</span>
+
+
+<span class="n">_DERIVE_ANCHOR_SUBDIR</span> <span class="o">=</span> <span class="s2">"numbox-derive"</span>
+<span class="c1"># Clear `.tmp-*` anchors left behind by a SIGKILL'd writer, as every other</span>
+<span class="c1"># anchor-writing module does for its own subdir.</span>
+<span class="n">_orphan_anchor_sweep</span><span class="p">(</span><span class="n">_DERIVE_ANCHOR_SUBDIR</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_derive_anchor_cres</span><span class="p">(</span><span class="n">derive_sig</span><span class="p">,</span> <span class="n">sig_canon</span><span class="p">,</span> <span class="n">derive</span><span class="p">,</span> <span class="n">derive_fp</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Compile ``derive`` under a cache identity that depends on the jit flags.</span>
+
+<span class="sd">    Folding the flags into the kernel name re-keys the kernel but not the derive:</span>
+<span class="sd">    the derive is compiled as its own ``cres``, and numba's cache file for it is</span>
+<span class="sd">    named after the derive's own source file and qualname, so a graph built under</span>
+<span class="sd">    ``error_model="numpy"`` and one built under the default model share it. The</span>
+<span class="sd">    second process then links the first's binary -- a division by zero returns</span>
+<span class="sd">    ``inf`` where it must raise.</span>
+
+<span class="sd">    So the derive is compiled through a generated wrapper whose *name* carries a</span>
+<span class="sd">    digest of the derive fingerprint plus the effective flags, written to its own</span>
+<span class="sd">    on-disk anchor. A flag change moves the name, which moves the anchor, which</span>
+<span class="sd">    moves numba's cache file. Mirrors ``compile_kernel._compile``.</span>
+
+<span class="sd">    The wrapper delegates to the derive njit-wrapped with ``cache=False``: it is</span>
+<span class="sd">    linked into the wrapper's cached artifact, and it must not carry a cache of</span>
+<span class="sd">    its own, which would be flag-blind exactly like the one this works around.</span>
+
+<span class="sd">    Returns ``None`` if the flags cannot be canonicalized or no anchor can be</span>
+<span class="sd">    written; the caller must then compile the derive **uncached**, because the</span>
+<span class="sd">    anchor is the only thing making a cached derive flag-safe.</span>
+<span class="sd">    """</span>
+    <span class="n">flags</span> <span class="o">=</span> <span class="n">_effective_flags</span><span class="p">(</span><span class="n">jit_options</span><span class="p">)</span>
+    <span class="n">flags_canon</span><span class="p">,</span> <span class="n">ok_flags</span> <span class="o">=</span> <span class="n">_flags_canon</span><span class="p">(</span><span class="n">flags</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">ok_flags</span><span class="p">:</span>
+        <span class="c1"># A flag with no canonical form cannot be keyed on; a key blind to a flag</span>
+        <span class="c1"># cannot protect the binary that flag produced.</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">digest</span> <span class="o">=</span> <span class="n">sha256</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"derive-anchor-v2</span><span class="se">\n</span><span class="si">{</span><span class="n">derive_fp</span><span class="si">}</span><span class="se">\n</span><span class="s2"># sig: </span><span class="si">{</span><span class="n">sig_canon</span><span class="si">}</span><span class="se">\n</span><span class="s2"># flags: </span><span class="si">{</span><span class="n">flags_canon</span><span class="si">}</span><span class="s2">"</span>
+        <span class="sa">f</span><span class="s2">"</span><span class="se">\n</span><span class="s2"># codegen_env: </span><span class="si">{</span><span class="n">_codegen_env_canon</span><span class="p">()</span><span class="si">}</span><span class="s2">"</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">)</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()[:</span><span class="mi">16</span><span class="p">]</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"_derive_</span><span class="si">{</span><span class="n">digest</span><span class="si">}</span><span class="s2">"</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">"a</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">"</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">derive_sig</span><span class="o">.</span><span class="n">args</span><span class="p">)))</span>
+    <span class="n">src</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"@_cres(_derive_sig, **_derive_jit_options)</span><span class="se">\n</span><span class="s2">"</span>
+        <span class="sa">f</span><span class="s2">"def </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">params</span><span class="si">}</span><span class="s2">):</span><span class="se">\n</span><span class="s2">"</span>
+        <span class="sa">f</span><span class="s2">"    return _inner(</span><span class="si">{</span><span class="n">params</span><span class="si">}</span><span class="s2">)</span><span class="se">\n</span><span class="s2">"</span>
+    <span class="p">)</span>
+    <span class="n">anchor</span> <span class="o">=</span> <span class="n">_anchor_root</span><span class="p">(</span><span class="n">_DERIVE_ANCHOR_SUBDIR</span><span class="p">)</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.py"</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">anchor</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">_materialize_anchor</span><span class="p">(</span><span class="n">anchor</span><span class="p">,</span> <span class="n">src</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">ns</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">"_cres"</span><span class="p">:</span> <span class="n">cres</span><span class="p">,</span>
+        <span class="s2">"_derive_sig"</span><span class="p">:</span> <span class="n">derive_sig</span><span class="p">,</span>
+        <span class="s2">"_derive_jit_options"</span><span class="p">:</span> <span class="n">jit_options</span><span class="p">,</span>
+        <span class="s2">"_inner"</span><span class="p">:</span> <span class="n">njit</span><span class="p">(</span><span class="o">**</span><span class="p">{</span><span class="o">**</span><span class="n">flags</span><span class="p">,</span> <span class="s2">"cache"</span><span class="p">:</span> <span class="kc">False</span><span class="p">})(</span><span class="n">derive</span><span class="p">),</span>
+        <span class="c1"># __name__ must be an importable module so numba can rebuild the cached</span>
+        <span class="c1"># overload's environment in another process; mirrors compile_kernel.</span>
+        <span class="s2">"__name__"</span><span class="p">:</span> <span class="vm">__name__</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="nb">compile</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">anchor</span><span class="p">),</span> <span class="s2">"exec"</span><span class="p">)</span>
+    <span class="n">exec</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>  <span class="c1"># nosec B102 - JIT codegen of internal source</span>
+    <span class="k">return</span> <span class="n">ns</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_derived_cres</span><span class="p">(</span><span class="n">ty</span><span class="p">,</span> <span class="n">sources</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">End</span><span class="p">],</span> <span class="n">derive</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">derive_fp</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="n">jit_options</span> <span class="o">=</span> <span class="n">jit_options</span> <span class="k">if</span> <span class="n">jit_options</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">{}</span>
+    <span class="n">sources_ty</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">source</span> <span class="ow">in</span> <span class="n">sources</span><span class="p">:</span>
+        <span class="n">source_ty</span> <span class="o">=</span> <span class="n">get_ty</span><span class="p">(</span><span class="n">source</span><span class="p">)</span>
+        <span class="n">sources_ty</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">source_ty</span><span class="p">)</span>
+    <span class="n">derive_sig</span> <span class="o">=</span> <span class="n">ty</span><span class="p">(</span><span class="o">*</span><span class="n">sources_ty</span><span class="p">)</span>
+    <span class="n">sig_canon</span><span class="p">,</span> <span class="n">sig_cacheable</span> <span class="o">=</span> <span class="n">_signature_identity</span><span class="p">(</span><span class="n">derive_sig</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">jit_options</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"cache"</span><span class="p">)</span> <span class="ow">and</span> <span class="n">derive_fp</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">sig_cacheable</span><span class="p">:</span>
+        <span class="n">anchored</span> <span class="o">=</span> <span class="n">_derive_anchor_cres</span><span class="p">(</span><span class="n">derive_sig</span><span class="p">,</span> <span class="n">sig_canon</span><span class="p">,</span> <span class="n">derive</span><span class="p">,</span> <span class="n">derive_fp</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">anchored</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">_derive_funcs</span><span class="p">[</span><span class="nb">id</span><span class="p">(</span><span class="n">anchored</span><span class="p">)]</span> <span class="o">=</span> <span class="n">derive</span>
+            <span class="k">return</span> <span class="n">anchored</span>
+        <span class="c1"># The anchor is what makes a cached derive flag-safe. Falling back to a</span>
+        <span class="c1"># plain cache=True compile here would restore exactly the flag-blind</span>
+        <span class="c1"># cache entry -- named after the derive's own source file and qualname --</span>
+        <span class="c1"># that the anchor exists to avoid, so the degrade must drop the cache</span>
+        <span class="c1"># too: recompiled per process, never wrong.</span>
+        <span class="n">jit_options</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">jit_options</span><span class="p">,</span> <span class="s2">"cache"</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
+    <span class="k">elif</span> <span class="n">jit_options</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"cache"</span><span class="p">)</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">sig_cacheable</span><span class="p">:</span>
+        <span class="c1"># A source type -- e.g. a Dispatcher wrapping an un-fingerprintable body</span>
+        <span class="c1"># -- has only a best-effort identity: the anchor name would be process-</span>
+        <span class="c1"># stable but blind to a change in that type, so a later process could link</span>
+        <span class="c1"># a stale derive binary. Drop the cache instead: recompiled per process,</span>
+        <span class="c1"># never wrong.</span>
+        <span class="n">jit_options</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">jit_options</span><span class="p">,</span> <span class="s2">"cache"</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">derive_cres</span> <span class="o">=</span> <span class="n">cres</span><span class="p">(</span><span class="n">derive_sig</span><span class="p">,</span> <span class="o">**</span><span class="n">jit_options</span><span class="p">)(</span><span class="n">derive</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">RuntimeError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="c1"># numba refuses cache=True for a function whose source file it cannot</span>
+        <span class="c1"># locate (an exec/&lt;string&gt;- or &lt;stdin&gt;-defined derive). Fall back to</span>
+        <span class="c1"># uncached rather than crashing -- a body numba cannot cache cannot go</span>
+        <span class="c1"># stale anyway. Derives defined in real modules or notebooks have a</span>
+        <span class="c1"># locator and are unaffected.</span>
+        <span class="k">if</span> <span class="n">jit_options</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"cache"</span><span class="p">)</span> <span class="ow">and</span> <span class="s2">"locator"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">):</span>
+            <span class="n">derive_cres</span> <span class="o">=</span> <span class="n">cres</span><span class="p">(</span><span class="n">derive_sig</span><span class="p">,</span> <span class="o">**</span><span class="p">{</span><span class="o">**</span><span class="n">jit_options</span><span class="p">,</span> <span class="s2">"cache"</span><span class="p">:</span> <span class="kc">False</span><span class="p">})(</span><span class="n">derive</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span>
+    <span class="n">_derive_funcs</span><span class="p">[</span><span class="nb">id</span><span class="p">(</span><span class="n">derive_cres</span><span class="p">)]</span> <span class="o">=</span> <span class="n">derive</span>
+    <span class="k">return</span> <span class="n">derive_cres</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_derived_line</span><span class="p">(</span>
+    <span class="n">derived_</span><span class="p">:</span> <span class="n">Derived</span><span class="p">,</span> <span class="n">ns</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">initializers</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">derive_hashes</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">kernel_safe_flags</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span>
+    <span class="n">_make_args</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="kc">None</span>
+<span class="p">):</span>
+    <span class="n">name_</span> <span class="o">=</span> <span class="n">derived_</span><span class="o">.</span><span class="n">name</span>
+    <span class="n">init_</span> <span class="o">=</span> <span class="n">derived_</span><span class="o">.</span><span class="n">init_value</span>
+    <span class="n">sources_</span> <span class="o">=</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">s</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">derived_</span><span class="o">.</span><span class="n">sources</span><span class="p">])</span>
+    <span class="n">sources_</span> <span class="o">=</span> <span class="n">sources_</span> <span class="o">+</span> <span class="s2">", "</span> <span class="k">if</span> <span class="n">sources_</span> <span class="ow">and</span> <span class="s2">","</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">sources_</span> <span class="k">else</span> <span class="n">sources_</span>
+    <span class="n">ty_</span> <span class="o">=</span> <span class="n">get_ty</span><span class="p">(</span><span class="n">derived_</span><span class="p">)</span>
+    <span class="n">derive_func</span> <span class="o">=</span> <span class="n">derived_</span><span class="o">.</span><span class="n">derive</span>
+    <span class="n">derive_fp</span><span class="p">,</span> <span class="n">derive_cacheable</span><span class="p">,</span> <span class="n">kernel_safe</span> <span class="o">=</span> <span class="n">_derive_fingerprint</span><span class="p">(</span><span class="n">derive_func</span><span class="p">)</span>
+    <span class="n">derive_hashes</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">derive_fp</span><span class="p">)</span>
+    <span class="n">kernel_safe_flags</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">kernel_safe</span><span class="p">)</span>
+    <span class="n">derive_jit</span> <span class="o">=</span> <span class="n">jit_options</span> <span class="k">if</span> <span class="n">derive_cacheable</span> <span class="k">else</span> <span class="p">{</span><span class="o">**</span><span class="p">(</span><span class="n">jit_options</span> <span class="ow">or</span> <span class="p">{}),</span> <span class="s2">"cache"</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
+    <span class="n">derive_</span> <span class="o">=</span> <span class="n">_derived_cres</span><span class="p">(</span><span class="n">ty_</span><span class="p">,</span> <span class="n">derived_</span><span class="o">.</span><span class="n">sources</span><span class="p">,</span> <span class="n">derive_func</span><span class="p">,</span> <span class="n">derive_jit</span><span class="p">,</span> <span class="n">derive_fp</span><span class="p">)</span>
+    <span class="n">derive_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">name_</span><span class="si">}</span><span class="s2">_derive"</span>
+    <span class="n">init_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">name_</span><span class="si">}</span><span class="s2">_init"</span>
+    <span class="n">_make_args</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">derive_name</span><span class="p">)</span>
+    <span class="n">ns</span><span class="p">[</span><span class="n">derive_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">derive_</span>
+    <span class="n">ns</span><span class="p">[</span><span class="n">init_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">init_</span>
+    <span class="n">initializers</span><span class="p">[</span><span class="n">init_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">init_</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"""</span><span class="si">{</span><span class="n">name_</span><span class="si">}</span><span class="s2"> = ll_make_work("</span><span class="si">{</span><span class="n">name_</span><span class="si">}</span><span class="s2">", </span><span class="si">{</span><span class="n">init_name</span><span class="si">}</span><span class="s2">, (</span><span class="si">{</span><span class="n">sources_</span><span class="si">}</span><span class="s2">), </span><span class="si">{</span><span class="n">derive_name</span><span class="si">}</span><span class="s2">)"""</span>
+
+
+<div class="viewcode-block" id="code_block_hash">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.builder.code_block_hash">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">code_block_hash</span><span class="p">(</span><span class="n">code_txt</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">""" Re-compile and re-save cache when source code has changed. """</span>
+    <span class="k">return</span> <span class="n">sha256</span><span class="p">(</span><span class="n">code_txt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">))</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_kernel_fingerprint</span><span class="p">(</span><span class="n">code_block</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">derive_hashes</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">type_sigs</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">bool</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""Return ``(hash, flags_cacheable)`` for the generated kernel.</span>
+
+<span class="sd">    The hash is baked into the name ``_make_&lt;hash&gt;``.</span>
+
+<span class="sd">    Folds each node's declared type (``type_sigs``) in alongside the body text and</span>
+<span class="sd">    derive source hashes, since a declared ty reaches the generated code only as the</span>
+<span class="sd">    bare global name ``{name}_ty`` and so is not otherwise captured by the body.</span>
+
+<span class="sd">    Also folds the resolved jit flags and the process codegen env knobs. The body</span>
+<span class="sd">    text renders them only as the literal ``@njit(**jit_options)``, so without this</span>
+<span class="sd">    two graphs differing solely in ``error_model`` or ``fastmath`` produced the same</span>
+<span class="sd">    ``_make_&lt;hash&gt;`` name, shared numba's cache key, and the second process linked</span>
+<span class="sd">    the first's binary -- a kernel cached under ``error_model="numpy"`` returned</span>
+<span class="sd">    ``inf`` for a division by zero that the default model must raise on.</span>
+
+<span class="sd">    ``flags_cacheable`` is False when a flag had no canonical form (a</span>
+<span class="sd">    ``pipeline_class``, a numba-typed ``locals``). The fold then degrades to</span>
+<span class="sd">    ``repr``, which is neither process-stable for a default-repr object nor</span>
+<span class="sd">    guaranteed to distinguish two behaviourally different values, so the caller</span>
+<span class="sd">    must compile the kernel uncached -- the same contract ``_derive_anchor_cres``</span>
+<span class="sd">    and ``compile_kernel`` already honour for this flag.</span>
+<span class="sd">    """</span>
+    <span class="n">flags_canon</span><span class="p">,</span> <span class="n">ok_flags</span> <span class="o">=</span> <span class="n">_flags_canon</span><span class="p">(</span><span class="n">_effective_flags</span><span class="p">(</span><span class="n">jit_options</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">code_block_hash</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"code_block = </span><span class="si">{</span><span class="n">code_block</span><span class="si">}</span><span class="s2"> derive_hashes = </span><span class="si">{</span><span class="n">derive_hashes</span><span class="si">}</span><span class="s2"> type_sigs = </span><span class="si">{</span><span class="n">type_sigs</span><span class="si">}</span><span class="s2">"</span>
+        <span class="sa">f</span><span class="s2">" flags = </span><span class="si">{</span><span class="n">flags_canon</span><span class="si">}</span><span class="s2"> codegen_env = </span><span class="si">{</span><span class="n">_codegen_env_canon</span><span class="p">()</span><span class="si">}</span><span class="s2">"</span>
+    <span class="p">),</span> <span class="n">ok_flags</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_infer_end_and_derived_nodes</span><span class="p">(</span><span class="n">spec</span><span class="p">:</span> <span class="n">SpecTy</span><span class="p">,</span> <span class="n">all_inputs_</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Type</span><span class="p">],</span> <span class="n">all_derived_</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Type</span><span class="p">],</span> <span class="n">registry</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">spec</span><span class="o">.</span><span class="n">name</span> <span class="ow">in</span> <span class="n">all_inputs_</span> <span class="ow">or</span> <span class="n">spec</span><span class="o">.</span><span class="n">name</span> <span class="ow">in</span> <span class="n">all_derived_</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">spec</span><span class="p">,</span> <span class="n">End</span><span class="p">):</span>
+        <span class="n">all_inputs_</span><span class="p">[</span><span class="n">spec</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">get_ty</span><span class="p">(</span><span class="n">spec</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="k">for</span> <span class="n">source</span> <span class="ow">in</span> <span class="n">spec</span><span class="o">.</span><span class="n">sources</span><span class="p">:</span>
+        <span class="n">_infer_end_and_derived_nodes</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">all_inputs_</span><span class="p">,</span> <span class="n">all_derived_</span><span class="p">,</span> <span class="n">registry</span><span class="p">)</span>
+    <span class="n">all_derived_</span><span class="p">[</span><span class="n">spec</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">get_ty</span><span class="p">(</span><span class="n">spec</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="infer_end_and_derived_nodes">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.builder.infer_end_and_derived_nodes">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">infer_end_and_derived_nodes</span><span class="p">(</span><span class="n">access_nodes</span><span class="p">:</span> <span class="n">PyTuple</span><span class="p">[</span><span class="n">SpecTy</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span> <span class="n">registry</span><span class="p">):</span>
+    <span class="n">all_inputs_</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+    <span class="n">all_derived_</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">access_node</span> <span class="ow">in</span> <span class="n">access_nodes</span><span class="p">:</span>
+        <span class="n">_infer_end_and_derived_nodes</span><span class="p">(</span><span class="n">access_node</span><span class="p">,</span> <span class="n">all_inputs_</span><span class="p">,</span> <span class="n">all_derived_</span><span class="p">,</span> <span class="n">registry</span><span class="p">)</span>
+    <span class="n">all_inputs_lst</span> <span class="o">=</span> <span class="p">[</span><span class="n">registry</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">all_inputs_</span><span class="o">.</span><span class="n">keys</span><span class="p">()]</span>
+    <span class="n">all_derived_lst</span> <span class="o">=</span> <span class="p">[</span><span class="n">registry</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">all_derived_</span><span class="o">.</span><span class="n">keys</span><span class="p">()]</span>
+    <span class="k">return</span> <span class="n">all_inputs_lst</span><span class="p">,</span> <span class="n">all_derived_lst</span></div>
+
+
+
+<div class="viewcode-block" id="make_graph">
+<a class="viewcode-back" href="../../../../numbox.core.work.html#numbox.core.work.builder.make_graph">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">make_graph</span><span class="p">(</span>
+    <span class="o">*</span><span class="n">access_nodes</span><span class="p">:</span> <span class="n">SpecTy</span><span class="p">,</span>
+    <span class="n">registry</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">jit_options</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="p">):</span>
+    <span class="k">if</span> <span class="n">registry</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">registry</span> <span class="o">=</span> <span class="n">_specs_registry</span>
+    <span class="n">all_inputs_</span><span class="p">,</span> <span class="n">all_derived_</span> <span class="o">=</span> <span class="n">infer_end_and_derived_nodes</span><span class="p">(</span><span class="n">access_nodes</span><span class="p">,</span> <span class="n">registry</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">jit_options</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">jit_options</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">jit_options</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">jit_options_</span><span class="p">,</span> <span class="o">**</span><span class="n">jit_options</span><span class="p">}</span>
+    <span class="n">ns</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="o">**</span><span class="n">getmodule</span><span class="p">(</span><span class="n">_file_anchor</span><span class="p">)</span><span class="o">.</span><span class="vm">__dict__</span><span class="p">,</span>
+        <span class="o">**</span><span class="p">{</span><span class="s2">"jit_options"</span><span class="p">:</span> <span class="n">jit_options</span><span class="p">,</span> <span class="s2">"ll_make_work"</span><span class="p">:</span> <span class="n">ll_make_work</span><span class="p">,</span> <span class="s2">"njit"</span><span class="p">:</span> <span class="n">njit</span><span class="p">}</span>
+    <span class="p">}</span>
+    <span class="n">_make_args</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">code_txt</span> <span class="o">=</span> <span class="n">StringIO</span><span class="p">()</span>
+    <span class="n">initializers</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">derive_hashes</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">kernel_safe_flags</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">input_</span> <span class="ow">in</span> <span class="n">all_inputs_</span><span class="p">:</span>
+        <span class="n">line_</span> <span class="o">=</span> <span class="n">_input_line</span><span class="p">(</span><span class="n">input_</span><span class="p">,</span> <span class="n">ns</span><span class="p">,</span> <span class="n">initializers</span><span class="p">)</span>
+        <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="se">\n\t</span><span class="si">{</span><span class="n">line_</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">derived_</span> <span class="ow">in</span> <span class="n">all_derived_</span><span class="p">:</span>
+        <span class="n">line_</span> <span class="o">=</span> <span class="n">_derived_line</span><span class="p">(</span>
+            <span class="n">derived_</span><span class="p">,</span> <span class="n">ns</span><span class="p">,</span> <span class="n">initializers</span><span class="p">,</span> <span class="n">derive_hashes</span><span class="p">,</span> <span class="n">kernel_safe_flags</span><span class="p">,</span> <span class="n">_make_args</span><span class="p">,</span> <span class="n">jit_options</span>
+        <span class="p">)</span>
+        <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="se">\n\t</span><span class="si">{</span><span class="n">line_</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+    <span class="n">type_ids</span> <span class="o">=</span> <span class="p">[(</span><span class="n">n</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">_type_identity</span><span class="p">(</span><span class="n">get_ty</span><span class="p">(</span><span class="n">n</span><span class="p">)))</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">chain</span><span class="p">(</span><span class="n">all_inputs_</span><span class="p">,</span> <span class="n">all_derived_</span><span class="p">)]</span>
+    <span class="n">type_sigs</span> <span class="o">=</span> <span class="p">[(</span><span class="n">name</span><span class="p">,</span> <span class="n">h</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="p">(</span><span class="n">h</span><span class="p">,</span> <span class="n">_c</span><span class="p">)</span> <span class="ow">in</span> <span class="n">type_ids</span><span class="p">]</span>
+    <span class="n">hash_</span><span class="p">,</span> <span class="n">flags_cacheable</span> <span class="o">=</span> <span class="n">_kernel_fingerprint</span><span class="p">(</span><span class="n">code_txt</span><span class="o">.</span><span class="n">getvalue</span><span class="p">(),</span> <span class="n">derive_hashes</span><span class="p">,</span> <span class="n">type_sigs</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">)</span>
+    <span class="n">kernel_cacheable</span> <span class="o">=</span> <span class="n">flags_cacheable</span> <span class="ow">and</span> <span class="nb">all</span><span class="p">(</span><span class="n">kernel_safe_flags</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">all</span><span class="p">(</span><span class="n">c</span> <span class="k">for</span> <span class="n">_name</span><span class="p">,</span> <span class="p">(</span><span class="n">_h</span><span class="p">,</span> <span class="n">c</span><span class="p">)</span> <span class="ow">in</span> <span class="n">type_ids</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">kernel_cacheable</span><span class="p">:</span>
+        <span class="c1"># A derive with only a best-effort fingerprint, a node typed as a</span>
+        <span class="c1"># Dispatcher wrapping an un-fingerprintable body, or a jit flag with no</span>
+        <span class="c1"># canonical form has a content-blind identity folded into the kernel name;</span>
+        <span class="c1"># compile the kernel without an on-disk cache so a stale binary cannot be</span>
+        <span class="c1"># linked -- recompiled per process, never wrong. The</span>
+        <span class="c1"># name (fed by type_sigs) is unchanged, so nothing else re-keys.</span>
+        <span class="n">ns</span><span class="p">[</span><span class="s2">"jit_options"</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">jit_options</span><span class="p">,</span> <span class="s2">"cache"</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
+    <span class="n">access_nodes_names</span> <span class="o">=</span> <span class="p">[</span><span class="n">n</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">access_nodes</span><span class="p">]</span>
+    <span class="n">tup_</span> <span class="o">=</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">access_nodes_names</span><span class="p">)</span> <span class="o">+</span> <span class="s2">","</span>
+    <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">"""</span><span class="se">\n\t</span><span class="s2">access_tuple = (</span><span class="si">{</span><span class="n">tup_</span><span class="si">}</span><span class="s2">)"""</span><span class="p">)</span>
+    <span class="n">code_txt</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">"</span><span class="se">\n\t</span><span class="s2">return access_tuple"</span><span class="p">)</span>
+    <span class="n">code_txt</span> <span class="o">=</span> <span class="n">code_txt</span><span class="o">.</span><span class="n">getvalue</span><span class="p">()</span>
+    <span class="n">make_params</span> <span class="o">=</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">chain</span><span class="p">(</span><span class="n">_make_args</span><span class="p">,</span> <span class="n">initializers</span><span class="o">.</span><span class="n">keys</span><span class="p">()))</span>
+    <span class="n">make_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"_make_</span><span class="si">{</span><span class="n">hash_</span><span class="si">}</span><span class="s2">"</span>
+    <span class="n">code_txt</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"""</span>
+<span class="s2">@njit(**jit_options)</span>
+<span class="s2">def </span><span class="si">{</span><span class="n">make_name</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">make_params</span><span class="si">}</span><span class="s2">):"""</span> <span class="o">+</span> <span class="n">code_txt</span> <span class="o">+</span> <span class="sa">f</span><span class="s2">"""</span>
+<span class="s2">access_tuple_ = </span><span class="si">{</span><span class="n">make_name</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">make_params</span><span class="si">}</span><span class="s2">)</span>
+<span class="s2">"""</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="nb">compile</span><span class="p">(</span><span class="n">code_txt</span><span class="p">,</span> <span class="n">getfile</span><span class="p">(</span><span class="n">_file_anchor</span><span class="p">),</span> <span class="n">mode</span><span class="o">=</span><span class="s2">"exec"</span><span class="p">)</span>
+    <span class="n">exec</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>  <span class="c1"># nosec B102 - JIT codegen of internal source</span>
+    <span class="n">access_tuple_</span> <span class="o">=</span> <span class="n">ns</span><span class="p">[</span><span class="s2">"access_tuple_"</span><span class="p">]</span>
+    <span class="n">Access</span> <span class="o">=</span> <span class="n">namedtuple</span><span class="p">(</span><span class="s2">"Access"</span><span class="p">,</span> <span class="n">access_nodes_names</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">Access</span><span class="p">(</span><span class="o">*</span><span class="n">access_tuple_</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Mikhail Goykhman.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
