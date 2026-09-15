@@ -49,6 +49,14 @@ def _cast_int_to_void_p(typingctx, p_ty):
 
 
 @intrinsic
+def _cast_void_p_to_int(typingctx, p_ty):
+    """ Cast void pointer type to 64-bit integer """
+    def codegen(context, builder, signature, args):
+        return builder.ptrtoint(args[0], intp_t)
+    return intp(p_ty), codegen
+
+
+@intrinsic
 def _load_at(typingctx: Context, p_ty, ty_ref: TypeRef):
     if unliteral(p_ty) not in (intp, uintp):
         raise TypingError(

@@ -1,7 +1,7 @@
 import numba
 import numpy
 import pytest
-from ctypes import c_char_p, c_void_p
+from ctypes import addressof, c_char_p, c_void_p, c_int64
 from numba import float64, njit
 from numba.experimental.function_type import _get_wrapper_address
 from numba.extending import intrinsic
@@ -9,6 +9,7 @@ from numba.extending import intrinsic
 from numbox.utils.meminfo import get_nrt_refcount, structref_meminfo
 from numbox.utils.highlevel import cres
 from numbox.utils.lowlevel import (
+    _cast_int_to_void_p, _cast_void_p_to_int,
     cast, deref_payload, extract_struct_member, get_func_p_as_int_from_func_struct,
     get_func_tuple, get_str_from_p_as_int, get_unicode_data_p, load_at, numba_version,
     store_at, tuple_of_struct_ptrs_as_int, uniformize_tuple_of_structs
@@ -342,6 +343,21 @@ def test_store_at_accepts_integer_literal_pointer():
     def kernel():
         store_at(0, int32(42))
     assert kernel is not None
+
+
+def test_pointer_to_int():
+    x_val = 137
+    x = c_int64(x_val)
+    x_p = addressof(x)
+
+    @njit
+    def roundtrip(p_):
+        p_as_int = _cast_int_to_void_p(p_)
+        return _cast_void_p_to_int(p_as_int)
+
+    x_p_roundtripped = roundtrip(x_p)
+    x_p_roundtripped_val = c_int64.from_address(x_p_roundtripped).value
+    assert x_p_roundtripped_val == x_val, x_p_roundtripped_val
 
 
 if __name__ == '__main__':
