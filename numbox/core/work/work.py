@@ -259,9 +259,6 @@ def _call_derive(typingctx: Context, derive_ty: FunctionType, sources_ty: Tuple)
     return sig, codegen
 
 
-_source_getter_registry = {}
-
-
 def _make_source_getter(source_ind):
     return f"""
 @intrinsic
@@ -302,11 +299,14 @@ _calculate_registry = {}
 
 
 def ensure_presence_of_source_getters_in_ns(num_sources_, ns_):
+    """ Define `_get_source_{i}` in `ns_` for every `i < num_sources_` that `ns_` does not define yet. `ns_` is
+     either the module namespace or a copy of it extended by `ns_extras`, so presence is checked in `ns_` itself. """
     for source_i in range(num_sources_):
+        if f"_get_source_{source_i}" in ns_:
+            continue
         source_getter_code_txt = _make_source_getter(source_i)
         source_getter_code = compile(source_getter_code_txt, getfile(_file_anchor), mode="exec")
         exec(source_getter_code, ns_)  # nosec B102 - JIT codegen of internal source
-        _source_getter_registry[source_i] = True
 
 
 def _codegen_method(num_sources, registry, make_code, exec_name, ns_extras=None):
