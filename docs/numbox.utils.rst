@@ -214,7 +214,8 @@ On numba 0.65 and earlier, numba's ``removerefctpass`` deletes every ``NRT_incre
 are plain values or arrays, that returns a plain value, and that allocates nothing. The
 reference ``export_meminfo`` takes is one of those calls, so numbox marks the function that
 makes it with numba's ``numba_args_may_always_need_nrt`` metadata, which keeps the pass off
-it. numba 0.66 removed the pass.
+it. numba 0.66 removed the pass and every mention of that metadata, so from 0.66 on nothing
+reads it.
 
 **numba's cache does not see that mark arrive.** numbox releases without it lose the
 reference when ``export_meminfo`` is given an array on numba 0.65 and earlier, so the
