@@ -646,6 +646,9 @@ def _xrowid(cur, p_rowid):
     return SQLITE_OK
 
 
+_UNSUPPORTED_TAG_MSG = "unsupported column tag"
+
+
 @njit(**_INLINE_JIT_OPTIONS)
 def _emit_cell(ctx, addr, tag, width, scratch_p, s_blob_destructor):
     """Hand the cell at ``addr`` to SQLite as the xColumn result on ``ctx`` and return the code xColumn returns.
@@ -669,7 +672,7 @@ def _emit_cell(ctx, addr, tag, width, scratch_p, s_blob_destructor):
         n = utf32_to_utf8(addr, width // 4, scratch_p)
         sqlite3_result_text(ctx, scratch_p, int32(n), SQLITE_TRANSIENT)
     else:
-        sqlite3_result_error(ctx, get_unicode_data_p("unsupported column tag"), -1)
+        sqlite3_result_error(ctx, get_unicode_data_p(_UNSUPPORTED_TAG_MSG), -1)
         return SQLITE_ERROR
     return SQLITE_OK
 

@@ -424,7 +424,7 @@ def test_a_column_tag_without_a_branch_fails_the_query(tag):
     msg = cast(sqlite3_errmsg(db), c_char_p).value
     sqlite3_finalize(stmt_p.value)
     sqlite3_close(db)
-    assert (rc, msg) == (SQLITE_ERROR, b"unsupported column tag")
+    assert (rc, msg) == (SQLITE_ERROR, v._UNSUPPORTED_TAG_MSG.encode())
 
 
 def test_fortran_order_matches_c():
