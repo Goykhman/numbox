@@ -87,8 +87,11 @@ def _incref_meminfo(typingctx, p_ty):
     symbol. Instead the codegen tags the enclosing function with the
     ``numba_args_may_always_need_nrt`` named metadata, numba's own marker for
     functions whose references outlive the call, which makes ``_legalize()``
-    refuse the rewrite for the whole module. numba 0.66 removed the pass
-    together with every mention of the tag, so from 0.66 on nothing reads it.
+    refuse the rewrite for that function's module. The tag can only refuse,
+    so it changes nothing where another check already fails, and each
+    function is lowered into a module of its own, so a caller's check never
+    sees the tag. numba 0.66 removed the pass together with every mention of
+    the tag, so from 0.66 on nothing reads it.
     """
     _require_intp(p_ty, "_incref_meminfo")
     sig = types.void(p_ty)
