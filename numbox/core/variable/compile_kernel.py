@@ -459,6 +459,57 @@ def _compile(
     return ns.pop(name)
 
 
+def _build_plan(
+    runs: list, idents: dict, flags: dict, jit_options: dict | None, cache: bool | None,
+    liveness: Callable, live_in_type: Callable, declared_sigs: bool = False, demoted: dict | None = None,
+) -> tuple[tuple, tuple]:
+    """Turn `runs` (from `build_runs`) into plan steps: each Python run becomes a
+    chain of `_PyStep`s, each jit run one compiled `_JitStep` segment.
+
+    `liveness(run_nodes)` gives a jit run's (live_in, live_out) and
+    `live_in_type(v)` the numba type each live-in is compiled against.
+    `declared_sigs` folds the segment's declared live-in/out types into the
+    compile digest. With `demoted` (variable -> demotion reason) a `Segment` is
+    recorded per run for the `PartitionReport`; without it `segments` is empty.
+    Returns (steps, segments)."""
+    steps, segments = [], []
+    for kind, run_nodes in runs:
+        quals = tuple(n.variable.qual_name() for n in run_nodes)
+        if kind == "python":
+            for n in run_nodes:
+                steps.append(_PyStep(
+                    var=n.variable,
+                    py_callable=getattr(n.variable.formula, "py_func", n.variable.formula),
+                    in_vars=tuple(n.inputs),
+                ))
+            if demoted is not None:
+                produced = {n.variable for n in run_nodes}
+                ins = sorted({i for n in run_nodes for i in n.inputs if i not in produced},
+                             key=lambda v: v.qual_name())
+                segments.append(Segment(
+                    kind="python", nodes=quals,
+                    inputs=tuple(v.qual_name() for v in ins),
+                    outputs=quals, source=None,
+                    reasons={n.variable.qual_name(): demoted[n.variable] for n in run_nodes},
+                ))
+            continue
+        live_in, live_out = liveness(run_nodes)
+        src, seg_bindings, _, _ = _generate_segment_body(run_nodes, live_in, live_out, idents, flags)
+        seg_sigs = ((tuple(v.params.type for v in live_in), tuple(v.params.type for v in live_out))
+                    if declared_sigs else ())
+        disp = _compile(src, seg_bindings, jit_options, cache, seg_sigs)
+        disp.compile(tuple(live_in_type(v) for v in live_in))
+        steps.append(_JitStep(dispatcher=disp, in_vars=live_in, out_vars=live_out))
+        if demoted is not None:
+            segments.append(Segment(
+                kind="jit", nodes=quals,
+                inputs=tuple(v.qual_name() for v in live_in),
+                outputs=tuple(v.qual_name() for v in live_out),
+                source=src, reasons={},
+            ))
+    return tuple(steps), tuple(segments)
+
+
 class CompiledKernel:
     """A fused @njit kernel compiled from a Variable graph.
 
@@ -592,52 +643,21 @@ class CompiledKernel:
         nodes = [n for n in compiled.ordered_nodes if n.variable not in external]
         order = linearize(nodes, set(demoted))
         runs = build_runs(order, set(demoted))
-        steps, segments = [], []
-        for kind, run_nodes in runs:
-            quals = tuple(n.variable.qual_name() for n in run_nodes)
-            if kind == "python":
-                ins = set()
-                produced = set()
-                for n in run_nodes:
-                    ins.update(i for i in n.inputs if i not in produced)
-                    produced.add(n.variable)
-                    steps.append(_PyStep(
-                        var=n.variable,
-                        py_callable=getattr(n.variable.formula, "py_func", n.variable.formula),
-                        in_vars=tuple(n.inputs),
-                    ))
-                reasons = {n.variable.qual_name(): demoted[n.variable] for n in run_nodes}
-                key = lambda v: v.qual_name()   # noqa: E731 - tiny local sort key
-                segments.append(Segment(
-                    kind="python", nodes=quals,
-                    inputs=tuple(v.qual_name() for v in sorted(ins, key=key)),
-                    outputs=quals, source=None, reasons=reasons,
-                ))
-                continue
-            live_in, live_out = segment_liveness(
-                run_nodes, external, self._required_vars, order
-            )
-            src, seg_bindings, _, _ = _generate_segment_body(
-                run_nodes, live_in, live_out, idents, flags
-            )
-            disp = _compile(src, seg_bindings, jit_options, cache)
-            disp.compile(tuple(typeof(values[v]) for v in live_in))
-            steps.append(_JitStep(dispatcher=disp, in_vars=live_in, out_vars=live_out))
-            segments.append(Segment(
-                kind="jit", nodes=quals,
-                inputs=tuple(v.qual_name() for v in live_in),
-                outputs=tuple(v.qual_name() for v in live_out),
-                source=src, reasons={},
-            ))
+        steps, segments = _build_plan(
+            runs, idents, flags, jit_options, cache,
+            liveness=lambda run_nodes: segment_liveness(run_nodes, external, self._required_vars, order),
+            live_in_type=lambda v: typeof(values[v]),
+            demoted=demoted,
+        )
         self._plan = _Plan(
-            steps=tuple(steps),
+            steps=steps,
             external_vars=tuple(self._external_vars),
             output_vars=tuple(self._required_vars),
         )
         self._store = values              # seed store from the already-computed values
         self._demoted = demoted           # freeze demotion verdicts for cone builds
         self._mode = "segmented"
-        self.partition = PartitionReport(mode="segmented", segments=tuple(segments))
+        self.partition = PartitionReport(mode="segmented", segments=segments)
         return tuple(values[v] for v in self._required_vars)
 
     def _ensure_store(self):
@@ -747,22 +767,12 @@ class CompiledKernel:
         demoted_in_cone = {v for v in self._demoted if v in cone_vars}
         order = linearize(affected, demoted_in_cone)
         runs = build_runs(order, demoted_in_cone)
-        steps = []
-        for kind, run_nodes in runs:
-            if kind == "python":
-                for n in run_nodes:
-                    steps.append(_PyStep(
-                        var=n.variable,
-                        py_callable=getattr(n.variable.formula, "py_func", n.variable.formula),
-                        in_vars=tuple(n.inputs),
-                    ))
-                continue
-            live_in, live_out = cone_liveness(run_nodes, order, self._required_vars, self._boundary)
-            src, seg_bindings, _, _ = _generate_segment_body(run_nodes, live_in, live_out, idents, flags)
-            disp = _compile(src, seg_bindings, jit_options, cache)
-            disp.compile(tuple(self._cone_live_in_type(v) for v in live_in))
-            steps.append(_JitStep(dispatcher=disp, in_vars=live_in, out_vars=live_out))
-        return _ConePlan(steps=tuple(steps))
+        steps, _ = _build_plan(
+            runs, idents, flags, jit_options, cache,
+            liveness=lambda run_nodes: cone_liveness(run_nodes, order, self._required_vars, self._boundary),
+            live_in_type=self._cone_live_in_type,
+        )
+        return _ConePlan(steps=steps)
 
     def _cone_key(self, affected) -> tuple[frozenset, frozenset]:
         """Cache key for a cone sub-plan: (cone node qual_names, live-in boundary
@@ -1059,42 +1069,21 @@ def compile_kernel(
         nodes = [n for n in compiled.ordered_nodes if n.variable not in external]
         order = linearize(nodes, demoted)
         runs = build_runs(order, demoted)
-        steps, segments = [], []
         # Same segment structure as _discover_and_run, but with declared types and a static demotion set (no probing).
-        for kind, run_nodes in runs:
-            quals = tuple(n.variable.qual_name() for n in run_nodes)
-            if kind == "python":
-                for n in run_nodes:
-                    steps.append(_PyStep(
-                        var=n.variable,
-                        py_callable=getattr(n.variable.formula, "py_func", n.variable.formula),
-                        in_vars=tuple(n.inputs)))
-                reasons = {n.variable.qual_name(): demoted[n.variable] for n in run_nodes}
-                ins = sorted({i for n in run_nodes for i in n.inputs
-                              if i not in {x.variable for x in run_nodes}},
-                             key=lambda v: v.qual_name())
-                segments.append(Segment(kind="python", nodes=quals,
-                                        inputs=tuple(v.qual_name() for v in ins),
-                                        outputs=quals, source=None, reasons=reasons))
-                continue
-            live_in, live_out = segment_liveness(run_nodes, external, required_vars, order)
-            src, seg_bindings, _, _ = _generate_segment_body(run_nodes, live_in, live_out, idents, flags)
-            seg_sigs = (tuple(v.params.type for v in live_in),
-                        tuple(v.params.type for v in live_out))
-            disp = _compile(src, seg_bindings, jit_options, cache, seg_sigs)
-            disp.compile(tuple(v.params.type for v in live_in))
-            steps.append(_JitStep(dispatcher=disp, in_vars=live_in, out_vars=live_out))
-            segments.append(Segment(kind="jit", nodes=quals,
-                                    inputs=tuple(v.qual_name() for v in live_in),
-                                    outputs=tuple(v.qual_name() for v in live_out),
-                                    source=src, reasons={}))
+        steps, segments = _build_plan(
+            runs, idents, flags, jit_options, cache,
+            liveness=lambda run_nodes: segment_liveness(run_nodes, external, required_vars, order),
+            live_in_type=lambda v: v.params.type,
+            declared_sigs=True,
+            demoted=demoted,
+        )
         ck = CompiledKernel(kernel, params, outputs, source, identifiers, ctx,
                             required_vars, external_vars, is_declared=True)
-        ck._plan = _Plan(steps=tuple(steps), external_vars=tuple(external_vars),
+        ck._plan = _Plan(steps=steps, external_vars=tuple(external_vars),
                          output_vars=tuple(required_vars))
         ck._demoted = demoted
         ck._mode = "segmented"
-        ck.partition = PartitionReport(mode="segmented", segments=tuple(segments))
+        ck.partition = PartitionReport(mode="segmented", segments=segments)
         return ck
     return CompiledKernel(
         kernel, params, outputs, source, identifiers, ctx, required_vars, external_vars

@@ -1,6 +1,6 @@
 import os
 import pickle
-from ctypes import addressof, c_char_p, c_int64, cast
+from ctypes import addressof, c_char_p, c_int32, c_int64, cast, string_at
 
 import pytest
 import numpy as np
@@ -8,13 +8,14 @@ from numba import njit
 from numba.core import config
 
 from numbox.utils.cstrings import c_string
+from numbox.utils.lowlevel import array_data_p
 from numbox.core.bindings.sqlite.conn import sqlite3_open, sqlite3_close
 from numbox.core.bindings.sqlite import tvf
 from numbox.core.bindings.sqlite.tvf import register_tvf
 from numbox.core.bindings.sqlite.stmt import sqlite3_prepare_v2, sqlite3_step, sqlite3_finalize
 from numbox.core.bindings.sqlite.column import (
     sqlite3_column_int64, sqlite3_column_double, sqlite3_column_text, sqlite3_column_type,
-    sqlite3_column_count,
+    sqlite3_column_count, sqlite3_column_blob, sqlite3_column_bytes,
 )
 from numbox.core.bindings.sqlite.tvf import _make_xbestindex, _TVF_DESC_DTYPE
 from numbox.core.bindings.sqlite.vtable import (
@@ -22,7 +23,7 @@ from numbox.core.bindings.sqlite.vtable import (
 )
 from numbox.core.bindings.sqlite.constants import (
     SQLITE_OK, SQLITE_CONSTRAINT, SQLITE_INDEX_CONSTRAINT_EQ, SQLITE_ROW,
-    SQLITE_ERROR, SQLITE_DONE, SQLITE_INTEGER, SQLITE_TEXT,
+    SQLITE_ERROR, SQLITE_DONE, SQLITE_INTEGER, SQLITE_TEXT, SQLITE_FLOAT,
 )
 
 _OUT = np.dtype([("n", "i8")])
@@ -43,6 +44,16 @@ def _scaled(start, stop, scale):
     for i in range(stop - start):
         out[i].n = start + i
         out[i].v = (start + i) * scale
+    return out
+
+
+@njit
+def _sum_args(*args):
+    out = np.empty(1, _OUT)
+    total = 0
+    for a in args:
+        total += a
+    out[0].n = total
     return out
 
 
@@ -121,6 +132,53 @@ def test_tvf_multi_column_and_float_arg():
     assert got == [(0, 0.0), (1, 2.5), (2, 5.0)]
     sqlite3_close(db.value)
     del h
+
+
+def test_tvf_hidden_columns_read_back_their_arguments():
+    # The arguments are HIDDEN columns of the schema, so a query may name them;
+    # SQLite's own table-valued functions answer such a column with its argument.
+    db = _open()
+    h = register_tvf(db.value, "scaled", (np.int64, np.int64, np.float64), _OUT2, _scaled)
+    stmt = c_int64(0)
+    with c_string("SELECT n, arg0, arg1, arg2 FROM scaled(0, 3, 2.5)") as p:
+        assert sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0) == SQLITE_OK
+    got = []
+    while sqlite3_step(stmt.value) == SQLITE_ROW:
+        got.append((sqlite3_column_int64(stmt.value, 0),
+                    sqlite3_column_type(stmt.value, 1), sqlite3_column_int64(stmt.value, 1),
+                    sqlite3_column_type(stmt.value, 2), sqlite3_column_int64(stmt.value, 2),
+                    sqlite3_column_type(stmt.value, 3), sqlite3_column_double(stmt.value, 3)))
+    sqlite3_finalize(stmt.value)
+    sqlite3_close(db.value)
+    del h
+    assert got == [(i, SQLITE_INTEGER, 0, SQLITE_INTEGER, 3, SQLITE_FLOAT, 2.5) for i in range(3)]
+
+
+def test_tvf_where_on_an_argument_column_is_checked_against_the_argument():
+    # The call already binds arg0 and arg1, so an '=' on either in WHERE is a
+    # second EQ on that arg, which SQLite checks against the hidden column.
+    db = _open()
+    h = register_tvf(db.value, "series", (np.int64, np.int64), _OUT, _series)
+    assert _select_int(db, "SELECT n FROM series(2, 5) WHERE arg0 = 2") == (SQLITE_OK, [(2,), (3,), (4,)])
+    assert _select_int(db, "SELECT n FROM series(2, 5) WHERE arg1 = 5") == (SQLITE_OK, [(2,), (3,), (4,)])
+    assert _select_int(db, "SELECT n FROM series(2, 5) WHERE arg0 = 3") == (SQLITE_OK, [])
+    sqlite3_close(db.value)
+    del h
+
+
+def test_tvf_column_tag_without_a_branch_fails_the_query():
+    # The tvf xColumn hands visible cells to the vtable's _emit_cell, so a tag
+    # with no branch there must fail the query here as well.
+    from numbox.core.bindings.sqlite import vtable as v
+    db = _open()
+    keys0 = set(v._DATA_ANCHOR)
+    register_tvf(db.value, "series", (np.int64, np.int64), _OUT, _series)
+    (key,) = set(v._DATA_ANCHOR) - keys0
+    desc = next(o for o in v._DATA_ANCHOR[key]._keep if isinstance(o, np.ndarray) and o.dtype == _TVF_DESC_DTYPE)
+    c_int32.from_address(int(desc["col_tags"][0])).value = 99
+    rc = _step_rc(db, "SELECT n FROM series(2, 5)")
+    sqlite3_close(db.value)
+    assert rc == SQLITE_ERROR
 
 
 def test_tvf_missing_hidden_arg():
@@ -306,8 +364,8 @@ def test_tvf_xbestindex_rejects_unbound_arg_despite_duplicate_eq():
     # 2 visible cols, 3 hidden (cols 2,3,4). Duplicate usable EQ on arg0 (col 2)
     # plus a usable EQ on arg2 (col 4), with arg1 (col 3) left unbound. A naive
     # usable-EQ count reaches 3 == n_hidden and wrongly accepts the plan even
-    # though one hidden arg is unbound. SQLite coalesces such constraints before
-    # xBestIndex so this never arrives via SQL, but the contract is to reject it.
+    # though one hidden arg is unbound. SQL sends duplicates whenever a query
+    # filters an argument the call binds, as in f(1) WHERE arg0 = 1.
     EQ = SQLITE_INDEX_CONSTRAINT_EQ
     rc, _ = _call_xbestindex(2, 3, [(2, EQ, 1), (2, EQ, 1), (4, EQ, 1)])
     assert rc == SQLITE_CONSTRAINT, rc
@@ -315,12 +373,36 @@ def test_tvf_xbestindex_rejects_unbound_arg_despite_duplicate_eq():
 
 def test_tvf_xbestindex_accepts_all_args_bound_with_duplicate_eq():
     # Every hidden arg (cols 2,3,4) has a usable EQ, with a redundant duplicate on
-    # arg0: the plan must still be accepted (the duplicate must not change the
-    # all-bound verdict).
+    # arg0: the plan must still be accepted. SQLite refuses a plan in which two
+    # constraints share an argvIndex, so the duplicate gets none and is not
+    # omitted, which leaves it for SQLite to check.
     EQ = SQLITE_INDEX_CONSTRAINT_EQ
     rc, usage = _call_xbestindex(2, 3, [(2, EQ, 1), (2, EQ, 1), (3, EQ, 1), (4, EQ, 1)])
     assert rc == SQLITE_OK, rc
-    assert [int(usage[i]["argvIndex"]) for i in range(4)] == [1, 1, 2, 3]
+    assert [(int(u["argvIndex"]), int(u["omit"])) for u in usage] == [(1, 1), (0, 0), (2, 1), (3, 1)]
+
+
+def test_tvf_xbestindex_checks_every_arg_past_64():
+    # 1 visible col, then n hidden. The all-bound check must not be capped at a
+    # machine word: with 64 or more args every one must still be bound, and one
+    # left unbound, at either end, must still reject the plan.
+    EQ = SQLITE_INDEX_CONSTRAINT_EQ
+    for n in (64, 65):
+        rc, usage = _call_xbestindex(1, n, [(1 + h, EQ, 1) for h in range(n)])
+        assert rc == SQLITE_OK, (n, rc)
+        assert [int(usage[i]["argvIndex"]) for i in range(n)] == list(range(1, n + 1))
+        for unbound in (0, n - 1):
+            rc, _ = _call_xbestindex(1, n, [(1 + h, EQ, 1) for h in range(n) if h != unbound])
+            assert rc == SQLITE_CONSTRAINT, (n, unbound, rc)
+
+
+def test_tvf_with_64_args_returns_its_row():
+    db = _open()
+    h = register_tvf(db.value, "sum64", (np.int64,) * 64, _OUT, _sum_args)
+    sql = "SELECT n FROM sum64(%s)" % ", ".join(str(i) for i in range(64))
+    assert _select_int(db, sql) == (SQLITE_OK, [(64 * 63 // 2,)])
+    sqlite3_close(db.value)
+    del h
 
 
 def _fetchall_text(db, sql):
@@ -383,6 +465,47 @@ def test_tvf_two_unicode_columns_share_cursor_scratch():
     del h
 
 
+_NUM_OUT = np.dtype([("i1", "i1"), ("i2", "i2"), ("i4", "i4"), ("i8", "i8"),
+                     ("u1", "u1"), ("u2", "u2"), ("u4", "u4"), ("u8", "u8"),
+                     ("f4", "f4"), ("f8", "f8"), ("b", "?")])
+_NUM_ROWS = np.array([
+    (-128, -32768, -2 ** 31, -2 ** 63, 255, 65535, 2 ** 32 - 1, 2 ** 64 - 1, 1.5, -2.25, True),
+    (127, 32767, 2 ** 31 - 1, 2 ** 63 - 1, 0, 1, 2, 3, -0.5, 1e300, False),
+], dtype=_NUM_OUT)
+
+
+@njit
+def _num_series(start, stop):
+    return _NUM_ROWS[start:stop]
+
+
+def test_tvf_every_numeric_and_bool_output_column():
+    # Drives every integer, float and bool tag through _tvf_xcolumn. SQLite
+    # holds integers as int64, so uint64 max comes back wrapped to -1, and bool
+    # is INTEGER 0/1. The storage class is checked too: -128.0 == -128 in Python.
+    db = _open()
+    h = register_tvf(db.value, "nums", (np.int64, np.int64), _NUM_OUT, _num_series)
+    stmt = c_int64(0)
+    with c_string("SELECT i1, i2, i4, i8, u1, u2, u4, u8, f4, f8, b FROM nums(0, 2)") as p:
+        assert sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0) == SQLITE_OK
+    rows, kinds = [], []
+    while sqlite3_step(stmt.value) == SQLITE_ROW:
+        n = sqlite3_column_count(stmt.value)
+        kinds.append([sqlite3_column_type(stmt.value, i) for i in range(n)])
+        rows.append(tuple(
+            sqlite3_column_double(stmt.value, i) if kinds[-1][i] == SQLITE_FLOAT
+            else sqlite3_column_int64(stmt.value, i) for i in range(n)
+        ))
+    sqlite3_finalize(stmt.value)
+    sqlite3_close(db.value)
+    del h
+    assert kinds == [[SQLITE_INTEGER] * 8 + [SQLITE_FLOAT, SQLITE_FLOAT, SQLITE_INTEGER]] * 2
+    assert rows == [
+        (-128, -32768, -2 ** 31, -2 ** 63, 255, 65535, 2 ** 32 - 1, -1, 1.5, -2.25, 1),
+        (127, 32767, 2 ** 31 - 1, 2 ** 63 - 1, 0, 1, 2, 3, -0.5, 1e300, 0),
+    ]
+
+
 _TWO_U_OUT = np.dtype([("a", "U6"), ("b", "U6")])
 _TWO_U_ROWS = np.array([("αβ", "héllo"), ("\U0001F600", "wörld")], dtype=_TWO_U_OUT)
 
@@ -390,6 +513,42 @@ _TWO_U_ROWS = np.array([("αβ", "héllo"), ("\U0001F600", "wörld")], dtype=_TW
 @njit
 def _two_u_series(start, stop):
     return _TWO_U_ROWS[start:stop]
+
+
+_ADDR_S_OUT = np.dtype([("addr", "i8"), ("s", "S4")])
+_ADDR_S_ROWS = np.array([(0, b"ab"), (0, b"cd")], dtype=_ADDR_S_OUT)
+
+
+@njit
+def _addr_s_series(start, stop):
+    # A fresh array per call, as a real fn returns; each row carries its address.
+    out = _ADDR_S_ROWS[start:stop].copy()
+    for i in range(out.shape[0]):
+        out[i].addr = array_data_p(out)
+    return out
+
+
+def test_tvf_text_result_is_copied_by_sqlite():
+    # The array behind a tvf result is released on the next xFilter, so an 'S'
+    # cell must reach SQLite as SQLITE_TRANSIENT, which makes SQLite copy it.
+    # sqlite3_column_blob returns the stored pointer as is, so a cell handed
+    # over without a copy would point back into the array fn returned.
+    db = _open()
+    h = register_tvf(db.value, "addrs", (np.int64, np.int64), _ADDR_S_OUT, _addr_s_series)
+    stmt = c_int64(0)
+    with c_string("SELECT addr, s FROM addrs(0, 2)") as p:
+        assert sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0) == SQLITE_OK
+    rows = []
+    while sqlite3_step(stmt.value) == SQLITE_ROW:
+        base = sqlite3_column_int64(stmt.value, 0)
+        s_p = sqlite3_column_blob(stmt.value, 1)
+        rows.append((base, s_p, string_at(s_p, sqlite3_column_bytes(stmt.value, 1))))
+    sqlite3_finalize(stmt.value)
+    sqlite3_close(db.value)
+    del h
+    assert [r[2] for r in rows] == [b"ab", b"cd"]
+    for base, s_p, _ in rows:
+        assert not base <= s_p < base + 2 * _ADDR_S_OUT.itemsize
 
 
 def _outer_xfilter_overloads():

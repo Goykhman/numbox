@@ -2,6 +2,7 @@
 evolving in time against compiled (numba) loop over individual entities """
 
 
+import logging
 import numba
 import numpy
 import sys
@@ -148,4 +149,5 @@ def benchmark():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     benchmark()

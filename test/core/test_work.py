@@ -281,5 +281,21 @@ def test_make_work_exposes_py_func():
     assert make_work.py_func is _make_work_jit.py_func
 
 
+def test_source_getters_are_generated_once_per_namespace():
+    # _codegen_method hands the getters either work.py's own namespace or a copy
+    # of it extended by ns_extras, so presence is a question for the namespace: a
+    # getter generated into the copy is absent from the original, and a getter
+    # already present is kept rather than generated again.
+    from numbox.core.work import work
+    ns = {k: v for k, v in vars(work).items() if not k.startswith("_get_source_")}
+    extended = {**ns, "extra": None}
+    work.ensure_presence_of_source_getters_in_ns(2, extended)
+    work.ensure_presence_of_source_getters_in_ns(1, ns)
+    getter = ns["_get_source_0"]
+    work.ensure_presence_of_source_getters_in_ns(2, ns)
+    assert ns["_get_source_0"] is getter
+    assert "_get_source_1" in ns
+
+
 if __name__ == "__main__":
     collect_and_run_tests(__name__)

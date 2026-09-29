@@ -1,16 +1,13 @@
 """Expose a per-query-computed numpy structured array as a SQLite table-valued
 function (register_tvf).
 
-``register_tvf(db, name, arg_types, out_dtype, fn)`` registers an eponymous
-virtual table whose rows are NOT static -- they are produced per query by the
-user's ``fn(*args)``, which returns a 1-D numpy structured array of ``out_dtype``.
-The function arguments are exposed as HIDDEN columns: ``SELECT * FROM f(2, 5)``
-turns ``2``/``5`` into EQ constraints on the hidden columns, which ``xBestIndex``
-binds into ``argv`` (in declaration order) and ``xFilter`` decodes and feeds to
-``fn``. The returned array is held alive for the cursor's lifetime via an
-NRT-backed ``[meminfo_p, data_p]`` slot (pinned with the inlined
-``_incref_meminfo`` intrinsic so numba's refcount pass cannot strip it), and
-released exactly once in ``xClose``.
+``register_tvf(db, name, arg_types, out_dtype, fn)`` registers an eponymous virtual table whose rows are NOT static --
+they are produced per query by the user's ``fn(*args)``, which returns a 1-D numpy structured array of ``out_dtype``.
+The function arguments are exposed as HIDDEN columns: ``SELECT * FROM f(2, 5)`` turns ``2``/``5`` into EQ constraints
+on the hidden columns, which ``xBestIndex`` binds into ``argv`` (in declaration order) and ``xFilter`` decodes, feeds
+to ``fn`` and keeps in the cursor, so a query naming a hidden column reads its argument back. The returned array is
+held alive for the cursor's lifetime via an NRT-backed ``[meminfo_p, data_p]`` slot (pinned with the inlined
+``_incref_meminfo`` intrinsic so numba's refcount pass cannot strip it), and released exactly once in ``xClose``.
 
 Unlike the read-only ``register_table`` (one shared module), each
 ``register_tvf`` GENERATES its own ``xFilter`` / ``xColumn`` (the user ``fn`` and
@@ -34,7 +31,7 @@ from numbox.core.bindings.sqlite._typemap import _col_tag, _SQL_TYPE, tags_buf_t
 from numbox.core.bindings.sqlite.vtable import (
     _Sqlite3Module, _SQLITE3_VTAB_CURSOR_DTYPE, _VTAB_DTYPE, _VTAB_SIZE,
     _IDX_INFO_DTYPE, _CONSTRAINT_DTYPE, _USAGE_DTYPE,
-    _register_with_destroy,
+    _emit_cell, _register_with_destroy,
 )
 from numbox.utils.digest import digest
 from numbox.utils.preprocessing import (
@@ -45,7 +42,7 @@ from numbox.utils.preprocessing import (
 # this module's __dict__, which seeds the exec namespace below.
 from numba import carray, njit  # noqa: F401
 from numba.core.types import (  # noqa: F401
-    int8, int16, int32, int64, uint8, uint16, uint32, uint64, float32, float64,
+    int32, int64, float64,
 )
 from numbox.core.bindings.sqlite.vtable import sqlite3_declare_vtab  # noqa: F401
 from numbox.core.bindings.sqlite.exec import sqlite3_malloc, sqlite3_free  # noqa: F401
@@ -81,6 +78,8 @@ _orphan_anchor_sweep(_ANCHOR_SUBDIR)
 # per-registration descriptor passed as pClientData; xConnect/xBestIndex/xColumn
 # read it by-name via carray(ptr, (1,), dtype=_TVF_DESC_DTYPE). The visible
 # (out_dtype) columns come first in the schema, the n_hidden arg columns after.
+# col_tags has an entry for every schema column, hidden args included;
+# col_offsets and col_widths cover only the visible ones.
 _TVF_DESC_DTYPE = np.dtype([
     ("ncols", "i4"), ("n_hidden", "i4"), ("itemsize", "i8"),
     ("col_offsets", "i8"), ("col_tags", "i8"), ("col_widths", "i8"),
@@ -90,8 +89,12 @@ _TVF_DESC_DTYPE = np.dtype([
 _TVF_CUR_DTYPE = np.dtype([
     ("base", _SQLITE3_VTAB_CURSOR_DTYPE), ("descriptor", "i8"), ("rowid", "i8"),
     ("mi_p", "i8"), ("data_p", "i8"), ("n_rows", "i8"), ("row_stride", "i8"), ("scratch_p", "i8"),
+    ("args_p", "i8"),
 ], align=True)
 _TVF_CUR_SIZE = _TVF_CUR_DTYPE.itemsize
+# bytes per hidden argument in the cursor's args_p buffer: each is kept as the
+# int64 or float64 xFilter decoded it to
+_ARG_SLOT = 8
 
 _INT_TAGS = frozenset((_TAG_I8, _TAG_I16, _TAG_I32, _TAG_I64,
                        _TAG_U8, _TAG_U16, _TAG_U32, _TAG_U64, _TAG_BOOL))
@@ -139,6 +142,8 @@ def _gen_arg_decode(arg_tags):
             lines.append("    a%d = sqlite3_value_int64(vals[%d])" % (i, i))
         else:
             lines.append("    a%d = sqlite3_value_double(vals[%d])" % (i, i))
+        # kept in the cursor for xColumn, which answers the hidden column with it
+        lines.append("    store_at(c[0].args_p + %d, a%d)" % (_ARG_SLOT * i, i))
     return "\n".join(lines)
 
 
@@ -186,21 +191,26 @@ def _make_xbestindex():
         cons = carray(_cast_int_to_void_p(ii[0].aConstraint), (n_constraint,), dtype=_CONSTRAINT_DTYPE)
         usage = carray(_cast_int_to_void_p(ii[0].aConstraintUsage), (n_constraint,), dtype=_USAGE_DTYPE)
 
-        # Track each hidden arg's binding as its own bit, not a running count: a
-        # duplicate usable EQ on one arg must not mask another arg being unbound.
-        # argvIndex is position-based (h + 1), so duplicates overwrite one slot.
-        bound_mask = uint64(0)
-        for i in range(n_constraint):
-            col = cons[i].iColumn
-            op = cons[i].op
-            h = col - ncols
-            if cons[i].usable != 0 and op == SQLITE_INDEX_CONSTRAINT_EQ and 0 <= h < n_hidden:
-                usage[i].argvIndex = int32(h + 1)
-                usage[i].omit = 1
-                bound_mask |= uint64(1) << uint64(h)
-
-        if bound_mask != (uint64(1) << uint64(n_hidden)) - uint64(1):
-            return SQLITE_CONSTRAINT
+        # Bind each hidden arg on its own, to the first usable EQ on its column. Not
+        # a running count: a duplicate usable EQ on one arg must not mask another
+        # arg being unbound. Not a bitmask either: a 64-bit mask would cap the args
+        # at 63. A second EQ on the same arg, as in f(1) WHERE arg0 = 1, gets no
+        # argvIndex, since SQLite refuses a plan in which two constraints share one,
+        # and is not omitted, so SQLite checks it against the hidden column.
+        # The scan is O(n_hidden * n_constraint): microseconds for a handful of
+        # args, about a millisecond at SQLite's default 2000-column cap, and it
+        # runs only when a query is planned.
+        for h in range(n_hidden):
+            bound = False
+            for i in range(n_constraint):
+                if (cons[i].usable != 0 and cons[i].op == SQLITE_INDEX_CONSTRAINT_EQ
+                        and cons[i].iColumn - ncols == h):
+                    usage[i].argvIndex = int32(h + 1)
+                    usage[i].omit = 1
+                    bound = True
+                    break
+            if not bound:
+                return SQLITE_CONSTRAINT
         ii[0].idxNum = int32(1)
         ii[0].estimatedCost = float64(1)
         ii[0].estimatedRows = 16
@@ -221,17 +231,25 @@ def _make_static_cfuncs():
     def _tvf_xopen(vtab, pp_cursor):
         cur = 0
         scratch_p = 0
+        args_p = 0
         try:
             v = carray(_cast_int_to_void_p(vtab), (1,), dtype=_VTAB_DTYPE)
             desc = v[0].descriptor
             d = carray(_cast_int_to_void_p(desc), (1,), dtype=_TVF_DESC_DTYPE)
             scratch = d[0].scratch_bytes
+            n_hidden = d[0].n_hidden
             cur = sqlite3_malloc(int32(_TVF_CUR_SIZE))
             if cur == 0:
                 return SQLITE_NOMEM
             if scratch > 0:
                 scratch_p = sqlite3_malloc(int32(scratch))
                 if scratch_p == 0:
+                    sqlite3_free(cur)
+                    return SQLITE_NOMEM
+            if n_hidden > 0:
+                args_p = sqlite3_malloc(int32(_ARG_SLOT * n_hidden))
+                if args_p == 0:
+                    sqlite3_free(scratch_p)
                     sqlite3_free(cur)
                     return SQLITE_NOMEM
             c = carray(_cast_int_to_void_p(cur), (1,), dtype=_TVF_CUR_DTYPE)
@@ -243,10 +261,12 @@ def _make_static_cfuncs():
             c[0].n_rows = 0
             c[0].row_stride = 0
             c[0].scratch_p = scratch_p
+            c[0].args_p = args_p
             slot = carray(_cast_int_to_void_p(pp_cursor), (1,), dtype=np.intp)
             slot[0] = cur
             return SQLITE_OK
         except Exception:
+            sqlite3_free(args_p)
             sqlite3_free(scratch_p)
             sqlite3_free(cur)
             return SQLITE_ERROR
@@ -261,6 +281,7 @@ def _make_static_cfuncs():
                 c[0].data_p = 0
                 c[0].n_rows = 0
                 c[0].row_stride = 0
+            sqlite3_free(c[0].args_p)
             sqlite3_free(c[0].scratch_p)
             sqlite3_free(cur)
             return SQLITE_OK
@@ -300,48 +321,24 @@ def _make_xcolumn():
             rowid = c[0].rowid
             d = carray(_cast_int_to_void_p(c[0].descriptor), (1,), dtype=_TVF_DESC_DTYPE)
             ncols = d[0].ncols
+            tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols + d[0].n_hidden,), dtype=tags_buf_t)
+            if j >= ncols:
+                # a hidden arg column: answer with the argument xFilter decoded
+                # for fn, as SQLite's own table-valued functions do
+                arg_p = c[0].args_p + _ARG_SLOT * (j - ncols)
+                if tags[j] == _TAG_F32 or tags[j] == _TAG_F64:
+                    sqlite3_result_double(ctx, load_unaligned(arg_p, float64))
+                else:
+                    sqlite3_result_int64(ctx, load_unaligned(arg_p, int64))
+                return SQLITE_OK
             offsets = carray(_cast_int_to_void_p(d[0].col_offsets), (ncols,), dtype=np.int64)
-            tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=tags_buf_t)
             widths = carray(_cast_int_to_void_p(d[0].col_widths), (ncols,), dtype=np.int64)
             addr = data_p + rowid * c[0].row_stride + offsets[j]
-            tag = tags[j]
-            if tag == _TAG_I8:
-                sqlite3_result_int64(ctx, int64(load_unaligned(addr, int8)))
-            elif tag == _TAG_I16:
-                sqlite3_result_int64(ctx, int64(load_unaligned(addr, int16)))
-            elif tag == _TAG_I32:
-                sqlite3_result_int64(ctx, int64(load_unaligned(addr, int32)))
-            elif tag == _TAG_I64:
-                sqlite3_result_int64(ctx, load_unaligned(addr, int64))
-            elif tag == _TAG_U8:
-                sqlite3_result_int64(ctx, int64(load_unaligned(addr, uint8)))
-            elif tag == _TAG_U16:
-                sqlite3_result_int64(ctx, int64(load_unaligned(addr, uint16)))
-            elif tag == _TAG_U32:
-                sqlite3_result_int64(ctx, int64(load_unaligned(addr, uint32)))
-            elif tag == _TAG_U64:
-                sqlite3_result_int64(ctx, int64(load_unaligned(addr, uint64)))
-            elif tag == _TAG_BOOL:
-                sqlite3_result_int64(ctx, int64(1) if load_unaligned(addr, uint8) != 0 else int64(0))
-            elif tag == _TAG_F32:
-                sqlite3_result_double(ctx, float64(load_unaligned(addr, float32)))
-            elif tag == _TAG_F64:
-                sqlite3_result_double(ctx, load_unaligned(addr, float64))
-            elif tag == _TAG_S:
-                # unlike the vtable's STATIC S/BLOB, ALL tvf results stay
-                # TRANSIENT: they point into the per-cursor NRT array (or the
-                # scratch), which is released and replaced on the next xFilter,
-                # so a STATIC pointer here would dangle.
-                n = _nul_trimmed_len(addr, widths[j])
-                sqlite3_result_text(ctx, addr, int32(n), _SQLITE_TRANSIENT)
-            elif tag == _TAG_BLOB:
-                n = _nul_trimmed_len(addr, widths[j])
-                sqlite3_result_blob(ctx, addr, int32(n), _SQLITE_TRANSIENT)
-            elif tag == _TAG_U:
-                scratch = c[0].scratch_p
-                n = utf32_to_utf8(addr, widths[j] // 4, scratch)
-                sqlite3_result_text(ctx, scratch, int32(n), _SQLITE_TRANSIENT)
-            return SQLITE_OK
+            # unlike the vtable's STATIC S/BLOB, ALL tvf results stay
+            # TRANSIENT: they point into the per-cursor NRT array (or the
+            # scratch), which is released and replaced on the next xFilter,
+            # so a STATIC pointer here would dangle.
+            return _emit_cell(ctx, addr, tags[j], widths[j], c[0].scratch_p, _SQLITE_TRANSIENT)
         except Exception:
             sqlite3_result_error(ctx, get_unicode_data_p("error reading tvf column"), -1)
             return SQLITE_ERROR
@@ -389,7 +386,9 @@ def _build_tvf_descriptor(name, arg_types, out_dtype):
             "string/bytes hidden args are not supported")
 
     offsets_buf = np.array(offs, dtype=np.int64)
-    tags_buf = np.array(vis_tags, dtype=tags_buf_t)
+    # one tag per schema column, in the order the schema below declares them: the
+    # visible columns, then the hidden args
+    tags_buf = np.array(vis_tags + arg_tags, dtype=tags_buf_t)
     widths_buf = np.array(vis_widths, dtype=np.int64)
     scratch = max([w + 1 for w, t in zip(vis_widths, vis_tags) if t == _TAG_U], default=0)
 
@@ -428,13 +427,12 @@ def _stem(name):
 def register_tvf(db, name, arg_types, out_dtype, fn):
     """Register an eponymous table-valued function backed by a computed array.
 
-    ``SELECT * FROM name(<args>)`` calls ``fn(*args)`` -- a plain Python or
-    ``@njit`` callable returning a 1-D numpy structured array of ``out_dtype`` --
-    and serves that array's rows. The ``arg_types`` (numpy scalar dtypes; integer
-    kinds are read via ``sqlite3_value_int64``, floating kinds via
-    ``sqlite3_value_double``) are exposed as trailing HIDDEN columns and must each
-    be supplied with an equality value in the query; a call form that leaves a
-    hidden arg unbound is rejected with a SQLite constraint error (no rows).
+    ``SELECT * FROM name(<args>)`` calls ``fn(*args)`` -- a plain Python or ``@njit`` callable returning a 1-D numpy
+    structured array of ``out_dtype`` -- and serves that array's rows. The ``arg_types`` (numpy scalar dtypes; integer
+    kinds are read via ``sqlite3_value_int64``, floating kinds via ``sqlite3_value_double``) are exposed as trailing
+    HIDDEN columns ``arg0``, ``arg1``, ... and must each be supplied with an equality value in the query; a call form
+    that leaves a hidden arg unbound is rejected with a SQLite constraint error (no rows). A query that names a hidden
+    column reads back that argument as ``fn`` received it.
 
     The registration's keep-alive lives in the module-level ``_DATA_ANCHOR``
     and is released by SQLite via ``xDestroy`` (on connection close

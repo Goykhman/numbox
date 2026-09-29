@@ -35,6 +35,7 @@ from numbox.core.bindings.sqlite._typemap import (
     _TAG_I8, _TAG_I16, _TAG_I32, _TAG_I64, _TAG_U8, _TAG_U16, _TAG_U32, _TAG_U64,
     _TAG_F32, _TAG_F64, _TAG_BOOL, _TAG_S, _TAG_U, _TAG_BLOB,
     _SQL_TYPE, _col_tag, utf32_to_utf8, _nul_trimmed_len, tags_buf_t,
+    _INLINE_JIT_OPTIONS,
 )
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
@@ -283,7 +284,7 @@ def _is_numeric_tag(tag):
 
 @njit(**jit_options)
 def _is_int_tag(tag):
-    return tag <= _TAG_U64
+    return _TAG_I8 <= tag <= _TAG_U64
 
 
 @njit(**jit_options)
@@ -403,52 +404,10 @@ def _xclose(cur):
         return SQLITE_ERROR
 
 
-@njit(**jit_options)
-def _cell_value_f64(d, rowid, col):
-    """Read the cell at (rowid, col) as float64, mirroring _xcolumn's full tag
-    ladder (same addr math, same load_unaligned widths). xBestIndex only
-    claims tags up to _TAG_BOOL; the string/blob tags fall through to 0."""
-    ncols = d[0].ncols
-    bases = carray(_cast_int_to_void_p(d[0].col_bases), (ncols,), dtype=np.int64)
-    strides = carray(_cast_int_to_void_p(d[0].col_strides), (ncols,), dtype=np.int64)
-    tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=tags_buf_t)
-    addr = bases[col] + rowid * strides[col]
-    tag = tags[col]
-    if tag == _TAG_I8:
-        return float64(load_unaligned(addr, int8))
-    elif tag == _TAG_I16:
-        return float64(load_unaligned(addr, int16))
-    elif tag == _TAG_I32:
-        return float64(load_unaligned(addr, int32))
-    elif tag == _TAG_I64:
-        return float64(load_unaligned(addr, int64))
-    elif tag == _TAG_U8:
-        return float64(load_unaligned(addr, uint8))
-    elif tag == _TAG_U16:
-        return float64(load_unaligned(addr, uint16))
-    elif tag == _TAG_U32:
-        return float64(load_unaligned(addr, uint32))
-    elif tag == _TAG_U64:
-        return float64(load_unaligned(addr, uint64))
-    elif tag == _TAG_BOOL:
-        return float64(1) if load_unaligned(addr, uint8) != 0 else float64(0)
-    elif tag == _TAG_F32:
-        return float64(load_unaligned(addr, float32))
-    elif tag == _TAG_F64:
-        return load_unaligned(addr, float64)
-    return float64(0)
-
-
-@njit(**jit_options)
-def _cell_value_i64(d, rowid, col):
-    """Read an integer cell at (rowid, col) as int64, mirroring _xcolumn's
-    sqlite3_result_int64 (uint64 wrapped to the same int64 SQLite sees)."""
-    ncols = d[0].ncols
-    bases = carray(_cast_int_to_void_p(d[0].col_bases), (ncols,), dtype=np.int64)
-    strides = carray(_cast_int_to_void_p(d[0].col_strides), (ncols,), dtype=np.int64)
-    tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=tags_buf_t)
-    addr = bases[col] + rowid * strides[col]
-    tag = tags[col]
+@njit(**_INLINE_JIT_OPTIONS)
+def _load_cell_i64(addr, tag):
+    """Load the integer or bool cell at ``addr`` as the int64 SQLite sees:
+    uint64 wraps, bool is 0/1. Every other tag reads as 0."""
     if tag == _TAG_I8:
         return int64(load_unaligned(addr, int8))
     elif tag == _TAG_I16:
@@ -465,7 +424,50 @@ def _cell_value_i64(d, rowid, col):
         return int64(load_unaligned(addr, uint32))
     elif tag == _TAG_U64:
         return int64(load_unaligned(addr, uint64))
+    elif tag == _TAG_BOOL:
+        return int64(1) if load_unaligned(addr, uint8) != 0 else int64(0)
     return int64(0)
+
+
+@njit(**_INLINE_JIT_OPTIONS)
+def _load_cell_f64(addr, tag):
+    """Load the float or bool cell at ``addr`` as float64. No other numeric tag reaches it: ``_emit_cell`` sends the
+    float tags only, and the predicate scan compares every integer column as int64 (``_cell_value_i64``). Any other tag
+    reads as 0."""
+    if tag == _TAG_BOOL:
+        return float64(1) if load_unaligned(addr, uint8) != 0 else float64(0)
+    elif tag == _TAG_F32:
+        return float64(load_unaligned(addr, float32))
+    elif tag == _TAG_F64:
+        return load_unaligned(addr, float64)
+    return float64(0)
+
+
+@njit(**_INLINE_JIT_OPTIONS)
+def _cell_at(d, rowid, col):
+    """Address and tag of the cell at (rowid, col)."""
+    ncols = d[0].ncols
+    bases = carray(_cast_int_to_void_p(d[0].col_bases), (ncols,), dtype=np.int64)
+    strides = carray(_cast_int_to_void_p(d[0].col_strides), (ncols,), dtype=np.int64)
+    tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=tags_buf_t)
+    return bases[col] + rowid * strides[col], tags[col]
+
+
+@njit(**jit_options)
+def _cell_value_f64(d, rowid, col):
+    """Read the cell at (rowid, col) as float64, with the same loads _xcolumn
+    emits. xBestIndex only claims tags up to _TAG_BOOL; the string/blob tags
+    fall through to 0."""
+    addr, tag = _cell_at(d, rowid, col)
+    return _load_cell_f64(addr, tag)
+
+
+@njit(**jit_options)
+def _cell_value_i64(d, rowid, col):
+    """Read an integer cell at (rowid, col) as int64, matching _xcolumn's
+    sqlite3_result_int64 (uint64 wrapped to the same int64 SQLite sees)."""
+    addr, tag = _cell_at(d, rowid, col)
+    return _load_cell_i64(addr, tag)
 
 
 @njit(**jit_options)
@@ -644,6 +646,37 @@ def _xrowid(cur, p_rowid):
     return SQLITE_OK
 
 
+_UNSUPPORTED_TAG_MSG = "unsupported column tag"
+
+
+@njit(**_INLINE_JIT_OPTIONS)
+def _emit_cell(ctx, addr, tag, width, scratch_p, s_blob_destructor):
+    """Hand the cell at ``addr`` to SQLite as the xColumn result on ``ctx`` and return the code xColumn returns.
+
+    S and BLOB results point straight at ``addr``, so the caller passes the destructor sentinel that matches how long
+    ``addr`` lives. U results are transcoded into ``scratch_p``, which the next xColumn overwrites, so they are always
+    TRANSIENT. Every tag ``_col_tag`` produces has a branch; any other tag fails the query with an error rather than
+    reading back as a silent NULL.
+    """
+    if _is_int_tag(tag) or tag == _TAG_BOOL:
+        sqlite3_result_int64(ctx, _load_cell_i64(addr, tag))
+    elif tag == _TAG_F32 or tag == _TAG_F64:
+        sqlite3_result_double(ctx, _load_cell_f64(addr, tag))
+    elif tag == _TAG_S:
+        n = _nul_trimmed_len(addr, width)
+        sqlite3_result_text(ctx, addr, int32(n), s_blob_destructor)
+    elif tag == _TAG_BLOB:
+        n = _nul_trimmed_len(addr, width)
+        sqlite3_result_blob(ctx, addr, int32(n), s_blob_destructor)
+    elif tag == _TAG_U:
+        n = utf32_to_utf8(addr, width // 4, scratch_p)
+        sqlite3_result_text(ctx, scratch_p, int32(n), SQLITE_TRANSIENT)
+    else:
+        sqlite3_result_error(ctx, get_unicode_data_p(_UNSUPPORTED_TAG_MSG), -1)
+        return SQLITE_ERROR
+    return SQLITE_OK
+
+
 @cfunc(types.int32(types.intp, types.intp, types.int32), cache=_CACHE)
 def _xcolumn(cur, ctx, j):
     try:
@@ -656,44 +689,10 @@ def _xcolumn(cur, ctx, j):
         tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols,), dtype=tags_buf_t)
         widths = carray(_cast_int_to_void_p(d[0].col_widths), (ncols,), dtype=np.int64)
         addr = bases[j] + rowid * strides[j]
-        tag = tags[j]
-        if tag == _TAG_I8:
-            sqlite3_result_int64(ctx, int64(load_unaligned(addr, int8)))
-        elif tag == _TAG_I16:
-            sqlite3_result_int64(ctx, int64(load_unaligned(addr, int16)))
-        elif tag == _TAG_I32:
-            sqlite3_result_int64(ctx, int64(load_unaligned(addr, int32)))
-        elif tag == _TAG_I64:
-            sqlite3_result_int64(ctx, load_unaligned(addr, int64))
-        elif tag == _TAG_U8:
-            sqlite3_result_int64(ctx, int64(load_unaligned(addr, uint8)))
-        elif tag == _TAG_U16:
-            sqlite3_result_int64(ctx, int64(load_unaligned(addr, uint16)))
-        elif tag == _TAG_U32:
-            sqlite3_result_int64(ctx, int64(load_unaligned(addr, uint32)))
-        elif tag == _TAG_U64:
-            sqlite3_result_int64(ctx, int64(load_unaligned(addr, uint64)))
-        elif tag == _TAG_BOOL:
-            sqlite3_result_int64(ctx, int64(1) if load_unaligned(addr, uint8) != 0 else int64(0))
-        elif tag == _TAG_F32:
-            sqlite3_result_double(ctx, float64(load_unaligned(addr, float32)))
-        elif tag == _TAG_F64:
-            sqlite3_result_double(ctx, load_unaligned(addr, float64))
-        elif tag == _TAG_S:
-            # S/BLOB results point into the registered array, which outlives
-            # the statement (_DATA_ANCHOR + the no-mutation contract), so
-            # STATIC hands SQLite the pointer zero-copy. U must stay TRANSIENT:
-            # it serves the per-cursor scratch, overwritten by the next xColumn.
-            n = _nul_trimmed_len(addr, widths[j])
-            sqlite3_result_text(ctx, addr, int32(n), SQLITE_STATIC)
-        elif tag == _TAG_BLOB:
-            n = _nul_trimmed_len(addr, widths[j])
-            sqlite3_result_blob(ctx, addr, int32(n), SQLITE_STATIC)
-        elif tag == _TAG_U:
-            scratch = c[0].scratch_p
-            n = utf32_to_utf8(addr, widths[j] // 4, scratch)
-            sqlite3_result_text(ctx, scratch, int32(n), SQLITE_TRANSIENT)
-        return SQLITE_OK
+        # S/BLOB results point into the registered array, which outlives the
+        # statement (_DATA_ANCHOR + the no-mutation contract), so STATIC hands
+        # SQLite the pointer zero-copy.
+        return _emit_cell(ctx, addr, tags[j], widths[j], c[0].scratch_p, SQLITE_STATIC)
     except Exception:
         sqlite3_result_error(ctx, get_unicode_data_p("error reading vtable column"), -1)
         return SQLITE_ERROR

@@ -76,7 +76,23 @@ def _require_intp(p_ty, fn_name):
 
 @intrinsic
 def _incref_meminfo(typingctx, p_ty):
-    """Incref a MemInfo at ``intp`` via NRT."""
+    """Incref a MemInfo at ``intp`` via NRT.
+
+    This intrinsic's signature (``void(intp)``) contains no NRT-tracked types,
+    so a caller of the same shape passes the legality check of numba's
+    ``removerefctpass``, which then deletes every ``NRT_incref`` and
+    ``NRT_decref`` call in that caller by name, this one included. The
+    ``_release_meminfo`` escape (call an NRT function outside the pass's
+    allowlist) is not available for an incref: numba registers no such
+    symbol. Instead the codegen tags the enclosing function with the
+    ``numba_args_may_always_need_nrt`` named metadata, numba's own marker for
+    functions whose references outlive the call, which makes ``_legalize()``
+    refuse the rewrite for that function's module. The tag can only refuse,
+    so it changes nothing where another check already fails, and each
+    function is lowered into a module of its own, so a caller's check never
+    sees the tag. numba 0.66 removed the pass together with every mention of
+    the tag, so from 0.66 on nothing reads it.
+    """
     _require_intp(p_ty, "_incref_meminfo")
     sig = types.void(p_ty)
 
@@ -84,6 +100,9 @@ def _incref_meminfo(typingctx, p_ty):
         mi_ll_ty = context.get_value_type(_MI_TY)
         meminfo = builder.inttoptr(args[0], mi_ll_ty)
         context.nrt.incref(builder, _MI_TY, meminfo)
+        module = builder.module
+        nmd = module.add_named_metadata("numba_args_may_always_need_nrt")
+        nmd.add(module.add_metadata([builder.function]))
     return sig, codegen
 
 

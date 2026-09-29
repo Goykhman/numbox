@@ -63,6 +63,49 @@ def utf32_to_utf8(src, n_codepoints, dst):
     return k
 
 
+# Per-element helpers (here and in vtable.py) are inlined at the numba IR level.
+# Left to LLVM's inliner, the larger ones (_utf8_decode_one, _emit_cell) stay
+# out of line, and a call per code point or per cell measurably slows their loops.
+_INLINE_JIT_OPTIONS = {**jit_options, "inline": "always"}
+
+
+@njit(**_INLINE_JIT_OPTIONS)
+def _utf8_decode_one(inp, i, nbytes):
+    """Decode the UTF-8 form starting at ``inp[i]`` (``inp`` holds ``nbytes``
+    bytes). Returns ``(code point, index just past the form)``. A malformed
+    form that still parses (surrogate, overlong encoding, out-of-range) decodes
+    to U+FFFD and is consumed whole; a byte that starts no complete form (bad
+    continuation byte, truncation) decodes to U+FFFD and is consumed alone."""
+    # RFC 3629 forms: a lead byte 0xxxxxxx (b0 < 0x80), 110xxxxx (b0 >> 5 == 0x6),
+    # 1110xxxx (b0 >> 4 == 0xE) or 11110xxx (b0 >> 3 == 0x1E), then continuation
+    # bytes 10xxxxxx (>> 6 == 0x2) that carry 6 bits each (& 0x3F).
+    b0 = uint32(inp[i])
+    if b0 < 0x80:
+        cp = b0
+        i += 1
+    elif b0 >> 5 == 0x6 and i + 1 < nbytes and (inp[i + 1] >> 6) == 0x2:
+        cp = ((b0 & 0x1F) << 6) | (uint32(inp[i + 1]) & 0x3F)
+        if cp < 0x80:
+            cp = 0xFFFD
+        i += 2
+    elif b0 >> 4 == 0xE and i + 2 < nbytes and (inp[i + 1] >> 6) == 0x2 and (inp[i + 2] >> 6) == 0x2:
+        cp = ((b0 & 0x0F) << 12) | ((uint32(inp[i + 1]) & 0x3F) << 6) | (uint32(inp[i + 2]) & 0x3F)
+        if cp < 0x800 or (0xD800 <= cp <= 0xDFFF):
+            cp = 0xFFFD
+        i += 3
+    elif (b0 >> 3 == 0x1E and i + 3 < nbytes and (inp[i + 1] >> 6) == 0x2
+          and (inp[i + 2] >> 6) == 0x2 and (inp[i + 3] >> 6) == 0x2):
+        cp = (((b0 & 0x07) << 18) | ((uint32(inp[i + 1]) & 0x3F) << 12)
+              | ((uint32(inp[i + 2]) & 0x3F) << 6) | (uint32(inp[i + 3]) & 0x3F))
+        if cp < 0x10000 or cp > 0x10FFFF:
+            cp = 0xFFFD
+        i += 4
+    else:
+        cp = 0xFFFD
+        i += 1
+    return uint32(cp), i
+
+
 @njit(**jit_options)
 def utf8_to_utf32(src, nbytes, dst, width_cp):
     """Decode the UTF-8 bytes at ``src`` (length ``nbytes``) into up to
@@ -76,31 +119,8 @@ def utf8_to_utf32(src, nbytes, dst, width_cp):
     i = 0
     k = 0
     while i < nbytes and k < width_cp:
-        b0 = uint32(inp[i])
-        if b0 < 0x80:
-            cp = b0
-            i += 1
-        elif b0 >> 5 == 0x6 and i + 1 < nbytes and (inp[i + 1] >> 6) == 0x2:
-            cp = ((b0 & 0x1F) << 6) | (uint32(inp[i + 1]) & 0x3F)
-            if cp < 0x80:
-                cp = 0xFFFD
-            i += 2
-        elif b0 >> 4 == 0xE and i + 2 < nbytes and (inp[i + 1] >> 6) == 0x2 and (inp[i + 2] >> 6) == 0x2:
-            cp = ((b0 & 0x0F) << 12) | ((uint32(inp[i + 1]) & 0x3F) << 6) | (uint32(inp[i + 2]) & 0x3F)
-            if cp < 0x800 or (0xD800 <= cp <= 0xDFFF):
-                cp = 0xFFFD
-            i += 3
-        elif (b0 >> 3 == 0x1E and i + 3 < nbytes and (inp[i + 1] >> 6) == 0x2
-              and (inp[i + 2] >> 6) == 0x2 and (inp[i + 3] >> 6) == 0x2):
-            cp = (((b0 & 0x07) << 18) | ((uint32(inp[i + 1]) & 0x3F) << 12)
-                  | ((uint32(inp[i + 2]) & 0x3F) << 6) | (uint32(inp[i + 3]) & 0x3F))
-            if cp < 0x10000 or cp > 0x10FFFF:
-                cp = 0xFFFD
-            i += 4
-        else:
-            cp = 0xFFFD
-            i += 1
-        store_unaligned(dst + 4 * k, uint32(cp))
+        cp, i = _utf8_decode_one(inp, i, nbytes)
+        store_unaligned(dst + 4 * k, cp)
         k += 1
     return k
 

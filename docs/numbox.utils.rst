@@ -197,6 +197,41 @@ numbox.utils.lowlevel
    :show-inheritance:
    :undoc-members:
 
+numbox.utils.meminfo
+--------------------
+
+Handing a reference through a pointer
+'''''''''''''''''''''''''''''''''''''
+
+:func:`~numbox.utils.meminfo.export_meminfo` returns a structref's (or an array's) MemInfo
+pointer as an ``intp`` and takes a reference for it,
+:func:`~numbox.utils.meminfo.borrow_structref` rebuilds a live structref from that pointer,
+and :func:`~numbox.utils.meminfo.release_meminfo` gives the reference back. The value stays
+alive for as long as the reference is held.
+
+On numba 0.65 and earlier, numba's ``removerefctpass`` deletes every ``NRT_incref`` and
+``NRT_decref`` call in a function it judges not to need them: roughly, one whose arguments
+are plain values or arrays, that returns a plain value, and that allocates nothing. The
+reference ``export_meminfo`` takes is one of those calls, so numbox marks the function that
+makes it with numba's ``numba_args_may_always_need_nrt`` metadata, which keeps the pass off
+it. numba 0.66 removed the pass and every mention of that metadata, so from 0.66 on nothing
+reads it.
+
+**numba's cache does not see that mark arrive.** numbox releases without it lose the
+reference when ``export_meminfo`` is given an array on numba 0.65 and earlier, so the
+pointer it returns does not hold the array: the MemInfo behind it can be freed while the
+pointer is still in use. A ``cache=True`` function that makes such a call and that numba
+compiled against one of those releases keeps the lost reference after numbox is upgraded,
+because numba's cache key covers the function's own source file, bytecode and closure,
+never the code of the functions it calls
+(`numba's caching limitations <https://numba.readthedocs.io/en/stable/user/jit.html#cache>`__).
+Delete that function's cache files (``*.nbi`` and ``*.nbc``) so numba compiles it again.
+
+.. automodule:: numbox.utils.meminfo
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 numbox.utils.cstrings
 ---------------------
 

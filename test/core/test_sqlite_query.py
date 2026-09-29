@@ -206,6 +206,42 @@ def test_utf8_to_utf32_overlong_is_replacement():
     assert int(dst[0]) == 0xFFFD
 
 
+# (UTF-8 bytes, decoded code points). A malformed multi-byte form that parses
+# (overlong, surrogate, above U+10FFFF) is replaced whole; a byte that starts no
+# complete form is replaced alone and decoding resumes at the next byte.
+_UTF8_CASES = [
+    (b"\xe2\x82\xac\xf0\x9f\x98\x80", [0x20AC, 0x1F600]),
+    (b"\xe0\x20\x41", [0xFFFD, 0x20, 0x41]),
+    (b"\xed\xa0\x80\x41", [0xFFFD, 0x41]),
+    (b"\xc0\xaf\x41", [0xFFFD, 0x41]),
+    (b"\xe0\x80\xaf\x41", [0xFFFD, 0x41]),
+    (b"\xf0\x80\x80\xaf\x41", [0xFFFD, 0x41]),
+    (b"\xf4\x90\x80\x80\x41", [0xFFFD, 0x41]),
+    (b"\x80\x41", [0xFFFD, 0x41]),
+    (b"\xff\x41", [0xFFFD, 0x41]),
+    (b"\x41\xf0\x9f\x98", [0x41, 0xFFFD, 0xFFFD, 0xFFFD]),
+]
+
+
+@pytest.mark.parametrize("raw, cps", _UTF8_CASES)
+def test_utf8_to_utf32_decodes_whole_sequence(raw, cps):
+    n, dst = _decode(raw, 8)
+    assert n == len(cps)
+    assert [int(x) for x in dst[:n]] == cps
+    assert not dst[n:].any()
+
+
+@pytest.mark.parametrize("raw, cps", _UTF8_CASES)
+def test_query_unicode_field_decodes_like_utf8_to_utf32(raw, cps):
+    # query_to_array decodes TEXT into a 'U' field with its own emit step; the
+    # CAST hands SQLite's raw bytes through unvalidated, so it sees them as is.
+    db = _open_mem()
+    with c_string("SELECT CAST(x'%s' AS TEXT)" % raw.hex()) as sql:
+        out = query_to_array(db, sql, np.dtype([("u", "U8")]))
+    sqlite3_close(db)
+    assert [ord(c) for c in out["u"][0]] == cps
+
+
 def test_query_xprocess_cache(tmp_path):
     import os
     import subprocess

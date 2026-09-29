@@ -236,6 +236,24 @@ def test_case_b_segmented_partition_and_result():
     assert ck.kernel(3.0) == (9.0,)  # ((3+1)*2)+1
 
 
+def test_case_b_python_run_inputs_exclude_values_made_inside_the_run():
+    g = Graph({"c": [
+        {"name": "a", "inputs": {"x": "e"}, "formula": lambda x: x + 1.0, "params": Params(type=float64)},
+        {"name": "b", "inputs": {"a": "c"}, "formula": lambda a: a * 2.0,
+         "params": Params(jitable=False, type=float64)},
+        {"name": "p", "inputs": {"b": "c", "x": "e"}, "formula": lambda b, x: b + x,
+         "params": Params(jitable=False, type=float64)},
+        {"name": "d", "inputs": {"p": "c"}, "formula": lambda p: p + 1.0, "params": Params(type=float64)},
+    ]}, ["e"])
+    g.external["e"].declare("x", Params(type=float64))
+    ck = compile_kernel(g, "c.d")
+    py = [s for s in ck.partition.segments if s.kind == "python"]
+    assert [(s.nodes, s.inputs, s.outputs) for s in py] == [
+        (("c.b", "c.p"), ("c.a", "e.x"), ("c.b", "c.p")),
+    ]
+    assert ck.kernel(3.0) == (12.0,)  # a=4, b=8, p=11, d=12
+
+
 def test_case_b_no_probing_declared_python_honored():
     # c.b is trivially jittable (lambda a: a*2.0) yet declared jitable=False;
     # it must appear as Python (NOT promoted to jit) -- no probing occurs.

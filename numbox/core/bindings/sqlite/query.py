@@ -3,7 +3,7 @@ import ctypes
 
 import numpy as np
 from numba import njit, carray
-from numba.core.types import uint8, uint32
+from numba.core.types import uint8
 
 from numbox.core.bindings.sqlite.constants import SQLITE_ROW, SQLITE_NULL, SQLITE_OK, SQLITE_DONE
 from numbox.core.bindings.sqlite.stmt import sqlite3_prepare_v2, sqlite3_step, sqlite3_finalize
@@ -16,6 +16,7 @@ from numbox.core.bindings.sqlite._typemap import (
     _col_tag,
     _TAG_I8, _TAG_I16, _TAG_I32, _TAG_I64, _TAG_U8, _TAG_U16, _TAG_U32, _TAG_U64,
     _TAG_F32, _TAG_F64, _TAG_BOOL, _TAG_S, _TAG_U, _TAG_BLOB,
+    _utf8_decode_one,
 )
 from numbox.core.configurations import jit_options
 from numbox.utils.lowlevel import _cast_int_to_void_p
@@ -34,39 +35,17 @@ def _copy_bytes(dst, off, src, nbytes):
 def _put_unicode(buf, off, scratch8, src_p, nbytes, width_cp):
     """Decode UTF-8 at ``src_p`` into up to ``width_cp`` UTF-32 code points and
     write them into ``buf`` at ``off`` in the platform's NATIVE byte order (via a
-    uint32 view of ``scratch8``, matching numpy's 'U' dtype). Mirrors
-    ``_typemap.utf8_to_utf32`` but writes natively into ``buf`` (a tracked
-    uint8 array view) instead of a raw pointer -- raw-pointer stores get
-    dead-code-eliminated by the macOS-arm64 optimizer. Malformed input -> U+FFFD."""
+    uint32 view of ``scratch8``, matching numpy's 'U' dtype). Decodes with the
+    same ``_typemap._utf8_decode_one`` as ``utf8_to_utf32`` but writes natively
+    into ``buf`` (a tracked uint8 array view) instead of a raw pointer -- raw-
+    pointer stores get dead-code-eliminated by the macOS-arm64 optimizer.
+    Malformed input -> U+FFFD."""
     inp = carray(_cast_int_to_void_p(src_p), (nbytes,), dtype=np.uint8)
     cps = scratch8.view(np.uint32)
     i = 0
     k = 0
     while i < nbytes and k < width_cp:
-        b0 = uint32(inp[i])
-        if b0 < 0x80:
-            cp = b0
-            i += 1
-        elif b0 >> 5 == 0x6 and i + 1 < nbytes and (inp[i + 1] >> 6) == 0x2:
-            cp = ((b0 & 0x1F) << 6) | (uint32(inp[i + 1]) & 0x3F)
-            if cp < 0x80:
-                cp = 0xFFFD
-            i += 2
-        elif b0 >> 4 == 0xE and i + 2 < nbytes and (inp[i + 1] >> 6) == 0x2 and (inp[i + 2] >> 6) == 0x2:
-            cp = ((b0 & 0x0F) << 12) | ((uint32(inp[i + 1]) & 0x3F) << 6) | (uint32(inp[i + 2]) & 0x3F)
-            if cp < 0x800 or (0xD800 <= cp <= 0xDFFF):
-                cp = 0xFFFD
-            i += 3
-        elif (b0 >> 3 == 0x1E and i + 3 < nbytes and (inp[i + 1] >> 6) == 0x2
-              and (inp[i + 2] >> 6) == 0x2 and (inp[i + 3] >> 6) == 0x2):
-            cp = (((b0 & 0x07) << 18) | ((uint32(inp[i + 1]) & 0x3F) << 12)
-                  | ((uint32(inp[i + 2]) & 0x3F) << 6) | (uint32(inp[i + 3]) & 0x3F))
-            if cp < 0x10000 or cp > 0x10FFFF:
-                cp = 0xFFFD
-            i += 4
-        else:
-            cp = 0xFFFD
-            i += 1
+        cp, i = _utf8_decode_one(inp, i, nbytes)
         cps[0] = cp
         _copy_bytes(buf, off + 4 * k, scratch8, 4)
         k += 1

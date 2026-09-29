@@ -385,6 +385,48 @@ def test_blob_preserves_interior_nul():
     sqlite3_close(db)
 
 
+@pytest.mark.parametrize("text_as_blob", [False, True])
+def test_text_and_blob_cells_point_into_the_registered_array(text_as_blob):
+    # The registered array outlives every query, so 'S' cells reach SQLite as
+    # SQLITE_STATIC, without a copy. sqlite3_column_blob returns the stored
+    # pointer as is, so each cell points at its own bytes in the array.
+    db = _open_memory()
+    a = np.array([(b"xy",), (b"zw",)], dtype=np.dtype([("s", "S3")]))
+    h = register_table(db, "t", a, text_as_blob=text_as_blob)  # noqa: F841
+    stmt_p = c_int64(0)
+    with c_string("SELECT s FROM t") as sql_p:
+        assert sqlite3_prepare_v2(db, sql_p, -1, addressof(stmt_p), 0) == 0
+    pointers = []
+    while sqlite3_step(stmt_p.value) == _SQLITE_ROW:
+        pointers.append(sqlite3_column_blob(stmt_p.value, 0))
+    sqlite3_finalize(stmt_p.value)
+    sqlite3_close(db)
+    assert pointers == [array_data_p(a), array_data_p(a) + a.itemsize]
+
+
+@pytest.mark.parametrize("tag", [99, -1])
+def test_a_column_tag_without_a_branch_fails_the_query(tag):
+    # Every tag _col_tag produces has a branch in _emit_cell. If one ever does
+    # not, above that range or below it, the query must fail rather than read the
+    # cell back as a silent NULL or as some other type.
+    from numbox.core.bindings.sqlite import vtable as v
+    from numbox.core.bindings.sqlite.conn import sqlite3_errmsg
+    from numbox.core.bindings.sqlite.constants import SQLITE_ERROR
+    db = _open_memory()
+    keys0 = set(v._DATA_ANCHOR)
+    register_table(db, "t", np.array([[1], [2]], dtype=np.int64), columns=["a"])
+    (key,) = set(v._DATA_ANCHOR) - keys0
+    v._DATA_ANCHOR[key]._keep[0].tags[0] = tag
+    stmt_p = c_int64(0)
+    with c_string("SELECT a FROM t") as sql_p:
+        assert sqlite3_prepare_v2(db, sql_p, -1, addressof(stmt_p), 0) == 0
+    rc = sqlite3_step(stmt_p.value)
+    msg = cast(sqlite3_errmsg(db), c_char_p).value
+    sqlite3_finalize(stmt_p.value)
+    sqlite3_close(db)
+    assert (rc, msg) == (SQLITE_ERROR, v._UNSUPPORTED_TAG_MSG.encode())
+
+
 def test_fortran_order_matches_c():
     db = _open_memory()
     a = np.asfortranarray(np.array([[1, 2], [3, 4], [5, 6]], dtype=np.int64))
