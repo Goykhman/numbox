@@ -20,7 +20,7 @@ from numbox.utils.fingerprint import (
     _Unfingerprintable, _canon_value, _fingerprint_function,
     _fingerprint_function_best_effort, _loaded_global_names,
 )
-from numbox.utils.preprocessing import _materialize_anchor, _structref_anchor_path
+from numbox.utils.preprocessing import _materialize_anchor, _structref_anchor_path, bounded_stem
 from numbox.utils.standard import make_params_strings
 
 
@@ -174,24 +174,42 @@ def make_structref_code_txt(
         assert isinstance(struct_fields, (list, tuple)), struct_fields
         fields_types = None
     struct_fields_str = ", ".join([field for field in struct_fields])
-    make_name = f"make_{struct_name.lower()}"
+    # The names of the generated functions, and of the class whose body defines
+    # the jitted getters and method thunks, reach numba's cache file names
+    # through their qualnames; bounded, a struct's name of any length stays
+    # under the file system's limit. The class takes the struct's full name
+    # back once its body is compiled, and the struct's name binds to it.
+    class_name = bounded_stem(struct_name)
+    make_name = f"make_{class_name.lower()}"
     new_returns = f"{make_name}({struct_fields_str})"
     repr_str = f"f'{struct_name}(" + ", ".join([f"{field}={{self.{field}}}" for field in struct_fields]) + ")'"
     code_txt = StringIO()
     code_txt.write(f"""
-class {struct_name}(StructRefProxy):
+class {class_name}(StructRefProxy):
     def __new__(cls, {struct_fields_str}):
         return {new_returns}
 
     def __repr__(self):
         return {repr_str}
 """)
+    # A long field's getter is defined under its bounded name and handed to the
+    # field's; that name must be nobody else's in the class body, or the hand-over
+    # would take another field's property or a method.
+    taken = set(struct_fields) | set(struct_methods or ())
     for field in struct_fields:
+        getter_name = bounded_stem(field)
+        while getter_name != field and getter_name in taken:
+            getter_name = "_" + getter_name
         code_txt.write(f"""
     @property
     @njit(**jit_options)
-    def {field}(self):
+    def {getter_name}(self):
         return self.{field}
+""")
+        if getter_name != field:
+            code_txt.write(f"""
+    {field} = {getter_name}
+    del {getter_name}
 """)
     methods_code_txt = StringIO()
     if struct_methods is not None:
@@ -206,20 +224,27 @@ class {struct_name}(StructRefProxy):
             method_identity, method_cacheable = _method_identity(method, user_ns)
             method_hash = hashlib.sha256(method_identity.encode("utf-8")).hexdigest()
             cacheable = cacheable and method_cacheable
+            thunk_name = f"{bounded_stem(method_name)}_{method_hash}"
             code_txt.write(f"""
     def {method_name}({params_str}):
-        return {self_name}.{method_name}_{method_hash}({names_params_str_wo_self})
+        return {self_name}.{thunk_name}({names_params_str_wo_self})
 
     @njit(**jit_options)
-    def {method_name}_{method_hash}({params_str}):
+    def {thunk_name}({params_str}):
         return {self_name}.{method_name}({names_params_str_wo_self})
 """)
             method_source = re.sub(r"\bdef\s+([a-zA-Z_]\w*)\b", "def _", method_source)
             methods_code_txt.write(f"""
 @overload_method({struct_type_class.__name__}, "{method_name}", jit_options=jit_options)
-def ol_{method_name}({params_str}):
+def ol_{bounded_stem(method_name)}({params_str}):
 {indent(method_source, "    ")}
     return _
+""")
+    if class_name != struct_name:
+        code_txt.write(f"""
+{class_name}.__name__ = {struct_name!r}
+{class_name}.__qualname__ = {struct_name!r}
+{struct_name} = {class_name}
 """)
     code_txt.write(f"""
 define_boxing({struct_type_class.__name__}, {struct_name})
@@ -240,7 +265,7 @@ fields_and_their_types = list(zip(fields, fields_types))
     ctor_code_block = "\n".join([f"        struct_.{field} = {field}" for field in struct_fields])
     code_txt.write(f"""
 @overload({struct_name}, strict=False, jit_options=jit_options)
-def ol_{struct_name.lower()}({struct_fields_ty_str}):
+def ol_{class_name.lower()}({struct_fields_ty_str}):
 {struct_type_code_block}
     def ctor({struct_fields_str}):
         struct_ = new({struct_type_name})

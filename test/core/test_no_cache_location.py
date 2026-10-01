@@ -690,3 +690,75 @@ def test_an_error_that_is_not_the_caches_is_raised_as_it_was(tmp_path):
                          capture_output=True, text=True, env=env, cwd=str(tmp_path))
     assert run.returncode != 0 and "a locator of another kind refused" in run.stderr, run.stderr
     assert "compiles without a cache" not in run.stderr
+
+
+# The type class lives in a module of its own, as the docs ask, so that the
+# struct's cache entries load in a second process.
+A_TYPE_CLASS = (
+    "from numba.core.types import StructRef\n"
+    "from numba.experimental.structref import register\n"
+    "@register\n"
+    "class TypeClass(StructRef):\n"
+    "    pass\n"
+)
+
+MAKE_A_LONG_NAMED_STRUCTREF = (
+    "from numba.core.types import float32\n"
+    "from numbox.utils.highlevel import make_structref\n"
+    "from numbox.utils.preprocessing import bounded_stem\n"
+    "from long_named_type_class import TypeClass\n"
+    "def dddddddddddddddddddddddddddddddddddddddd(self):\n"
+    "    return self.value * 2\n"
+    "def " + "m" * 200 + "(self):\n"
+    "    return self.value * 3\n"
+    "name = NAME\n"
+    "field = 'f' + name[1:]\n"
+    "fields = {'value': float32}\n"
+    "if bounded_stem(field) != field:\n"
+    "    fields[bounded_stem(field)] = float32\n"
+    "fields[field] = float32\n"
+    "methods = {'d' * 40: dddddddddddddddddddddddddddddddddddddddd, 'm' * 200: " + "m" * 200 + "}\n"
+    "Struct = make_structref(name, fields, TypeClass, struct_methods=methods)\n"
+    "values = [1.5 * (index + 1) for index in range(len(fields))]\n"
+    "struct = Struct(*values)\n"
+    "assert [getattr(struct, each) for each in fields] == values and getattr(struct, 'd' * 40)() == 3.0\n"
+    "assert getattr(struct, 'm' * 200)() == 4.5\n"
+    "assert Struct.__name__ == name and Struct.__qualname__ == name and repr(struct).startswith(name + '(')\n"
+    "print('made', len(name))\n"
+)
+
+
+@pytest.mark.parametrize("name", ["S" * 40, "S" * 41, "S" * 150, "S" * 300, "é" * 40, "結" * 100],
+                         ids=["40 ascii", "41 ascii", "150 ascii", "300 ascii", "40 accented", "100 cjk"])
+def test_a_struct_name_of_any_length_caches(tmp_path, name):
+    # numba names a cache file after the anchor's stem and the jitted
+    # function's qualname, both of which carried the struct's name, so a
+    # name of about 93 characters overflowed the file system's 255 bytes in
+    # numba's own files, past the anchor's check. The stems and the generated
+    # names are bounded now: as they are up to 40 bytes, a prefix and a digest
+    # beyond, and the class takes its full name back once compiled. The file
+    # system counts bytes, so a name of 40 accented characters (80 bytes) is
+    # bounded, and 100 CJK characters (300 bytes) are cut by whole characters.
+    # A field named with the struct's length is bounded in its getter the same
+    # way, and a field named with that bounded name, defined before it, keeps
+    # its property: the long field's getter took the name and the hand-over
+    # deleted the short field's. One method's name is 40 bytes, the most a
+    # bounded name can be, so its thunk's files are the longest numba writes
+    # for any struct: under the 230 bytes bounded_stem promises, which leave
+    # room for numba's temporary name at the write; the other's is 200, which
+    # the thunk's and the overload's names must bound.
+    (tmp_path / "long_named_type_class.py").write_text(A_TYPE_CLASS)
+    script = tmp_path / "make.py"
+    script.write_text(MAKE_A_LONG_NAMED_STRUCTREF.replace("NAME", repr(name)), encoding="utf-8")
+    env = dict(os.environ, PYTHONPATH=str(REPO), NUMBA_CACHE_DIR=str(tmp_path / "cache"))
+    env.pop("NUMBOX_JIT_OPTIONS", None)
+    run = subprocess.run([sys.executable, "-W", "error::RuntimeWarning", str(script)],
+                         capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    assert run.returncode == 0 and f"made {len(name)}" in run.stdout, run.stderr
+    cache_files = [path.name for path in (tmp_path / "cache").rglob("*.nb*")]
+    assert cache_files and all(len(each.encode()) < 230 for each in cache_files), cache_files
+    indexes = _index_files(tmp_path / "cache")
+    again = subprocess.run([sys.executable, "-W", "error::RuntimeWarning", str(script)],
+                           capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    assert again.returncode == 0, again.stderr
+    assert _index_files(tmp_path / "cache") == indexes

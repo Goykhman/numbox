@@ -162,6 +162,25 @@ the failure mode on that version to constants outside the inline
 range. Earlier supported versions (3.10--3.13) collide on any
 constant edit.
 
+The anchor's name carries the struct's or the function's, and numba
+names its cache files after the anchor and the qualified name of the
+function it caches, which carries the struct's again through the class
+whose body defines the jitted getters and method thunks, so a struct
+named with about 93 characters overflowed the 255 bytes a file system
+allows a name, in numba's own files past the anchor's write. Those
+names are bounded now (``bounded_stem``): a name of 40 bytes or fewer
+is used as it is, so nearly every struct keeps the file names it had,
+and a longer one becomes the whole characters of it that fit in 31
+bytes and a digest of the whole. The measure is the name's UTF-8,
+which is the file system's: a character of another script takes up to
+four bytes there. The generated class is defined under the bounded name and
+takes the struct's full name back once its body is compiled, so
+``__name__``, ``__qualname__`` and ``repr`` show the name the caller
+gave, whatever its length, and the struct caches. A field's jitted
+getter is defined under the bounded name the same way and the
+property takes the field's, so a field's name of any length caches
+too; a method's name is bounded in its thunk and its overload.
+
 See also ``numba.core.caching.Cache._index_key`` and
 ``numba.core.caching._SourceFileBackedLocatorMixin.get_source_stamp``
 in numba's source for the cache key construction and source-stamp
