@@ -1021,10 +1021,16 @@ def test_an_anchor_path_too_long_for_the_file_system_compiles_uncached_and_the_w
     # with "a shorter NUMBA_CACHE_DIR" where none was set. There is no cache
     # here, and the warning names the length rather than offering a writable
     # directory, which this one is; NUMBA_CACHE_DIR at a short path cures both.
+    # The directory ends 50 bytes short of the limit whatever tmp_path's
+    # length: components of 200 while one more leaves room for a last, then
+    # the last of the length that lands there, so the directory itself can
+    # always be made.
+    target = 4096 - 50
     deep = tmp_path
-    while len(str(deep)) < 4096 - 90:
+    while len(str(deep)) + 201 < target - 1:
         deep = deep / ("d" * 200)
-    deep = deep / ("d" * (4096 - 50 - len(str(deep))))
+    deep = deep / ("d" * (target - 1 - len(str(deep))))
+    assert len(str(deep)) == target
     deep.mkdir(parents=True)
     env = dict(os.environ, PYTHONPATH=str(REPO))
     for name in ("NUMBOX_JIT_OPTIONS", "NUMBA_CACHE_DIR", "XDG_CACHE_HOME"):
