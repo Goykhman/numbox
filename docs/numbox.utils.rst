@@ -178,11 +178,16 @@ reports a component too long as a syntax error, and the warning then
 offers the directory, quoting the error); with the names bounded, as below,
 the directory is the only part that can make it so, ``NUMBA_CACHE_DIR``
 or the user's cache directory, and ``NUMBA_CACHE_DIR`` at a shorter
-path moves the anchor out of either. The check writes names shorter
-than the longest numba writes, so a directory within about 230 bytes
-of the path limit, 4096 on Linux, passes it and overflows at numba's
-first save instead, where numba's own error names the length; the
-remedy is the same.
+path moves the anchor out of either. The anchor's check writes names
+shorter than the longest numba writes for a struct, which carry its name
+and its methods', so a user cache directory within about 230 bytes of
+the path limit, 4096 on Linux, passes it and overflows at numba's first
+save instead, where numba's own error names the length; the remedy is
+the same. A ``NUMBA_CACHE_DIR`` that deep is too deep for the package's
+own files first, whose location under it appends their directory's path
+and whose check reserves the length of numba's files, so the package
+answers, with its remedy, and the generated code compiles under its
+answer.
 
 The anchor's name carries the struct's or the function's, and numba
 names its cache files after the anchor and the qualified name of the

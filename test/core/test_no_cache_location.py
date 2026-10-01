@@ -6,6 +6,7 @@ under an archive import or a read-only install. Every check here runs in a
 subprocess with its own tree and cache directory, so the placement under test
 is the one the subprocess sees and nothing else.
 """
+import ast
 import compileall
 import importlib.util
 import marshal
@@ -69,6 +70,21 @@ def _run(env, cwd, warnings="always"):
 
 def _index_files(cache_dir):
     return sorted(path.name for path in Path(cache_dir).rglob("*.nbi"))
+
+
+def _directory_of_length(root, length):
+    """A directory made under ``root`` whose path is ``length`` bytes, whatever ``root``'s length.
+
+    Components of 200 while one more leaves room for a last, then the last of the length that lands there, so
+    the directory itself can always be made.
+    """
+    deep = root
+    while len(str(deep)) + 201 < length - 1:
+        deep = deep / ("d" * 200)
+    deep = deep / ("d" * (length - 1 - len(str(deep))))
+    assert len(str(deep)) == length
+    deep.mkdir(parents=True)
+    return deep
 
 
 @pytest.mark.parametrize("name", [
@@ -670,6 +686,58 @@ def test_a_read_only_install_warns_naming_numba_cache_dir_and_setting_it_caches(
             path.chmod(0o755)
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="a path of 4096 bytes is Linux's limit")
+def test_a_location_too_close_to_the_path_limit_for_numbas_files_compiles_uncached_and_is_told_so(tmp_path):
+    # numba's own check of a location makes a temporary file, one without a
+    # name on Linux, so a NUMBA_CACHE_DIR whose location for a module fits the
+    # path limit while numba's files, of a hundred bytes and more, do not
+    # passed it, and the import died at the first save. The probe makes a file
+    # named as long as numba's longest for the package, and the warning says
+    # what the length's remedy is. The location of the first module asked ends
+    # 20 bytes short of the limit.
+    location = str(REPO / "numbox" / "core").lstrip(os.sep)
+    cache_dir = _directory_of_length(tmp_path, 4096 - 20 - 1 - len(location))
+    env = dict(os.environ, PYTHONPATH=str(REPO), NUMBA_CACHE_DIR=str(cache_dir))
+    env.pop("NUMBOX_JIT_OPTIONS", None)
+    run = _run(env, tmp_path)
+    assert run.returncode == 0 and str(REPO / "numbox" / "core") in run.stdout, run.stderr
+    assert run.stderr.count("compiles without a cache") == 1, run.stderr
+    assert "the path is too long for the file system: a shorter NUMBA_CACHE_DIR, or none" in run.stderr, run.stderr
+    assert not _index_files(cache_dir)
+
+
+def _function_names(tree):
+    """Each function's qualified name as numba names its cache files, angle brackets dropped, with its line."""
+    def walk(node, scope):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                yield ".".join(scope + [child.name]), child.lineno
+                yield from walk(child, scope + [child.name, "locals"])
+            elif isinstance(child, ast.ClassDef):
+                yield from walk(child, scope + [child.name])
+            else:
+                yield from walk(child, scope)
+    return walk(tree, [])
+
+
+def test_numbas_longest_file_name_for_the_package_is_within_the_probes_bound():
+    # The probe reserves LONGEST_CACHE_FILE_NAME bytes in a location for the
+    # files numba writes there: the module's stem, the function's qualified
+    # name, a line number, the interpreter tag with its abiflags and an index
+    # number, written under a 21-byte temporary name. Every function of the
+    # package must fit, decorated or not, and so must the builder's generated
+    # kernel, anchored to its file under a name of 64 hex characters.
+    from numbox.core.configurations import LONGEST_CACHE_FILE_NAME
+    tag = f".py{sys.version_info[0]}{sys.version_info[1]}t.99.nbc.tmp.0123456789abcdef"
+    names = [f"{path.stem}.{qualname}-{lineno}{tag}"
+             for path in sorted((REPO / "numbox").rglob("*.py"))
+             for qualname, lineno in _function_names(ast.parse(path.read_text(encoding="utf-8")))]
+    names.append(f"builder._make_{'0' * 64}-9999{tag}")
+    longest = max(names, key=len)
+    assert len(names) > 500
+    assert len(longest) <= LONGEST_CACHE_FILE_NAME, longest
+
+
 ANOTHER_ERROR_AT_THE_CACHE_SET_UP = (
     "import numba.core.caching as caching\n"
     "def refuse(self, py_func):\n"
@@ -1013,25 +1081,22 @@ def test_a_struct_name_of_any_length_caches(tmp_path, name):
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="a path of 4096 bytes and a name of 255 are Linux's limits")
-@pytest.mark.parametrize("directory", ["NUMBA_CACHE_DIR", "HOME"])
-def test_an_anchor_path_too_long_for_the_file_system_compiles_uncached_and_the_warning_says_so(tmp_path, directory):
+@pytest.mark.parametrize("directory, remedy", [
+    ("HOME", "too long for the file system: NUMBA_CACHE_DIR at a shorter path"),
+    ("NUMBA_CACHE_DIR", "the path is too long for the file system: a shorter NUMBA_CACHE_DIR, or none"),
+])
+def test_an_anchor_path_too_long_for_the_file_system_compiles_uncached_and_the_warning_says_so(
+        tmp_path, directory, remedy):
     # A cache directory deep enough that the anchor's directory fits the path
-    # limit and the anchor's own name, of fixed length, does not: NUMBA_CACHE_DIR,
-    # or the user's cache directory under a deep home, which the warning met
-    # with "a shorter NUMBA_CACHE_DIR" where none was set. There is no cache
-    # here, and the warning names the length rather than offering a writable
-    # directory, which this one is; NUMBA_CACHE_DIR at a short path cures both.
-    # The directory ends 50 bytes short of the limit whatever tmp_path's
-    # length: components of 200 while one more leaves room for a last, then
-    # the last of the length that lands there, so the directory itself can
-    # always be made.
-    target = 4096 - 50
-    deep = tmp_path
-    while len(str(deep)) + 201 < target - 1:
-        deep = deep / ("d" * 200)
-    deep = deep / ("d" * (target - 1 - len(str(deep))))
-    assert len(str(deep)) == target
-    deep.mkdir(parents=True)
+    # limit and the anchor's own name, of fixed length, does not: the user's
+    # cache directory under a deep home, which the warning met with "a shorter
+    # NUMBA_CACHE_DIR" where none was set. There is no cache here, and the
+    # warning names the length rather than offering a writable directory, which
+    # this one is; NUMBA_CACHE_DIR at a short path cures it. A NUMBA_CACHE_DIR
+    # as deep is too deep for the package's own files, whose location under it
+    # appends their directory's path, so the package answers first, with its
+    # remedy, and the struct compiles under its answer without a word of its own.
+    deep = _directory_of_length(tmp_path, 4096 - 50)
     env = dict(os.environ, PYTHONPATH=str(REPO))
     for name in ("NUMBOX_JIT_OPTIONS", "NUMBA_CACHE_DIR", "XDG_CACHE_HOME"):
         env.pop(name, None)
@@ -1039,5 +1104,5 @@ def test_an_anchor_path_too_long_for_the_file_system_compiles_uncached_and_the_w
     run = subprocess.run([sys.executable, "-W", "always", "-c", MAKE_A_STRUCTREF], capture_output=True, text=True,
                          env=env, cwd=str(tmp_path))
     assert run.returncode == 0 and "made" in run.stdout, run.stderr
-    assert "compiles without a cache" in run.stderr, run.stderr
-    assert "too long for the file system: NUMBA_CACHE_DIR at a shorter path" in run.stderr, run.stderr
+    assert run.stderr.count("compiles without a cache") == 1, run.stderr
+    assert remedy in run.stderr, run.stderr

@@ -40,11 +40,17 @@ that file, since that is what numba looks up for it, on disk or gone, and one zi
 passed over; any other archive has no location at all. A directory of the package reached through a symlink
 is walked like the rest, wherever the link points. The check makes the cache directories it asks about, as
 numba would at the first decoration in each; with caching beside the sources that is an empty ``__pycache__``
-per directory of the package, a linked one included. The check writes a name shorter than numba's, so a
-cache directory within a few dozen bytes of the path limit, 4096 on Linux, passes it and overflows at
-numba's first save instead, where numba's own error names the length; a shorter path is the remedy.
+per directory of the package, a linked one included. numba's own writability check makes a temporary file,
+one without a name on Linux, and the files it saves have names of a hundred bytes and more, so a location
+within their length of the path limit, 4096 on Linux, passes numba's check and the first save overflows;
+the check here makes a file named as long as the longest numba writes for the package's files (128 bytes,
+which a test holds every function of the package under), so that location turns caching off with the
+warning instead.
 
-- For a source file on disk the remedy is ``NUMBA_CACHE_DIR`` pointed at a writable directory.
+- For a source file on disk the remedy is ``NUMBA_CACHE_DIR`` pointed at a writable directory; where its
+  location is too long for the file system, a shorter ``NUMBA_CACHE_DIR`` or none, since each location numba
+  picks for a source on disk but the one beside it appends the source's directory path, else the package
+  installed at a shorter path.
 - For a ``.zip``, or a frozen application, it is the user's cache directory made writable: a ``.zip`` is the
   one archive numba caches, from 0.61 on, and it caches it there, taking the directory without checking that
   it can be written; a frozen application (``sys.frozen``) is cached there too, its sources not being on disk.

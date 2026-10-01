@@ -4,6 +4,7 @@ import inspect
 import os
 import json
 import sys
+import tempfile
 import types
 import warnings
 import zipfile
@@ -43,7 +44,15 @@ def _cache_probe():
     """The function whose cache location is asked for; never compiled."""
 
 
-def check_cache_location(py_file):
+# The longest file numba writes for a function of numbox's own files, with room to spare: the module's stem,
+# the function's qualified name, numba's line number, interpreter tag and index number, and the 21 bytes of the
+# temporary name it is written under. The longest-named function of the package comes to 105 bytes and the
+# builder's generated kernel, anchored to its file, to 117; a test holds every function of the package under
+# this bound.
+LONGEST_CACHE_FILE_NAME = 128
+
+
+def check_cache_location(py_file, longest_file_name=0):
     """Raise as numba would where a function whose source is ``py_file`` cannot be cached; else return.
 
     The question is put the way numba puts it: the cache set-up that decoration runs, which picks the location
@@ -52,6 +61,12 @@ def check_cache_location(py_file):
     location but a ``.zip``'s and the first save runs for all, raising ``OSError``. The probe's code is given
     ``py_file`` as its file, which is all a locator reads of it. Nothing is compiled, and nothing is written
     but the cache directory itself. An ``OSError`` from the check names the location numba picked.
+
+    numba's writability check makes a temporary file whose name is short, or none at all on Linux, and the
+    files it saves have names of up to a hundred bytes and more, so a location within their length of the path
+    limit passes the check and the first save dies. Given ``longest_file_name``, a file with a name that long
+    is made and removed in the location too, and the ``OSError`` is the location's: the package asks with
+    ``LONGEST_CACHE_FILE_NAME``, the bound on numba's names for its own files.
     """
     code = _cache_probe.__code__.replace(co_filename=os.fspath(py_file))
     probe = types.FunctionType(code, _cache_probe.__globals__, _cache_probe.__name__)
@@ -61,6 +76,10 @@ def check_cache_location(py_file):
     locator.get_source_stamp()
     try:
         locator.ensure_cache_path()
+        if longest_file_name:
+            # tempfile's name is the prefix and eight characters of its own.
+            with tempfile.NamedTemporaryFile(dir=locator.get_cache_path(), prefix="x" * (longest_file_name - 8)):
+                pass
     except OSError as error:
         # The error names what failed, a temporary file's name among the
         # possibilities; the location it is in is what a reader can act on.
@@ -201,8 +220,11 @@ def _compiled_from(zip_path, directory, stem):
 def cache_remedy(py_file, failure, silence):
     """The remedy for ``failure``, numba's for a function whose file is ``py_file``, ending in ``silence``.
 
-    ``NUMBA_CACHE_DIR`` for a source file on disk, which is the only kind numba reads the variable for. For a
-    ``.zip`` or a frozen application, both cached under the user's cache directory, the location made writable:
+    ``NUMBA_CACHE_DIR`` for a source file on disk, which is the only kind numba reads the variable for; where its
+    location is too long for the file system, a shorter ``NUMBA_CACHE_DIR`` or none, since each location numba
+    picks for a source on disk but the one beside it appends the source's directory path, else the package at a
+    shorter path. For a ``.zip`` or a frozen application, both cached under the user's cache directory, the
+    location made writable:
     the ``.zip``'s error names it, a directory of numba's under the user's cache directory; the frozen
     application's is the no-locator one, numba having passed the location over on its error, so the user's
     cache directory is named. For any other archive, or a module without its source, the source files on disk
@@ -211,6 +233,13 @@ def cache_remedy(py_file, failure, silence):
     path, through ``XDG_CACHE_HOME`` or ``HOME``.
     """
     if os.path.exists(py_file):
+        if isinstance(failure, OSError) and failure.errno == errno.ENAMETOOLONG:
+            # numba's own check passes the location, its temporary file
+            # fitting where its cache files would not; the error names it.
+            return (
+                "the path is too long for the file system: a shorter NUMBA_CACHE_DIR, or none, where it is set, "
+                f"else numbox installed at a shorter path; or {silence}"
+            )
         # numba itself passes a location it cannot make or write over, for a
         # source on disk, so the error here is the no-locator one.
         return f"Set NUMBA_CACHE_DIR to a writable directory, or {silence}"
@@ -260,8 +289,9 @@ def uncached_where_no_cache_can_be_written(options):
     Every function numbox caches decorates under the one ``jit_options``, so the question is put here, once, for
     a source file in each directory of the package that holds a module, and answered for the package. Where
     numba can cache no function of one of those files the options come back with ``cache`` off and one warning
-    names the remedy: ``NUMBA_CACHE_DIR`` for a source file on disk; for a ``.zip``, the user's cache directory
-    made writable, since numba reads ``NUMBA_CACHE_DIR`` only for a source file on disk; for any other archive,
+    names the remedy: ``NUMBA_CACHE_DIR`` for a source file on disk, or a shorter one, or none, where the
+    location is too long for the file system; for a ``.zip``, the user's cache directory made writable, since
+    numba reads ``NUMBA_CACHE_DIR`` only for a source file on disk; for any other archive,
     or a ``.pyc``-only install, or a ``.pyc`` in a ``.zip``, the source files on disk or a ``.zip`` holding them,
     which numba 0.61 and later cache in the user's cache directory. ``NUMBOX_JIT_OPTIONS='{"cache": false}'``
     turns caching off and silences the warning. An error that is not the cache's, as ``is_a_cache_error`` draws
@@ -279,7 +309,7 @@ def uncached_where_no_cache_can_be_written(options):
         return options
     for py_file in _module_files():
         try:
-            check_cache_location(py_file)
+            check_cache_location(py_file, LONGEST_CACHE_FILE_NAME)
         except (RuntimeError, OSError, ValueError) as error:
             if not is_a_cache_error(error):
                 raise

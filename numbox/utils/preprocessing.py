@@ -13,7 +13,7 @@ import time
 import warnings
 from pathlib import Path
 
-from numbox.core.configurations import cache_remedy, check_cache_location, is_a_cache_error
+from numbox.core.configurations import LONGEST_CACHE_FILE_NAME, cache_remedy, check_cache_location, is_a_cache_error
 
 
 def _anchor_root(subdir: str = "numbox-structref") -> Path:
@@ -148,12 +148,13 @@ def _cached_at_or_uncached(py_file: str, jit_options: dict) -> dict:
 
     ``make_graph``'s kernel is anchored to the builder's own file and cached beside it, and the options a caller
     gives reach numba as they are, past the package's answer, so the question is put for the file, the way the
-    package puts it for its own; the remedy is the package's for the placement.
+    package puts it for its own, the kernel's name within the package's bound; the remedy is the package's for
+    the placement.
     """
     if not jit_options.get("cache"):
         return jit_options
     try:
-        check_cache_location(py_file)
+        check_cache_location(py_file, LONGEST_CACHE_FILE_NAME)
     except (RuntimeError, OSError, ValueError) as error:
         if not is_a_cache_error(error):
             raise
