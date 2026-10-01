@@ -54,7 +54,7 @@ from numbox.utils.cstrings import c_string
 from numbox.utils.digest import digest
 from numbox.utils.preprocessing import (
     _anchor_path,
-    _materialize_anchor,
+    _anchored_or_uncached,
     _orphan_anchor_sweep,
 )
 
@@ -226,9 +226,9 @@ def _compile_callbacks(stem, srcs, state_type, fns):
     code_txt = "# udaf-digest: %s\n%s" % (udaf_digest, "".join(srcs))
     # globals() is this module's __dict__; it carries __name__, which numba's
     # warm-cache Environment rebuild requires when reloading the cached impls.
-    ns = {**globals(), "_state_type": state_type, **fns}
     anchor = _anchor_path(_ANCHOR_SUBDIR, stem, code_txt)
-    _materialize_anchor(anchor, code_txt)
+    ns = {**globals(), "_state_type": state_type, **fns,
+          "jit_options": _anchored_or_uncached(anchor, code_txt, jit_options)}
     code = compile(code_txt, str(anchor), mode="exec")
     exec(code, ns)  # nosec B102 - JIT codegen of internal source
     return ns

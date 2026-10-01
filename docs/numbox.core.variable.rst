@@ -265,8 +265,11 @@ state cannot be fingerprinted -- a ``cres``-compiled callable, or a value with
 no canonical form -- make that one kernel uncacheable: always recompiled per
 process, never wrong. The
 ``cache`` keyword is tri-state: ``None`` (the default) defers to
-``jit_options["cache"]``, then the ``NUMBOX_JIT_OPTIONS`` environment
-default, then ``True``; an explicit ``True``/``False`` wins. Two costs are
+``jit_options["cache"]``, then numbox's default, the ``NUMBOX_JIT_OPTIONS``
+environment value or ``True`` unless numba can write no cache for numbox's
+own files, where it is ``False`` (see :doc:`numbox.core.configurations`);
+an explicit ``True``/``False`` wins, and the kernel's own anchor still turns
+caching off where it cannot be cached. Two costs are
 worth knowing: a formula that references or closes over a **large array**
 pays a per-compile ``sha256`` over that array's bytes (proportional to its
 size) on every ``compile_kernel`` call; and numba itself declines to

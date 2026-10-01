@@ -692,6 +692,254 @@ def test_an_error_that_is_not_the_caches_is_raised_as_it_was(tmp_path):
     assert "compiles without a cache" not in run.stderr
 
 
+# The code numbox generates at run time, each child importing the helpers of
+# the test module that exercises it.
+MAKE_A_STRUCTREF = (
+    "from numba.core.types import StructRef, float32\n"
+    "from numba.experimental.structref import register\n"
+    "from numbox.utils.highlevel import make_structref\n"
+    "@register\n"
+    "class TypeClass(StructRef):\n"
+    "    pass\n"
+    "Struct = make_structref('Struct', {'value': float32}, TypeClass)\n"
+    "assert Struct(2.5).value == 2.5\n"
+    "print('made')\n"
+)
+
+REGISTER_AN_AGGREGATE = (
+    "from test.core.test_sqlite_udf_helpers import (_open_memory, _make_table, _read1_int64, sum_state_type,\n"
+    "                                               sum_init, sum_step, sum_finalize)\n"
+    "from numbox.core.bindings.sqlite.udf_helpers import register_aggregate\n"
+    "from numbox.core.bindings.sqlite.conn import sqlite3_close\n"
+    "db = _open_memory()\n"
+    "_make_table(db, [1, 2, 3, 4, 5])\n"
+    "register_aggregate(db, 'my_sum', 1, sum_state_type, sum_init, sum_step, sum_finalize)\n"
+    "value, _ = _read1_int64(db, 'SELECT __cap(my_sum(v)) FROM t')\n"
+    "sqlite3_close(db)\n"
+    "assert value == 15, value\n"
+    "print('summed')\n"
+)
+
+COMPILE_A_KERNEL = (
+    "from numbox.core.variable.variable import Graph\n"
+    "from numbox.core.variable.compile_kernel import compile_kernel\n"
+    "def f(x):\n"
+    "    return x + 1.0\n"
+    "graph = Graph({'calc': [{'name': 'y', 'inputs': {'x': 'ext'}, 'formula': f}]}, ['ext'])\n"
+    "kernel = compile_kernel(graph, 'calc.y')\n"
+    "assert kernel.execute({'ext': {'x': 1.0}})['calc.y'] == 2.0\n"
+    "print('executed')\n"
+)
+
+BUILD_A_DERIVE = (
+    "from numpy import isclose\n"
+    "from numbox.core.work.builder import Derived, End, make_graph\n"
+    "x = End(name='x', init_value=3.14)\n"
+    "def twice(x):\n"
+    "    return 2 * x\n"
+    "y = Derived(name='y', init_value=0.0, derive=twice, sources=(x,))\n"
+    "access = make_graph(y)\n"
+    "access.y.calculate()\n"
+    "assert isclose(access.y.data, 6.28), access.y.data\n"
+    "print('derived')\n"
+)
+
+REGISTER_A_TVF = (
+    "import numpy as np\n"
+    "from test.core.test_sqlite_tvf import _open, _select_int, _series, _OUT\n"
+    "from numbox.core.bindings.sqlite.tvf import register_tvf\n"
+    "from numbox.core.bindings.sqlite.conn import sqlite3_close\n"
+    "db = _open()\n"
+    "handle = register_tvf(db.value, 'series', (np.int64, np.int64), _OUT, _series)\n"
+    "rc, rows = _select_int(db, 'SELECT n FROM series(2, 5)')\n"
+    "assert rc == 0 and [row[0] for row in rows] == [2, 3, 4], (rc, rows)\n"
+    "sqlite3_close(db.value)\n"
+    "print('selected')\n"
+)
+
+
+@needs_a_directory_it_cannot_write
+@pytest.mark.parametrize("child, word", [
+    (MAKE_A_STRUCTREF, "made"), (REGISTER_AN_AGGREGATE, "summed"), (REGISTER_A_TVF, "selected"),
+], ids=["make_structref", "register_aggregate", "register_tvf"])
+def test_generated_code_compiles_uncached_where_its_anchor_cannot_be_written(tmp_path, child, word):
+    # The code numbox generates at run time is anchored to a file under
+    # NUMBA_CACHE_DIR or the user's cache directory, and the anchor was written
+    # whatever the cache option said. So with the tree writable, where the
+    # package's own functions cache, and the user's cache directory not,
+    # make_structref and the sqlite registrations died at the anchor's
+    # directory. The anchor is written to be cached from, and where it cannot
+    # be, the code compiles without a cache after a warning; NUMBA_CACHE_DIR at
+    # a writable directory cures it and holds the anchor.
+    home = tmp_path / "home"
+    home.mkdir()
+    home.chmod(0o555)
+    try:
+        env = dict(os.environ, PYTHONPATH=str(REPO), HOME=str(home), XDG_CACHE_HOME=str(home / "cache"))
+        env.pop("NUMBA_CACHE_DIR", None)
+        env.pop("NUMBOX_JIT_OPTIONS", None)
+        run = subprocess.run([sys.executable, "-W", "always", "-c", child], capture_output=True, text=True,
+                             env=env, cwd=str(tmp_path))
+        assert run.returncode == 0 and word in run.stdout, run.stderr
+        assert "compiles without a cache" in run.stderr and "Set NUMBA_CACHE_DIR" in run.stderr, run.stderr
+        cured = subprocess.run([sys.executable, "-W", "error::RuntimeWarning", "-c", child], capture_output=True,
+                               text=True, env=dict(env, NUMBA_CACHE_DIR=str(tmp_path / "cache")), cwd=str(tmp_path))
+        assert cured.returncode == 0 and word in cured.stdout, cured.stderr
+        assert list((tmp_path / "cache").rglob("*.py")), "no anchor under NUMBA_CACHE_DIR"
+    finally:
+        home.chmod(0o755)
+
+
+@needs_a_directory_it_cannot_write
+@pytest.mark.parametrize("child, word, warns", [
+    (MAKE_A_STRUCTREF, "made", True), (REGISTER_AN_AGGREGATE, "summed", True), (REGISTER_A_TVF, "selected", True),
+    (COMPILE_A_KERNEL, "executed", True), (BUILD_A_DERIVE, "derived", False),
+], ids=["make_structref", "register_aggregate", "register_tvf", "compile_kernel", "derive"])
+def test_a_warm_anchor_in_a_directory_that_stopped_being_writable(tmp_path, child, word, warns):
+    # The anchor is on disk from an earlier run, in a NUMBA_CACHE_DIR that can
+    # no longer be written. numba then caches the code in the user's cache
+    # directory, and a check on the anchor's own directory would have turned
+    # caching off where numba had a location. With the user's cache directory
+    # unwritable too there is none, and a check that only wrote the anchor
+    # would have let the first decorated function die at numba's set-up. The
+    # builder's derive falls back without a word, as it did for an anchor it
+    # could not write.
+    home = tmp_path / "home"
+    home.mkdir()
+    cache = tmp_path / "cache"
+    env = dict(os.environ, PYTHONPATH=str(REPO), HOME=str(home), XDG_CACHE_HOME=str(home / "cache"),
+               NUMBA_CACHE_DIR=str(cache))
+    env.pop("NUMBOX_JIT_OPTIONS", None)
+    warm = subprocess.run([sys.executable, "-W", "error::RuntimeWarning", "-c", child], capture_output=True,
+                          text=True, env=env, cwd=str(tmp_path))
+    assert warm.returncode == 0 and word in warm.stdout, warm.stderr
+    anchors = list(cache.rglob("*.py"))
+    assert anchors, "no anchor under NUMBA_CACHE_DIR"
+    read_only = [cache, *(path for path in cache.rglob("*") if path.is_dir())]
+    for path in read_only:
+        path.chmod(0o555)
+    try:
+        in_user_cache = subprocess.run([sys.executable, "-W", "error::RuntimeWarning", "-c", child],
+                                       capture_output=True, text=True, env=env, cwd=str(tmp_path))
+        assert in_user_cache.returncode == 0 and word in in_user_cache.stdout, in_user_cache.stderr
+        assert _index_files(home), "numba did not cache the generated code in the user's cache directory"
+        home_tree = [home, *(path for path in home.rglob("*") if path.is_dir())]
+        read_only.extend(home_tree)
+        for path in home_tree:
+            path.chmod(0o555)
+        uncached = subprocess.run([sys.executable, "-W", "always", "-c", child], capture_output=True, text=True,
+                                  env=env, cwd=str(tmp_path))
+        assert uncached.returncode == 0 and word in uncached.stdout, uncached.stderr
+        if warns:
+            assert "compiles without a cache" in uncached.stderr and "Set NUMBA_CACHE_DIR" in uncached.stderr
+        else:
+            assert "compiles without a cache" not in uncached.stderr, uncached.stderr
+    finally:
+        for path in read_only:
+            path.chmod(0o755)
+
+
+@pytest.mark.parametrize("child, word, warns", [
+    (MAKE_A_STRUCTREF, "made", True), (REGISTER_AN_AGGREGATE, "summed", True), (REGISTER_A_TVF, "selected", True),
+    (COMPILE_A_KERNEL, "executed", True), (BUILD_A_DERIVE, "derived", False),
+], ids=["make_structref", "register_aggregate", "register_tvf", "compile_kernel", "derive"])
+@pytest.mark.parametrize("placement", ["a file", "a component too long"])
+def test_generated_code_compiles_uncached_under_a_numba_cache_dir_numba_cannot_use(
+        tmp_path, placement, child, word, warns):
+    # NUMBA_CACHE_DIR pointing into a file, or with a component longer than the
+    # file system allows: the package's own functions cache beside their
+    # sources, numba passing such a location over, and the anchor's directory
+    # cannot be made. Any error there means no cache here, so the code compiles
+    # without one, as it did before the anchors asked numba, and the warning's
+    # remedy is the error's: a directory numba can use, or a shorter path.
+    if placement == "a file":
+        cache_dir = tmp_path / "file"
+        cache_dir.write_text("not a directory\n")
+        remedy = "Set NUMBA_CACHE_DIR to a writable directory"
+    else:
+        cache_dir = tmp_path / ("c" * 300)
+        # Windows reports the component as a syntax error (WinError 123, EINVAL),
+        # naming no length, and the warning offers the directory then.
+        remedy = ("Set NUMBA_CACHE_DIR to a writable directory" if os.name == "nt"
+                  else "too long for the file system: NUMBA_CACHE_DIR at a shorter path")
+    env = dict(os.environ, PYTHONPATH=str(REPO), NUMBA_CACHE_DIR=str(cache_dir))
+    env.pop("NUMBOX_JIT_OPTIONS", None)
+    run = subprocess.run([sys.executable, "-W", "always", "-c", child], capture_output=True, text=True, env=env,
+                         cwd=str(tmp_path))
+    assert run.returncode == 0 and word in run.stdout, run.stderr
+    if warns:
+        assert "compiles without a cache" in run.stderr and remedy in run.stderr, run.stderr
+    else:
+        assert "compiles without a cache" not in run.stderr, run.stderr
+
+
+def test_make_graph_under_a_callers_cache_option_falls_back_from_an_archive(tmp_path):
+    # make_graph's kernel is anchored to builder.py itself and cached beside it,
+    # and a caller's options reach numba as they are: with cache on from an
+    # archive the kernel died at numba's set-up, where the package, the
+    # structref, the kernel compiler and the derives had fallen back.
+    archive = _archive(tmp_path / "numbox-0.0.0-py3.12.egg")
+    child = BUILD_A_DERIVE.replace("make_graph(y)", "make_graph(y, jit_options={'cache': True})")
+    assert child != BUILD_A_DERIVE
+    env = dict(os.environ, PYTHONPATH=str(archive), NUMBA_CACHE_DIR=str(tmp_path / "cache"))
+    env.pop("NUMBOX_JIT_OPTIONS", None)
+    run = subprocess.run([sys.executable, "-W", "always", "-c", child], capture_output=True, text=True, env=env,
+                         cwd=str(tmp_path))
+    assert run.returncode == 0 and "derived" in run.stdout, run.stderr
+    assert "the code generated at builder.py" in run.stderr and "source is not a file on disk" in run.stderr
+    assert '"cache" off in the jit options this code was given' in run.stderr, run.stderr
+    # The derives cache under anchors of their own, written here, and the
+    # builder's answer for its file is not theirs.
+    assert _index_files(tmp_path / "cache"), "the derive did not cache under NUMBA_CACHE_DIR"
+
+
+A_STRUCTREF_WITH_A_TYPING_ERROR = MAKE_A_STRUCTREF.replace(
+    "Struct = make_structref('Struct', {'value': float32}, TypeClass)\n",
+    "def bad(self):\n"
+    "    return self.value + 'x'\n"
+    "Struct = make_structref('Struct', {'value': float32}, TypeClass, struct_methods={'bad': bad})\n"
+    "Struct(2.5).bad()\n",
+)
+
+
+def test_a_typing_error_in_generated_code_quotes_the_source_with_caching_off(tmp_path):
+    # numba quotes the offending line from the file the code names, the
+    # anchor, which with caching off was no longer written: the message then
+    # pointed at a file that was not there, with "source missing", where main
+    # showed the line. The anchor is written where it can be, cache or no.
+    assert A_STRUCTREF_WITH_A_TYPING_ERROR != MAKE_A_STRUCTREF
+    script = tmp_path / "probe.py"
+    script.write_text(A_STRUCTREF_WITH_A_TYPING_ERROR)
+    env = dict(os.environ, PYTHONPATH=str(REPO), NUMBA_CACHE_DIR=str(tmp_path / "cache"),
+               NUMBOX_JIT_OPTIONS='{"cache": false}')
+    run = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    assert run.returncode != 0 and "TypingError" in run.stderr, run.stderr
+    assert "source missing" not in run.stderr and "return self.value + 'x'" in run.stderr, run.stderr
+    assert list((tmp_path / "cache").rglob("*.py")) and not _index_files(tmp_path / "cache")
+
+
+@pytest.mark.parametrize("child, word", [
+    (MAKE_A_STRUCTREF.replace("TypeClass)\n", "TypeClass, jit_options={'cache': True})\n"), "made"),
+    (COMPILE_A_KERNEL.replace("'calc.y')", "'calc.y', jit_options={'cache': False}, cache=True)"), "executed"),
+], ids=["make_structref with jit_options", "compile_kernel with cache"])
+def test_the_anchor_warning_names_the_options_the_caller_gave(tmp_path, child, word):
+    # make_structref, compile_kernel and the builder take jit options of the
+    # caller's, which NUMBOX_JIT_OPTIONS does not reach, and compile_kernel's
+    # cache argument overrides those too; the warning offered the variable
+    # alone, here set to turn caching off already, and then the jit options,
+    # here off as well.
+    assert child not in (MAKE_A_STRUCTREF, COMPILE_A_KERNEL)
+    cache_dir = tmp_path / "file"
+    cache_dir.write_text("not a directory\n")
+    env = dict(os.environ, PYTHONPATH=str(REPO), NUMBA_CACHE_DIR=str(cache_dir),
+               NUMBOX_JIT_OPTIONS='{"cache": false}')
+    run = subprocess.run([sys.executable, "-W", "always", "-c", child], capture_output=True, text=True, env=env,
+                         cwd=str(tmp_path))
+    assert run.returncode == 0 and word in run.stdout, run.stderr
+    assert "compiles without a cache" in run.stderr, run.stderr
+    assert '"cache" off in the jit options this code was given, or in its cache argument where it takes one' in run.stderr
+
+
 # The type class lives in a module of its own, as the docs ask, so that the
 # struct's cache entries load in a second process.
 A_TYPE_CLASS = (
@@ -762,3 +1010,28 @@ def test_a_struct_name_of_any_length_caches(tmp_path, name):
                            capture_output=True, text=True, env=env, cwd=str(tmp_path))
     assert again.returncode == 0, again.stderr
     assert _index_files(tmp_path / "cache") == indexes
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="a path of 4096 bytes and a name of 255 are Linux's limits")
+@pytest.mark.parametrize("directory", ["NUMBA_CACHE_DIR", "HOME"])
+def test_an_anchor_path_too_long_for_the_file_system_compiles_uncached_and_the_warning_says_so(tmp_path, directory):
+    # A cache directory deep enough that the anchor's directory fits the path
+    # limit and the anchor's own name, of fixed length, does not: NUMBA_CACHE_DIR,
+    # or the user's cache directory under a deep home, which the warning met
+    # with "a shorter NUMBA_CACHE_DIR" where none was set. There is no cache
+    # here, and the warning names the length rather than offering a writable
+    # directory, which this one is; NUMBA_CACHE_DIR at a short path cures both.
+    deep = tmp_path
+    while len(str(deep)) < 4096 - 90:
+        deep = deep / ("d" * 200)
+    deep = deep / ("d" * (4096 - 50 - len(str(deep))))
+    deep.mkdir(parents=True)
+    env = dict(os.environ, PYTHONPATH=str(REPO))
+    for name in ("NUMBOX_JIT_OPTIONS", "NUMBA_CACHE_DIR", "XDG_CACHE_HOME"):
+        env.pop(name, None)
+    env[directory] = str(deep)
+    run = subprocess.run([sys.executable, "-W", "always", "-c", MAKE_A_STRUCTREF], capture_output=True, text=True,
+                         env=env, cwd=str(tmp_path))
+    assert run.returncode == 0 and "made" in run.stdout, run.stderr
+    assert "compiles without a cache" in run.stderr, run.stderr
+    assert "too long for the file system: NUMBA_CACHE_DIR at a shorter path" in run.stderr, run.stderr

@@ -35,7 +35,7 @@ from numbox.core.bindings.sqlite.vtable import (
 )
 from numbox.utils.digest import digest
 from numbox.utils.preprocessing import (
-    _anchor_path, _materialize_anchor, _orphan_anchor_sweep,
+    _anchor_path, _anchored_or_uncached, _orphan_anchor_sweep,
 )
 
 # Names referenced by the GENERATED source; importing them here puts them in
@@ -361,9 +361,9 @@ def _compile_xfilter(stem, arg_tags, out_dtype, fn):
     src = _XFILTER_SRC.format(arg_decode=arg_decode, fn_call=fn_call)
     tvf_digest = digest((out_dtype, tuple(arg_tags)), [fn])
     code_txt = "# tvf-digest: %s\n%s" % (tvf_digest, src)
-    ns = {**globals(), "_fn": fn, "_N_HIDDEN": n_hidden}
     anchor = _anchor_path(_ANCHOR_SUBDIR, stem, code_txt)
-    _materialize_anchor(anchor, code_txt)
+    ns = {**globals(), "_fn": fn, "_N_HIDDEN": n_hidden,
+          "jit_options": _anchored_or_uncached(anchor, code_txt, jit_options)}
     code = compile(code_txt, str(anchor), mode="exec")
     exec(code, ns)  # nosec B102 - JIT codegen of internal source
     return ns["_tvf_xfilter_impl"]

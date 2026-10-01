@@ -14,7 +14,7 @@ from numbox.utils.fingerprint import (
     _fingerprint_function_best_effort, _flags_canon, _loaded_global_names,
 )
 from numbox.utils.highlevel import cres, _signature_identity, _type_identity
-from numbox.utils.preprocessing import _anchor_root, _materialize_anchor, _orphan_anchor_sweep
+from numbox.utils.preprocessing import _anchor_or_error, _anchor_root, _cached_at_or_uncached, _orphan_anchor_sweep
 
 
 def _file_anchor():
@@ -179,10 +179,9 @@ def _derive_anchor_cres(derive_sig, sig_canon, derive, derive_fp, jit_options):
         f"    return _inner({params})\n"
     )
     anchor = _anchor_root(_DERIVE_ANCHOR_SUBDIR) / f"{name}.py"
-    try:
-        anchor.parent.mkdir(parents=True, exist_ok=True)
-        _materialize_anchor(anchor, src)
-    except OSError:
+    if _anchor_or_error(anchor, src) is not None:
+        # No anchor on disk, or none numba can cache from: a warm anchor whose
+        # directory can no longer be written and no other location left.
         return None
     ns = {
         "_cres": cres,
@@ -331,9 +330,13 @@ def make_graph(
     if jit_options is None:
         jit_options = {}
     jit_options = {**jit_options_, **jit_options}
+    # The kernel below is anchored to this file and cached beside it; a
+    # caller's cache option reaches numba past the package's answer. The
+    # derives cache under anchors of their own and keep the options as given.
+    kernel_options = _cached_at_or_uncached(getfile(_file_anchor), jit_options)
     ns = {
         **getmodule(_file_anchor).__dict__,
-        **{"jit_options": jit_options, "ll_make_work": ll_make_work, "njit": njit}
+        **{"jit_options": kernel_options, "ll_make_work": ll_make_work, "njit": njit}
     }
     _make_args = []
     code_txt = StringIO()
@@ -359,7 +362,7 @@ def make_graph(
         # compile the kernel without an on-disk cache so a stale binary cannot be
         # linked -- recompiled per process, never wrong. The
         # name (fed by type_sigs) is unchanged, so nothing else re-keys.
-        ns["jit_options"] = {**jit_options, "cache": False}
+        ns["jit_options"] = {**kernel_options, "cache": False}
     access_nodes_names = [n.name for n in access_nodes]
     tup_ = ", ".join(access_nodes_names) + ","
     code_txt.write(f"""\n\taccess_tuple = ({tup_})""")

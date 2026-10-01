@@ -20,7 +20,7 @@ from numbox.utils.fingerprint import (
     _Unfingerprintable, _canon_value, _fingerprint_function,
     _fingerprint_function_best_effort, _loaded_global_names,
 )
-from numbox.utils.preprocessing import _materialize_anchor, _structref_anchor_path, bounded_stem
+from numbox.utils.preprocessing import _anchored_or_uncached, _structref_anchor_path, bounded_stem
 from numbox.utils.standard import make_params_strings
 
 
@@ -320,10 +320,19 @@ def make_structref(
 
     Anchor file
     -----------
-    The generated ``code_txt`` is written to a content-addressed file
-    under numba's cache directory and that file -- not ``highlevel.py``
-    -- is used as the ``compile()`` anchor. See the "Cache-anchor
-    mechanism" section in ``docs/numbox.utils.rst`` for the rationale.
+    A content-addressed file under numba's cache directory, not
+    ``highlevel.py``, is the ``compile()`` anchor of the generated
+    ``code_txt``, written whenever it can be, since numba quotes the
+    source from it in its messages: with caching off a write that fails
+    is nothing, the path serving as the code's filename. With caching on
+    the anchor is written and numba asked whether it can cache a function
+    of it, which needs the file on disk; where the write fails, or numba
+    has no location for the file, the struct compiles without a cache
+    after a warning, an anchor that was written left where it is. A
+    method without a
+    canonical fingerprint turns caching off before any of this, without
+    a warning, as it always did. See the "Cache-anchor mechanism"
+    section in ``docs/numbox.utils.rst``.
     """
     code_txt, fields_types, cacheable = make_structref_code_txt(
         struct_name, struct_fields, struct_type_class, struct_methods, user_ns=ns
@@ -335,6 +344,8 @@ def make_structref(
         # its content-addressed identity cannot be trusted to change when the
         # behaviour does; compile the struct without an on-disk cache.
         jit_options = {**jit_options, "cache": False}
+    anchor = _structref_anchor_path(struct_name, code_txt)
+    jit_options = _anchored_or_uncached(anchor, code_txt, jit_options)
     ns = ns or {}
     ns = {
         **ns,
@@ -352,8 +363,6 @@ def make_structref(
             struct_type_class.__name__: struct_type_class
         }
     }
-    anchor = _structref_anchor_path(struct_name, code_txt)
-    _materialize_anchor(anchor, code_txt)
     code = compile(code_txt, str(anchor), mode="exec")
     exec(code, ns)  # nosec B102 - JIT codegen of internal source
     return ns[struct_name]
