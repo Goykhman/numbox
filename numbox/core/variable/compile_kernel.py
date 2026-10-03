@@ -84,7 +84,7 @@ from numbox.utils.fingerprint import (
 )
 from numbox.utils.highlevel import _type_identity
 from numbox.utils.preprocessing import (
-    _anchor_root, _materialize_anchor, _orphan_anchor_sweep,
+    _anchor_root, _anchored_or_uncached, _orphan_anchor_sweep,
 )
 
 _ANCHOR_SUBDIR = "numbox-compile-kernel"
@@ -441,15 +441,9 @@ def _compile(
     )
     anchor = _anchor_root(_ANCHOR_SUBDIR) / f"_kernel_{digest}.py"
     if opts["cache"]:
-        try:
-            anchor.parent.mkdir(parents=True, exist_ok=True)
-            _materialize_anchor(anchor, final_src)
-        except OSError as e:
-            warnings.warn(
-                f"compile_kernel: cache directory unusable ({e}); "
-                f"compiling without an on-disk cache"
-            )
-            opts["cache"] = False
+        # An uncached kernel has no anchor, as before; the structref and the
+        # sqlite registrations write theirs for numba's messages either way.
+        opts = _anchored_or_uncached(anchor, final_src, opts)
     code = compile(final_src, str(anchor), "exec")
     # __name__ must be an importable module so numba can rebuild the cached
     # overload's environment in another process (importlib.import_module needs
@@ -915,11 +909,17 @@ def compile_kernel(
         output is requested once -- the return tuple is positional, so a
         repeat carries no information).
     :param jit_options: merged over numbox's defaults
-        (`NUMBOX_JIT_OPTIONS` env) and passed to @njit. All options except
-        `cache` participate in the content-addressed digest.
+        (`NUMBOX_JIT_OPTIONS` env, with `cache` off where numba can write no
+        cache for numbox's own files, see `numbox.core.configurations`) and
+        passed to @njit. All options except `cache` participate in the
+        content-addressed digest.
     :param cache: tri-state. `None` (default) defers to
-        `jit_options["cache"]`, then the `NUMBOX_JIT_OPTIONS` env default,
-        then `True`. An explicit `True`/`False` wins over both.
+        `jit_options["cache"]`, then numbox's default, the
+        `NUMBOX_JIT_OPTIONS` env value or `True` unless numba can write no
+        cache for numbox's own files, where it is `False` even though the
+        kernel's own anchor might be cacheable. An explicit `True`/`False`
+        wins over both, and the anchor's own check still turns caching off
+        where that anchor cannot be cached.
 
     Error timing: structural problems raise here (unknown or malformed
     `required` entries, non-callable formulas, arity mismatches against the

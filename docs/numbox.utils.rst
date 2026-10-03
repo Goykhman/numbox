@@ -162,6 +162,59 @@ the failure mode on that version to constants outside the inline
 range. Earlier supported versions (3.10--3.13) collide on any
 constant edit.
 
+The anchor is written whenever it can be: numba caches from it, and
+quotes the source from it in its messages, a typing error's among them,
+so with caching off a write that fails is nothing and the path serves
+as the code's name, as it did. With caching on numba is then asked
+whether it can cache a function of that file, the question the package
+puts for its own modules; where the write fails, for whatever reason,
+or the answer is
+no, an unwritable user cache directory or ``NUMBA_CACHE_DIR`` with no
+other location left, the generated code compiles without a cache after
+one warning naming the remedy, instead of dying at the write or at
+numba's set-up. A path too long for the file system is one such
+failure, and the warning says so where the file system does (Windows
+reports a component too long as a syntax error, and the warning then
+offers the directory, quoting the error); with the names bounded, as below,
+the directory is the only part that can make it so, ``NUMBA_CACHE_DIR``
+or the user's cache directory, and ``NUMBA_CACHE_DIR`` at a shorter
+path moves the anchor out of either. The anchor's check writes names
+shorter than the longest numba writes for a struct, which carry its name
+and its methods', so a user cache directory within about 230 bytes of
+the path limit, 4096 on Linux, passes it and overflows at numba's first
+save instead, where numba's own error names the length; the remedy is
+the same. A ``NUMBA_CACHE_DIR`` that deep is too deep for the package's
+own files first, whose location under it appends their directory's path
+and whose check reserves the length of numba's files, so the package
+answers, with its remedy, and the generated code compiles under its
+answer.
+
+The anchor's name carries the struct's or the function's, and numba
+names its cache files after the anchor and the qualified name of the
+function it caches, which carries the struct's again through the class
+whose body defines the jitted getters and method thunks, so a struct
+named with about 93 characters overflowed the 255 bytes a file system
+allows a name, in numba's own files past the anchor's check. Those
+names are bounded now (``bounded_stem``): a name of 40 bytes or fewer
+is used as it is, so nearly every struct keeps the file names it had,
+and a longer one becomes the whole characters of it that fit in 31
+bytes and a digest of the whole. The measure is the name's UTF-8,
+which is the file system's: a character of another script takes up to
+four bytes there. The generated class is defined under the bounded name and
+takes the struct's full name back once its body is compiled, so
+``__name__``, ``__qualname__`` and ``repr`` show the name the caller
+gave, whatever its length, and the struct caches. A field's jitted
+getter is defined under the bounded name the same way and the
+property takes the field's, so a field's name of any length caches
+too; a method's name is bounded in its thunk and its overload.
+``compile_kernel``, the work builder's derives and the sqlite
+aggregate, window and table-valued function registrations anchor their
+generated code the same way and fall back the same way, the derive
+without a warning, and the kernel and the derive write no anchor when
+not caching, as before; ``make_graph``'s kernel, anchored to the builder's
+own file, asks for that file under the options it was given. See :doc:`numbox.core.configurations` for the
+package-wide rule the anchors follow.
+
 See also ``numba.core.caching.Cache._index_key`` and
 ``numba.core.caching._SourceFileBackedLocatorMixin.get_source_stamp``
 in numba's source for the cache key construction and source-stamp
