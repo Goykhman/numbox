@@ -526,7 +526,7 @@ def test_readonly_cache_dir_degrades_gracefully(tmp_path):
     try:
         files, stderr = _run_cache_probe(tmp_path, "{}")
         assert files == []
-        assert "cache directory unusable" in stderr
+        assert "compiles without a cache" in stderr
     finally:
         cache_dir.chmod(0o700)
 

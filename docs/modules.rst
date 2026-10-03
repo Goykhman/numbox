@@ -7,6 +7,7 @@ numbox
    numbox.core.any
    numbox.core.bindings
    numbox.core.bindings.sqlite
+   numbox.core.configurations
    numbox.core.proxy
    numbox.core.variable
    numbox.core.vector
