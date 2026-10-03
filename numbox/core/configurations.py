@@ -5,7 +5,6 @@ import os
 import json
 import sys
 import tempfile
-import types
 import warnings
 import zipfile
 import zipimport
@@ -41,7 +40,7 @@ def get_jit_options():
 
 
 def _cache_probe():
-    """The function whose cache location is asked for; never compiled."""
+    """A function of this module, never compiled: its code's file is the one numba looks up for the module."""
 
 
 # The longest file numba writes for a function of numbox's own files, with room to spare: the module's stem,
@@ -58,7 +57,7 @@ def check_cache_location(py_file, longest_file_name=0):
     The question is put the way numba puts it: the cache set-up that decoration runs, which picks the location
     for the file or raises ``RuntimeError`` with no locator, then the source's stamp, which decoration reads
     and which stats the archive for a ``.zip``, then the writability check, which decoration runs for every
-    location but a ``.zip``'s and the first save runs for all, raising ``OSError``. The probe's code is given
+    location but a ``.zip``'s and the first save runs for all, raising ``OSError``. The probe is compiled with
     ``py_file`` as its file, which is all a locator reads of it. Nothing is compiled, and nothing is written
     but the cache directory itself. An ``OSError`` from the check names the location numba picked.
 
@@ -68,8 +67,9 @@ def check_cache_location(py_file, longest_file_name=0):
     is made and removed in the location too, and the ``OSError`` is the location's: the package asks with
     ``LONGEST_CACHE_FILE_NAME``, the bound on numba's names for its own files.
     """
-    code = _cache_probe.__code__.replace(co_filename=os.fspath(py_file))
-    probe = types.FunctionType(code, _cache_probe.__globals__, _cache_probe.__name__)
+    namespace = {}
+    exec(compile("def _cache_probe():\n    pass\n", os.fspath(py_file), "exec"), namespace)  # nosec B102 - fixed source
+    probe = namespace["_cache_probe"]
     locator = CompileResultCacheImpl(probe).locator
     # numba reads the source's stamp at decoration too, the archive's for a
     # .zip, which is not there where the code names an archive since moved.
