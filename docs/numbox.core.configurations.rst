@@ -71,6 +71,11 @@ warning instead.
 A function numba cannot cache is compiled in every process that uses it, never wrong; that is the cost the
 warning reports. An error at decoration that is not the cache's is raised as it was.
 
+A package built on numbox can put the same question for its own files: ``check_cache_location`` asks it for
+one file, ``is_a_cache_error`` tells numba's cache errors from the rest, and ``cache_remedy`` words the
+remedy, given the package's name for the two remedies that tell the reader to install it again, at a shorter
+path or with its source files on disk.
+
 The code numbox generates at run time, ``make_structref``'s, ``compile_kernel``'s, the work builder's derives
 and the sqlite registrations', is anchored to a file under ``NUMBA_CACHE_DIR`` or the user's cache directory
 so that numba can cache it. That directory can be unwritable where the package's own functions cache, since
