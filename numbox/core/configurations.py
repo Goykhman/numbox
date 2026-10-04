@@ -234,7 +234,8 @@ def cache_remedy(py_file, failure, silence, package="numbox"):
 
     ``package`` is the one the remedy tells the reader to install again, at a shorter path or with its source
     files on disk: a package built on numbox that puts the question for its own files with
-    ``check_cache_location`` and ``is_a_cache_error`` passes its own name.
+    ``check_cache_location`` and ``is_a_cache_error`` passes its own name, as it passes ``check_cache_location`` a
+    ``longest_file_name`` for its own functions, ``LONGEST_CACHE_FILE_NAME`` being numbox's.
     """
     if os.path.exists(py_file):
         if isinstance(failure, OSError) and failure.errno == errno.ENAMETOOLONG:

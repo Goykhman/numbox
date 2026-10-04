@@ -74,7 +74,10 @@ warning reports. An error at decoration that is not the cache's is raised as it 
 A package built on numbox can put the same question for its own files: ``check_cache_location`` asks it for
 one file, ``is_a_cache_error`` tells numba's cache errors from the rest, and ``cache_remedy`` words the
 remedy, given the package's name for the two remedies that tell the reader to install it again, at a shorter
-path or with its source files on disk.
+path or with its source files on disk. The bound on file names is the package's own:
+``LONGEST_CACHE_FILE_NAME`` holds numbox's functions only, so a package passes ``check_cache_location`` the
+longest name numba writes for its own, as ``longest_file_name``, or a location that fits numbox's names and not
+the package's passes the check and the first save overflows it.
 
 The code numbox generates at run time, ``make_structref``'s, ``compile_kernel``'s, the work builder's derives
 and the sqlite registrations', is anchored to a file under ``NUMBA_CACHE_DIR`` or the user's cache directory
