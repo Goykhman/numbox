@@ -694,9 +694,11 @@ def test_a_location_too_close_to_the_path_limit_for_numbas_files_compiles_uncach
     # path limit while numba's files, of a hundred bytes and more, do not
     # passed it, and the import died at the first save. The probe makes a file
     # named as long as numba's longest for the package, and the warning says
-    # what the length's remedy is. The location of the first module asked ends
-    # 20 bytes short of the limit.
-    location = str(REPO / "numbox" / "core").lstrip(os.sep)
+    # what the length's remedy is. The location of the first module asked,
+    # the directory's name and a hash of its path under NUMBA_CACHE_DIR, ends
+    # 20 bytes short of the limit, whatever the checkout's own path.
+    from numba.core.caching import _CacheLocator
+    location = _CacheLocator.get_suitable_cache_subpath(str(REPO / "numbox" / "core" / "configurations.py"))
     cache_dir = _directory_of_length(tmp_path, 4096 - 20 - 1 - len(location))
     env = dict(os.environ, PYTHONPATH=str(REPO), NUMBA_CACHE_DIR=str(cache_dir))
     env.pop("NUMBOX_JIT_OPTIONS", None)

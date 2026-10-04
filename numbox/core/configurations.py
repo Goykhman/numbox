@@ -221,10 +221,11 @@ def cache_remedy(py_file, failure, silence, package="numbox"):
     """The remedy for ``failure``, numba's for a function whose file is ``py_file``, ending in ``silence``.
 
     ``NUMBA_CACHE_DIR`` for a source file on disk, which is the only kind numba reads the variable for; where its
-    location is too long for the file system, a shorter ``NUMBA_CACHE_DIR`` or none, since each location numba
-    picks for a source on disk but the one beside it appends the source's directory path, else the package at a
-    shorter path. For a ``.zip`` or a frozen application, both cached under the user's cache directory, the
-    location made writable:
+    location is too long for the file system, a shorter ``NUMBA_CACHE_DIR`` or none, since numba's location under
+    the variable is a directory named for the source's directory, by its name and a hash of its path, and without
+    the variable numba caches beside the source; else the package at a shorter path, where the location beside
+    the source is the long one. For a ``.zip`` or a frozen application, both cached under the user's cache
+    directory, the location made writable:
     the ``.zip``'s error names it, a directory of numba's under the user's cache directory; the frozen
     application's is the no-locator one, numba having passed the location over on its error, so the user's
     cache directory is named. For any other archive, or a module without its source, the source files on disk

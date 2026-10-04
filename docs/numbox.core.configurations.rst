@@ -52,9 +52,10 @@ which a test holds every function of the package under), so that location turns 
 warning instead.
 
 - For a source file on disk the remedy is ``NUMBA_CACHE_DIR`` pointed at a writable directory; where its
-  location is too long for the file system, a shorter ``NUMBA_CACHE_DIR`` or none, since each location numba
-  picks for a source on disk but the one beside it appends the source's directory path, else the package
-  installed at a shorter path.
+  location is too long for the file system, a shorter ``NUMBA_CACHE_DIR`` or none, since numba's location
+  under the variable is a directory named for the source's directory, by its name and a hash of its path, and
+  without the variable numba caches beside the source; else the package installed at a shorter path, where the
+  location beside the source is the long one.
 - For a ``.zip``, or a frozen application, it is the user's cache directory made writable: a ``.zip`` is the
   one archive numba caches, from 0.61 on, and it caches it there, taking the directory without checking that
   it can be written; a frozen application (``sys.frozen``) is cached there too, its sources not being on disk.
