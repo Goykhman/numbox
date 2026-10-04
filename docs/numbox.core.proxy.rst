@@ -310,8 +310,9 @@ A caller that reached ``.as_func`` as a compile-time constant is not among them:
 it carries no alias, so it goes on serving the pre-upgrade body on every run
 until its own cache entry is cleared. To clear it by hand instead, the entries
 are the ``.nbc`` / ``.nbi`` files in the ``__pycache__`` directory beside each
-caller's own source (or under ``NUMBA_CACHE_DIR`` if set);
-``~/.cache/numba`` holds only callers numba cannot anchor to a source file.
+caller's own source (or under ``NUMBA_CACHE_DIR`` if set), or in numba's user
+cache directory (see :ref:`where_the_cache_lands`) for a caller whose
+``__pycache__`` numba cannot write.
 
 The one variant that leaves the alias unchanged — a ``proxy_if_available``
 binding present when the caller was cached but absent on reload — would otherwise

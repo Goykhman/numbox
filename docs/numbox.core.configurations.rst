@@ -12,13 +12,17 @@ that is not ``true`` or ``false`` (the string ``"false"`` is true to numba, whic
 unset means ``{"cache": true}``, so numbox compiles into numba's on-disk cache by default, and
 ``export NUMBOX_JIT_OPTIONS='{"cache": false}'`` turns that off.
 
+.. _where_the_cache_lands:
+
 Where the cache lands
 +++++++++++++++++++++
 
 numba writes a cached function's entries under ``NUMBA_CACHE_DIR`` when that is set, else into the
-``__pycache__`` directory beside the function's source file, else into the user's cache directory
-(``~/.cache/numba`` on Linux), taking the first of those it can write. It sets the cache up when the function is
-decorated, so with caching on the question of where it lands is settled at import.
+``__pycache__`` directory beside the function's source file, else into the user's cache directory, taking the
+first of those it can write. It sets the cache up when the function is decorated, so with caching on the question
+of where it lands is settled at import. The user's cache directory is ``~/Library/Caches/numba`` on macOS,
+``%LOCALAPPDATA%\numba\Cache`` on Windows, and ``$XDG_CACHE_HOME/numba`` elsewhere, ``~/.cache/numba`` when
+``XDG_CACHE_HOME`` is unset.
 
 Where no cache can be written, numba raises at decoration, and numbox's import used to die on its first module
 with ``RuntimeError: cannot cache function ...: no locator available for file ...``. The two placements that do
