@@ -616,7 +616,7 @@ def test_proxy_as_func_mixed_with_a_numba_native_wrapper_fails_to_unify_for_numb
     Why the two types cannot simply be made to compare equal is worked through in
     ``test/utils/test_derive_wap.py::test_the_derive_type_stays_distinct_from_the_plain_function_type``.
 
-    numba's assert carries no message, so the frame it was raised from is checked instead of any
+    numba<0.68.0's assert carries no message, so the frame it was raised from is checked instead of any
     text. Matching on ``AssertionError`` alone would be satisfied by an unrelated one raised
     anywhere in the same call.
     """

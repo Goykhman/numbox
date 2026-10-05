@@ -385,7 +385,7 @@ class CompiledGraph:
                     raise RuntimeError(f"Uninitialized input {input_.qual_name()} for {node.variable}")
                 args[i] = arg
             if self.debug:
-                print(f"Calculating {node}\nwith metadata\n{node.variable.metadata}", file=sys.stderr)
+                print(f"Calculating {node}\nwith metadata\n{node.variable.metadata}", file=sys.stderr, flush=True)
             result = node.variable.formula(*args)
             values.get(node.variable).value = result
 
