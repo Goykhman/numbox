@@ -8,10 +8,12 @@ is the one the subprocess sees and nothing else.
 """
 import ast
 import compileall
+import errno
 import importlib.util
 import marshal
 import os
 import py_compile
+import pytest
 import re
 import shutil
 import subprocess
@@ -19,7 +21,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-import pytest
+from numbox.core.configurations import numba_version
 
 REPO = Path(__file__).resolve().parent.parent.parent
 
@@ -42,20 +44,25 @@ IMPORT_AND_USE = (
 )
 
 
-def _archive(path, bytecode_naming_the_archive=()):
+def _archive(path, bytecode_naming_the_archive=(), only_compiled=True):
     """numbox's modules zipped into ``path``, which goes on PYTHONPATH as it is.
 
-    A directory named in ``bytecode_naming_the_archive`` goes in as ``.pyc`` alone, each compiled to name its
-    path inside the archive, as ``compileall -d`` and ``py_compile``'s ``dfile`` do.
+    When ``only_compiled`, a directory named in ``bytecode_naming_the_archive`` goes in as ``.pyc`` alone,
+    each compiled to name its path inside the archive, as ``compileall -d`` and ``py_compile``'s ``dfile`` do.
     """
     with zipfile.ZipFile(path, "w") as zipped:
         for source in sorted((REPO / "numbox").rglob("*.py")):
             member = str(source.relative_to(REPO))
             if source.parent.relative_to(REPO).as_posix() in bytecode_naming_the_archive:
-                compiled = py_compile.compile(str(source), cfile=str(path.parent / (source.name + "c")),
-                                              dfile=os.path.join(str(path), member), doraise=True)
-                zipped.write(compiled, member + "c")
-                os.unlink(compiled)
+                if only_compiled:
+                    compiled = py_compile.compile(str(source), cfile=str(path.parent / (source.name + "c")),
+                                                  dfile=os.path.join(str(path), member), doraise=True)
+                    zipped.write(compiled, member + "c")
+                    os.unlink(compiled)
+                else:
+                    # numba>=0.68 started hashing the source contents of the archive into the archive's cache stamp,
+                    # https://github.com/numba/numba/pull/10659/changes#diff-c8984431aeca12d764359ea2e11184fe2bc5a976c59e067eb95e20e207c365aaR388
+                    zipped.write(source, member)
             else:
                 zipped.write(source, member)
     return path
@@ -547,8 +554,10 @@ def test_a_zip_import_whose_location_for_one_directory_stopped_being_writable_ta
     # directory of .pyc members compiled to name the archive, as compileall -d
     # does, stands in the listing like one of .py members: a listing that let
     # only .py members stand never asked for it.
+    if parent.endswith(".zip") and numba_version >= 68:
+        parent = parent.rstrip(".zip")
     (tmp_path / parent).mkdir(exist_ok=True)
-    archive = _archive(tmp_path / parent / "numbox.zip", bytecode)
+    archive = _archive(tmp_path / parent / "numbox.zip", bytecode, only_compiled=numba_version < 68)
     home = tmp_path / "home"
     home.mkdir()
     env = dict(os.environ, PYTHONPATH=str(archive), HOME=str(home), XDG_CACHE_HOME=str(home / "cache"))
@@ -693,9 +702,11 @@ def test_a_location_too_close_to_the_path_limit_for_numbas_files_compiles_uncach
     # path limit while numba's files, of a hundred bytes and more, do not
     # passed it, and the import died at the first save. The probe makes a file
     # named as long as numba's longest for the package, and the warning says
-    # what the length's remedy is. The location of the first module asked ends
-    # 20 bytes short of the limit.
-    location = str(REPO / "numbox" / "core").lstrip(os.sep)
+    # what the length's remedy is. The location of the first module asked,
+    # the directory's name and a hash of its path under NUMBA_CACHE_DIR, ends
+    # 20 bytes short of the limit, whatever the checkout's own path.
+    from numba.core.caching import _CacheLocator
+    location = _CacheLocator.get_suitable_cache_subpath(str(REPO / "numbox" / "core" / "configurations.py"))
     cache_dir = _directory_of_length(tmp_path, 4096 - 20 - 1 - len(location))
     env = dict(os.environ, PYTHONPATH=str(REPO), NUMBA_CACHE_DIR=str(cache_dir))
     env.pop("NUMBOX_JIT_OPTIONS", None)
@@ -704,6 +715,26 @@ def test_a_location_too_close_to_the_path_limit_for_numbas_files_compiles_uncach
     assert run.stderr.count("compiles without a cache") == 1, run.stderr
     assert "the path is too long for the file system: a shorter NUMBA_CACHE_DIR, or none" in run.stderr, run.stderr
     assert not _index_files(cache_dir)
+
+
+@pytest.mark.parametrize("placement", ["too long", "archive"])
+def test_the_remedies_that_name_a_package_name_the_one_given(tmp_path, placement):
+    # A package built on numbox puts the question for its own files and takes
+    # the remedy from cache_remedy; the two remedies that tell the reader to
+    # install a package again named numbox whichever package had asked.
+    from numbox.core.configurations import cache_remedy
+    if placement == "too long":
+        py_file = tmp_path / "ducklib.py"
+        py_file.write_text("")
+        failure = OSError(errno.ENAMETOOLONG, "File name too long", str(tmp_path / "cache"))
+        named = "else {} installed at a shorter path"
+    else:
+        py_file = tmp_path / "numbduck-0.0.0-py3-none-any.whl" / "numbduck" / "ducklib.py"
+        failure = RuntimeError(f"cannot cache function 'f': no locator available for file '{py_file}'")
+        named = "install {} with its source files on disk"
+    remedy = cache_remedy(str(py_file), failure, "silence", package="numbduck")
+    assert named.format("numbduck") in remedy and "numbox" not in remedy, remedy
+    assert named.format("numbox") in cache_remedy(str(py_file), failure, "silence")
 
 
 def _function_names(tree):
