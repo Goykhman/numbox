@@ -217,20 +217,26 @@ def _compiled_from(zip_path, directory, stem):
         return None
 
 
-def cache_remedy(py_file, failure, silence):
+def cache_remedy(py_file, failure, silence, package="numbox"):
     """The remedy for ``failure``, numba's for a function whose file is ``py_file``, ending in ``silence``.
 
     ``NUMBA_CACHE_DIR`` for a source file on disk, which is the only kind numba reads the variable for; where its
-    location is too long for the file system, a shorter ``NUMBA_CACHE_DIR`` or none, since each location numba
-    picks for a source on disk but the one beside it appends the source's directory path, else the package at a
-    shorter path. For a ``.zip`` or a frozen application, both cached under the user's cache directory, the
-    location made writable:
+    location is too long for the file system, a shorter ``NUMBA_CACHE_DIR`` or none, since numba's location under
+    the variable is a directory named for the source's directory, by its name and a hash of its path, and without
+    the variable numba caches beside the source; else the package at a shorter path, where the location beside
+    the source is the long one. For a ``.zip`` or a frozen application, both cached under the user's cache
+    directory, the location made writable:
     the ``.zip``'s error names it, a directory of numba's under the user's cache directory; the frozen
     application's is the no-locator one, numba having passed the location over on its error, so the user's
     cache directory is named. For any other archive, or a module without its source, the source files on disk
     or a ``.zip`` holding them. A ``.zip``'s location too long for the file system is the user's cache
     directory's doing, with the names numba makes bounded, and the remedy is that directory at a shorter
     path, through ``XDG_CACHE_HOME`` or ``HOME``.
+
+    ``package`` is the one the remedy tells the reader to install again, at a shorter path or with its source
+    files on disk: a package built on numbox that puts the question for its own files with
+    ``check_cache_location`` and ``is_a_cache_error`` passes its own name, as it passes ``check_cache_location`` a
+    ``longest_file_name`` for its own functions, ``LONGEST_CACHE_FILE_NAME`` being numbox's.
     """
     if os.path.exists(py_file):
         if isinstance(failure, OSError) and failure.errno == errno.ENAMETOOLONG:
@@ -238,7 +244,7 @@ def cache_remedy(py_file, failure, silence):
             # fitting where its cache files would not; the error names it.
             return (
                 "the path is too long for the file system: a shorter NUMBA_CACHE_DIR, or none, where it is set, "
-                f"else numbox installed at a shorter path; or {silence}"
+                f"else {package} installed at a shorter path; or {silence}"
             )
         # numba itself passes a location it cannot make or write over, for a
         # source on disk, so the error here is the no-locator one.
@@ -271,7 +277,7 @@ def cache_remedy(py_file, failure, silence):
         )
     return (
         "NUMBA_CACHE_DIR has no effect here, because the source is not a file on disk: to cache, "
-        "install numbox with its source files on disk, unpacked from any archive, or import it from a "
+        f"install {package} with its source files on disk, unpacked from any archive, or import it from a "
         f".zip holding its source files, which numba 0.61 and later cache in the user's cache directory; or "
         f"{silence}"
     )

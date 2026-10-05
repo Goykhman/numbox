@@ -52,9 +52,10 @@ which a test holds every function of the package under), so that location turns 
 warning instead.
 
 - For a source file on disk the remedy is ``NUMBA_CACHE_DIR`` pointed at a writable directory; where its
-  location is too long for the file system, a shorter ``NUMBA_CACHE_DIR`` or none, since each location numba
-  picks for a source on disk but the one beside it appends the source's directory path, else the package
-  installed at a shorter path.
+  location is too long for the file system, a shorter ``NUMBA_CACHE_DIR`` or none, since numba's location
+  under the variable is a directory named for the source's directory, by its name and a hash of its path, and
+  without the variable numba caches beside the source; else the package installed at a shorter path, where the
+  location beside the source is the long one.
 - For a ``.zip``, or a frozen application, it is the user's cache directory made writable: a ``.zip`` is the
   one archive numba caches, from 0.61 on, and it caches it there, taking the directory without checking that
   it can be written; a frozen application (``sys.frozen``) is cached there too, its sources not being on disk.
@@ -70,6 +71,14 @@ warning instead.
 
 A function numba cannot cache is compiled in every process that uses it, never wrong; that is the cost the
 warning reports. An error at decoration that is not the cache's is raised as it was.
+
+A package built on numbox can put the same question for its own files: ``check_cache_location`` asks it for
+one file, ``is_a_cache_error`` tells numba's cache errors from the rest, and ``cache_remedy`` words the
+remedy, given the package's name for the two remedies that tell the reader to install it again, at a shorter
+path or with its source files on disk. The bound on file names is the package's own:
+``LONGEST_CACHE_FILE_NAME`` holds numbox's functions only, so a package passes ``check_cache_location`` the
+longest name numba writes for its own, as ``longest_file_name``, or a location that fits numbox's names and not
+the package's passes the check and the first save overflows it.
 
 The code numbox generates at run time, ``make_structref``'s, ``compile_kernel``'s, the work builder's derives
 and the sqlite registrations', is anchored to a file under ``NUMBA_CACHE_DIR`` or the user's cache directory
