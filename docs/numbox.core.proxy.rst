@@ -56,8 +56,9 @@ with the rest.
 From numba 0.61 onward ``.as_func`` inherits the mixed-container limit of any
 derive value: a tuple holding it alongside a plain ``CompileResultWAP`` no longer
 unifies, failing with a message-less ``AssertionError`` from
-``numba.core.utils.unified_function_type``. See :doc:`numbox.core.work` for that
-limit and for why making the two types compare equal is not available as a fix.
+``numba.core.utils.unified_function_type`` (fixed in numba==0.68.0).
+See :doc:`numbox.core.work` for that limit and for why making the two types
+compare equal is not available as a fix.
 
 Referencing ``.as_func`` as a constant carries a caching caveat that passing it
 as a function-type argument does not; read `Cache invalidation`_ below before

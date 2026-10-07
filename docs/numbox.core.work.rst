@@ -591,20 +591,21 @@ These limits are worth knowing:
 - A container that mixes a `cres` derive with a differently typed function value: a tuple
   holding a `cres` alongside a plain ``CompileResultWAP``, a signature-declared njit
   dispatcher or a ``cfunc``. numba unifies the element types before any of numbox's
-  conversions apply, and ``numba.core.utils.unified_function_type`` requires every
-  function type it meets to equal the first through a bare ``assert``, so the failure
-  arrives as an ``AssertionError`` carrying no message. A lazily compiled ``@njit``
-  dispatcher in the mix is the one subcase that reads differently: unification accepts
-  it, and numbox's guard then rejects it at the unboxing boundary with a ``TypeError``
-  naming the offending type.
+  conversions apply, and ``numba.core.utils.unified_function_type``, for numba<0.68.0,
+  requires every function type it meets to equal the first through a bare ``assert``,
+  so the failure arrives as an ``AssertionError`` carrying no message (fixed in numba==0.68.0).
+  A lazily compiled ``@njit`` dispatcher in the mix is the one subcase that reads
+  differently: unification accepts it, and numbox's guard then rejects it at the unboxing
+  boundary with a ``TypeError`` naming the offending type.
   From numba 0.61 onward a ``@proxy`` binding's ``.as_func`` is a `DeriveFunctionType`
   value as well (see :doc:`numbox.core.proxy`), so it meets this limit identically: a
-  tuple mixing it with a plain ``CompileResultWAP`` fails on the same assertion, where
-  before it unified and returned a value.
+  tuple mixing it with a plain ``CompileResultWAP`` fails on the same assertion, for numba<0.68,
+  where before it unified and returned a value.
   Homogeneous containers are unaffected, including a tuple of two `cres` derives, or a
   `cres` derive alongside a `@proxy` binding's `.as_func` of the same signature. This
   is not specific to numbox: two plain ``CompileResultWAP`` values of different
-  signatures but the same argument count fail identically with numbox uninvolved.
+  signatures but the same argument count fail identically with numbox uninvolved,
+  for numba<0.68.
   What numbox changes is how easily the case is reached, since `DeriveFunctionType` is a
   distinct type from ``FunctionType`` and numba compares function types by class. Making the
   two compare equal is not available as a fix. numba interns types in a cache keyed by a

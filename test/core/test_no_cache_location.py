@@ -21,7 +21,6 @@ import sys
 import zipfile
 from pathlib import Path
 
-from numbox.core.configurations import numba_version
 
 REPO = Path(__file__).resolve().parent.parent.parent
 
@@ -44,25 +43,20 @@ IMPORT_AND_USE = (
 )
 
 
-def _archive(path, bytecode_naming_the_archive=(), only_compiled=True):
+def _archive(path, bytecode_naming_the_archive=()):
     """numbox's modules zipped into ``path``, which goes on PYTHONPATH as it is.
 
-    When ``only_compiled``, a directory named in ``bytecode_naming_the_archive`` goes in as ``.pyc`` alone,
-    each compiled to name its path inside the archive, as ``compileall -d`` and ``py_compile``'s ``dfile`` do.
+    A directory named in ``bytecode_naming_the_archive`` goes in as ``.pyc`` alone, each compiled to name its
+    path inside the archive, as ``compileall -d`` and ``py_compile``'s ``dfile`` do.
     """
     with zipfile.ZipFile(path, "w") as zipped:
         for source in sorted((REPO / "numbox").rglob("*.py")):
             member = str(source.relative_to(REPO))
             if source.parent.relative_to(REPO).as_posix() in bytecode_naming_the_archive:
-                if only_compiled:
-                    compiled = py_compile.compile(str(source), cfile=str(path.parent / (source.name + "c")),
-                                                  dfile=os.path.join(str(path), member), doraise=True)
-                    zipped.write(compiled, member + "c")
-                    os.unlink(compiled)
-                else:
-                    # numba>=0.68 started hashing the source contents of the archive into the archive's cache stamp,
-                    # https://github.com/numba/numba/pull/10659/changes#diff-c8984431aeca12d764359ea2e11184fe2bc5a976c59e067eb95e20e207c365aaR388
-                    zipped.write(source, member)
+                compiled = py_compile.compile(str(source), cfile=str(path.parent / (source.name + "c")),
+                                              dfile=os.path.join(str(path), member), doraise=True)
+                zipped.write(compiled, member + "c")
+                os.unlink(compiled)
             else:
                 zipped.write(source, member)
     return path
@@ -136,11 +130,9 @@ def test_options_without_a_cache_key_are_asked_for_the_sites_that_cache_under_th
     assert run.stderr.count("compiles without a cache") == 1, run.stderr
 
 
-@pytest.mark.skipif(
-    os.name == "nt" and numba_version == 68,
-    reason="""Numba 0.68's ZIP cache locator uses Windows path separators for ZIP members,
-see https://github.com/numba/numba/issues/10889""",
-)
+windows_path_sep_bug = "Numba 0.68's ZIP cache locator uses Windows path separators for ZIP members"
+
+
 def test_a_zip_import_is_cached_by_numba_from_0_61(tmp_path):
     # The warning sends an archive's user to a .zip, which numba caches from
     # 0.61 on, in the user's cache directory whatever NUMBA_CACHE_DIR says.
@@ -153,6 +145,8 @@ def test_a_zip_import_is_cached_by_numba_from_0_61(tmp_path):
                NUMBA_CACHE_DIR=str(tmp_path / "cache"))
     env.pop("NUMBOX_JIT_OPTIONS", None)
     run = _run(env, tmp_path)
+    if windows_path_sep_bug in run.stderr:
+        pytest.skip(windows_path_sep_bug)
     assert run.returncode == 0 and str(archive) in run.stdout, run.stderr
     cached = tuple(int(part) for part in numba.__version__.split(".")[:2]) >= (0, 61)
     assert ("compiles without a cache" not in run.stderr) == cached, run.stderr
@@ -281,11 +275,6 @@ def _zip_is_cached():
     return tuple(int(part) for part in numba.__version__.split(".")[:2]) >= (0, 61)
 
 
-@pytest.mark.skipif(
-    os.name == "nt" and numba_version == 68,
-    reason="""Numba 0.68's ZIP cache locator uses Windows path separators for ZIP members,
-see https://github.com/numba/numba/issues/10889""",
-)
 @pytest.mark.parametrize("tree", ["site", "numbox.zip.tree"])
 def test_a_pyc_in_a_zip_asks_by_the_file_it_was_compiled_from(tmp_path, tree):
     # zipimport takes a .pyc before the .py beside it and keeps the file it was
@@ -313,6 +302,8 @@ def test_a_pyc_in_a_zip_asks_by_the_file_it_was_compiled_from(tmp_path, tree):
     env.pop("NUMBOX_JIT_OPTIONS", None)
     run = subprocess.run([sys.executable, "-W", "always", "-c", IMPORT_LIBM], capture_output=True, text=True,
                          env=env, cwd=str(tmp_path))
+    if windows_path_sep_bug in run.stderr:
+        pytest.skip(windows_path_sep_bug)
     assert run.returncode == 0 and str(archive) in run.stdout, run.stderr
     assert run.stderr.count("compiles without a cache") == 1, run.stderr
     assert "source is not a file on disk" in run.stderr and "holding its source files" in run.stderr, run.stderr
@@ -321,11 +312,6 @@ def test_a_pyc_in_a_zip_asks_by_the_file_it_was_compiled_from(tmp_path, tree):
         assert (repr(str(libm)) if tree == "site" else "No zip file found") in run.stderr, run.stderr
 
 
-@pytest.mark.skipif(
-    os.name == "nt" and numba_version == 68,
-    reason="""Numba 0.68's ZIP cache locator uses Windows path separators for ZIP members,
-see https://github.com/numba/numba/issues/10889""",
-)
 def test_a_stale_pyc_beside_its_source_in_a_zip_is_passed_over_as_zipimport_passes_it(tmp_path):
     # zipimport runs the .py where the .pyc beside it is stale against it, by
     # size or time, so the module's functions are cached from the archive like
@@ -352,6 +338,8 @@ def test_a_stale_pyc_beside_its_source_in_a_zip_is_passed_over_as_zipimport_pass
     env.pop("NUMBOX_JIT_OPTIONS", None)
     run = subprocess.run([sys.executable, "-W", "always", "-c", IMPORT_LIBM], capture_output=True, text=True,
                          env=env, cwd=str(tmp_path))
+    if windows_path_sep_bug in run.stderr:
+        pytest.skip(windows_path_sep_bug)
     assert run.returncode == 0 and run.stdout.strip().endswith("libm.py"), run.stderr
     if _zip_is_cached():
         assert "compiles without a cache" not in run.stderr, run.stderr
@@ -361,11 +349,6 @@ def test_a_stale_pyc_beside_its_source_in_a_zip_is_passed_over_as_zipimport_pass
         assert _index_files(home), "libm's functions were not cached from the archive"
 
 
-@pytest.mark.skipif(
-    os.name == "nt" and numba_version == 68,
-    reason="""Numba 0.68's ZIP cache locator uses Windows path separators for ZIP members,
-see https://github.com/numba/numba/issues/10889""",
-)
 def test_a_stale_pyc_whose_source_in_the_zip_does_not_compile_is_passed_over(tmp_path):
     # zipimport, passing the stale .pyc over, compiles the .py beside it, and a
     # syntax error there, uncaught, killed the import of configurations where
@@ -383,16 +366,13 @@ def test_a_stale_pyc_whose_source_in_the_zip_does_not_compile_is_passed_over(tmp
                NUMBA_CACHE_DIR=str(tmp_path / "cache"))
     env.pop("NUMBOX_JIT_OPTIONS", None)
     run = _run(env, tmp_path)
+    if windows_path_sep_bug in run.stderr:
+        pytest.skip(windows_path_sep_bug)
     assert run.returncode == 0 and str(archive) in run.stdout, run.stderr
     if _zip_is_cached():
         assert "compiles without a cache" not in run.stderr, run.stderr
 
 
-@pytest.mark.skipif(
-    os.name == "nt" and numba_version == 68,
-    reason="""Numba 0.68's ZIP cache locator uses Windows path separators for ZIP members,
-see https://github.com/numba/numba/issues/10889""",
-)
 @pytest.mark.parametrize("damage", ["truncated", "lzma"])
 def test_a_stray_pyc_in_a_zip_that_nothing_imports_is_passed_over(tmp_path, damage):
     # A .pyc member of this interpreter's magic that zipimport could not run,
@@ -413,6 +393,8 @@ def test_a_stray_pyc_in_a_zip_that_nothing_imports_is_passed_over(tmp_path, dama
                NUMBA_CACHE_DIR=str(tmp_path / "cache"))
     env.pop("NUMBOX_JIT_OPTIONS", None)
     run = _run(env, tmp_path)
+    if windows_path_sep_bug in run.stderr:
+        pytest.skip(windows_path_sep_bug)
     assert run.returncode == 0 and str(archive) in run.stdout, run.stderr
     if _zip_is_cached():
         assert "compiles without a cache" not in run.stderr, run.stderr
@@ -495,11 +477,6 @@ def test_a_zip_import_whose_user_cache_directory_is_too_long_is_told_so(tmp_path
         assert "make that directory, " not in run.stderr, run.stderr
 
 
-@pytest.mark.skipif(
-    os.name == "nt" and numba_version == 68,
-    reason="""Numba 0.68's ZIP cache locator uses Windows path separators for ZIP members,
-see https://github.com/numba/numba/issues/10889""",
-)
 def test_a_moved_zip_whose_pyc_members_name_its_old_path_compiles_uncached_and_is_told_why(tmp_path):
     # numba reads the source's stamp at decoration, the archive's for a .zip,
     # by the path the module's code names: .pyc members compiled to name the
@@ -516,6 +493,8 @@ def test_a_moved_zip_whose_pyc_members_name_its_old_path_compiles_uncached_and_i
     env.pop("NUMBOX_JIT_OPTIONS", None)
     run = subprocess.run([sys.executable, "-W", "always", "-c", IMPORT_LIBM], capture_output=True, text=True,
                          env=env, cwd=str(tmp_path))
+    if windows_path_sep_bug in run.stderr:
+        pytest.skip(windows_path_sep_bug)
     assert run.returncode == 0 and str(moved) in run.stdout, run.stderr
     assert run.stderr.count("compiles without a cache") == 1, run.stderr
     if _zip_is_cached():
@@ -584,10 +563,8 @@ def test_a_zip_import_whose_location_for_one_directory_stopped_being_writable_ta
     # directory of .pyc members compiled to name the archive, as compileall -d
     # does, stands in the listing like one of .py members: a listing that let
     # only .py members stand never asked for it.
-    if parent.endswith(".zip") and numba_version >= 68:
-        parent = parent.removesuffix(".zip")
     (tmp_path / parent).mkdir(exist_ok=True)
-    archive = _archive(tmp_path / parent / "numbox.zip", bytecode, only_compiled=numba_version < 68)
+    archive = _archive(tmp_path / parent / "numbox.zip", bytecode)
     home = tmp_path / "home"
     home.mkdir()
     env = dict(os.environ, PYTHONPATH=str(archive), HOME=str(home), XDG_CACHE_HOME=str(home / "cache"))
@@ -595,6 +572,10 @@ def test_a_zip_import_whose_location_for_one_directory_stopped_being_writable_ta
     env.pop("NUMBOX_JIT_OPTIONS", None)
     warm = _run(env, tmp_path)
     assert warm.returncode == 0, warm.stderr
+    if "use a path without a .zip-named directory" in warm.stderr:
+        pytest.skip("numba's caching doesn't distinguish directory with .zip in its name from an archive from 0.68 on")
+    if "put all source .py file(s) in .zip" in warm.stderr:
+        pytest.skip("numba's caching demands .py sources in a .zip from 0.68 on")
     if not _zip_is_cached():
         pytest.skip("numba caches a .zip from 0.61 on")
     # Under XDG_CACHE_HOME on Linux, under Library/Caches on macOS.

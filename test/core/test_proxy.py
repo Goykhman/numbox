@@ -603,8 +603,9 @@ def test_proxy_as_func_declared_as_a_plain_function_type_still_discards():
 
 
 @pytest.mark.skipif(not jit_addr_supported(), reason=_JIT_ADDR_REASON)
-def test_proxy_as_func_mixed_with_a_numba_native_wrapper_fails_to_unify_for_numba_lt_68():
-    """Characterization of a narrowing: a heterogeneous tuple of function values is refused.
+def test_proxy_as_func_mixed_with_a_numba_native_wrapper_fails_to_unify_for_numba_lt_68_and_works_for_numba_gte_68():
+    """Characterization of a narrowing: a heterogeneous tuple of function values is refused
+    for numba<0.68.
 
     numba<0.68.0 unifies a tuple's element types in ``unified_function_type`` with a bare
     class-identity comparison, which runs before any of numbox's conversions get a say, so a
