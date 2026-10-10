@@ -1,0 +1,298 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.utils.meminfo &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/utils/meminfo.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.utils.meminfo</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.utils.meminfo</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">ctypes</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numba</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">llvmlite</span><span class="w"> </span><span class="kn">import</span> <span class="n">ir</span> <span class="k">as</span> <span class="n">llir</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">types</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">cgutils</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">TypingError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">intrinsic</span>
+
+
+<span class="n">return_tuple_type</span> <span class="o">=</span> <span class="n">types</span><span class="o">.</span><span class="n">UniTuple</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_structref_meminfo</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">s_type</span><span class="p">):</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">meminfo</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">get_meminfos</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">s_type</span><span class="p">,</span> <span class="n">s</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">type_data</span><span class="p">,</span> <span class="n">meminfo_p</span> <span class="o">=</span> <span class="n">meminfo</span>
+
+        <span class="n">meminfo_p_as_int</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">ptrtoint</span><span class="p">(</span><span class="n">meminfo_p</span><span class="p">,</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">numba</span><span class="o">.</span><span class="n">intp</span><span class="p">))</span>
+        <span class="n">data_p</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">meminfo_data</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">meminfo_p</span><span class="p">)</span>
+        <span class="n">data_p_as_int</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">ptrtoint</span><span class="p">(</span><span class="n">data_p</span><span class="p">,</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">numba</span><span class="o">.</span><span class="n">intp</span><span class="p">))</span>
+
+        <span class="k">return</span> <span class="n">context</span><span class="o">.</span><span class="n">make_tuple</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">return_tuple_type</span><span class="p">,</span> <span class="p">(</span><span class="n">meminfo_p_as_int</span><span class="p">,</span> <span class="n">data_p_as_int</span><span class="p">))</span>
+
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">return_tuple_type</span><span class="p">(</span><span class="n">s_type</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span>
+
+
+<div class="viewcode-block" id="structref_meminfo">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.meminfo.structref_meminfo">[docs]</a>
+<span class="nd">@numba</span><span class="o">.</span><span class="n">njit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">structref_meminfo</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    :param s: instance of StructRef</span>
+<span class="sd">    :return: tuple of pointers (as 64-bit integers) to meminfo member of the StructRef and its data payload.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_structref_meminfo</span><span class="p">(</span><span class="n">s</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="get_nrt_refcount">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.meminfo.get_nrt_refcount">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_nrt_refcount</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    :param s: instance of an object with payload wrapped in a meminfo</span>
+<span class="sd">    :return: NRT reference count, the one which is controllable by nrt context's incref/decref</span>
+
+<span class="sd">    Leverages meminfo memory layout::</span>
+
+<span class="sd">        struct MemInfo {</span>
+<span class="sd">            size_t            refct;</span>
+<span class="sd">            NRT_dtor_function dtor;</span>
+<span class="sd">            void              *dtor_info;</span>
+<span class="sd">            void              *data;</span>
+<span class="sd">            size_t            size;    /* only used for NRT allocated memory */</span>
+<span class="sd">            NRT_ExternalAllocator *external_allocator;</span>
+<span class="sd">        };</span>
+
+<span class="sd">    see `nrt &lt;https://github.com/numba/numba/blob/main/numba/core/runtime/nrt.cpp#L17&gt;`_.</span>
+<span class="sd">    """</span>
+    <span class="n">meminfo_p</span><span class="p">,</span> <span class="n">data_p</span> <span class="o">=</span> <span class="n">structref_meminfo</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_int64</span><span class="o">.</span><span class="n">from_address</span><span class="p">(</span><span class="n">meminfo_p</span><span class="p">)</span><span class="o">.</span><span class="n">value</span></div>
+
+
+
+<span class="n">_MI_TY</span> <span class="o">=</span> <span class="n">types</span><span class="o">.</span><span class="n">MemInfoPointer</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">voidptr</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_require_intp</span><span class="p">(</span><span class="n">p_ty</span><span class="p">,</span> <span class="n">fn_name</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Reject anything other than ``types.intp`` for pointer-as-int args.</span>
+
+<span class="sd">    Accepting an arbitrary integer type would emit an ``inttoptr`` of the</span>
+<span class="sd">    wrong width on 64-bit hosts (e.g., int32 → i32 → ptr truncates).</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">p_ty</span> <span class="o">!=</span> <span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">fn_name</span><span class="si">}</span><span class="s2"> expects types.intp, got </span><span class="si">{</span><span class="n">p_ty</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_incref_meminfo</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">p_ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Incref a MemInfo at ``intp`` via NRT.</span>
+
+<span class="sd">    This intrinsic's signature (``void(intp)``) contains no NRT-tracked types,</span>
+<span class="sd">    so a caller of the same shape passes the legality check of numba's</span>
+<span class="sd">    ``removerefctpass``, which then deletes every ``NRT_incref`` and</span>
+<span class="sd">    ``NRT_decref`` call in that caller by name, this one included. The</span>
+<span class="sd">    ``_release_meminfo`` escape (call an NRT function outside the pass's</span>
+<span class="sd">    allowlist) is not available for an incref: numba registers no such</span>
+<span class="sd">    symbol. Instead the codegen tags the enclosing function with the</span>
+<span class="sd">    ``numba_args_may_always_need_nrt`` named metadata, numba's own marker for</span>
+<span class="sd">    functions whose references outlive the call, which makes ``_legalize()``</span>
+<span class="sd">    refuse the rewrite for that function's module. The tag can only refuse,</span>
+<span class="sd">    so it changes nothing where another check already fails, and each</span>
+<span class="sd">    function is lowered into a module of its own, so a caller's check never</span>
+<span class="sd">    sees the tag. numba 0.66 removed the pass together with every mention of</span>
+<span class="sd">    the tag, so from 0.66 on nothing reads it.</span>
+<span class="sd">    """</span>
+    <span class="n">_require_intp</span><span class="p">(</span><span class="n">p_ty</span><span class="p">,</span> <span class="s2">"_incref_meminfo"</span><span class="p">)</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">types</span><span class="o">.</span><span class="n">void</span><span class="p">(</span><span class="n">p_ty</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+        <span class="n">mi_ll_ty</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">get_value_type</span><span class="p">(</span><span class="n">_MI_TY</span><span class="p">)</span>
+        <span class="n">meminfo</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">inttoptr</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">mi_ll_ty</span><span class="p">)</span>
+        <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">incref</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">_MI_TY</span><span class="p">,</span> <span class="n">meminfo</span><span class="p">)</span>
+        <span class="n">module</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">module</span>
+        <span class="n">nmd</span> <span class="o">=</span> <span class="n">module</span><span class="o">.</span><span class="n">add_named_metadata</span><span class="p">(</span><span class="s2">"numba_args_may_always_need_nrt"</span><span class="p">)</span>
+        <span class="n">nmd</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">module</span><span class="o">.</span><span class="n">add_metadata</span><span class="p">([</span><span class="n">builder</span><span class="o">.</span><span class="n">function</span><span class="p">]))</span>
+    <span class="k">return</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span>
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_release_meminfo</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">p_ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Decref a MemInfo at ``intp`` via ``NRT_MemInfo_release``.</span>
+
+<span class="sd">    Uses ``NRT_MemInfo_release`` directly rather than ``context.nrt.decref``</span>
+<span class="sd">    because this intrinsic's signature (``void(intp)``) contains no</span>
+<span class="sd">    NRT-tracked types, which lets numba's ``removerefctpass`` rewrite strip</span>
+<span class="sd">    a plain ``NRT_decref`` as dead code. Calling ``NRT_MemInfo_release``</span>
+<span class="sd">    (not in the pass's accepted-nrtfns allowlist) keeps ``_legalize()``</span>
+<span class="sd">    from enabling the rewrite at all.</span>
+<span class="sd">    """</span>
+    <span class="n">_require_intp</span><span class="p">(</span><span class="n">p_ty</span><span class="p">,</span> <span class="s2">"_release_meminfo"</span><span class="p">)</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">types</span><span class="o">.</span><span class="n">void</span><span class="p">(</span><span class="n">p_ty</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+        <span class="n">ptr_ty</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">()</span>
+        <span class="n">fnty</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">FunctionType</span><span class="p">(</span><span class="n">llir</span><span class="o">.</span><span class="n">VoidType</span><span class="p">(),</span> <span class="p">[</span><span class="n">ptr_ty</span><span class="p">])</span>
+        <span class="n">fn</span> <span class="o">=</span> <span class="n">cgutils</span><span class="o">.</span><span class="n">get_or_insert_function</span><span class="p">(</span>
+            <span class="n">builder</span><span class="o">.</span><span class="n">module</span><span class="p">,</span> <span class="n">fnty</span><span class="p">,</span> <span class="s2">"NRT_MemInfo_release"</span><span class="p">)</span>
+        <span class="n">meminfo</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">inttoptr</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">ptr_ty</span><span class="p">)</span>
+        <span class="n">builder</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">fn</span><span class="p">,</span> <span class="p">[</span><span class="n">meminfo</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span>
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_deref_structref_raw_ptr</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">struct_type_ref</span><span class="p">,</span> <span class="n">p_ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Reconstruct a structref value from an ``intp`` MemInfo pointer."""</span>
+    <span class="n">_require_intp</span><span class="p">(</span><span class="n">p_ty</span><span class="p">,</span> <span class="s2">"_deref_structref_raw_ptr"</span><span class="p">)</span>
+    <span class="n">inst_type</span> <span class="o">=</span> <span class="n">struct_type_ref</span><span class="o">.</span><span class="n">instance_type</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">inst_type</span><span class="p">(</span><span class="n">struct_type_ref</span><span class="p">,</span> <span class="n">p_ty</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+        <span class="n">p_val</span> <span class="o">=</span> <span class="n">args</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">mi_ll_ty</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">get_value_type</span><span class="p">(</span><span class="n">_MI_TY</span><span class="p">)</span>
+        <span class="n">meminfo</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">inttoptr</span><span class="p">(</span><span class="n">p_val</span><span class="p">,</span> <span class="n">mi_ll_ty</span><span class="p">)</span>
+        <span class="n">st</span> <span class="o">=</span> <span class="n">cgutils</span><span class="o">.</span><span class="n">create_struct_proxy</span><span class="p">(</span><span class="n">inst_type</span><span class="p">)(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">)</span>
+        <span class="n">st</span><span class="o">.</span><span class="n">meminfo</span> <span class="o">=</span> <span class="n">meminfo</span>
+        <span class="k">return</span> <span class="n">st</span><span class="o">.</span><span class="n">_getvalue</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span>
+
+
+<div class="viewcode-block" id="borrow_structref">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.meminfo.borrow_structref">[docs]</a>
+<span class="nd">@numba</span><span class="o">.</span><span class="n">njit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">borrow_structref</span><span class="p">(</span><span class="n">struct_type</span><span class="p">,</span> <span class="n">p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Incref + reconstruct a structref from an ``intp`` MemInfo pointer.</span>
+
+<span class="sd">    The caller receives a live structref that participates in normal NRT</span>
+<span class="sd">    refcount. Net-zero for the external owner if the caller's scope exits</span>
+<span class="sd">    without additional actions (local decref on drop balances the incref).</span>
+<span class="sd">    """</span>
+    <span class="n">_incref_meminfo</span><span class="p">(</span><span class="n">p</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_deref_structref_raw_ptr</span><span class="p">(</span><span class="n">struct_type</span><span class="p">,</span> <span class="n">p</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="export_meminfo">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.meminfo.export_meminfo">[docs]</a>
+<span class="nd">@numba</span><span class="o">.</span><span class="n">njit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">export_meminfo</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Export a structref as an ``intp`` MemInfo pointer with a +1 incref.</span>
+
+<span class="sd">    The returned ``intp`` keeps the allocation alive until the caller</span>
+<span class="sd">    balances it with ``release_meminfo``.</span>
+<span class="sd">    """</span>
+    <span class="n">meminfo_p</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">structref_meminfo</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
+    <span class="n">_incref_meminfo</span><span class="p">(</span><span class="n">meminfo_p</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">meminfo_p</span></div>
+
+
+
+<div class="viewcode-block" id="release_meminfo">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.meminfo.release_meminfo">[docs]</a>
+<span class="nd">@numba</span><span class="o">.</span><span class="n">njit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">release_meminfo</span><span class="p">(</span><span class="n">p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Decref a MemInfo at ``intp`` via NRT_MemInfo_release.</span>
+
+<span class="sd">    Public njit wrapper over ``_release_meminfo``. Callable from Python</span>
+<span class="sd">    and ``@njit`` contexts.</span>
+<span class="sd">    """</span>
+    <span class="n">_release_meminfo</span><span class="p">(</span><span class="n">p</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

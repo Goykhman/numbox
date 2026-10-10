@@ -1,0 +1,328 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.configurations &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/numbox.core.configurations.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="numbox.core.proxy" href="numbox.core.proxy.html" />
+    <link rel="prev" title="numbox.core.bindings.sqlite" href="numbox.core.bindings.sqlite.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">numbox</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.any.html">numbox.core.any</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.html">numbox.core.bindings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.sqlite.html">numbox.core.bindings.sqlite</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbox.core.configurations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#where-the-cache-lands">Where the cache lands</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#modules">Modules</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#id2">numbox.core.configurations</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.proxy.html">numbox.core.proxy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.variable.html">numbox.core.variable</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.vector.html">numbox.core.vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.work.html">numbox.core.work</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.utils.html">numbox.utils</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">numbox</a></li>
+      <li class="breadcrumb-item active">numbox.core.configurations</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbox.core.configurations.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbox-core-configurations">
+<h1>numbox.core.configurations<a class="headerlink" href="#numbox-core-configurations" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>Every function numbox caches is decorated under one set of numba options, <code class="docutils literal notranslate"><span class="pre">jit_options</span></code>, read once from
+the <code class="docutils literal notranslate"><span class="pre">NUMBOX_JIT_OPTIONS</span></code> environment variable when this module is first imported; a bare <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> in
+numbox, as in <code class="docutils literal notranslate"><span class="pre">lowlevel.py</span></code>, <code class="docutils literal notranslate"><span class="pre">meminfo.py</span></code> and <code class="docutils literal notranslate"><span class="pre">make_vector</span></code>, is not cached and takes none. The value is a JSON
+object passed to <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> as keyword arguments, and any other shape is refused by name, as is a <code class="docutils literal notranslate"><span class="pre">cache</span></code>
+that is not <code class="docutils literal notranslate"><span class="pre">true</span></code> or <code class="docutils literal notranslate"><span class="pre">false</span></code> (the string <code class="docutils literal notranslate"><span class="pre">&quot;false&quot;</span></code> is true to numba, which reads the option’s truth);
+unset means <code class="docutils literal notranslate"><span class="pre">{&quot;cache&quot;:</span> <span class="pre">true}</span></code>, so numbox compiles into numba’s on-disk cache by default, and
+<code class="docutils literal notranslate"><span class="pre">export</span> <span class="pre">NUMBOX_JIT_OPTIONS='{&quot;cache&quot;:</span> <span class="pre">false}'</span></code> turns that off.</p>
+</section>
+<section id="where-the-cache-lands">
+<span id="id1"></span><h2>Where the cache lands<a class="headerlink" href="#where-the-cache-lands" title="Link to this heading"></a></h2>
+<p>numba writes a cached function’s entries under <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> when that is set, else into the
+<code class="docutils literal notranslate"><span class="pre">__pycache__</span></code> directory beside the function’s source file, else into the user’s cache directory, taking the
+first of those it can write. It sets the cache up when the function is decorated, so with caching on the question
+of where it lands is settled at import. The user’s cache directory is <code class="docutils literal notranslate"><span class="pre">~/Library/Caches/numba</span></code> on macOS,
+<code class="docutils literal notranslate"><span class="pre">%LOCALAPPDATA%\numba\Cache</span></code> on Windows, and <code class="docutils literal notranslate"><span class="pre">$XDG_CACHE_HOME/numba</span></code> elsewhere, <code class="docutils literal notranslate"><span class="pre">~/.cache/numba</span></code> when
+<code class="docutils literal notranslate"><span class="pre">XDG_CACHE_HOME</span></code> is unset.</p>
+<p>Where no cache can be written, numba raises at decoration, and numbox’s import used to die on its first module
+with <code class="docutils literal notranslate"><span class="pre">RuntimeError:</span> <span class="pre">cannot</span> <span class="pre">cache</span> <span class="pre">function</span> <span class="pre">...:</span> <span class="pre">no</span> <span class="pre">locator</span> <span class="pre">available</span> <span class="pre">for</span> <span class="pre">file</span> <span class="pre">...</span></code>. The two placements that do
+that are a read-only install whose user cache directory cannot be written either, and an import from an
+<code class="docutils literal notranslate"><span class="pre">.egg</span></code>, <code class="docutils literal notranslate"><span class="pre">.whl</span></code> or <code class="docutils literal notranslate"><span class="pre">.pyz</span></code> archive, which Spark’s <code class="docutils literal notranslate"><span class="pre">--py-files</span></code> ships. Since every function numbox caches
+decorates under the one <code class="docutils literal notranslate"><span class="pre">jit_options</span></code>, numbox puts the question once, when this module is imported, and
+answers it for the package: for a probe in each directory of the package that holds a module, since numba’s
+in-tree cache is a <code class="docutils literal notranslate"><span class="pre">__pycache__</span></code> beside each source, it runs the cache set-up numba runs at decoration and
+the writability check numba runs at the first save, compiling nothing, and where either fails for any
+directory numbox compiles without a cache and one <code class="docutils literal notranslate"><span class="pre">RuntimeWarning</span></code> names the remedy. Every directory
+counts, whether or not its modules cache anything, so the answer errs toward uncached, which is never wrong.
+A module that survives as <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> alone is asked by the file it was compiled from, which its code keeps and
+numba looks up: the <code class="docutils literal notranslate"><span class="pre">.py</span></code> that is gone where it was compiled in place, or a tree elsewhere, on disk or not.
+For a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>, which numba caches per directory of the archive, each in a location of its own under the
+user’s cache directory, the archive’s directories are listed and the question put for one module of each; a
+<code class="docutils literal notranslate"><span class="pre">.pyc</span></code> in the archive that zipimport would run, which it takes before the <code class="docutils literal notranslate"><span class="pre">.py</span></code> beside it unless it is
+stale against it or of another interpreter, and whose code keeps the file it was compiled from, is asked by
+that file, since that is what numba looks up for it, on disk or gone, and one zipimport would pass over is
+passed over; any other archive has no location at all. A directory of the package reached through a symlink
+is walked like the rest, wherever the link points. The check makes the cache directories it asks about, as
+numba would at the first decoration in each; with caching beside the sources that is an empty <code class="docutils literal notranslate"><span class="pre">__pycache__</span></code>
+per directory of the package, a linked one included. numba’s own writability check makes a temporary file,
+one without a name on Linux, and the files it saves have names of a hundred bytes and more, so a location
+within their length of the path limit, 4096 on Linux, passes numba’s check and the first save overflows;
+the check here makes a file named as long as the longest numba writes for the package’s files (128 bytes,
+which a test holds every function of the package under), so that location turns caching off with the
+warning instead.</p>
+<ul class="simple">
+<li><p>For a source file on disk the remedy is <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> pointed at a writable directory; where its
+location is too long for the file system, a shorter <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> or none, since numba’s location
+under the variable is a directory named for the source’s directory, by its name and a hash of its path, and
+without the variable numba caches beside the source; else the package installed at a shorter path, where the
+location beside the source is the long one.</p></li>
+<li><p>For a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>, or a frozen application, it is the user’s cache directory made writable: a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> is the
+one archive numba caches, from 0.61 on, and it caches it there, taking the directory without checking that
+it can be written; a frozen application (<code class="docutils literal notranslate"><span class="pre">sys.frozen</span></code>) is cached there too, its sources not being on disk.
+numba reads <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> only for a source file on disk, so the variable changes nothing for either.
+A <code class="docutils literal notranslate"><span class="pre">.zip</span></code> whose cache directory holds every entry but can no longer be written falls back too, where numba
+alone would have loaded the entries: the writability check is the rule numba applies to every other
+placement.</p></li>
+<li><p>For an <code class="docutils literal notranslate"><span class="pre">.egg</span></code>, <code class="docutils literal notranslate"><span class="pre">.whl</span></code> or <code class="docutils literal notranslate"><span class="pre">.pyz</span></code>, a <code class="docutils literal notranslate"><span class="pre">.pyc</span></code>-only install or a <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> in a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>, it is the source
+files on disk or a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> holding them.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">NUMBOX_JIT_OPTIONS='{&quot;cache&quot;:</span> <span class="pre">false}'</span></code> turns caching off and silences the warning in every case, the
+package’s options being what it sets; the anchors’ warning under a caller’s own options, below, is
+silenced by those.</p></li>
+</ul>
+<p>A function numba cannot cache is compiled in every process that uses it, never wrong; that is the cost the
+warning reports. An error at decoration that is not the cache’s is raised as it was.</p>
+<p>A package built on numbox can put the same question for its own files: <code class="docutils literal notranslate"><span class="pre">check_cache_location</span></code> asks it for
+one file, <code class="docutils literal notranslate"><span class="pre">is_a_cache_error</span></code> tells numba’s cache errors from the rest, and <code class="docutils literal notranslate"><span class="pre">cache_remedy</span></code> words the
+remedy, given the package’s name for the two remedies that tell the reader to install it again, at a shorter
+path or with its source files on disk. The bound on file names is the package’s own:
+<code class="docutils literal notranslate"><span class="pre">LONGEST_CACHE_FILE_NAME</span></code> holds numbox’s functions only, so a package passes <code class="docutils literal notranslate"><span class="pre">check_cache_location</span></code> the
+longest name numba writes for its own, as <code class="docutils literal notranslate"><span class="pre">longest_file_name</span></code>, or a location that fits numbox’s names and not
+the package’s passes the check and the first save overflows it.</p>
+<p>The code numbox generates at run time, <code class="docutils literal notranslate"><span class="pre">make_structref</span></code>’s, <code class="docutils literal notranslate"><span class="pre">compile_kernel</span></code>’s, the work builder’s derives
+and the sqlite registrations’, is anchored to a file under <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> or the user’s cache directory
+so that numba can cache it. That directory can be unwritable where the package’s own functions cache, since
+those cache beside their sources, so each anchor puts the same question for its own file when it is written,
+and the code it names compiles without a cache where the answer is no, after a warning of the same shape (the
+builder’s derive falls back without one, as it did). <code class="docutils literal notranslate"><span class="pre">make_structref</span></code>, <code class="docutils literal notranslate"><span class="pre">compile_kernel</span></code> and the builder
+take jit options of the caller’s, which the variable does not reach, and <code class="docutils literal notranslate"><span class="pre">compile_kernel</span></code>’s <code class="docutils literal notranslate"><span class="pre">cache</span></code>
+argument overrides those too, so that warning’s silence is <code class="docutils literal notranslate"><span class="pre">cache</span></code> off in the options the code was given,
+the argument where it takes one, or the variable where the options are the package’s. <code class="docutils literal notranslate"><span class="pre">make_graph</span></code>’s
+kernel is anchored to the builder’s own file and cached beside it, so it puts the question for that file
+under the options it was given, and falls back the same way with the package’s remedy for the placement.
+See the cache-anchor section of <a class="reference internal" href="numbox.utils.html"><span class="doc">numbox.utils</span></a>.</p>
+</section>
+<section id="modules">
+<h2>Modules<a class="headerlink" href="#modules" title="Link to this heading"></a></h2>
+<section id="id2">
+<h3>numbox.core.configurations<a class="headerlink" href="#id2" title="Link to this heading"></a></h3>
+<dl class="py function" id="module-numbox.core.configurations">
+<dt class="sig sig-object py" id="numbox.core.configurations.cache_remedy">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.configurations.</span></span><span class="sig-name descname"><span class="pre">cache_remedy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">py_file</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">failure</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">silence</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">package</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'numbox'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/configurations.html#cache_remedy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.configurations.cache_remedy" title="Link to this definition"></a></dt>
+<dd><p>The remedy for <code class="docutils literal notranslate"><span class="pre">failure</span></code>, numba’s for a function whose file is <code class="docutils literal notranslate"><span class="pre">py_file</span></code>, ending in <code class="docutils literal notranslate"><span class="pre">silence</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> for a source file on disk, which is the only kind numba reads the variable for; where its
+location is too long for the file system, a shorter <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> or none, since numba’s location under
+the variable is a directory named for the source’s directory, by its name and a hash of its path, and without
+the variable numba caches beside the source; else the package at a shorter path, where the location beside
+the source is the long one. For a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> or a frozen application, both cached under the user’s cache
+directory, the location made writable:
+the <code class="docutils literal notranslate"><span class="pre">.zip</span></code>’s error names it, a directory of numba’s under the user’s cache directory; the frozen
+application’s is the no-locator one, numba having passed the location over on its error, so the user’s
+cache directory is named. For any other archive, or a module without its source, the source files on disk
+or a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> holding them. A <code class="docutils literal notranslate"><span class="pre">.zip</span></code>’s location too long for the file system is the user’s cache
+directory’s doing, with the names numba makes bounded, and the remedy is that directory at a shorter
+path, through <code class="docutils literal notranslate"><span class="pre">XDG_CACHE_HOME</span></code> or <code class="docutils literal notranslate"><span class="pre">HOME</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">package</span></code> is the one the remedy tells the reader to install again, at a shorter path or with its source
+files on disk: a package built on numbox that puts the question for its own files with
+<code class="docutils literal notranslate"><span class="pre">check_cache_location</span></code> and <code class="docutils literal notranslate"><span class="pre">is_a_cache_error</span></code> passes its own name, as it passes <code class="docutils literal notranslate"><span class="pre">check_cache_location</span></code> a
+<code class="docutils literal notranslate"><span class="pre">longest_file_name</span></code> for its own functions, <code class="docutils literal notranslate"><span class="pre">LONGEST_CACHE_FILE_NAME</span></code> being numbox’s.</p>
+<p>On numba==0.68.0, <code class="docutils literal notranslate"><span class="pre">KeyError</span></code> caused by the Windows ZIP path separator
+bug <a class="reference external" href="https://github.com/numba/numba/issues/10889">https://github.com/numba/numba/issues/10889</a> can be worked around by
+disabling caching. The bug is scheduled to be fixed in 0.68.1.</p>
+<p>On numba&gt;=0.68, <code class="docutils literal notranslate"><span class="pre">KeyError</span></code> caused by missing .py source files in the ZIP
+archive (when only compiled <cite>.pyc</cite> files are present) can be avoided by either
+disabling caching or including all source files in the archive.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.configurations.check_cache_location">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.configurations.</span></span><span class="sig-name descname"><span class="pre">check_cache_location</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">py_file</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">longest_file_name</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/configurations.html#check_cache_location"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.configurations.check_cache_location" title="Link to this definition"></a></dt>
+<dd><p>Raise as numba would where a function whose source is <code class="docutils literal notranslate"><span class="pre">py_file</span></code> cannot be cached; else return.</p>
+<p>The question is put the way numba puts it: the cache set-up that decoration runs, which picks the location
+for the file or raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> with no locator, then the source’s stamp, which decoration reads
+and which stats the archive for a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>, then the writability check, which decoration runs for every
+location but a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>’s and the first save runs for all, raising <code class="docutils literal notranslate"><span class="pre">OSError</span></code>. The probe is compiled with
+<code class="docutils literal notranslate"><span class="pre">py_file</span></code> as its file, which is all a locator reads of it. Nothing is compiled, and nothing is written
+but the cache directory itself. An <code class="docutils literal notranslate"><span class="pre">OSError</span></code> from the check names the location numba picked.</p>
+<p>numba’s writability check makes a temporary file whose name is short, or none at all on Linux, and the
+files it saves have names of up to a hundred bytes and more, so a location within their length of the path
+limit passes the check and the first save dies. Given <code class="docutils literal notranslate"><span class="pre">longest_file_name</span></code>, a file with a name that long
+is made and removed in the location too, and the <code class="docutils literal notranslate"><span class="pre">OSError</span></code> is the location’s: the package asks with
+<code class="docutils literal notranslate"><span class="pre">LONGEST_CACHE_FILE_NAME</span></code>, the bound on numba’s names for its own files.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.configurations.function_struct_has">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.configurations.</span></span><span class="sig-name descname"><span class="pre">function_struct_has</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">field</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="reference internal" href="_modules/numbox/core/configurations.html#function_struct_has"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.configurations.function_struct_has" title="Link to this definition"></a></dt>
+<dd><p>Whether numba’s <cite>FunctionModel</cite> carries a slot named <cite>field</cite>.</p>
+<p><cite>get_field_position</cite> is numba’s own accessor for the question and raises <cite>KeyError</cite> when
+the slot is absent, which is how a numba predating it reads.</p>
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="numbox.core.configurations.function_struct_size">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.configurations.</span></span><span class="sig-name descname"><span class="pre">function_struct_size</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">3</span></em><a class="headerlink" href="#numbox.core.configurations.function_struct_size" title="Link to this definition"></a></dt>
+<dd><p>Number of slots in the <cite>FunctionModel</cite> struct: (c_addr, py_addr, jit_addr) on numba 0.61
+and later, (addr, pyaddr) before it. Read off the data model rather than inferred from the
+numba version, so the layout is discovered rather than assumed.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.configurations.get_jit_options">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.configurations.</span></span><span class="sig-name descname"><span class="pre">get_jit_options</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/configurations.html#get_jit_options"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.configurations.get_jit_options" title="Link to this definition"></a></dt>
+<dd><p>E.g., export NUMBOX_JIT_OPTIONS=’{“cache”: false}’</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.configurations.is_a_cache_error">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.configurations.</span></span><span class="sig-name descname"><span class="pre">is_a_cache_error</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">error</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/configurations.html#is_a_cache_error"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.configurations.is_a_cache_error" title="Link to this definition"></a></dt>
+<dd><p>Whether <code class="docutils literal notranslate"><span class="pre">error</span></code> is numba’s for a cache it cannot set up: no locator, a location it cannot use, or
+missing source files(s) on numba&gt;=0.68.</p>
+<p>numba itself passes over a location on any <code class="docutils literal notranslate"><span class="pre">OSError</span></code> from making its directory or writing a file there,
+permission denied, a read-only file system, a path into a file, a component too long, a full disk, so any
+<code class="docutils literal notranslate"><span class="pre">OSError</span></code> counts. So does the <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> numba raises for an archive under a directory whose name
+holds <code class="docutils literal notranslate"><span class="pre">.zip</span></code>: its <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator takes the file by that substring and then finds no <code class="docutils literal notranslate"><span class="pre">.zip</span></code> in it.
+numba&gt;=0.68 started hashing the source contents of the archive into the archive’s cache stamp, therefore
+missing .py raise KeyError.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.configurations.uncached_where_no_cache_can_be_written">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.configurations.</span></span><span class="sig-name descname"><span class="pre">uncached_where_no_cache_can_be_written</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">options</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/configurations.html#uncached_where_no_cache_can_be_written"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.configurations.uncached_where_no_cache_can_be_written" title="Link to this definition"></a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">options</span></code> as given, or with <code class="docutils literal notranslate"><span class="pre">cache</span></code> off after one warning where numba can write no cache for numbox.</p>
+<p>numba sets a cached function up when it is decorated and raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> there when no cache location
+can be written: a read-only install whose user cache directory cannot be written either, or an import from an
+<code class="docutils literal notranslate"><span class="pre">.egg</span></code>, <code class="docutils literal notranslate"><span class="pre">.whl</span></code> or <code class="docutils literal notranslate"><span class="pre">.pyz</span></code> archive, which Spark’s <code class="docutils literal notranslate"><span class="pre">--py-files</span></code> ships. For a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> it takes the user’s
+cache directory without checking at decoration that it can be written, and the first write raises <code class="docutils literal notranslate"><span class="pre">OSError</span></code>
+instead. Either way the import died at the first decorated function, and nothing named the way out.</p>
+<p>Every function numbox caches decorates under the one <code class="docutils literal notranslate"><span class="pre">jit_options</span></code>, so the question is put here, once, for
+a source file in each directory of the package that holds a module, and answered for the package. Where
+numba can cache no function of one of those files the options come back with <code class="docutils literal notranslate"><span class="pre">cache</span></code> off and one warning
+names the remedy: <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> for a source file on disk, or a shorter one, or none, where the
+location is too long for the file system; for a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>, the user’s cache directory made writable, since
+numba reads <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> only for a source file on disk; for any other archive,
+or a <code class="docutils literal notranslate"><span class="pre">.pyc</span></code>-only install, or a <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> in a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>, the source files on disk or a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> holding them,
+which numba 0.61 and later cache in the user’s cache directory. <code class="docutils literal notranslate"><span class="pre">NUMBOX_JIT_OPTIONS='{&quot;cache&quot;:</span> <span class="pre">false}'</span></code>
+turns caching off and silences the warning. An error that is not the cache’s, as <code class="docutils literal notranslate"><span class="pre">is_a_cache_error</span></code> draws
+the line, is raised as it was.</p>
+<p>A <code class="docutils literal notranslate"><span class="pre">.zip</span></code> whose cache directory holds every entry but can no longer be written takes the fallback too, where
+numba alone would have loaded the entries: the writability check is the rule numba applies to every other
+placement, and the one the <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator is missing, reported as <a class="reference external" href="https://github.com/numba/numba/issues/10888">https://github.com/numba/numba/issues/10888</a>.</p>
+<p>Options without a <code class="docutils literal notranslate"><span class="pre">cache</span></code> key, as <code class="docutils literal notranslate"><span class="pre">NUMBOX_JIT_OPTIONS</span></code> can give, leave <code class="docutils literal notranslate"><span class="pre">njit</span></code> to its default, off, but
+the sqlite virtual-table and table-valued-function callbacks cache under them, so they are asked about too and
+come back with <code class="docutils literal notranslate"><span class="pre">cache</span></code> off, said, where the answer is no.</p>
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="numbox.core.bindings.sqlite.html" class="btn btn-neutral float-left" title="numbox.core.bindings.sqlite" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="numbox.core.proxy.html" class="btn btn-neutral float-right" title="numbox.core.proxy" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

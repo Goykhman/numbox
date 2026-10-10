@@ -1,0 +1,537 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.configurations &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/configurations.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.configurations</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.configurations</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">errno</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">importlib.machinery</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">inspect</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">zipfile</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">zipimport</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">importlib.metadata</span><span class="w"> </span><span class="kn">import</span> <span class="n">version</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numba.experimental.function_type</span>  <span class="c1"># noqa: F401  registers `FunctionModel` against `FunctionType`</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.caching</span><span class="w"> </span><span class="kn">import</span> <span class="n">CompileResultCacheImpl</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.datamodel</span><span class="w"> </span><span class="kn">import</span> <span class="n">default_manager</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.misc.appdirs</span><span class="w"> </span><span class="kn">import</span> <span class="n">AppDirs</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">FunctionType</span><span class="p">,</span> <span class="n">void</span>
+
+
+<span class="n">numba_version</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">version</span><span class="p">(</span><span class="s2">"numba"</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"."</span><span class="p">)[</span><span class="mi">1</span><span class="p">])</span>
+<span class="k">assert</span> <span class="n">numba_version</span> <span class="o">&gt;=</span> <span class="mi">60</span><span class="p">,</span> <span class="n">numba_version</span>
+
+
+<div class="viewcode-block" id="get_jit_options">
+<a class="viewcode-back" href="../../../numbox.core.configurations.html#numbox.core.configurations.get_jit_options">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_jit_options</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    E.g., export NUMBOX_JIT_OPTIONS='{"cache": false}'</span>
+<span class="sd">    """</span>
+    <span class="n">as_str</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"NUMBOX_JIT_OPTIONS"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">as_str</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s2">"cache"</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">as_json</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">as_str</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">json</span><span class="o">.</span><span class="n">JSONDecodeError</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"NUMBOX_JIT_OPTIONS must be valid JSON"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">as_json</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="c1"># Its keys go to njit as keyword arguments, and the fallback below</span>
+        <span class="c1"># reads "cache" from it, so a value of another shape stops here, named.</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">'NUMBOX_JIT_OPTIONS must be a JSON object, e.g. {"cache": false}'</span><span class="p">)</span>
+    <span class="k">if</span> <span class="s2">"cache"</span> <span class="ow">in</span> <span class="n">as_json</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">as_json</span><span class="p">[</span><span class="s2">"cache"</span><span class="p">],</span> <span class="nb">bool</span><span class="p">):</span>
+        <span class="c1"># numba reads the option's truth, so the string "false" turned caching on.</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">'NUMBOX_JIT_OPTIONS "cache" must be true or false, e.g. {"cache": false}'</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">as_json</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_cache_probe</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""A function of this module, never compiled: its code's file is the one numba looks up for the module."""</span>
+
+
+<span class="c1"># The longest file numba writes for a function of numbox's own files, with room to spare: the module's stem,</span>
+<span class="c1"># the function's qualified name, numba's line number, interpreter tag and index number, and the 21 bytes of the</span>
+<span class="c1"># temporary name it is written under. The longest-named function of the package comes to 105 bytes and the</span>
+<span class="c1"># builder's generated kernel, anchored to its file, to 117; a test holds every function of the package under</span>
+<span class="c1"># this bound.</span>
+<span class="n">LONGEST_CACHE_FILE_NAME</span> <span class="o">=</span> <span class="mi">128</span>
+
+
+<div class="viewcode-block" id="check_cache_location">
+<a class="viewcode-back" href="../../../numbox.core.configurations.html#numbox.core.configurations.check_cache_location">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">check_cache_location</span><span class="p">(</span><span class="n">py_file</span><span class="p">,</span> <span class="n">longest_file_name</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Raise as numba would where a function whose source is ``py_file`` cannot be cached; else return.</span>
+
+<span class="sd">    The question is put the way numba puts it: the cache set-up that decoration runs, which picks the location</span>
+<span class="sd">    for the file or raises ``RuntimeError`` with no locator, then the source's stamp, which decoration reads</span>
+<span class="sd">    and which stats the archive for a ``.zip``, then the writability check, which decoration runs for every</span>
+<span class="sd">    location but a ``.zip``'s and the first save runs for all, raising ``OSError``. The probe is compiled with</span>
+<span class="sd">    ``py_file`` as its file, which is all a locator reads of it. Nothing is compiled, and nothing is written</span>
+<span class="sd">    but the cache directory itself. An ``OSError`` from the check names the location numba picked.</span>
+
+<span class="sd">    numba's writability check makes a temporary file whose name is short, or none at all on Linux, and the</span>
+<span class="sd">    files it saves have names of up to a hundred bytes and more, so a location within their length of the path</span>
+<span class="sd">    limit passes the check and the first save dies. Given ``longest_file_name``, a file with a name that long</span>
+<span class="sd">    is made and removed in the location too, and the ``OSError`` is the location's: the package asks with</span>
+<span class="sd">    ``LONGEST_CACHE_FILE_NAME``, the bound on numba's names for its own files.</span>
+<span class="sd">    """</span>
+    <span class="n">namespace</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">exec</span><span class="p">(</span><span class="nb">compile</span><span class="p">(</span><span class="s2">"def _cache_probe():</span><span class="se">\n</span><span class="s2">    pass</span><span class="se">\n</span><span class="s2">"</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">fspath</span><span class="p">(</span><span class="n">py_file</span><span class="p">),</span> <span class="s2">"exec"</span><span class="p">),</span> <span class="n">namespace</span><span class="p">)</span>  <span class="c1"># nosec B102 - fixed source</span>
+    <span class="n">probe</span> <span class="o">=</span> <span class="n">namespace</span><span class="p">[</span><span class="s2">"_cache_probe"</span><span class="p">]</span>
+    <span class="n">locator</span> <span class="o">=</span> <span class="n">CompileResultCacheImpl</span><span class="p">(</span><span class="n">probe</span><span class="p">)</span><span class="o">.</span><span class="n">locator</span>
+    <span class="c1"># numba reads the source's stamp at decoration too, the archive's for a</span>
+    <span class="c1"># .zip, which is not there where the code names an archive since moved.</span>
+    <span class="n">locator</span><span class="o">.</span><span class="n">get_source_stamp</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">locator</span><span class="o">.</span><span class="n">ensure_cache_path</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">longest_file_name</span><span class="p">:</span>
+            <span class="c1"># tempfile's name is the prefix and eight characters of its own.</span>
+            <span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">NamedTemporaryFile</span><span class="p">(</span><span class="nb">dir</span><span class="o">=</span><span class="n">locator</span><span class="o">.</span><span class="n">get_cache_path</span><span class="p">(),</span> <span class="n">prefix</span><span class="o">=</span><span class="s2">"x"</span> <span class="o">*</span> <span class="p">(</span><span class="n">longest_file_name</span> <span class="o">-</span> <span class="mi">8</span><span class="p">)):</span>
+                <span class="k">pass</span>
+    <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+        <span class="c1"># The error names what failed, a temporary file's name among the</span>
+        <span class="c1"># possibilities; the location it is in is what a reader can act on.</span>
+        <span class="k">raise</span> <span class="ne">OSError</span><span class="p">(</span><span class="n">error</span><span class="o">.</span><span class="n">errno</span><span class="p">,</span> <span class="n">error</span><span class="o">.</span><span class="n">strerror</span><span class="p">,</span> <span class="n">locator</span><span class="o">.</span><span class="n">get_cache_path</span><span class="p">())</span> <span class="kn">from</span><span class="w"> </span><span class="nn">error</span></div>
+
+
+
+<div class="viewcode-block" id="is_a_cache_error">
+<a class="viewcode-back" href="../../../numbox.core.configurations.html#numbox.core.configurations.is_a_cache_error">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">is_a_cache_error</span><span class="p">(</span><span class="n">error</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Whether ``error`` is numba's for a cache it cannot set up: no locator, a location it cannot use, or</span>
+<span class="sd">    missing source files(s) on numba&gt;=0.68.</span>
+
+<span class="sd">    numba itself passes over a location on any ``OSError`` from making its directory or writing a file there,</span>
+<span class="sd">    permission denied, a read-only file system, a path into a file, a component too long, a full disk, so any</span>
+<span class="sd">    ``OSError`` counts. So does the ``ValueError`` numba raises for an archive under a directory whose name</span>
+<span class="sd">    holds ``.zip``: its ``.zip`` locator takes the file by that substring and then finds no ``.zip`` in it.</span>
+<span class="sd">    numba&gt;=0.68 started hashing the source contents of the archive into the archive's cache stamp, therefore</span>
+<span class="sd">    missing .py raise KeyError.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">error</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">error</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s2">"No zip file found"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">error</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">error</span><span class="p">,</span> <span class="ne">KeyError</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">numba_version</span> <span class="o">&gt;=</span> <span class="mi">68</span> <span class="ow">and</span> <span class="s2">"There is no item named"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">error</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">error</span><span class="p">,</span> <span class="ne">RuntimeError</span><span class="p">)</span> <span class="ow">and</span> <span class="s2">"no locator available"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">error</span><span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_module_files</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""The source files numba's answer for numbox rests on, this module's own first.</span>
+
+<span class="sd">    numba's in-tree cache is a ``__pycache__`` beside each source, so the directories answer separately and one</span>
+<span class="sd">    can be writable while another is not: one module of each directory stands for the directory, whether or not</span>
+<span class="sd">    that directory's modules cache anything, so a directory numba cannot cache in turns caching off for the</span>
+<span class="sd">    package even where every cached function's own directory is fine; the answer errs toward uncached, which</span>
+<span class="sd">    is never wrong. And numba finds a location for a module by its code's file, so a module that survives as</span>
+<span class="sd">    ``.pyc`` alone, beside sourced ones, answers for itself, by the file it was compiled from, which its code</span>
+<span class="sd">    keeps: the ``.py`` that is gone where it was compiled in place, or a tree elsewhere, on disk or not. The</span>
+<span class="sd">    package is found by this module's ``__file__``, which is where it was imported from, an archive or a</span>
+<span class="sd">    directory: its code's file, which numba looks up for the probe and which is asked first, can be elsewhere</span>
+<span class="sd">    the same way. An archive shows no directories to walk, so there its members are listed instead.</span>
+<span class="sd">    """</span>
+    <span class="k">yield</span> <span class="n">inspect</span><span class="o">.</span><span class="n">getfile</span><span class="p">(</span><span class="n">_cache_probe</span><span class="p">)</span>
+    <span class="n">package</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="vm">__file__</span><span class="p">))</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">package</span><span class="p">):</span>
+        <span class="k">yield from</span> <span class="n">_archived_module_files</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="n">walked</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">directory</span><span class="p">,</span> <span class="n">subdirectories</span><span class="p">,</span> <span class="n">files</span> <span class="ow">in</span> <span class="n">os</span><span class="o">.</span><span class="n">walk</span><span class="p">(</span><span class="n">package</span><span class="p">,</span> <span class="n">followlinks</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="c1"># A symlink is followed, and a directory reached twice through links,</span>
+        <span class="c1"># a cycle among them, is walked once.</span>
+        <span class="n">real</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">realpath</span><span class="p">(</span><span class="n">directory</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">real</span> <span class="ow">in</span> <span class="n">walked</span><span class="p">:</span>
+            <span class="n">subdirectories</span><span class="p">[:]</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">continue</span>
+        <span class="n">walked</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">real</span><span class="p">)</span>
+        <span class="n">subdirectories</span><span class="p">[:]</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">name</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">subdirectories</span> <span class="k">if</span> <span class="n">name</span> <span class="o">!=</span> <span class="s2">"__pycache__"</span><span class="p">)</span>
+        <span class="n">stems</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">name</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s2">"."</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">files</span> <span class="k">if</span> <span class="n">name</span><span class="o">.</span><span class="n">endswith</span><span class="p">((</span><span class="s2">".py"</span><span class="p">,</span> <span class="s2">".pyc"</span><span class="p">))})</span>
+        <span class="n">sources</span> <span class="o">=</span> <span class="p">[</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">directory</span><span class="p">,</span> <span class="n">stem</span> <span class="o">+</span> <span class="s2">".py"</span><span class="p">)</span> <span class="k">for</span> <span class="n">stem</span> <span class="ow">in</span> <span class="n">stems</span><span class="p">]</span>
+        <span class="n">on_disk</span> <span class="o">=</span> <span class="p">[</span><span class="n">source</span> <span class="k">for</span> <span class="n">source</span> <span class="ow">in</span> <span class="n">sources</span> <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">source</span><span class="p">)]</span>
+        <span class="k">if</span> <span class="n">on_disk</span><span class="p">:</span>
+            <span class="k">yield</span> <span class="n">on_disk</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">source</span> <span class="ow">in</span> <span class="n">sources</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">source</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">on_disk</span><span class="p">:</span>
+                <span class="n">compiled_from</span> <span class="o">=</span> <span class="n">_sourceless_compiled_from</span><span class="p">(</span><span class="n">source</span><span class="p">[:</span><span class="o">-</span><span class="mi">3</span><span class="p">]</span> <span class="o">+</span> <span class="s2">".pyc"</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">compiled_from</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">yield</span> <span class="n">compiled_from</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_sourceless_compiled_from</span><span class="p">(</span><span class="n">pyc_path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""The file the ``.pyc`` at ``pyc_path``, alone beside sourced modules, was compiled from, or None.</span>
+
+<span class="sd">    The import system runs such a ``.pyc`` through its sourceless loader, which keeps the compile-time file on</span>
+<span class="sd">    the code, and fails the module's import on one it cannot run, of another interpreter's magic number or</span>
+<span class="sd">    unreadable; so the loader's answer is read, and none leaves nothing to ask.</span>
+<span class="sd">    """</span>
+    <span class="n">loader</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">machinery</span><span class="o">.</span><span class="n">SourcelessFileLoader</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">pyc_path</span><span class="p">)[:</span><span class="o">-</span><span class="mi">4</span><span class="p">],</span> <span class="n">pyc_path</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">loader</span><span class="o">.</span><span class="n">get_code</span><span class="p">(</span><span class="n">loader</span><span class="o">.</span><span class="n">name</span><span class="p">)</span><span class="o">.</span><span class="n">co_filename</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_archived_module_files</span><span class="p">(</span><span class="n">own</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""One module per directory of numbox inside the ``.zip`` that holds ``own``, this module as imported, and the</span>
+<span class="sd">    file each ``.pyc`` in it that zipimport would run was compiled from; nothing for any other archive.</span>
+
+<span class="sd">    numba caches a ``.zip`` per directory of it, each in a location of its own under the user's cache directory,</span>
+<span class="sd">    so the directories answer separately there too. A ``.pyc`` run from the archive keeps the file it was compiled</span>
+<span class="sd">    from as its code's file, and that is what numba looks up for its functions, the archive's own path for the</span>
+<span class="sd">    module is not; so such a member asks by that file, there or gone. The archive is the first part of the path</span>
+<span class="sd">    named ``.zip`` that is one, a directory so named above it being no archive. Any other archive has no location</span>
+<span class="sd">    at all, and the probe's own file has already asked.</span>
+<span class="sd">    """</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="n">own</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">sep</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">depth</span><span class="p">,</span> <span class="n">part</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">parts</span><span class="p">):</span>
+        <span class="n">zip_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">sep</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">parts</span><span class="p">[:</span><span class="n">depth</span> <span class="o">+</span> <span class="mi">1</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">part</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">".zip"</span><span class="p">)</span> <span class="ow">and</span> <span class="n">zipfile</span><span class="o">.</span><span class="n">is_zipfile</span><span class="p">(</span><span class="n">zip_path</span><span class="p">):</span>
+            <span class="k">break</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="n">package</span> <span class="o">=</span> <span class="s2">"/"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="n">depth</span> <span class="o">+</span> <span class="mi">1</span><span class="p">:</span><span class="o">-</span><span class="mi">2</span><span class="p">])</span>
+    <span class="k">with</span> <span class="n">zipfile</span><span class="o">.</span><span class="n">ZipFile</span><span class="p">(</span><span class="n">zip_path</span><span class="p">)</span> <span class="k">as</span> <span class="n">archive</span><span class="p">:</span>
+        <span class="n">names</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">name</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">archive</span><span class="o">.</span><span class="n">namelist</span><span class="p">()</span>
+                       <span class="k">if</span> <span class="n">name</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">package</span> <span class="o">+</span> <span class="s2">"/"</span><span class="p">)</span> <span class="ow">and</span> <span class="n">name</span><span class="o">.</span><span class="n">endswith</span><span class="p">((</span><span class="s2">".py"</span><span class="p">,</span> <span class="s2">".pyc"</span><span class="p">))</span>
+                       <span class="ow">and</span> <span class="s2">"/__pycache__/"</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">name</span><span class="p">)</span>
+    <span class="n">seen</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">names</span><span class="p">:</span>
+        <span class="n">directory</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">file</span> <span class="o">=</span> <span class="n">name</span><span class="o">.</span><span class="n">rpartition</span><span class="p">(</span><span class="s2">"/"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">file</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">".pyc"</span><span class="p">):</span>
+            <span class="n">member</span> <span class="o">=</span> <span class="n">_compiled_from</span><span class="p">(</span><span class="n">zip_path</span><span class="p">,</span> <span class="n">directory</span><span class="p">,</span> <span class="n">file</span><span class="p">[:</span><span class="o">-</span><span class="mi">4</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">member</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">member</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">zip_path</span> <span class="o">+</span> <span class="n">os</span><span class="o">.</span><span class="n">sep</span><span class="p">):</span>
+                <span class="k">yield</span> <span class="n">member</span>
+                <span class="k">continue</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">member</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">zip_path</span><span class="p">,</span> <span class="o">*</span><span class="n">name</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"/"</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">directory</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">seen</span><span class="p">:</span>
+            <span class="n">seen</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">directory</span><span class="p">)</span>
+            <span class="k">yield</span> <span class="n">member</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_compiled_from</span><span class="p">(</span><span class="n">zip_path</span><span class="p">,</span> <span class="n">directory</span><span class="p">,</span> <span class="n">stem</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""The file the code zipimport runs module ``stem`` of ``directory`` from names, or None where it runs none.</span>
+
+<span class="sd">    zipimport decides: it runs the ``.pyc`` before the ``.py`` beside it, but not one of another interpreter's</span>
+<span class="sd">    magic number, nor one stale against that ``.py``, which it passes over for the source, nor one it cannot</span>
+<span class="sd">    unmarshal, and the module's import fails with it; so its answer, its code, is read. The file that names is</span>
+<span class="sd">    the archive's own path for the module where zipimport compiled the ``.py``, or where the ``.pyc`` was</span>
+<span class="sd">    compiled to name the archive, and stands for the directory as a ``.py`` member does; else it is the file</span>
+<span class="sd">    elsewhere the ``.pyc`` was compiled from, there or gone, and asks for itself. No code at all, for whatever</span>
+<span class="sd">    stops zipimport, a source it cannot compile or a member it cannot decompress among the reasons, leaves</span>
+<span class="sd">    nothing to ask.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">stem</span> <span class="o">==</span> <span class="s2">"__init__"</span><span class="p">:</span>
+        <span class="n">directory</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">stem</span> <span class="o">=</span> <span class="n">directory</span><span class="o">.</span><span class="n">rpartition</span><span class="p">(</span><span class="s2">"/"</span><span class="p">)</span>
+    <span class="n">importer</span> <span class="o">=</span> <span class="n">zipimport</span><span class="o">.</span><span class="n">zipimporter</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">zip_path</span><span class="p">,</span> <span class="o">*</span><span class="n">directory</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"/"</span><span class="p">)))</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">importer</span><span class="o">.</span><span class="n">get_code</span><span class="p">(</span><span class="n">stem</span><span class="p">)</span><span class="o">.</span><span class="n">co_filename</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+
+<div class="viewcode-block" id="cache_remedy">
+<a class="viewcode-back" href="../../../numbox.core.configurations.html#numbox.core.configurations.cache_remedy">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">cache_remedy</span><span class="p">(</span><span class="n">py_file</span><span class="p">,</span> <span class="n">failure</span><span class="p">,</span> <span class="n">silence</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="s2">"numbox"</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""The remedy for ``failure``, numba's for a function whose file is ``py_file``, ending in ``silence``.</span>
+
+<span class="sd">    ``NUMBA_CACHE_DIR`` for a source file on disk, which is the only kind numba reads the variable for; where its</span>
+<span class="sd">    location is too long for the file system, a shorter ``NUMBA_CACHE_DIR`` or none, since numba's location under</span>
+<span class="sd">    the variable is a directory named for the source's directory, by its name and a hash of its path, and without</span>
+<span class="sd">    the variable numba caches beside the source; else the package at a shorter path, where the location beside</span>
+<span class="sd">    the source is the long one. For a ``.zip`` or a frozen application, both cached under the user's cache</span>
+<span class="sd">    directory, the location made writable:</span>
+<span class="sd">    the ``.zip``'s error names it, a directory of numba's under the user's cache directory; the frozen</span>
+<span class="sd">    application's is the no-locator one, numba having passed the location over on its error, so the user's</span>
+<span class="sd">    cache directory is named. For any other archive, or a module without its source, the source files on disk</span>
+<span class="sd">    or a ``.zip`` holding them. A ``.zip``'s location too long for the file system is the user's cache</span>
+<span class="sd">    directory's doing, with the names numba makes bounded, and the remedy is that directory at a shorter</span>
+<span class="sd">    path, through ``XDG_CACHE_HOME`` or ``HOME``.</span>
+
+<span class="sd">    ``package`` is the one the remedy tells the reader to install again, at a shorter path or with its source</span>
+<span class="sd">    files on disk: a package built on numbox that puts the question for its own files with</span>
+<span class="sd">    ``check_cache_location`` and ``is_a_cache_error`` passes its own name, as it passes ``check_cache_location`` a</span>
+<span class="sd">    ``longest_file_name`` for its own functions, ``LONGEST_CACHE_FILE_NAME`` being numbox's.</span>
+
+<span class="sd">    On numba==0.68.0, ``KeyError`` caused by the Windows ZIP path separator</span>
+<span class="sd">    bug https://github.com/numba/numba/issues/10889 can be worked around by</span>
+<span class="sd">    disabling caching. The bug is scheduled to be fixed in 0.68.1.</span>
+
+<span class="sd">    On numba&gt;=0.68, ``KeyError`` caused by missing .py source files in the ZIP</span>
+<span class="sd">    archive (when only compiled `.pyc` files are present) can be avoided by either</span>
+<span class="sd">    disabling caching or including all source files in the archive.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">py_file</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">failure</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">)</span> <span class="ow">and</span> <span class="n">failure</span><span class="o">.</span><span class="n">errno</span> <span class="o">==</span> <span class="n">errno</span><span class="o">.</span><span class="n">ENAMETOOLONG</span><span class="p">:</span>
+            <span class="c1"># numba's own check passes the location, its temporary file</span>
+            <span class="c1"># fitting where its cache files would not; the error names it.</span>
+            <span class="k">return</span> <span class="p">(</span>
+                <span class="s2">"the path is too long for the file system: a shorter NUMBA_CACHE_DIR, or none, where it is set, "</span>
+                <span class="sa">f</span><span class="s2">"else </span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2"> installed at a shorter path; or </span><span class="si">{</span><span class="n">silence</span><span class="si">}</span><span class="s2">"</span>
+            <span class="p">)</span>
+        <span class="c1"># numba itself passes a location it cannot make or write over, for a</span>
+        <span class="c1"># source on disk, so the error here is the no-locator one.</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">"Set NUMBA_CACHE_DIR to a writable directory, or </span><span class="si">{</span><span class="n">silence</span><span class="si">}</span><span class="s2">"</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">failure</span><span class="p">,</span> <span class="ne">KeyError</span><span class="p">):</span>
+        <span class="k">if</span> <span class="s2">"</span><span class="se">\\</span><span class="s2">"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">failure</span><span class="p">)</span> <span class="ow">and</span> <span class="n">os</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s2">"nt"</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">(</span>
+                <span class="s2">"Numba 0.68's ZIP cache locator uses Windows path separators for ZIP members, "</span>
+                <span class="s2">"see https://github.com/numba/numba/issues/10889"</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">"For numba&gt;=0.68, put all source .py file(s) in .zip, or </span><span class="si">{</span><span class="n">silence</span><span class="si">}</span><span class="s2">"</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">failure</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">sys</span><span class="p">,</span> <span class="s2">"frozen"</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+        <span class="c1"># The .zip's error names the location numba picked, which is under</span>
+        <span class="c1"># the user's cache directory; the frozen application's names nothing.</span>
+        <span class="n">location</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">failure</span><span class="p">,</span> <span class="s2">"filename"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">or</span> <span class="n">AppDirs</span><span class="p">(</span><span class="n">appname</span><span class="o">=</span><span class="s2">"numba"</span><span class="p">,</span> <span class="n">appauthor</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">user_cache_dir</span>
+        <span class="k">if</span> <span class="p">(</span>
+            <span class="nb">isinstance</span><span class="p">(</span><span class="n">failure</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">)</span>
+            <span class="ow">and</span> <span class="n">failure</span><span class="o">.</span><span class="n">errno</span> <span class="o">==</span> <span class="n">errno</span><span class="o">.</span><span class="n">EISDIR</span> <span class="ow">and</span> <span class="n">location</span> <span class="ow">and</span> <span class="n">location</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">".zip"</span><span class="p">)</span>
+            <span class="ow">and</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">location</span><span class="p">)</span> <span class="ow">and</span> <span class="n">py_file</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">location</span> <span class="o">+</span> <span class="n">os</span><span class="o">.</span><span class="n">sep</span><span class="p">)</span>
+        <span class="p">):</span>
+            <span class="k">return</span> <span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"the path </span><span class="si">{</span><span class="n">location</span><span class="si">}</span><span class="s2"> is a directory whose name ends in .zip, "</span>
+                <span class="s2">"which numba mistakes for the source archive; rename that "</span>
+                <span class="s2">"directory, or use a path without a .zip-named directory, "</span>
+                <span class="sa">f</span><span class="s2">"or </span><span class="si">{</span><span class="n">silence</span><span class="si">}</span><span class="s2">"</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">failure</span><span class="p">,</span> <span class="ne">FileNotFoundError</span><span class="p">)</span> <span class="ow">and</span> <span class="n">py_file</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">failure</span><span class="o">.</span><span class="n">filename</span> <span class="o">+</span> <span class="n">os</span><span class="o">.</span><span class="n">sep</span><span class="p">):</span>
+            <span class="c1"># The stamp numba reads at decoration, of the archive the code</span>
+            <span class="c1"># names: .pyc members compiled to name an archive since moved. A</span>
+            <span class="c1"># location that cannot be made, under a dangling link, is ENOENT</span>
+            <span class="c1"># too, and is not under the code's file.</span>
+            <span class="n">suggestion</span> <span class="o">=</span> <span class="s2">""</span> <span class="k">if</span> <span class="n">numba_version</span> <span class="o">&gt;=</span> <span class="mi">68</span> <span class="k">else</span> <span class="s2">"compile the archive's .pyc members to name its path now, or "</span>
+            <span class="k">return</span> <span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"the module's code names </span><span class="si">{</span><span class="n">failure</span><span class="o">.</span><span class="n">filename</span><span class="si">}</span><span class="s2">, which is not there: its .pyc was compiled to name "</span>
+                <span class="sa">f</span><span class="s2">"that path, </span><span class="si">{</span><span class="n">suggestion</span><span class="si">}</span><span class="s2">ship its source files; "</span>
+                <span class="sa">f</span><span class="s2">"or </span><span class="si">{</span><span class="n">silence</span><span class="si">}</span><span class="s2">"</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">failure</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">)</span> <span class="ow">and</span> <span class="n">failure</span><span class="o">.</span><span class="n">errno</span> <span class="o">==</span> <span class="n">errno</span><span class="o">.</span><span class="n">ENAMETOOLONG</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">(</span>
+                <span class="s2">"numba caches a .zip, or a frozen application, in the user's cache directory, and NUMBA_CACHE_DIR "</span>
+                <span class="sa">f</span><span class="s2">"has no effect here, because the source is not a file on disk: the path is too long for the file "</span>
+                <span class="sa">f</span><span class="s2">"system, so put that directory, </span><span class="si">{</span><span class="n">location</span><span class="si">}</span><span class="s2">, at a shorter path, through XDG_CACHE_HOME or HOME, or "</span>
+                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">silence</span><span class="si">}</span><span class="s2">"</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="s2">"numba caches a .zip, or a frozen application, in the user's cache directory, and NUMBA_CACHE_DIR "</span>
+            <span class="sa">f</span><span class="s2">"has no effect here, because the source is not a file on disk: make that directory, </span><span class="si">{</span><span class="n">location</span><span class="si">}</span><span class="s2">, "</span>
+            <span class="sa">f</span><span class="s2">"writable, or </span><span class="si">{</span><span class="n">silence</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="p">(</span>
+        <span class="s2">"NUMBA_CACHE_DIR has no effect here, because the source is not a file on disk: to cache, "</span>
+        <span class="sa">f</span><span class="s2">"install </span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2"> with its source files on disk, unpacked from any archive, or import it from a "</span>
+        <span class="sa">f</span><span class="s2">".zip holding its source files, which numba 0.61 and later cache in the user's cache directory; or "</span>
+        <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">silence</span><span class="si">}</span><span class="s2">"</span>
+    <span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="uncached_where_no_cache_can_be_written">
+<a class="viewcode-back" href="../../../numbox.core.configurations.html#numbox.core.configurations.uncached_where_no_cache_can_be_written">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">uncached_where_no_cache_can_be_written</span><span class="p">(</span><span class="n">options</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""``options`` as given, or with ``cache`` off after one warning where numba can write no cache for numbox.</span>
+
+<span class="sd">    numba sets a cached function up when it is decorated and raises ``RuntimeError`` there when no cache location</span>
+<span class="sd">    can be written: a read-only install whose user cache directory cannot be written either, or an import from an</span>
+<span class="sd">    ``.egg``, ``.whl`` or ``.pyz`` archive, which Spark's ``--py-files`` ships. For a ``.zip`` it takes the user's</span>
+<span class="sd">    cache directory without checking at decoration that it can be written, and the first write raises ``OSError``</span>
+<span class="sd">    instead. Either way the import died at the first decorated function, and nothing named the way out.</span>
+
+<span class="sd">    Every function numbox caches decorates under the one ``jit_options``, so the question is put here, once, for</span>
+<span class="sd">    a source file in each directory of the package that holds a module, and answered for the package. Where</span>
+<span class="sd">    numba can cache no function of one of those files the options come back with ``cache`` off and one warning</span>
+<span class="sd">    names the remedy: ``NUMBA_CACHE_DIR`` for a source file on disk, or a shorter one, or none, where the</span>
+<span class="sd">    location is too long for the file system; for a ``.zip``, the user's cache directory made writable, since</span>
+<span class="sd">    numba reads ``NUMBA_CACHE_DIR`` only for a source file on disk; for any other archive,</span>
+<span class="sd">    or a ``.pyc``-only install, or a ``.pyc`` in a ``.zip``, the source files on disk or a ``.zip`` holding them,</span>
+<span class="sd">    which numba 0.61 and later cache in the user's cache directory. ``NUMBOX_JIT_OPTIONS='{"cache": false}'``</span>
+<span class="sd">    turns caching off and silences the warning. An error that is not the cache's, as ``is_a_cache_error`` draws</span>
+<span class="sd">    the line, is raised as it was.</span>
+
+<span class="sd">    A ``.zip`` whose cache directory holds every entry but can no longer be written takes the fallback too, where</span>
+<span class="sd">    numba alone would have loaded the entries: the writability check is the rule numba applies to every other</span>
+<span class="sd">    placement, and the one the ``.zip`` locator is missing, reported as https://github.com/numba/numba/issues/10888.</span>
+
+<span class="sd">    Options without a ``cache`` key, as ``NUMBOX_JIT_OPTIONS`` can give, leave ``njit`` to its default, off, but</span>
+<span class="sd">    the sqlite virtual-table and table-valued-function callbacks cache under them, so they are asked about too and</span>
+<span class="sd">    come back with ``cache`` off, said, where the answer is no.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">options</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"cache"</span><span class="p">,</span> <span class="kc">True</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">options</span>
+    <span class="k">for</span> <span class="n">py_file</span> <span class="ow">in</span> <span class="n">_module_files</span><span class="p">():</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">check_cache_location</span><span class="p">(</span><span class="n">py_file</span><span class="p">,</span> <span class="n">LONGEST_CACHE_FILE_NAME</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">RuntimeError</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">,</span> <span class="ne">KeyError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">)</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">is_a_cache_error</span><span class="p">(</span><span class="n">error</span><span class="p">):</span>
+                <span class="k">raise</span>
+            <span class="n">failure</span> <span class="o">=</span> <span class="n">error</span>
+            <span class="k">break</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">options</span>
+    <span class="n">silence</span> <span class="o">=</span> <span class="s2">"NUMBOX_JIT_OPTIONS='{</span><span class="se">\"</span><span class="s2">cache</span><span class="se">\"</span><span class="s2">: false}' to turn caching off and silence this warning"</span>
+    <span class="n">remedy</span> <span class="o">=</span> <span class="n">cache_remedy</span><span class="p">(</span><span class="n">py_file</span><span class="p">,</span> <span class="n">failure</span><span class="p">,</span> <span class="n">silence</span><span class="p">)</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"numba cannot cache numbox here (</span><span class="si">{</span><span class="n">failure</span><span class="si">}</span><span class="s2">); it compiles without a cache. </span><span class="si">{</span><span class="n">remedy</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span>
+        <span class="ne">RuntimeWarning</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="o">**</span><span class="n">options</span><span class="p">,</span> <span class="s2">"cache"</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span></div>
+
+
+
+<span class="n">jit_options</span> <span class="o">=</span> <span class="n">uncached_where_no_cache_can_be_written</span><span class="p">(</span><span class="n">get_jit_options</span><span class="p">())</span>
+
+
+<span class="n">_PROXY_CACHE_STRICT_ENV</span> <span class="o">=</span> <span class="s2">"NUMBOX_PROXY_CACHE_STRICT"</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_strict_cache_mode</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""True when ``NUMBOX_PROXY_CACHE_STRICT`` selects strict validation of ``@proxy`` cache loads.</span>
+
+<span class="sd">    Strict mode makes every fail-open path in the ``numbox.core.proxy.proxy`` cache guard loud: a payload</span>
+<span class="sd">    that cannot be read, or an object whose container cannot be parsed, aborts the load with</span>
+<span class="sd">    ``UnvalidatedProxyCacheError`` instead of loading unchecked; and a detected stale alias raises</span>
+<span class="sd">    ``StaleProxyCacheError`` before the heal, leaving the stale entry on disk. It is a debugging aid, off by</span>
+<span class="sd">    default. Unlike ``jit_options`` above, the value is read on each call rather than once at import, so the</span>
+<span class="sd">    knob can be toggled within a process; the cost is one environment lookup against a multi-millisecond</span>
+<span class="sd">    cache load. Anything other than the unset/empty/``0``/``false``/``no``/``off`` set (case-insensitive)</span>
+<span class="sd">    enables it.</span>
+<span class="sd">    """</span>
+    <span class="n">value</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">_PROXY_CACHE_STRICT_ENV</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">value</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">value</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">""</span><span class="p">,</span> <span class="s2">"0"</span><span class="p">,</span> <span class="s2">"false"</span><span class="p">,</span> <span class="s2">"no"</span><span class="p">,</span> <span class="s2">"off"</span><span class="p">)</span>
+
+
+<span class="n">MAX_STR_LENGTH</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">**</span> <span class="mi">31</span> <span class="o">-</span> <span class="mi">1</span>
+
+<span class="c1">#: numba's `FunctionModel`, resolved once. Looking a data model up is type machinery and</span>
+<span class="c1">#: compiles nothing, which is what lets the layout be read here: `numbox.utils.lowlevel` and</span>
+<span class="c1">#: `numbox.utils.derive_wap` both need it on paths that must stay free of compilation side</span>
+<span class="c1">#: effects, and importing the former compiles a cached eager `@njit` helper.</span>
+<span class="n">_function_model</span> <span class="o">=</span> <span class="n">default_manager</span><span class="o">.</span><span class="n">lookup</span><span class="p">(</span><span class="n">FunctionType</span><span class="p">(</span><span class="n">void</span><span class="p">()))</span>
+
+<span class="c1">#: Number of slots in the `FunctionModel` struct: (c_addr, py_addr, jit_addr) on numba 0.61</span>
+<span class="c1">#: and later, (addr, pyaddr) before it. Read off the data model rather than inferred from the</span>
+<span class="c1">#: numba version, so the layout is discovered rather than assumed.</span>
+<span class="n">function_struct_size</span> <span class="o">=</span> <span class="n">_function_model</span><span class="o">.</span><span class="n">field_count</span>
+
+
+<div class="viewcode-block" id="function_struct_has">
+<a class="viewcode-back" href="../../../numbox.core.configurations.html#numbox.core.configurations.function_struct_has">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">function_struct_has</span><span class="p">(</span><span class="n">field</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Whether numba's `FunctionModel` carries a slot named `field`.</span>
+
+<span class="sd">    `get_field_position` is numba's own accessor for the question and raises `KeyError` when</span>
+<span class="sd">    the slot is absent, which is how a numba predating it reads.</span>
+<span class="sd">    """</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">_function_model</span><span class="o">.</span><span class="n">get_field_position</span><span class="p">(</span><span class="n">field</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="kc">True</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
