@@ -14,8 +14,8 @@ sys.path.insert(0, os.path.abspath('..'))
 
 
 project = "numbox"
-copyright = "2025, Mikhail Goykhman"
-author = "Mikhail Goykhman"
+copyright = "2026, NumbOx GitHub Repository Contributors"
+author = "NumbOx GitHub Repository Contributors"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

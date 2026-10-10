@@ -155,7 +155,7 @@ def _cached_at_or_uncached(py_file: str, jit_options: dict) -> dict:
         return jit_options
     try:
         check_cache_location(py_file, LONGEST_CACHE_FILE_NAME)
-    except (RuntimeError, OSError, ValueError) as error:
+    except (RuntimeError, OSError, KeyError, ValueError) as error:
         if not is_a_cache_error(error):
             raise
         failure = error

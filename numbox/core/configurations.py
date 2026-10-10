@@ -18,6 +18,10 @@ from numba.misc.appdirs import AppDirs
 from numba.core.types import FunctionType, void
 
 
+numba_version = int(version("numba").split(".")[1])
+assert numba_version >= 60, numba_version
+
+
 def get_jit_options():
     """
     E.g., export NUMBOX_JIT_OPTIONS='{"cache": false}'
@@ -87,17 +91,22 @@ def check_cache_location(py_file, longest_file_name=0):
 
 
 def is_a_cache_error(error):
-    """Whether ``error`` is numba's for a cache it cannot set up: no locator, or a location it cannot use.
+    """Whether ``error`` is numba's for a cache it cannot set up: no locator, a location it cannot use, or
+    missing source files(s) on numba>=0.68.
 
     numba itself passes over a location on any ``OSError`` from making its directory or writing a file there,
     permission denied, a read-only file system, a path into a file, a component too long, a full disk, so any
     ``OSError`` counts. So does the ``ValueError`` numba raises for an archive under a directory whose name
     holds ``.zip``: its ``.zip`` locator takes the file by that substring and then finds no ``.zip`` in it.
+    numba>=0.68 started hashing the source contents of the archive into the archive's cache stamp, therefore
+    missing .py raise KeyError.
     """
     if isinstance(error, OSError):
         return True
     if isinstance(error, ValueError):
         return "No zip file found" in str(error)
+    if isinstance(error, KeyError):
+        return numba_version >= 68 and "There is no item named" in str(error)
     return isinstance(error, RuntimeError) and "no locator available" in str(error)
 
 
@@ -237,6 +246,14 @@ def cache_remedy(py_file, failure, silence, package="numbox"):
     files on disk: a package built on numbox that puts the question for its own files with
     ``check_cache_location`` and ``is_a_cache_error`` passes its own name, as it passes ``check_cache_location`` a
     ``longest_file_name`` for its own functions, ``LONGEST_CACHE_FILE_NAME`` being numbox's.
+
+    On numba==0.68.0, ``KeyError`` caused by the Windows ZIP path separator
+    bug https://github.com/numba/numba/issues/10889 can be worked around by
+    disabling caching. The bug is scheduled to be fixed in 0.68.1.
+
+    On numba>=0.68, ``KeyError`` caused by missing .py source files in the ZIP
+    archive (when only compiled `.pyc` files are present) can be avoided by either
+    disabling caching or including all source files in the archive.
     """
     if os.path.exists(py_file):
         if isinstance(failure, OSError) and failure.errno == errno.ENAMETOOLONG:
@@ -249,18 +266,37 @@ def cache_remedy(py_file, failure, silence, package="numbox"):
         # numba itself passes a location it cannot make or write over, for a
         # source on disk, so the error here is the no-locator one.
         return f"Set NUMBA_CACHE_DIR to a writable directory, or {silence}"
+    if isinstance(failure, KeyError):
+        if "\\" in str(failure) and os.name == "nt":
+            return (
+                "Numba 0.68's ZIP cache locator uses Windows path separators for ZIP members, "
+                "see https://github.com/numba/numba/issues/10889"
+            )
+        return f"For numba>=0.68, put all source .py file(s) in .zip, or {silence}"
     if isinstance(failure, OSError) or getattr(sys, "frozen", False):
         # The .zip's error names the location numba picked, which is under
         # the user's cache directory; the frozen application's names nothing.
         location = getattr(failure, "filename", None) or AppDirs(appname="numba", appauthor=False).user_cache_dir
+        if (
+            isinstance(failure, OSError)
+            and failure.errno == errno.EISDIR and location and location.endswith(".zip")
+            and os.path.isdir(location) and py_file.startswith(location + os.sep)
+        ):
+            return (
+                f"the path {location} is a directory whose name ends in .zip, "
+                "which numba mistakes for the source archive; rename that "
+                "directory, or use a path without a .zip-named directory, "
+                f"or {silence}"
+            )
         if isinstance(failure, FileNotFoundError) and py_file.startswith(failure.filename + os.sep):
             # The stamp numba reads at decoration, of the archive the code
             # names: .pyc members compiled to name an archive since moved. A
             # location that cannot be made, under a dangling link, is ENOENT
             # too, and is not under the code's file.
+            suggestion = "" if numba_version >= 68 else "compile the archive's .pyc members to name its path now, or "
             return (
                 f"the module's code names {failure.filename}, which is not there: its .pyc was compiled to name "
-                "that path, so compile the archive's .pyc members to name its path now, or ship its source files; "
+                f"that path, {suggestion}ship its source files; "
                 f"or {silence}"
             )
         if isinstance(failure, OSError) and failure.errno == errno.ENAMETOOLONG:
@@ -316,7 +352,7 @@ def uncached_where_no_cache_can_be_written(options):
     for py_file in _module_files():
         try:
             check_cache_location(py_file, LONGEST_CACHE_FILE_NAME)
-        except (RuntimeError, OSError, ValueError) as error:
+        except (RuntimeError, OSError, KeyError, ValueError) as error:
             if not is_a_cache_error(error):
                 raise
             failure = error
@@ -355,10 +391,6 @@ def _strict_cache_mode():
 
 
 MAX_STR_LENGTH = 2 ** 31 - 1
-
-
-numba_version = int(version("numba").split(".")[1])
-assert numba_version >= 60, numba_version
 
 #: numba's `FunctionModel`, resolved once. Looking a data model up is type machinery and
 #: compiles nothing, which is what lets the layout be read here: `numbox.utils.lowlevel` and
