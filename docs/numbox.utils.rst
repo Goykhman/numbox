@@ -141,11 +141,16 @@ opcode encodes an *index* into ``co_consts`` rather than the value
 itself, so two methods differing only in a numeric literal
 (``return self.x + 1`` vs ``return self.x + 1000``) produce identical
 ``co_code``. With a shared anchor file both would resolve to the same
-``cache_subpath`` (numba's
-``_CacheLocator.get_suitable_cache_subpath`` derives the cache subdir
-from a hash of ``co_filename``) and the second to compile would
-silently load the first's binary. Per-content anchors segregate the
-two by ``cache_subpath`` so the collision never arises.
+cache files: numba names them after the anchor file's stem and the
+function's qualified name (``CacheImpl.get_filename_base``), in one
+directory for them all, the ``__pycache__`` beside the anchors where
+numba's in-tree locator takes them or, under ``NUMBA_CACHE_DIR`` or
+the user's cache directory, a subdirectory derived from a hash of the
+anchors' *directory* (``_CacheLocator.get_suitable_cache_subpath``),
+so the second to compile would silently load the first's binary.
+Per-content anchors segregate the two by the anchor's stem, which
+numba puts in the cache files' names, so the collision never arises;
+every anchor shares that one directory.
 
 Structural body changes -- different operators, additional
 statements, renamed variables -- produce different ``co_code`` and
@@ -178,16 +183,29 @@ reports a component too long as a syntax error, and the warning then
 offers the directory, quoting the error); with the names bounded, as below,
 the directory is the only part that can make it so, ``NUMBA_CACHE_DIR``
 or the user's cache directory, and ``NUMBA_CACHE_DIR`` at a shorter
-path moves the anchor out of either. The anchor's check writes names
-shorter than the longest numba writes for a struct, which carry its name
-and its methods', so a user cache directory within about 230 bytes of
-the path limit, 4096 on Linux, passes it and overflows at numba's first
-save instead, where numba's own error names the length; the remedy is
-the same. A ``NUMBA_CACHE_DIR`` that deep is too deep for the package's
-own files first, whose location under it appends their directory's path
-and whose check reserves the length of numba's files, so the package
-answers, with its remedy, and the generated code compiles under its
-answer.
+path moves the anchor out of either. A cache directory whose path is
+not UTF-8 is another: numba hashes the anchor's directory path as UTF-8
+to name its cache directory, and the warning asks for ``NUMBA_CACHE_DIR``
+at a UTF-8 path. The anchor's check writes a name as long as the
+longest numba writes for the functions it anchors, read off the
+generated code, the functions decorated themselves or defined within a
+decorated one, an overload's constructor among them: the stem, the
+function's qualified name, its line, Python's version, three digits
+for the data file's number, which numba counts from one without
+bound, and the 21 of the temporary name numba writes each
+file through, so a user cache directory
+or a ``NUMBA_CACHE_DIR`` within that of the path limit, 4096 on Linux,
+fails it and the generated code compiles without a cache after the
+warning; the check wrote a short name there, which numba's own check
+passes too, and numba's first save died through the struct's making
+with no warning at all, and a bound for any struct, 251, then turned
+caching off on a file system whose name limit is under it for a struct
+whose names were a quarter of that. The package's own check answers
+first only nearer the limit, within about 175 bytes of it: the package's
+location under ``NUMBA_CACHE_DIR`` is a directory named for its own, by
+its name and a hash of its path, and its check reserves the length of
+numba's files for the package's functions, so it fails only where those
+no longer fit; the generated code then compiles under its answer.
 
 The anchor's name carries the struct's or the function's, and numba
 names its cache files after the anchor and the qualified name of the

@@ -53,10 +53,10 @@ inferred-signature ``@njit`` argument keeps the numbox type and propagates, from
 numba 0.61 onward; on 0.60 there is no numbox type to keep and it discards along
 with the rest.
 
-From numba 0.61 onward ``.as_func`` inherits the mixed-container limit of any
-derive value: a tuple holding it alongside a plain ``CompileResultWAP`` no longer
-unifies, failing with a message-less ``AssertionError`` from
-``numba.core.utils.unified_function_type`` (fixed in numba==0.68.0).
+From numba 0.61 to 0.67 ``.as_func`` inherits the mixed-container limit of any
+derive value: a tuple holding it alongside a plain ``CompileResultWAP`` does not
+unify, failing with a message-less ``AssertionError`` from
+``numba.core.utils.unified_function_type``; numba 0.68.0 unifies it, as 0.60 did.
 See :doc:`numbox.core.work` for that limit and for why making the two types
 compare equal is not available as a fix.
 
