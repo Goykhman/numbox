@@ -20,7 +20,7 @@ from numbox.core.bindings.libc import getenv, memcpy
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.configurations import numba_version
 from numbox.core.proxy.proxy import proxy, proxy_if_available, make_proxy_name
-from numbox.utils.derive_wap import DeriveFunctionType, DeriveWAP, jit_addr_supported
+from numbox.utils.derive_wap import DeriveFunctionType, DeriveWAP
 from numbox.utils.lowlevel import array_data_p, get_unicode_data_p
 from test.auxiliary_utils import (
     assert_njit_cache_survives_subprocess_roundtrip,
@@ -213,11 +213,7 @@ def test_proxy_if_available_present_symbol_returns_real_proxy():
         return _call_lib_func("cos", (x,))
 
     assert hasattr(cos, "as_func")
-    if jit_addr_supported():
-        assert isinstance(cos.as_func, DeriveWAP)
-    else:
-        # `isinstance` would pass either way, since `DeriveWAP` subclasses this.
-        assert type(cos.as_func) is CompileResultWAP
+    assert isinstance(cos.as_func, DeriveWAP)
     assert abs(cos(0.5) - math.cos(0.5)) < 1e-15
 
 
@@ -480,9 +476,6 @@ def aux_raises(x):
     return x + 1.0
 
 
-_JIT_ADDR_REASON = "`FunctionModel` has no `jit_addr` slot (numba < 0.61), so `.as_func` stays a plain `CompileResultWAP`"
-
-
 def test_proxy_as_func_is_a_derive_where_the_jit_addr_slot_exists():
     """``.as_func`` is the handle that carries the propagating calling convention.
 
@@ -502,16 +495,11 @@ def test_proxy_as_func_is_a_derive_where_the_jit_addr_slot_exists():
 
     as_func = scaled.as_func
     assert isinstance(as_func, CompileResultWAP)
-    if jit_addr_supported():
-        assert isinstance(as_func, DeriveWAP)
-        assert isinstance(typeof(as_func), DeriveFunctionType)
-        assert as_func.jit_address != 0, "the callconv entry point is what fills `jit_addr`"
-    else:
-        assert type(as_func) is CompileResultWAP
-        assert type(typeof(as_func)) is FunctionType
+    assert isinstance(as_func, DeriveWAP)
+    assert isinstance(typeof(as_func), DeriveFunctionType)
+    assert as_func.jit_address != 0, "the callconv entry point is what fills `jit_addr`"
 
 
-@pytest.mark.skipif(not jit_addr_supported(), reason=_JIT_ADDR_REASON)
 def test_proxy_as_func_as_an_njit_argument_propagates_a_raising_body():
     """An exception raised inside a proxied body reaches the caller through ``.as_func``.
 
@@ -529,7 +517,6 @@ def test_proxy_as_func_as_an_njit_argument_propagates_a_raising_body():
         call_through(aux_raises.as_func, 1.0)
 
 
-@pytest.mark.skipif(not jit_addr_supported(), reason=_JIT_ADDR_REASON)
 def test_proxy_as_func_as_a_jitted_constant_propagates_a_raising_body():
     """The same contract on the constant path, which is lowered separately.
 
@@ -588,11 +575,10 @@ def test_proxy_as_func_declared_as_a_plain_function_type_still_discards():
     only the returned value is asserted.
     """
     as_func = aux_raises.as_func
-    if jit_addr_supported():
-        assert isinstance(as_func, DeriveWAP), (
-            f"the value handed in is a {type(as_func).__name__}, so the declared plain "
-            f"`FunctionType` never reaches `DeriveFunctionType.can_convert_to`"
-        )
+    assert isinstance(as_func, DeriveWAP), (
+        f"the value handed in is a {type(as_func).__name__}, so the declared plain "
+        f"`FunctionType` never reaches `DeriveFunctionType.can_convert_to`"
+    )
 
     @njit(float64(FunctionType(float64(float64)), float64))
     def call_through_declared_plain(f, x):
@@ -602,7 +588,6 @@ def test_proxy_as_func_declared_as_a_plain_function_type_still_discards():
     assert call_through_declared_plain(as_func, 1.0) == 0.0
 
 
-@pytest.mark.skipif(not jit_addr_supported(), reason=_JIT_ADDR_REASON)
 def test_proxy_as_func_mixed_with_a_numba_native_wrapper_fails_to_unify_for_numba_lt_68_and_works_for_numba_gte_68():
     """Characterization of a narrowing: a heterogeneous tuple of function values is refused
     for numba<0.68.

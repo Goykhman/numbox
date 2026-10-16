@@ -51,9 +51,6 @@ Limits
 survive: a value handed from Python into a parameter *declared* as a plain
 ``FunctionType`` degrades to the C convention on the way in.
 
-Where numba has no such slot :func:`jit_addr_supported` is false, the whole mechanism
-is inert and ``cres`` returns a plain ``CompileResultWAP``.
-
 Standing on numba
 -----------------
 
@@ -75,26 +72,14 @@ from numba.experimental.function_type import (
 )
 from numba.extending import NativeValue, box, register_model, unbox
 
-from numbox.core.configurations import function_struct_has
 
-
-__all__ = ["DeriveFunctionType", "DeriveWAP", "jit_addr_supported", "rewrap_derive"]
+__all__ = ["DeriveFunctionType", "DeriveWAP", "rewrap_derive"]
 
 
 #: Where :func:`rewrap_derive` parks the upgraded wrapper on the object it upgrades,
 #: so that the address stored in ``py_addr`` stays backed for as long as the caller
 #: holds the original.
 _UPGRADED_ATTR = "_numbox_derive_wap"
-
-
-def jit_addr_supported() -> bool:
-    """Whether the running numba exposes the ``jit_addr`` slot.
-
-    The slot was added to ``FunctionModel`` in numba 0.61. Where it is absent the
-    mechanism has nothing to populate, so numbox leaves first-class calls to numba
-    rather than shipping a half-installed variant.
-    """
-    return function_struct_has("jit_addr")
 
 
 class DeriveFunctionType(FunctionType):
@@ -296,8 +281,6 @@ def rewrap_derive(derive):
     released memory. Hanging it off the original ties its lifetime to the object
     the caller already holds, which is the lifetime the address assumed all along.
     """
-    if not jit_addr_supported():
-        return derive
     if not isinstance(derive, CompileResultWAP) or isinstance(derive, DeriveWAP):
         return derive
     upgraded = getattr(derive, _UPGRADED_ATTR, None)

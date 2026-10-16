@@ -60,7 +60,7 @@ warning instead.
   is ``NUMBA_CACHE_DIR`` pointed at a writable directory; where it is
   set and numba passed it over, the warning names it and asks for a writable directory at a short path, since
   numba passes over one too deep to make its directory in as it does an unwritable one; and where
-  ``NUMBA_CACHE_LOCATOR_CLASSES``, from numba 0.62, leaves the user-provided locator out, it is the locations
+  ``NUMBA_CACHE_LOCATOR_CLASSES`` leaves the user-provided locator out, it is the locations
   the list names made writable, numba never reading the variable. Where the
   location is too long for the file system, the remedy is for the location the error names: numba takes a
   directory under ``NUMBA_CACHE_DIR`` where that is set, else the ``__pycache__`` beside the source, else a
@@ -186,8 +186,8 @@ warning instead.
   error naming a location that is none of numba's is told that location as the error names it, and one naming
   no file is told the locations numba could have taken.
 - For a ``.zip``, or a frozen application, it is the user's cache directory made writable, or room made there,
-  with the reason the error gives, a full disk or permissions: a ``.zip`` is the one archive numba caches, from
-  0.61 on, and it caches it there, taking the directory without checking that it can be written; the error names
+  with the reason the error gives, a full disk or permissions: a ``.zip`` is the one archive numba caches
+  and it caches it there, taking the directory without checking that it can be written; the error names
   that location, or a file numba's first save writes in it, and the location is told with the reason; an error
   naming a location that is none of numba's, under the list and in its order, is told that location as the error
   names it, as for a source on disk, with nothing of what moves the user's cache directory and nothing of where

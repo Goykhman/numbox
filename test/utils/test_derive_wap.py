@@ -12,17 +12,11 @@ from numba.core.types import FunctionType, float64
 from numba.core.types.function_type import CompileResultWAP
 
 import numbox.utils.derive_wap as derive_wap_module
-from numbox.core.configurations import numba_version
 from numbox.core.proxy.proxy import proxy
 from numbox.utils.derive_wap import DeriveFunctionType, DeriveWAP, rewrap_derive
 from numbox.core.work.work import make_work
 from numbox.core.work.work_utils import make_work_helper
 from numbox.utils.highlevel import cres
-
-
-pytestmark = pytest.mark.skipif(
-    numba_version < 61, reason="`jit_addr` slot added to `FunctionModel` in numba 0.61"
-)
 
 
 def _raise_when_positive(a):

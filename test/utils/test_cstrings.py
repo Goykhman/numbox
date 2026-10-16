@@ -2,6 +2,7 @@ from contextlib import ExitStack
 from ctypes import c_char
 
 from numba import njit
+from numba.core.errors import UnsupportedBytecodeError
 import pytest
 
 from numbox.utils.cstrings import c_string
@@ -62,14 +63,6 @@ def test_context_manager_in_njit_raises():
     test breaks because numba started supporting it, revisit the
     cstrings module docstring's JIT caveat.
 
-    Catches the broad ``Exception`` deliberately. The exception class
-    numba raises for this construct varies across the support matrix:
-
-    - numba 0.60.x raises ``UnsupportedError`` (inherits from ``NumbaError``)
-    - numba 0.61.0+ raises ``UnsupportedBytecodeError`` (inherits from
-      ``Exception`` directly, NOT ``NumbaError`` — see numba commit
-      ``57a53878ca``)
-
     Since they share no common numba-specific base, ``Exception`` is
     the only ancestor that catches both. The test's intent is to
     assert "compilation fails" — any exception means numba rejected
@@ -81,7 +74,7 @@ def test_context_manager_in_njit_raises():
         with c_string("x") as p:
             return p
 
-    with pytest.raises(Exception):
+    with pytest.raises(UnsupportedBytecodeError):
         kernel()
 
 

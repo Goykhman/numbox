@@ -75,7 +75,7 @@ The three slots are directly observable through
 :func:`numbox.utils.lowlevel.get_func_tuple`, which is the clearest way to see what the type
 adds. ``jit_addr`` is populated and matches the entry point the wrapper captured, while
 numba's own ``_get_jit_address`` still yields 0 for the same value, because it resolves an
-address only for a ``Dispatcher``. The example needs numba 0.61 or later:
+address only for a ``Dispatcher``.
 
 .. code-block:: python
 
@@ -104,8 +104,8 @@ the tuple has two entries rather than three, and ``cres`` returns a plain
 ``CompileResultWAP`` rather than a :class:`~numbox.utils.derive_wap.DeriveWAP`, because
 without the slot there is nothing for the mechanism to populate.
 
-:func:`numbox.utils.highlevel.cres` is not the only source of one. From numba 0.61 onward a
-``@proxy`` binding's ``.as_func`` is a :class:`~numbox.utils.derive_wap.DeriveWAP` too,
+:func:`numbox.utils.highlevel.cres` is not the only source of one.
+A ``@proxy`` binding's ``.as_func`` is a :class:`~numbox.utils.derive_wap.DeriveWAP` too,
 minted from the proxied body's compile result, with the same exception semantics and the
 same effect on a jitted caller that reaches it as a constant. See :doc:`numbox.core.proxy`.
 

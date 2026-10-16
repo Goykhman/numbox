@@ -11,8 +11,8 @@ from numbox.utils.highlevel import cres
 from numbox.utils.lowlevel import (
     _cast_int_to_void_p, _cast_void_p_to_int,
     cast, deref_payload, extract_struct_member, get_func_p_as_int_from_func_struct,
-    get_func_tuple, get_str_from_p_as_int, get_unicode_data_p, load_at, numba_version,
-    store_at, tuple_of_struct_ptrs_as_int, uniformize_tuple_of_structs
+    get_func_tuple, get_str_from_p_as_int, get_unicode_data_p, load_at, store_at,
+    tuple_of_struct_ptrs_as_int, uniformize_tuple_of_structs
 )
 from test.auxiliary_utils import collect_and_run_tests, deref_int64_intp, str_from_p_as_int
 from test.common_structrefs import ll_make_s4, S1, S1Type, S12, S12Type, S2
@@ -122,8 +122,6 @@ def test_get_func_p_from_func_struct():
     assert get_func_p_as_int_from_func_struct(func) == func.address
 
 
-@pytest.mark.skipif(numba_version < 61,
-                    reason="_get_jit_address added in numba 0.61")
 def test_get_func_tuple():
     from numba.experimental.function_type import _get_jit_address
 
@@ -139,8 +137,7 @@ def test_get_func_tuple():
     assert func_tup[2] != 0, "populated `jit_addr` in `FunctionModel` for cres"
     assert func_tup[2] == func.jit_address, """
 `jit_addr` holds the numba calling convention entry point, which is the one that can carry
-an exception out of a first-class call. The slot was added to the FunctionType data model in
-numba==0.61, https://github.com/numba/numba/blob/release0.61/numba/experimental/function_type.py#L65
+an exception out of a first-class call.
 """
     assert _get_jit_address(func, func_sig) == 0, """
 numba fills the slot only for a Dispatcher and yields 0 for everything else, so a cres would

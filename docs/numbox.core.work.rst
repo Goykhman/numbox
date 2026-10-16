@@ -560,11 +560,6 @@ internals are patched: nothing replaces numba behaviour, it only registers again
 
 These limits are worth knowing:
 
-- On numba 0.60 the `jit_addr` slot does not exist. `cres` returns a plain
-  ``CompileResultWAP`` there and the exception is still discarded, leaving a zero-filled
-  `data` and a set `derived`. See
-  `numba issue 8246 <https://github.com/numba/numba/issues/8246>`_ for the underlying
-  behaviour.
 - A `derive` built directly against numba as a ``CompileResultWAP`` rather than through
   `cres` carries no entry point to call. :func:`numbox.core.work.work.make_work` upgrades
   such a value when it is passed from Python, because the check is on the object's class.
@@ -597,7 +592,7 @@ These limits are worth knowing:
   A lazily compiled ``@njit`` dispatcher in the mix is the one subcase that reads
   differently: unification accepts it, and numbox's guard then rejects it at the unboxing
   boundary with a ``TypeError`` naming the offending type.
-  From numba 0.61 onward a ``@proxy`` binding's ``.as_func`` is a `DeriveFunctionType`
+  A ``@proxy`` binding's ``.as_func`` is a `DeriveFunctionType`
   value as well (see :doc:`numbox.core.proxy`), so it meets this limit identically: a
   tuple mixing it with a plain ``CompileResultWAP`` fails on the same assertion, for numba<0.68,
   where before it unified and returned a value.

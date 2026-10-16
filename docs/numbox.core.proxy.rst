@@ -26,18 +26,16 @@ Passing it as an argument is what keeps the *receiving* function cacheable. Hand
 cache index key differs in every process. The receiving function then never matches
 what an earlier run wrote: it recompiles on every run and leaves another overload
 behind in the index. Hand it ``.as_func`` and the parameter types as a function type
-instead, ``FunctionType[float64(float64)]`` on numba 0.60 and
-``DeriveFunctionType[float64(float64)]`` from 0.61, which is structural and identical
+instead, ``DeriveFunctionType[float64(float64)]``, which is structural and identical
 in every process, so the receiving function is compiled once and loaded from the
 cache in every later one.
 
-From numba 0.61 onward ``.as_func`` is a
+``.as_func`` is a
 :class:`~numbox.utils.derive_wap.DeriveWAP` typed as
 :class:`~numbox.utils.derive_wap.DeriveFunctionType`, so the ``jit_addr`` slot of
 its data model carries the numba calling convention entry point and an exception
 raised inside the proxied body propagates out of a first-class call instead of
-being discarded. numba 0.60 has no such slot, so ``.as_func`` is a plain
-``CompileResultWAP`` there and the exception is still discarded. ``DeriveWAP``
+being discarded. ``DeriveWAP``
 subclasses ``CompileResultWAP``, so ``isinstance`` passes on either version and
 only ``type(...) is CompileResultWAP`` tells the two apart.
 
@@ -49,14 +47,12 @@ value. Handing ``.as_func`` from Python into a jitted parameter *declared* as a
 plain ``FunctionType`` discards as well, because the value degrades to the C
 convention on the way in; ``DeriveFunctionType.can_convert_to`` permits that
 conversion deliberately, so such a call site goes on compiling unchanged. An
-inferred-signature ``@njit`` argument keeps the numbox type and propagates, from
-numba 0.61 onward; on 0.60 there is no numbox type to keep and it discards along
-with the rest.
+inferred-signature ``@njit`` argument keeps the numbox type and propagates.
 
-From numba 0.61 to 0.67 ``.as_func`` inherits the mixed-container limit of any
+Below numba 0.68.0, ``.as_func`` inherits the mixed-container limit of any
 derive value: a tuple holding it alongside a plain ``CompileResultWAP`` does not
 unify, failing with a message-less ``AssertionError`` from
-``numba.core.utils.unified_function_type``; numba 0.68.0 unifies it, as 0.60 did.
+``numba.core.utils.unified_function_type``; numba 0.68.0 unifies it.
 See :doc:`numbox.core.work` for that limit and for why making the two types
 compare equal is not available as a fix.
 
@@ -131,8 +127,7 @@ declares the ``jit_addr`` slot symbolically with ``context.declare_function`` an
 links the proxied body's compile result in with ``add_linking_library``. The call
 site then uses only that slot, so the ``c_addr`` and ``py_addr`` dynamic globals
 are dead and get eliminated before numba scans the final module, and the caller
-caches. This holds from numba 0.61 onward; on 0.60 ``.as_func`` is a plain
-``CompileResultWAP`` and the caller stays uncacheable as before.
+caches.
 
 What such a caller caches is the proxied body's machine code, linked in. The
 inline at work on this path is not the ``inline='always'`` the decorator puts on

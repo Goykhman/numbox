@@ -6,7 +6,6 @@ from numba import njit
 from numba.core.itanium_mangler import mangle_type_or_value
 from numba.core.types import Type
 from numba.core.types.functions import Dispatcher
-from numba.core.types.function_type import CompileResultWAP
 from numba.core.typing.templates import Signature
 from numba.experimental.function_type import FunctionType
 from numba.experimental.structref import define_boxing, new, StructRefProxy
@@ -15,7 +14,7 @@ from textwrap import dedent, indent
 from typing import Callable, Iterable, Optional
 
 from numbox.core.configurations import jit_options as jit_options_
-from numbox.utils.derive_wap import DeriveWAP, jit_addr_supported
+from numbox.utils.derive_wap import DeriveWAP
 from numbox.utils.fingerprint import (
     _Unfingerprintable, _canon_value, _fingerprint_function,
     _fingerprint_function_best_effort, _loaded_global_names,
@@ -73,8 +72,7 @@ def cres(sig, **kwargs):
     exception raised inside the compiled body propagates out of a first-class
     call instead of being discarded. See
     :mod:`numbox.utils.derive_wap` for why that requires a numbox-owned
-    type. On numba 0.60, which has no ``jit_addr`` slot to populate, a plain
-    ``CompileResultWAP`` is returned and the previous behaviour is kept.
+    type.
     """
     if not isinstance(sig, Signature):
         raise ValueError(f"Expected a single signature, found {sig} of type {type(sig)}")
@@ -84,7 +82,7 @@ def cres(sig, **kwargs):
         sigs = func_jit.nopython_signatures
         assert len(sigs) == 1, f"Ambiguous signature, {sigs}"
         func_cres = func_jit.get_compile_result(sigs[0])
-        wrapper = DeriveWAP(func_cres) if jit_addr_supported() else CompileResultWAP(func_cres)
+        wrapper = DeriveWAP(func_cres)
         # Keep the body reachable from the wrapper. The compile result identifies it only by
         # a compiled address and a mangled name carrying a per-process counter, so a body
         # that captures this value has nothing process-stable to fingerprint without it.

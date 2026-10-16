@@ -9,7 +9,6 @@ import pytest
 from numba import njit, cfunc, vectorize
 from numba.core.dispatcher import Dispatcher
 from numba.core.types import float64
-from numbox.core.configurations import numba_version
 from numbox.core.variable.compile_kernel import (
     _generate_body, _compile, compile_kernel, CompiledKernel,
 )
@@ -297,9 +296,6 @@ def test_cres_formula():
     assert ck.execute({"ext": {"p": 1.5, "q": 2.0}}) == {"variables.u": -0.5}
 
 
-@pytest.mark.skipif(
-    numba_version < 61, reason="`jit_addr` slot added to `FunctionModel` in numba 0.61"
-)
 def test_a_raising_cres_formula_propagates():
     """`cres` is a general utility, not a `Work` detail, so the exception contract it
     carries reaches this subsystem too. A formula that raises used to leave a

@@ -463,31 +463,16 @@ def _name_limit(location):
         return 255
 
 
-def _class_named(module, name):
-    """The class named ``name`` in ``module``, or None if the module has no such class.
-
-    numba spells its locator classes without a leading underscore from 0.62; under 0.60 and 0.61 the underscore is
-    tried too, because numba put one before the names until then. Those two versions read no
-    ``NUMBA_CACHE_LOCATOR_CLASSES``, so the underscore is tried under them alone. That leaves out a listed name that
-    numba refuses from 0.62, ``CacheLocator`` for its base class, just as numba leaves it out."""
-    cls = getattr(module, name, None)
-    if cls is None and numba_version < 62:
-        cls = getattr(module, "_" + name, None)
-    return cls
-
-
 def _numba_locator(name):
-    """numba's cache locator class of this name, or None if this numba has none.
-
-    The ``.zip`` locator arrived in 0.61."""
+    """numba's cache locator class of this name, or None if there's none."""
     from numba.core import caching
-    return _class_named(caching, name)
+    return getattr(caching, name, None)
 
 
 def _locators(listed):
     """numba's cache locator classes in the order numba tries them.
 
-    ``listed`` is ``NUMBA_CACHE_LOCATOR_CLASSES`` as numba 0.62 and later read it. Each entry is a class of numba's
+    ``listed`` is ``NUMBA_CACHE_LOCATOR_CLASSES``. Each entry is a class of numba's
     caching module, by its name, or any class by its dotted path, resolved as numba resolves it. If ``listed`` is
     empty, the order is numba's own.
 
@@ -506,7 +491,7 @@ def _locators(listed):
         if "." in entry:
             module_path, class_name = entry.rsplit(".", 1)
             try:
-                cls = _class_named(importlib.import_module(module_path), class_name)
+                cls = getattr(importlib.import_module(module_path), class_name, None)
             except Exception:
                 # importlib's errors, a relative path's TypeError and whatever
                 # the module raises on import. numba raises these as its own
@@ -756,7 +741,7 @@ def cache_remedy(py_file, failure, silence, package="numbox"):
     no locator listed after its ``.zip`` locator for a path with ``.zip`` in it, because that locator takes the file
     without trying its location, so a location that one of those would give is none of numba's.
 
-    ``NUMBA_CACHE_LOCATOR_CLASSES``, which numba 0.62 and later read, decides the order. Each entry is one of three
+    ``NUMBA_CACHE_LOCATOR_CLASSES`` decides the order. Each entry is one of three
     things: a class of numba's caching module; a subclass of such a class, by its dotted path, which takes what its
     parent takes, caches where its parent does, and is told as its parent is; or a class outside numba's families,
     with a ``from_function`` and a place of its own, which takes whatever its ``from_function`` takes when asked with
@@ -1666,7 +1651,7 @@ def cache_remedy(py_file, failure, silence, package="numbox"):
                     f"NUMBA_CACHE_LOCATOR_CLASSES, {listed}, takes nothing without"
                 )
         a_zip = (
-            "import it from a .zip holding its source files, which numba 0.61 and later cache in the user's cache "
+            "import it from a .zip holding its source files, which numba caches in the user's cache "
             "directory"
         )
         found = _archive_above(py_file)
@@ -1692,7 +1677,7 @@ def cache_remedy(py_file, failure, silence, package="numbox"):
                 "locator takes for the archive first" if in_the_way else "")
             a_zip = (
                 f"rename the archive, {found[0]}, to end in .zip, lower-case, which numba's .zip locator looks for in "
-                f"the path, with its source files in it{moved}, so that numba 0.61 and later cache it in the user's "
+                f"the path, with its source files in it{moved}, so that numba caches it in the user's "
                 "cache directory"
             )
         if listed_without(for_a_zip):
@@ -2142,7 +2127,7 @@ def uncached_where_no_cache_can_be_written(options):
     directory at a shorter path, if the path is too long; or the ``.zip`` locator listed, if
     ``NUMBA_CACHE_LOCATOR_CLASSES`` leaves it out. numba reads ``NUMBA_CACHE_DIR`` only for a source file on disk.
     For any other kind of archive, a ``.pyc``-only install or a ``.pyc`` in a ``.zip``, the remedy is the source
-    files on disk, or a ``.zip`` holding them, which numba 0.61 and later cache in the user's cache directory. The
+    files on disk, or a ``.zip`` holding them, which numba caches in the user's cache directory. The
     same goes, from numba 0.68, for a ``.zip`` member whose archive holds no source for it, a ``.pyc`` alone, because
     numba then reads the member's source from the archive for the stamp; the member is named. On Windows under numba
     0.68.0 every member is such a member, because the name is built with the platform's separator (numba issue
@@ -2209,20 +2194,5 @@ MAX_STR_LENGTH = 2 ** 31 - 1
 #: effects, and importing the former compiles a cached eager `@njit` helper.
 _function_model = default_manager.lookup(FunctionType(void()))
 
-#: Number of slots in the `FunctionModel` struct: (c_addr, py_addr, jit_addr) on numba 0.61
-#: and later, (addr, pyaddr) before it. Read off the data model rather than inferred from the
-#: numba version, so the layout is discovered rather than assumed.
+#: Slots in the `FunctionModel` struct: (c_addr, py_addr, jit_addr)
 function_struct_size = _function_model.field_count
-
-
-def function_struct_has(field: str) -> bool:
-    """Whether numba's `FunctionModel` carries a slot named `field`.
-
-    `get_field_position` is numba's own accessor for the question and raises `KeyError` when
-    the slot is absent, which is how a numba predating it reads.
-    """
-    try:
-        _function_model.get_field_position(field)
-    except KeyError:
-        return False
-    return True

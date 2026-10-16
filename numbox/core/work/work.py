@@ -18,9 +18,7 @@ from numbox.core.configurations import jit_options
 from numbox.core.work.lowlevel_work_utils import ll_make_work, WorkTypeClass
 from numbox.core.work.node import NodeType
 from numbox.core.work.node_base import NodeBase, NodeBaseType
-from numbox.utils.derive_wap import (
-    DeriveFunctionType, jit_addr_supported, rewrap_derive
-)
+from numbox.utils.derive_wap import DeriveFunctionType, rewrap_derive
 from numbox.utils.lowlevel import (
     extract_struct_member, _cast, _get_func_tuple, is_not_null, get_func_p_from_func_struct, get_ll_func_sig
 )
@@ -51,20 +49,18 @@ class Work(NodeBase):
         Heterogeneous tuple of `Work` instances that this `Work` instance depends on.
     derive : FunctionType
         Function of the signature determined by the data types of `sources` and `data`.
-        On numba 0.61 and later an exception raised inside it propagates out of
+        An exception raised inside it propagates out of
         `calculate`, leaving `data` untouched and `derived` unset, so the node can be
         calculated again once the cause is addressed. numba's error path holds the
         references it took, so a node whose derive has ever failed stays pinned, along
         with what it references, for the life of the process; retrying the same node
-        adds nothing further. Several cases still discard the
-        exception and cache a zero-filled `data`: numba 0.60, which has no `jit_addr`
-        slot to carry the entry point that can unwind; a plain `CompileResultWAP` built
-        directly against numba rather than through `numbox.utils.highlevel.cres` and
-        reached from jitted scope, where it cannot be upgraded (a `@proxy` binding's
-        `.as_func` is not one of these on numba 0.61 and later: it is a `DeriveWAP` and
-        propagates on those same jitted-scope paths); a `cfunc`, which is not upgraded
-        either; and a derive handed from Python to a jitted parameter that is declared
-        as a plain `FunctionType`, which degrades on the way in.
+        adds nothing further. Some cases still discard the exception and cache a
+        zero-filled `data`: a plain `CompileResultWAP` built directly against numba rather
+        than through `numbox.utils.highlevel.cres` and reached from jitted scope, where it
+        cannot be upgraded (a `@proxy` binding's `.as_func` is not one of these: it is a
+        `DeriveWAP` and propagates on those same jitted-scope paths); a `cfunc`, which is
+        not upgraded either; and a 'derive' handed from Python to a jitted parameter that
+        is declared as a plain `FunctionType`, which degrades on the way in.
     derived : int8
         Flag indicating whether the `data` has already been calculated.
     node : NodeType
@@ -239,9 +235,6 @@ def _call_derive(typingctx: Context, derive_ty: FunctionType, sources_ty: Tuple)
             derive_ty_ll = get_ll_func_sig(context, derive_ty)
             derive_p = builder.bitcast(derive_p_raw, derive_ty_ll.as_pointer())
             return builder.call(derive_p, derive_args)
-
-        if not jit_addr_supported():
-            return emit_c_call()
 
         jit_addr = cgutils.create_struct_proxy(derive_ty)(
             context, builder, value=derive_struct).jit_addr

@@ -30,9 +30,7 @@ import textwrap
 
 import pytest
 
-from numbox.core.configurations import numba_version
 from numbox.core.proxy.proxy import _undefined_symbols
-from numbox.utils.derive_wap import jit_addr_supported
 
 _EDITED = "proxied_binding.py"
 _HEALED = {"call_scale": "compiled", "call_scale2": "compiled", "call_offset": "served", "plain": "served"}
@@ -407,18 +405,6 @@ def test_a_const_reference_caller_becomes_cacheable(tmp_path):
     warm = _warm(probe, env)
     assert warm["STATS_disp_offset"] == "served", f"the control caller recompiled: {_stats(warm, _CONST_FNS)}"
     refused = 'Cannot cache compiled function "const_scale"'
-    if numba_version < 61:
-        assert warm["STATS_const_scale"] == "compiled", (
-            f"a version with no `jit_addr` slot cached the const caller: {_stats(warm, _CONST_FNS)}"
-        )
-        assert refused in warm["WARNINGS"], f"the refusal went unannounced: {warm['WARNINGS']}"
-        assert (warm["NBI_const_scale"], warm["NBC_const_scale"]) == ("0", "0"), (
-            f"a declined caller still wrote cache files: {warm['NBI_const_scale']}/{warm['NBC_const_scale']}"
-        )
-        assert warm["STATS_const_offset"] == "compiled", (
-            f"the second const caller cached where the first did not: {_stats(warm, _CONST_FNS)}"
-        )
-        return
 
     assert warm["STATS_const_scale"] == "served", f"the const caller did not cache: {_stats(warm, _CONST_FNS)}"
     assert refused not in cold["WARNINGS"], f"numba declined the const caller: {cold['WARNINGS']}"
@@ -453,11 +439,6 @@ def test_a_const_reference_caller_serves_a_stale_body_after_an_edit(tmp_path):
 
     _edit_body(tmp_path)
     fields = _fields(_run_probe(probe, env))
-    if numba_version < 61:
-        assert _results(fields, _CONST_NEW_BODY) == _CONST_NEW_BODY, (
-            f"a version with no `jit_addr` slot served a stale body: {_results(fields, _CONST_NEW_BODY)}"
-        )
-        return
 
     assert fields["RESULT_const_scale"] == _CONST_OLD_BODY["const_scale"], (
         f"the const caller healed -- if the guard now covers a linked-in body this test has done its job: "
@@ -768,13 +749,6 @@ def test_a_const_reference_caller_calls_a_binding_that_disappeared(tmp_path):
     cold_env["SYMBOL_PRESENT"] = "0"
     cold = _fields(_run_probe(probe, cold_env))
     assert cold.get("RAISED") == "TypingError", f"a cold cache did not reach the clean typing error: {cold}"
-
-    if not jit_addr_supported():
-        assert warm.get("RAISED") == "TypingError", (
-            "a numba with no `jit_addr` slot cannot cache a const-reference caller at all, so the warm run has "
-            f"to recompile and reach the same error the cold one did: {warm}"
-        )
-        return
 
     assert warm.get("RESULT") == "11.0", f"the warm run stopped serving the vanished binding: {warm}"
     assert warm["STATS"] == "served", f"that number was recompiled rather than loaded from the cache: {warm}"
