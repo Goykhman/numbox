@@ -300,11 +300,7 @@ def test_a_raising_cres_formula_propagates():
     """`cres` is a general utility, not a `Work` detail, so the exception contract it
     carries reaches this subsystem too. A formula that raises used to leave a
     zero-filled result and no signal at all; it now surfaces to the caller of
-    `execute`, with no `Work` anywhere in the picture.
-
-    Skipped on numba 0.60, which has no `jit_addr` slot: `cres` returns a plain
-    `CompileResultWAP` there and the formula still discards its exception, which is
-    the documented behaviour rather than a regression."""
+    `execute`, with no `Work` anywhere in the picture."""
     def blow_up(a, b):
         if a > b:
             raise ValueError("formula boom")

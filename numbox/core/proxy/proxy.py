@@ -332,17 +332,17 @@ def proxy(sig, jit_options: Optional[dict] = None):
     for the main signature. Cacheable as a called jitted function (via the
     dispatcher); passable as a function-type argument (via ``.as_func``).
 
-    `.as_func`` is a ``DeriveWAP`` typed as ``DeriveFunctionType``,
+    ``.as_func`` is a ``DeriveWAP`` typed as ``DeriveFunctionType``,
     so an exception raised inside the proxied body propagates out of a first-class call made
     through ``.as_func`` instead of being discarded; see :mod:`numbox.utils.derive_wap`.
-    Calling the dispatcher itself is unchanged on every version: that path goes through the
+    Calling the dispatcher itself still discards: that path goes through the
     body's cfunc wrapper, which discards the exception and zero-fills the return value. Handing
     ``.as_func`` from Python into a parameter *declared* as a plain ``FunctionType`` also still
     discards, which ``DeriveFunctionType.can_convert_to`` documents.
 
     Reaching ``.as_func`` as a compile-time constant from a ``cache=True`` jitted caller makes
-    that caller cacheable, and its cached binary then binds the proxied body's machine code:
-    after an edit to the body such a caller does not reliably pick it up, and which body it does
+    that caller cacheable, and its cached binary then binds the proxied body's machine code.
+    After an edit to the body such a caller does not reliably pick it up, and which body it does
     run is not single-valued, so the numba cache has to be cleared rather than trusted to notice.
     The stale-alias guard below does not cover that caller, because a constant reference emits
     no alias for it to check; for the same reason it does not catch a ``proxy_if_available``

@@ -99,11 +99,6 @@ address only for a ``Dispatcher``.
     assert jit_addr == add.jit_address
     assert _get_jit_address(add, sig) == 0
 
-Nothing above runs on an earlier numba. ``_get_jit_address`` does not exist there to import,
-the tuple has two entries rather than three, and ``cres`` returns a plain
-``CompileResultWAP`` rather than a :class:`~numbox.utils.derive_wap.DeriveWAP`, because
-without the slot there is nothing for the mechanism to populate.
-
 :func:`numbox.utils.highlevel.cres` is not the only source of one.
 A ``@proxy`` binding's ``.as_func`` is a :class:`~numbox.utils.derive_wap.DeriveWAP` too,
 minted from the proxied body's compile result, with the same exception semantics and the

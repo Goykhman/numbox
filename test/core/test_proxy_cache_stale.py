@@ -390,9 +390,7 @@ def test_a_const_reference_caller_becomes_cacheable(tmp_path):
     dynamic globals (such as ctypes pointers and large global arrays)`` -- and leaves the cache directory with
     nothing of that caller's in it, so the second process compiles from scratch again.
 
-    On numba 0.60 there is no ``jit_addr`` slot for the mechanism to populate, so the refusal is still the right
-    outcome there; it is asserted rather than skipped, which is what pins the version gate as a genuine no-op.
-    ``disp_offset`` is served warm on every version, so buying this by loosening caching in general would fail
+    ``disp_offset`` is served warm regardless, so buying this by loosening caching in general would fail
     here rather than pass.
     """
     probe = _write_const_caller_scenario(tmp_path)

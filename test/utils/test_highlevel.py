@@ -437,11 +437,10 @@ def test_type_identity_cres_is_cacheable():
         return x + 1.0
 
     ty = typeof(compiled)
-    # `cres` mints the numbox-owned type where the `jit_addr` slot exists to populate,
-    # and numba's plain `FunctionType` on numba 0.60 where it does not. Either spelling
-    # is structural, which is the property this test is about. Which one is minted is
-    # pinned by `test/utils/test_derive_wap.py::test_cres_mints_a_derive_wap`.
-    assert str(ty) in ("DeriveFunctionType[float64(float64)]", "FunctionType[float64(float64)]")
+    # `cres` mints the numbox-owned type, which is structural, the property this test
+    # is about; that it is minted is pinned by
+    # `test/utils/test_derive_wap.py::test_cres_mints_a_derive_wap`.
+    assert str(ty) == "DeriveFunctionType[float64(float64)]"
     h, ok = _type_identity(ty)
     assert ok is True and len(h) == 64
 

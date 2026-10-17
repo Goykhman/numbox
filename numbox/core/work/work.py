@@ -55,12 +55,12 @@ class Work(NodeBase):
         references it took, so a node whose derive has ever failed stays pinned, along
         with what it references, for the life of the process; retrying the same node
         adds nothing further. Some cases still discard the exception and cache a
-        zero-filled `data`: a plain `CompileResultWAP` built directly against numba rather
-        than through `numbox.utils.highlevel.cres` and reached from jitted scope, where it
-        cannot be upgraded (a `@proxy` binding's `.as_func` is not one of these: it is a
-        `DeriveWAP` and propagates on those same jitted-scope paths); a `cfunc`, which is
-        not upgraded either; and a 'derive' handed from Python to a jitted parameter that
-        is declared as a plain `FunctionType`, which degrades on the way in.
+        zero-filled `data`. One is a plain `CompileResultWAP` built directly against numba
+        rather than through `numbox.utils.highlevel.cres` and reached from jitted scope,
+        where it cannot be upgraded. A `@proxy` binding's `.as_func` is not one of these:
+        it is a `DeriveWAP` and propagates on those same jitted-scope paths. Another is a
+        `cfunc`, which is not upgraded either. The last is a 'derive' handed from Python to
+        a jitted parameter declared as a plain `FunctionType`, which degrades on the way in.
     derived : int8
         Flag indicating whether the `data` has already been calculated.
     node : NodeType

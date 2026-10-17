@@ -2712,8 +2712,8 @@ def test_a_listed_locator_whose_module_raises_on_import_is_no_locator_for_the_re
     failure = OSError(errno.EACCES, "Permission denied", str(py_file.parent / "__pycache__"))
     remedy = configurations.cache_remedy(str(py_file), failure, "silence")
     assert "boom" not in remedy and remedy.endswith("; or silence"), remedy
-    assert configurations._locators("badmod.SomeClass,InTreeCacheLocator") == [
-        configurations._numba_locator("InTreeCacheLocator")]
+    from numba.core.caching import InTreeCacheLocator
+    assert configurations._locators("badmod.SomeClass,InTreeCacheLocator") == [InTreeCacheLocator]
 
 
 def test_an_empty_path_object_as_an_errors_name_is_the_working_directory_not_an_archive_above(tmp_path, monkeypatch):
