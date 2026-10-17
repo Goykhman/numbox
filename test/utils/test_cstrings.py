@@ -63,11 +63,9 @@ def test_context_manager_in_njit_raises():
     test breaks because numba started supporting it, revisit the
     cstrings module docstring's JIT caveat.
 
-    Since they share no common numba-specific base, ``Exception`` is
-    the only ancestor that catches both. The test's intent is to
-    assert "compilation fails" — any exception means numba rejected
-    the construct; the regression we'd catch (numba silently accepting
-    and miscompiling) wouldn't raise at all.
+    The test's intent is to assert that compilation fails with numba's
+    ``UnsupportedBytecodeError``. The regression it would catch, numba
+    silently accepting and miscompiling, would not raise at all.
     """
     @njit
     def kernel():

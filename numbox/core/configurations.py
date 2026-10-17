@@ -595,19 +595,6 @@ def _archive_above(py_file):
     return None
 
 
-_FAMILIES = ("UserProvidedCacheLocator", "InTreeCacheLocator", "UserWideCacheLocator", "IPythonCacheLocator",
-             "ZipCacheLocator")
-
-
-def _of_numbas(cls):
-    """Whether ``cls`` belongs to one of numba's locator families, whose places the remedy knows.
-
-    A class outside them has a ``from_function`` and a place of its own. It takes whatever its ``from_function`` takes
-    when asked with a probe, as numba asks it, and it caches in a place that only the class can name."""
-    from numba.core import caching
-    return any(issubclass(cls, getattr(caching, name)) for name in _FAMILIES)
-
-
 def _ipython_locator_reads(py_file):
     """Whether a locator of numba's IPython family that numba reaches takes ``py_file`` by its name.
 
@@ -1571,7 +1558,7 @@ def cache_remedy(py_file, failure, silence, package="numbox"):
             # instead of asking the locator, and never asking the reader to
             # make the directory writable, would leave numba raising the same
             # error after the reader unsets the variable as told.
-            if in_tree is not None and _takes(in_tree, py_file):
+            if _takes(in_tree, py_file):
                 caches_beside = f"numba caches beside the source, in its __pycache__, {beside}, hashing no path"
             else:
                 caches_beside = (
@@ -1650,7 +1637,7 @@ def cache_remedy(py_file, failure, silence, package="numbox"):
             "directory"
         )
         found = _archive_above(py_file)
-        if found is not None and for_a_zip is not None and not found[0].endswith(".zip"):
+        if found is not None and not found[0].endswith(".zip"):
             # The file is in an archive already, APP.ZIP or an .egg, which
             # numba's .zip locator never takes, because the locator looks for
             # a part of the path ending in ".zip", lower-case. The remedy tells

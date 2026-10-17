@@ -341,9 +341,10 @@ def proxy(sig, jit_options: Optional[dict] = None):
     discards, which ``DeriveFunctionType.can_convert_to`` documents.
 
     Reaching ``.as_func`` as a compile-time constant from a ``cache=True`` jitted caller makes
-    that caller cacheable, and its cached binary then binds the proxied body's machine code.
-    After an edit to the body such a caller does not reliably pick it up, and which body it does
-    run is not single-valued, so the numba cache has to be cleared rather than trusted to notice.
+    that caller cacheable. Its cached binary then binds the proxied body's machine code. After
+    an edit to the body such a caller does not reliably pick it up. Which body it does run is
+    not single-valued either. The numba cache therefore has to be cleared rather than trusted
+    to notice.
     The stale-alias guard below does not cover that caller, because a constant reference emits
     no alias for it to check; for the same reason it does not catch a ``proxy_if_available``
     binding that has since gone absent, where such a caller returns the vanished binding's value
@@ -455,8 +456,8 @@ def proxy_if_available(lib, sig, jit_options: Optional[dict] = None):
         if hasattr(my_binding, "as_func"):
             use(my_binding.as_func)
 
-    A present binding's ``.as_func`` follows ``proxy``'s contract above, including the
-    numba-version-dependent type and exception semantics.
+    A present binding's ``.as_func`` follows ``proxy``'s contract above, including its type
+    and exception semantics.
     """
     def _(func):
         if hasattr(lib, func.__name__):

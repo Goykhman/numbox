@@ -15,6 +15,7 @@ from numba.core.typing.context import Context
 from numba.extending import intrinsic
 
 from numbox.core.configurations import function_struct_size, jit_options, MAX_STR_LENGTH
+from numbox.core.configurations import numba_version  # noqa: F401  re-exported for existing importers
 from numbox.utils.void_type import VoidType
 from numbox.utils.highlevel import determine_field_index
 
