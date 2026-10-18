@@ -26,7 +26,7 @@ from numba.core.types import FunctionType, void
 
 
 numba_version = int(version("numba").split(".")[1])
-assert numba_version >= 60, numba_version
+assert numba_version >= 63, numba_version
 
 
 def get_jit_options():
@@ -463,12 +463,6 @@ def _name_limit(location):
         return 255
 
 
-def _numba_locator(name):
-    """numba's cache locator class of this name, or None if there's none."""
-    from numba.core import caching
-    return getattr(caching, name, None)
-
-
 def _locators(listed):
     """numba's cache locator classes in the order numba tries them.
 
@@ -500,7 +494,7 @@ def _locators(listed):
                 # the module's error instead.
                 cls = None
         else:
-            cls = _numba_locator(entry)
+            cls = getattr(caching, entry, None)
         if isinstance(cls, type) and callable(getattr(cls, "from_function", None)):
             classes.append(cls)
     return classes
@@ -601,18 +595,6 @@ def _archive_above(py_file):
     return None
 
 
-_FAMILIES = ("UserProvidedCacheLocator", "InTreeCacheLocator", "UserWideCacheLocator", "IPythonCacheLocator",
-             "ZipCacheLocator")
-
-
-def _of_numbas(cls):
-    """Whether ``cls`` belongs to one of numba's locator families, whose places the remedy knows.
-
-    A class outside them has a ``from_function`` and a place of its own. It takes whatever its ``from_function`` takes
-    when asked with a probe, as numba asks it, and it caches in a place that only the class can name."""
-    return any(base is not None and issubclass(cls, base) for base in map(_numba_locator, _FAMILIES))
-
-
 def _ipython_locator_reads(py_file):
     """Whether a locator of numba's IPython family that numba reaches takes ``py_file`` by its name.
 
@@ -623,14 +605,13 @@ def _ipython_locator_reads(py_file):
     numba asks it; the in-tree locator, for one, takes a cell file on disk whose ``__pycache__`` it can write. A
     locator that passes the file over leaves the ones after it reached."""
     from numba import config
-    for_ipython = _numba_locator("IPythonCacheLocator")
-    for_a_zip = _numba_locator("ZipCacheLocator")
-    if for_ipython is None or not _taken_by_ipython(py_file):
+    from numba.core import caching
+    if not _taken_by_ipython(py_file):
         return False
-    for cls in _locators(getattr(config, "CACHE_LOCATOR_CLASSES", "")):
-        if issubclass(cls, for_ipython):
+    for cls in _locators(config.CACHE_LOCATOR_CLASSES):
+        if issubclass(cls, caching.IPythonCacheLocator):
             return True
-        if for_a_zip is not None and issubclass(cls, for_a_zip) and ".zip" in py_file:
+        if issubclass(cls, caching.ZipCacheLocator) and ".zip" in py_file:
             return False
         if _takes(cls, py_file):
             # A locator before IPython's took the file, so the IPython locator
@@ -918,6 +899,7 @@ def cache_remedy(py_file, failure, silence, package="numbox"):
     locator listed first, to list a locator for a file on disk before it; or to put the file elsewhere.
     """
     from numba import config
+    from numba.core import caching
     from numba.core.caching import _CacheLocator
     # check_cache_location takes any path-like, bytes included, and so does
     # cache_remedy. The remedy reads a str; os.fspath would leave bytes as
@@ -932,19 +914,19 @@ def cache_remedy(py_file, failure, silence, package="numbox"):
     # it, is no name.
     filename = getattr(failure, "filename", None)
     filename = os.fsdecode(filename) if filename and isinstance(filename, (str, bytes, os.PathLike)) else None
-    listed = getattr(config, "CACHE_LOCATOR_CLASSES", "")
-    user_provided = _numba_locator("UserProvidedCacheLocator")
-    in_tree = _numba_locator("InTreeCacheLocator")
-    user_wide = _numba_locator("UserWideCacheLocator")
-    for_ipython = _numba_locator("IPythonCacheLocator")
-    for_a_zip = _numba_locator("ZipCacheLocator")
+    listed = config.CACHE_LOCATOR_CLASSES
+    user_provided = caching.UserProvidedCacheLocator
+    in_tree = caching.InTreeCacheLocator
+    user_wide = caching.UserWideCacheLocator
+    for_ipython = caching.IPythonCacheLocator
+    for_a_zip = caching.ZipCacheLocator
 
     def one_of(cls, base):
         # Whether cls is base or a subclass of it. A subclass listed by its
         # dotted path takes what its parent takes and caches where its parent
         # does, as numba's InTreeCacheLocatorFsAgnostic does, so each of
         # numba's locators stands for its whole family.
-        return base is not None and issubclass(cls, base)
+        return issubclass(cls, base)
 
     def of_numbas(cls):
         # Whether cls belongs to one of numba's locator families, whose places
@@ -969,7 +951,7 @@ def cache_remedy(py_file, failure, silence, package="numbox"):
     def listed_without(base):
         # Whether NUMBA_CACHE_LOCATOR_CLASSES is set and names no class of
         # base's family.
-        return base is not None and bool(listed) and not any(one_of(cls, base) for cls in _locators(listed))
+        return bool(listed) and not any(one_of(cls, base) for cls in _locators(listed))
 
     try:
         subpath = _CacheLocator.get_suitable_cache_subpath(py_file)
@@ -1576,7 +1558,7 @@ def cache_remedy(py_file, failure, silence, package="numbox"):
             # instead of asking the locator, and never asking the reader to
             # make the directory writable, would leave numba raising the same
             # error after the reader unsets the variable as told.
-            if in_tree is not None and _takes(in_tree, py_file):
+            if _takes(in_tree, py_file):
                 caches_beside = f"numba caches beside the source, in its __pycache__, {beside}, hashing no path"
             else:
                 caches_beside = (
@@ -1655,7 +1637,7 @@ def cache_remedy(py_file, failure, silence, package="numbox"):
             "directory"
         )
         found = _archive_above(py_file)
-        if found is not None and for_a_zip is not None and not found[0].endswith(".zip"):
+        if found is not None and not found[0].endswith(".zip"):
             # The file is in an archive already, APP.ZIP or an .egg, which
             # numba's .zip locator never takes, because the locator looks for
             # a part of the path ending in ".zip", lower-case. The remedy tells

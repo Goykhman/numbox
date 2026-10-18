@@ -201,9 +201,7 @@ def test_proxy_referenced_symbol_is_process_stable(tmp_path):
 def test_proxy_if_available_present_symbol_returns_real_proxy():
     """When the C symbol is present, ``proxy_if_available`` returns a
     real ``@proxy``-wrapped dispatcher with ``.as_func`` attached, of the
-    same numba-version-dependent type ``proxy`` hands out: a ``DeriveWAP``
-    where the ``jit_addr`` slot exists, a plain ``CompileResultWAP`` where
-    it does not."""
+    type ``proxy`` hands out: a ``DeriveWAP``."""
     lib = open_libm()
     if lib is None:
         pytest.skip("No suitable math/C runtime library discoverable")
@@ -476,18 +474,14 @@ def aux_raises(x):
     return x + 1.0
 
 
-def test_proxy_as_func_is_a_derive_where_the_jit_addr_slot_exists():
+def test_proxy_as_func_is_a_derive_wap():
     """``.as_func`` is the handle that carries the propagating calling convention.
 
-    Where ``FunctionModel`` has the ``jit_addr`` slot the binding hands out a ``DeriveWAP``
-    typed as ``DeriveFunctionType``, which is what lets a first-class call select numba's own
-    calling convention and unwind an exception out of the proxied body. Where the slot is
-    absent there is nothing to populate, so the value stays the plain ``CompileResultWAP`` it
-    has always been. Both arms are written out rather than skipped, because every numba in the
-    supported range runs one of them.
-
-    ``isinstance(..., CompileResultWAP)`` holds either way, which is why the second arm has to
-    compare the exact type: ``DeriveWAP`` subclasses it.
+    The binding hands out a ``DeriveWAP`` typed as ``DeriveFunctionType``, which is what lets a
+    first-class call select numba's own calling convention and unwind an exception out of the
+    proxied body. ``isinstance(..., CompileResultWAP)`` holds for it too, because ``DeriveWAP``
+    subclasses it, so the ``DeriveWAP`` type, the ``DeriveFunctionType`` typing and a populated
+    ``jit_addr`` are asserted as well.
     """
     @proxy(float64(float64))
     def scaled(x):
@@ -568,8 +562,7 @@ def test_proxy_as_func_declared_as_a_plain_function_type_still_discards():
     The type of the value handed in is asserted first because both assertions below hold for a
     plain ``CompileResultWAP`` too: without that check the test would keep passing while
     ``.as_func`` quietly stopped being a ``DeriveWAP``, and ``can_convert_to`` would never be
-    entered at all. Where the ``jit_addr`` slot is absent there is no conversion to enter and
-    the C convention is all there has ever been, so the check is made only on the other arm.
+    entered at all.
 
     Like the dispatcher-call test above, the discarded exception surfaces as an unraisable and
     only the returned value is asserted.

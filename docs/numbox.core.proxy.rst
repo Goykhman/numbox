@@ -36,8 +36,8 @@ cache in every later one.
 its data model carries the numba calling convention entry point and an exception
 raised inside the proxied body propagates out of a first-class call instead of
 being discarded. ``DeriveWAP``
-subclasses ``CompileResultWAP``, so ``isinstance`` passes on either version and
-only ``type(...) is CompileResultWAP`` tells the two apart.
+subclasses ``CompileResultWAP``, so an ``isinstance`` check against ``CompileResultWAP``
+passes for both and only ``type(...) is CompileResultWAP`` tells the two apart.
 
 Only one of the binding's two handles propagates. **Calling the dispatcher itself
 still discards**, on every numba version: that call reaches the proxied body

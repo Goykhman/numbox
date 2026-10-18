@@ -270,10 +270,6 @@ def rewrap_derive(derive):
     Anything else, including ``None``, is returned unchanged so callers can apply
     this unconditionally.
 
-    On a numba without the ``jit_addr`` slot there is nothing to upgrade into: the
-    struct has no field to hold the entry point, so producing a
-    :class:`DeriveWAP` there would only yield a value that cannot be unboxed.
-
     The upgraded wrapper is memoized onto the object it upgrades, and that is
     required rather than an optimization. ``py_addr`` holds the derive's address
     without taking a reference, so a wrapper minted fresh per call would be freed
