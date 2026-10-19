@@ -13,6 +13,7 @@ from numba.extending import intrinsic, overload
 from types import FunctionType as PyFunctionType
 from typing import List, Optional, Tuple
 
+from numbox.core.cache_key import _keyed, keyed_njit
 from numbox.core.configurations import _PROXY_CACHE_STRICT_ENV, _strict_cache_mode
 from numbox.utils.derive_wap import DeriveWAP
 from numbox.utils.fingerprint import (
@@ -359,7 +360,8 @@ def proxy(sig, jit_options: Optional[dict] = None):
 
     def wrap(func):
         assert isinstance(func, PyFunctionType)
-        func_jit = njit(sig, **jit_options)(func)
+        with _keyed(func):
+            func_jit = njit(sig, **jit_options)(func)
         cres = func_jit.get_compile_result(main_sig)
         # Register a process-stable alias for the body's cfunc wrapper and reference
         # that instead of numba's process-local ``v<uid>`` name (see _stable_cfunc_alias).
@@ -385,10 +387,12 @@ def _{func_proxy_name}(typingctx, {func_names_args_str}):
 def {func_proxy_name}({func_args_str}):
     return _{func_proxy_name}({func_names_args_str})
 """
+        # The generated wrapper is decorated by keyed_njit under the name its template uses, so numbox keys the
+        # wrapper's cache as it keys the body's while the template keeps the @njit( line the anchor below measures.
         ns = {
             **inspect.getmodule(func).__dict__,
             **{
-                'cgutils': cgutils, 'intrinsic': intrinsic, 'ir': ir, 'jit_opts': jit_opts, 'njit': njit,
+                'cgutils': cgutils, 'intrinsic': intrinsic, 'ir': ir, 'jit_opts': jit_opts, 'njit': keyed_njit,
                 'sig': sig, 'main_sig': main_sig, '_call_proxied_alias': _call_proxied_alias
             }
         }
@@ -430,6 +434,8 @@ def {func_proxy_name}({func_args_str}):
         # nothing process-stable to fold and falls back on the type name -- which every
         # first-class function value in the process shares.
         dispatcher.as_func._numbox_proxy_alias = cfunc_alias
+        # And the body's dispatcher, whose cache explain_cache_key reads.
+        dispatcher.as_func._numbox_dispatcher = func_jit
         return dispatcher
     return wrap
 

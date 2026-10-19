@@ -7,10 +7,11 @@ from numba import njit, typeof
 from numba.core.types import Type
 from typing import Any, Callable, Dict, NamedTuple, Optional, Sequence, Tuple as PyTuple, Union
 
+from numbox.core.cache_key import _settings_canon
 from numbox.core.configurations import jit_options as jit_options_
 from numbox.core.work.lowlevel_work_utils import ll_make_work
 from numbox.utils.fingerprint import (
-    _Unfingerprintable, _codegen_env_canon, _effective_flags, _fingerprint_function,
+    _Unfingerprintable, _effective_flags, _fingerprint_function,
     _fingerprint_function_best_effort, _flags_canon, _loaded_global_names,
 )
 from numbox.utils.highlevel import cres, _signature_identity, _type_identity
@@ -139,27 +140,25 @@ _orphan_anchor_sweep(_DERIVE_ANCHOR_SUBDIR)
 
 
 def _derive_anchor_cres(derive_sig, sig_canon, derive, derive_fp, jit_options):
-    """Compile ``derive`` under a cache identity that depends on the jit flags.
+    """Compile ``derive`` under a cache identity that depends on what it reads.
 
-    Folding the flags into the kernel name re-keys the kernel but not the derive:
-    the derive is compiled as its own ``cres``, and numba's cache file for it is
-    named after the derive's own source file and qualname, so a graph built under
-    ``error_model="numpy"`` and one built under the default model share it. The
-    second process then links the first's binary -- a division by zero returns
-    ``inf`` where it must raise.
+    The derive is compiled as its own ``cres``, whose cache numbox keys on the
+    jit flags and the settings (``numbox.core.cache_key``). That key, like
+    numba's, leaves out what the derive reads: the values of its globals and the
+    code of the functions it calls.
 
     So the derive is compiled through a generated wrapper whose *name* carries a
     digest of the derive fingerprint plus the effective flags, written to its own
-    on-disk anchor. A flag change moves the name, which moves the anchor, which
-    moves numba's cache file. Mirrors ``compile_kernel._compile``.
+    on-disk anchor. A change to either moves the name. The name moves the anchor,
+    and the anchor moves numba's cache file. Mirrors ``compile_kernel._compile``.
 
     The wrapper delegates to the derive njit-wrapped with ``cache=False``: it is
     linked into the wrapper's cached artifact, and it must not carry a cache of
-    its own, which would be flag-blind exactly like the one this works around.
+    its own, which numba would key on neither its flags nor what it reads.
 
     Returns ``None`` if the flags cannot be canonicalized or no anchor can be
     written; the caller must then compile the derive **uncached**, because the
-    anchor is the only thing making a cached derive flag-safe.
+    anchor is what keys a cached derive on what it reads.
     """
     flags = _effective_flags(jit_options)
     flags_canon, ok_flags = _flags_canon(flags)
@@ -169,7 +168,7 @@ def _derive_anchor_cres(derive_sig, sig_canon, derive, derive_fp, jit_options):
         return None
     digest = sha256(
         f"derive-anchor-v2\n{derive_fp}\n# sig: {sig_canon}\n# flags: {flags_canon}"
-        f"\n# codegen_env: {_codegen_env_canon()}".encode("utf-8")
+        f"\n# settings: {_settings_canon()}".encode("utf-8")
     ).hexdigest()[:16]
     name = f"_derive_{digest}"
     params = ", ".join(f"a{i}" for i in range(len(derive_sig.args)))
@@ -210,11 +209,11 @@ def _derived_cres(ty, sources: Sequence[End], derive, jit_options=None, derive_f
         if anchored is not None:
             _derive_funcs[id(anchored)] = derive
             return anchored
-        # The anchor is what makes a cached derive flag-safe. Falling back to a
-        # plain cache=True compile here would restore exactly the flag-blind
-        # cache entry -- named after the derive's own source file and qualname --
-        # that the anchor exists to avoid, so the degrade must drop the cache
-        # too: recompiled per process, never wrong.
+        # The anchor is what keys a cached derive on what it reads. Falling back
+        # to a plain cache=True compile here would restore the cache entry the
+        # anchor exists to avoid, named after the derive's own source file and
+        # qualname and blind to its globals and callees. So the degrade must drop
+        # the cache too: recompiled per process, never wrong.
         jit_options = {**jit_options, "cache": False}
     elif jit_options.get("cache") and not sig_cacheable:
         # A source type -- e.g. a Dispatcher wrapping an un-fingerprintable body
@@ -277,12 +276,12 @@ def _kernel_fingerprint(code_block: str, derive_hashes: list, type_sigs: list, j
     derive source hashes, since a declared ty reaches the generated code only as the
     bare global name ``{name}_ty`` and so is not otherwise captured by the body.
 
-    Also folds the resolved jit flags and the process codegen env knobs. The body
-    text renders them only as the literal ``@njit(**jit_options)``, so without this
-    two graphs differing solely in ``error_model`` or ``fastmath`` produced the same
-    ``_make_<hash>`` name, shared numba's cache key, and the second process linked
-    the first's binary -- a kernel cached under ``error_model="numpy"`` returned
-    ``inf`` for a division by zero that the default model must raise on.
+    Also folds the resolved jit flags and the ``NUMBA_*`` settings that change the
+    emitted code (see :mod:`numbox.core.cache_key`). The body text renders the
+    flags only as the literal ``@njit(**jit_options)``, so the fold gives two
+    graphs that differ solely in ``error_model`` or ``fastmath`` two
+    ``_make_<hash>`` names. numbox's key holds the flags of the kernel's cache as
+    well; the names keep the two in separate cache files besides.
 
     ``flags_cacheable`` is False when a flag had no canonical form (a
     ``pipeline_class``, a numba-typed ``locals``). The fold then degrades to
@@ -294,7 +293,7 @@ def _kernel_fingerprint(code_block: str, derive_hashes: list, type_sigs: list, j
     flags_canon, ok_flags = _flags_canon(_effective_flags(jit_options))
     return code_block_hash(
         f"code_block = {code_block} derive_hashes = {derive_hashes} type_sigs = {type_sigs}"
-        f" flags = {flags_canon} codegen_env = {_codegen_env_canon()}"
+        f" flags = {flags_canon} settings = {_settings_canon()}"
     ), ok_flags
 
 

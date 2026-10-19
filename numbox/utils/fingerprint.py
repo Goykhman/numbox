@@ -23,7 +23,6 @@ from typing import Any, Optional, Sequence
 
 import numpy as np
 
-from numba.core import config as numba_config
 from numba.core.dispatcher import Dispatcher
 from numba.core.types import ExternalFunction
 from numba.core.types.function_type import CompileResultWAP
@@ -455,12 +454,8 @@ def _fingerprint_function_best_effort(func: FunctionType, opaque: Optional[list]
 # Shared by every content-addressed cache key that must re-key when the resolved
 # jit flags change: the `compile_kernel` digest and the `make_graph` kernel
 # fingerprint. Kept here rather than in `compile_kernel` so `builder` can reuse it
-# without importing that module (whose import runs an orphan-anchor sweep).
-
-_CODEGEN_ENV_KNOBS = (
-    "BOUNDSCHECK", "LOOP_VECTORIZE", "SLP_VECTORIZE", "ENABLE_AVX", "DISABLE_INTEL_SVML",
-)
-
+# without importing that module (whose import runs an orphan-anchor sweep). The
+# NUMBA_* settings those digests fold come from `numbox.core.cache_key`.
 
 def _effective_flags(jit_options: dict | None) -> dict:
     """The non-`cache` jit flags, resolved against the numbox defaults.
@@ -472,16 +467,6 @@ def _effective_flags(jit_options: dict | None) -> dict:
     """
     opts = {**_default_jit_options, **(jit_options or {})}
     return {k: v for k, v in opts.items() if k != "cache"}
-
-
-def _codegen_env_canon() -> str:
-    """Canonical string for the process's result-affecting numba codegen env knobs.
-
-    These change the emitted binary but live in neither the jit flags nor numba's
-    own on-disk cache key, and they override even an explicit jit flag at lowering,
-    so they must enter a digest directly, read at compile time.
-    """
-    return repr([(k, getattr(numba_config, k, None)) for k in _CODEGEN_ENV_KNOBS])
 
 
 def _flags_canon(flags: dict) -> tuple[str, bool]:

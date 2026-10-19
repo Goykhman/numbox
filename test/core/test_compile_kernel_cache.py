@@ -14,6 +14,7 @@ import types
 
 import pytest
 from numba import njit, typeof, vectorize
+from numba.core import config as numba_config
 from numba.core.caching import NullCache
 
 from numbox.core.variable.compile_kernel import (
@@ -391,11 +392,10 @@ def test_module_attr_dufunc_captured_value_rekeys_fingerprint():
 # ---------------------------------------------------------------------------
 
 def test_vectorize_env_knob_enters_digest(monkeypatch):
-    import numbox.utils.fingerprint as fp
     src = "def _kernel(a0):\n    return (a0,)\n"
-    monkeypatch.setattr(fp.numba_config, "LOOP_VECTORIZE", 0, raising=False)
+    monkeypatch.setattr(numba_config, "LOOP_VECTORIZE", 0, raising=False)
     name0 = _compile(src, {}, None, None).py_func.__name__
-    monkeypatch.setattr(fp.numba_config, "LOOP_VECTORIZE", 1, raising=False)
+    monkeypatch.setattr(numba_config, "LOOP_VECTORIZE", 1, raising=False)
     name1 = _compile(src, {}, None, None).py_func.__name__
     assert name0 != name1, "LOOP_VECTORIZE absent from the cache digest"
 
@@ -407,13 +407,23 @@ def test_boundscheck_env_enters_digest(monkeypatch):
     """NUMBA_BOUNDSCHECK overrides even an explicit boundscheck flag at lowering
     but is in neither the jit flags nor numba's cache key; it must enter the
     digest so a bounds-check flip does not cache-hit the unchecked binary."""
-    import numbox.utils.fingerprint as fp
     src = "def _kernel(a0):\n    return (a0,)\n"
-    monkeypatch.setattr(fp.numba_config, "BOUNDSCHECK", None)
+    monkeypatch.setattr(numba_config, "BOUNDSCHECK", None)
     name_off = _compile(src, {}, None, None).py_func.__name__
-    monkeypatch.setattr(fp.numba_config, "BOUNDSCHECK", 1)
+    monkeypatch.setattr(numba_config, "BOUNDSCHECK", 1)
     name_on = _compile(src, {}, None, None).py_func.__name__
     assert name_off != name_on, "BOUNDSCHECK absent from the cache digest"
+
+
+def test_svml_env_enters_digest(monkeypatch):
+    """NUMBA_DISABLE_INTEL_SVML decides whether numba calls Intel's SVML for
+    vectorized math, and numba's cache key does not hold it."""
+    src = "def _kernel(a0):\n    return (a0,)\n"
+    monkeypatch.setattr(numba_config, "DISABLE_INTEL_SVML", 0)
+    name_svml = _compile(src, {}, None, None).py_func.__name__
+    monkeypatch.setattr(numba_config, "DISABLE_INTEL_SVML", 1)
+    name_plain = _compile(src, {}, None, None).py_func.__name__
+    assert name_svml != name_plain, "DISABLE_INTEL_SVML absent from the cache digest"
 
 
 # Un-canonicalizable jit flags must warn, not silently disable caching

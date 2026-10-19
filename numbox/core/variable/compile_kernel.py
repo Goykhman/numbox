@@ -30,26 +30,29 @@ truncated value). Any node left undeclared (or only partially typed) keeps the
 runtime-discovery path; a graph that declares nothing behaves exactly as today.
 
 The on-disk cache is content-addressed per compiled unit (the fused kernel, or
-each jit segment): the digest fingerprints each formula's code, constants,
+each jit segment). The digest fingerprints each formula's code, constants,
 default arguments, closure-cell values, referenced globals and the values of
-referenced module attributes, plus the kernel's effective jit flags, any
-Dispatcher/DUFunc formula's targetoptions, and the process ``NUMBA_BOUNDSCHECK``
-setting. The kernel source never mentions types, so declared signatures are
+referenced module attributes. It also holds the kernel's effective jit flags,
+any Dispatcher/DUFunc formula's targetoptions, and the ``NUMBA_*`` settings
+that change the emitted code (``numbox.core.cache_key.KEYED_SETTINGS``). The
+kernel itself is a function numbox compiles, so its own cache key holds them
+as well.
+The kernel source never mentions types, so declared signatures are
 appended to the digest as well: two declared-type variants of one graph get
 distinct cache anchors. A formula with no canonical fingerprint forces its unit
 uncached (no anchor, no numba cache).
 
 This freshness guarantee covers the code numbox generates and njit-wraps from
 raw Python. It does *not* extend to a formula that carries its OWN numba on-disk
-cache -- a ``@njit(cache=True)`` Dispatcher -- whose cache key is blind to jit
-flags and global values: folding those into the outer kernel name cannot
-invalidate it, and a fresh outer would otherwise link (and serialize) the stale
-inner binary. Such a unit is compiled without an on-disk cache, with a warning:
-numbox refuses to compound numba's flag-blind inner cache but cannot cure it (a
-change to the user dispatcher's flags or globals still serves that dispatcher's
-own stale binary in-process). Env-level codegen knobs other than
-``NUMBA_BOUNDSCHECK`` are likewise outside the digest, as is a value or dispatcher
-a module exposes ONLY through a PEP 562 ``__getattr__`` (resolving it would fire
+cache, a ``@njit(cache=True)`` Dispatcher. That cache's key is blind to the
+global values the dispatcher reads, and numba's own key is blind to its jit
+flags as well. Folding those into the outer kernel name cannot invalidate it,
+and a fresh outer would otherwise link (and serialize) the stale inner binary.
+Such a unit is compiled without an on-disk cache, with a warning. numbox refuses
+to compound that inner cache but cannot cure it: a change to the user
+dispatcher's flags or globals still serves that dispatcher's own stale binary
+in-process. A value or dispatcher a module exposes ONLY
+through a PEP 562 ``__getattr__`` is outside the digest (resolving it would fire
 unrelated modules' ``__getattr__`` on every compile) -- change such a value and
 clear the cache.
 """
@@ -78,8 +81,9 @@ from numbox.core.variable.utils import (
 from numbox.core.variable.variable import (
     QUAL_SEP, CompiledGraph, CompiledNode, Graph, Variable, make_qual_name,
 )
+from numbox.core.cache_key import _settings_canon
 from numbox.utils.fingerprint import (
-    _Unfingerprintable, _canon_value, _codegen_env_canon, _effective_flags, _fingerprint_function,
+    _Unfingerprintable, _canon_value, _effective_flags, _fingerprint_function,
     _flags_canon, _referenced_global_names, _safe_repr,
 )
 from numbox.utils.highlevel import _type_identity
@@ -138,8 +142,8 @@ def _formula_fingerprint(formula) -> tuple[str, bool]:
 def _is_self_cached(formula) -> bool:
     """True if ``formula`` carries its own numba on-disk cache -- a Dispatcher
     built with ``cache=True`` (its ``_cache`` is a ``FunctionCache``, not a
-    ``NullCache``). That cache is keyed by numba's flag- and global-blind
-    ``_index_key``, so folding flags into the outer kernel name cannot keep it
+    ``NullCache``). That cache's key is blind to the global values the dispatcher
+    reads, so folding them into the outer kernel name cannot keep it
     fresh: a fresh outer compile links -- and would serialize -- the stale inner
     binary. Such a unit must not be disk-cached. A ``cache=False`` Dispatcher
     recompiles in-process and is safe; a DUFunc's cache is not independently
@@ -164,12 +168,12 @@ def _pyfunc_of(formula):
 
 def _references_self_cached(value, seen: set[int]) -> bool:
     """True if ``value`` IS, or transitively holds/references, a Dispatcher with
-    its own numba cache. A formula that reaches a ``@njit(cache=True)`` dispatcher
-    -- through a call, a default argument, a container, a closure cell, or a global
-    -- links that dispatcher's flag- and global-blind binary; the outer digest
-    re-keys on it yet cannot invalidate the callee's cache, so the unit must not be
-    disk-cached either (else a stale inner is serialized into a fresh-digest
-    artifact). This mirrors ``_canon_value``'s traversal so every channel the
+    its own numba cache. A formula can reach a ``@njit(cache=True)`` dispatcher
+    through a call, a default argument, a container, a closure cell, or a global.
+    It then links that dispatcher's binary, whose key is blind to the globals the
+    dispatcher reads. The outer digest re-keys on it yet cannot invalidate the
+    callee's cache, so the unit must not be disk-cached either, or a stale inner
+    is serialized into a fresh-digest artifact. This mirrors ``_canon_value``'s traversal so every channel the
     digest folds is also covered here -- a narrower walk leaves a poisoning gap."""
     if id(value) in seen:
         return False
@@ -395,7 +399,7 @@ def _compile(
         warnings.warn(
             "compile_kernel: formula(s) " + ", ".join(sorted(set(self_cached)))
             + " are, or reference, a @njit(cache=True) dispatcher whose cache key is "
-            "blind to jit flags and referenced global values; compiling this kernel "
+            "blind to referenced global values; compiling this kernel "
             "without an on-disk cache so a stale inner binary cannot be linked into a "
             "cached artifact. Pass cache=False to those dispatchers (or supply "
             "plain-Python formulas) to restore caching."
@@ -426,10 +430,10 @@ def _compile(
         "ck-digest-v3\n" + source
         + "\n# formulas:\n" + "\n".join(fingerprints)
         + "\n# flags: " + flags_canon
-        # Env codegen knobs (BOUNDSCHECK, LOOP/SLP vectorize, ...) override even an
-        # explicit jit flag at lowering and are in neither the jit flags nor numba's
-        # own cache key.
-        + "\n# codegen_env: " + _codegen_env_canon()
+        # The NUMBA_* settings that change the emitted code (NUMBA_BOUNDSCHECK
+        # overrides even an explicit jit flag at lowering) are in neither the jit
+        # flags nor numba's own cache key; see numbox.core.cache_key.
+        + "\n# settings: " + _settings_canon()
         + "\n# declared_sigs: " + repr(declared_canon)
     )
     if not cacheable:
@@ -941,19 +945,22 @@ def compile_kernel(
 
     Caching: the kernel digest fingerprints each formula's bytecode,
     constants, default values, closure-cell values, referenced module-level
-    globals (including helper functions, recursively) and referenced
-    module-attribute values, defining module, the effective jit flags, any
-    Dispatcher/DUFunc formula's targetoptions, and the process
-    ``NUMBA_BOUNDSCHECK``. Because the generated source never mentions types,
+    globals (including helper functions, recursively), referenced
+    module-attribute values and defining module. It also holds the effective
+    jit flags, any Dispatcher/DUFunc formula's targetoptions, and the
+    ``NUMBA_*`` settings that change the emitted code (see
+    :mod:`numbox.core.cache_key`). Because the
+    generated source never mentions types,
     a declared graph's signatures are appended to the digest too (the consumed
     external signature for an eager fused kernel, each segment's live-in/out
     signature for an eager segment), so two declared-type variants of one
     type-free graph get distinct cache anchors and never reuse each other's
-    binary. A formula whose state cannot be fingerprinted (e.g.
-    cres/CompileResultWAP objects, values with no canonical form), or that
-    carries -- or reaches -- its own numba cache (a `@njit(cache=True)` Dispatcher,
-    whose key is flag- and global-blind and cannot be invalidated from outside),
-    downgrades that one kernel to cache=False: always recompiled, never stale. The
+    binary. Two kinds of formula downgrade their kernel to cache=False, always
+    recompiled and never stale. One is a formula whose state cannot be
+    fingerprinted (e.g. cres/CompileResultWAP objects, values with no canonical
+    form). The other carries or reaches its own numba cache, a
+    `@njit(cache=True)` Dispatcher, whose key is blind to the globals it reads
+    and cannot be invalidated from outside. The
     self-cached-dispatcher and un-canonicalizable-flag degrades emit a warning; an
     inherently unfingerprintable formula kind (CFunc, cres) degrades silently as
     documented. See the module docstring for the guarantee's scope. When caching
