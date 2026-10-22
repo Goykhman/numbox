@@ -13,6 +13,7 @@ from numba.extending import overload, overload_method
 from textwrap import dedent, indent
 from typing import Callable, Iterable, Optional
 
+from numbox.core.cache_key import _keyed
 from numbox.core.configurations import jit_options as jit_options_
 from numbox.utils.derive_wap import DeriveWAP
 from numbox.utils.fingerprint import (
@@ -78,7 +79,8 @@ def cres(sig, **kwargs):
         raise ValueError(f"Expected a single signature, found {sig} of type {type(sig)}")
 
     def _(func):
-        func_jit = njit(sig, **kwargs)(func)
+        with _keyed(func):
+            func_jit = njit(sig, **kwargs)(func)
         sigs = func_jit.nopython_signatures
         assert len(sigs) == 1, f"Ambiguous signature, {sigs}"
         func_cres = func_jit.get_compile_result(sigs[0])
@@ -87,6 +89,8 @@ def cres(sig, **kwargs):
         # a compiled address and a mangled name carrying a per-process counter, so a body
         # that captures this value has nothing process-stable to fingerprint without it.
         wrapper._numbox_py_func = func
+        # And the dispatcher, whose cache explain_cache_key reads.
+        wrapper._numbox_dispatcher = func_jit
         return wrapper
     return _
 

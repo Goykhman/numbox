@@ -656,9 +656,9 @@ def test_make_graph_kernel_name_depends_on_jit_flags(monkeypatch):
     numba caches the whole library, including the generated CPython wrapper,
     and the wrapper is flag-sensitive independently of the body: nogil=True
     emits PyEval_SaveThread/PyEval_RestoreThread around the call, nogil=False
-    does not. The derive anchor does not re-key the kernel, so only the flag
-    fold in _kernel_fingerprint keeps the two apart -- without it both share one
-    cache entry and the first writer wins.
+    does not. The derive anchor does not re-key the kernel. The flag fold in
+    _kernel_fingerprint gives the two different names, beside the flags
+    numbox's cache key holds for each.
 
     nogil is used rather than error_model/fastmath/boundscheck precisely because
     those three only affect arithmetic, of which the generated kernel body (a
@@ -724,12 +724,12 @@ def test_derive_anchor_degrade_drops_the_cache(monkeypatch):
     """When the derive anchor cannot be built, the fallback compile must drop
     `cache`.
 
-    The anchor is the only thing that makes a cached derive flag-safe: numba
-    names a plain `cres(..., cache=True)` cache file after the derive's own
-    source file and qualname, so it is shared across jit-flag variants. Falling
-    back to that on the degrade paths -- flags with no canonical form, or an
-    unwritable anchor -- would restore the exact staleness the anchor exists to
-    prevent, so the degrade compiles uncached instead.
+    The anchor is what keys a cached derive on what it reads. numba names a
+    plain `cres(..., cache=True)` cache file after the derive's own source file
+    and qualname, and numbox's key on it holds the flags but not the derive's
+    globals and callees. Falling back to that on the degrade paths -- flags with
+    no canonical form, or an unwritable anchor -- would restore the staleness
+    the anchor exists to prevent, so the degrade compiles uncached instead.
     """
     from numbox.core.work import builder as builder_mod
 
@@ -758,7 +758,7 @@ def test_derive_anchor_degrade_drops_the_cache(monkeypatch):
     )
     assert recorded.get("cache") is False, (
         f"anchor degrade compiled with cache={recorded.get('cache')!r}; a plain "
-        "cache=True compile is the flag-blind entry the anchor exists to avoid"
+        "cache=True compile is the entry, blind to what the derive reads, that the anchor exists to avoid"
     )
 
 
