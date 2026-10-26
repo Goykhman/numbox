@@ -7,7 +7,6 @@ settings flood a child's stdout with numba's own dumps.
 """
 import ast
 import collections
-import functools
 import inspect
 import json
 import os
@@ -109,8 +108,8 @@ def _key_of(func):
 
 @pytest.mark.parametrize("env", sorted(KEYED_SETTINGS))
 def test_a_setting_changed_in_code_changes_the_key(env, monkeypatch):
-    """The key reads each setting when numba looks the function up, so a change made in code after import counts
-    for the next compile."""
+    """numbox reads each setting when numba looks the function up, so a setting changed in code changes the key used
+    by the next lookup."""
     key_before = _key_of(_keyed_for_settings)
     monkeypatch.setattr(numba_config, KEYED_SETTINGS[env], "numbox-test-value", raising=False)
     assert explain_cache_key(_keyed_for_settings)["settings"][env] == "'numbox-test-value'"
@@ -407,17 +406,39 @@ def _divides_by(a, b):
 def test_a_pipeline_class_of_ones_own_compiles_uncached_with_a_warning():
     divides = keyed_njit(cache=True, pipeline_class=_pipeline_for("numpy"))(_divides_by)
     divides._cache.flush()
-    with pytest.warns(UncachedWarning, match="the pipeline class is .*Pipeline, not numba's default"):
+    with pytest.warns(UncachedWarning, match=r"the pipeline class is _pipeline_for\.<locals>\.Pipeline, not numba's"):
         assert divides(1.0, 0.0) == np.inf
     assert divides._cache._cache_file._load_index() == {}
 
 
-def test_a_pipeline_without_a_qualname_compiles_uncached_with_a_warning():
-    divides = keyed_njit(cache=True, pipeline_class=functools.partial(Compiler))(_divides_by)
-    divides._cache.flush()
-    with pytest.warns(UncachedWarning, match=r"the pipeline class is functools\.partial\(.*\), not numba's default"):
-        assert divides(1.0, 2.0) == 0.5
-    assert divides._cache._cache_file._load_index() == {}
+def _halves(a):
+    return a / 2.0
+
+
+class _PipelineReadAfresh:
+    """A pipeline callable without a ``__qualname__`` whose ``repr`` returns a different string each time."""
+
+    def __init__(self):
+        self.reads = 0
+
+    def __call__(self, *args):
+        return Compiler(*args)
+
+    def __repr__(self):
+        self.reads += 1
+        return f"a pipeline read {self.reads} times"
+
+
+def test_a_pipeline_without_a_qualname_compiles_uncached_with_one_warning():
+    """The refusal message names the pipeline's type, not its ``repr``, so numbox issues one ``UncachedWarning`` per
+    process for a function compiled under a pipeline whose ``repr`` returns a different string each time."""
+    halves = keyed_njit(cache=True, pipeline_class=_PipelineReadAfresh())(_halves)
+    halves._cache.flush()
+    with pytest.warns(UncachedWarning, match="the pipeline class is an instance of _PipelineReadAfresh") as caught:
+        assert halves(1.0) == 0.5
+        assert halves(np.float32(1.0)) == 0.5
+    assert len([w for w in caught if issubclass(w.category, UncachedWarning)]) == 1
+    assert halves._cache._cache_file._load_index() == {}
 
 
 def test_a_type_in_locals_that_names_an_address_is_refused_and_one_that_only_reads_alike_is_not():
