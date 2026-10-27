@@ -13,7 +13,7 @@ from numba.extending import intrinsic, overload
 from types import FunctionType as PyFunctionType
 from typing import List, Optional, Tuple
 
-from numbox.core.cache_key import _keyed, keyed_njit
+from numbox.core.cache_key import _keyed, numbox_njit
 from numbox.core.configurations import _PROXY_CACHE_STRICT_ENV, _strict_cache_mode
 from numbox.utils.derive_wap import DeriveWAP
 from numbox.utils.fingerprint import (
@@ -387,12 +387,12 @@ def _{func_proxy_name}(typingctx, {func_names_args_str}):
 def {func_proxy_name}({func_args_str}):
     return _{func_proxy_name}({func_names_args_str})
 """
-        # The generated wrapper is decorated by keyed_njit under the name its template uses, so numbox keys the
+        # The generated wrapper is decorated by numbox_njit under the name its template uses, so numbox keys the
         # wrapper's cache as it keys the body's while the template keeps the @njit( line the anchor below measures.
         ns = {
             **inspect.getmodule(func).__dict__,
             **{
-                'cgutils': cgutils, 'intrinsic': intrinsic, 'ir': ir, 'jit_opts': jit_opts, 'njit': keyed_njit,
+                'cgutils': cgutils, 'intrinsic': intrinsic, 'ir': ir, 'jit_opts': jit_opts, 'njit': numbox_njit,
                 'sig': sig, 'main_sig': main_sig, '_call_proxied_alias': _call_proxied_alias
             }
         }

@@ -10,7 +10,7 @@ things that do change the binary numba builds, but are not in that key, are the 
 changes between two runs, the second run loads the binary cached by the first, and numba issues no warning.
 
 numbox adds both to the key of every function it compiles, and of any function decorated with
-:func:`~numbox.core.cache_key.keyed_njit` or :func:`~numbox.core.cache_key.keyed_cfunc`. The functions numbox
+:func:`~numbox.core.cache_key.numbox_njit` or :func:`~numbox.core.cache_key.numbox_cfunc`. The functions numbox
 compiles include its :doc:`bindings <numbox.core.bindings>`, the structrefs of
 :func:`~numbox.utils.highlevel.make_structref`, the kernels of
 :func:`~numbox.core.variable.compile_kernel.compile_kernel`, the derives of :class:`~numbox.core.work.builder.Derived`
@@ -19,19 +19,19 @@ Every other function is cached under numba's key alone.
 
 .. code-block:: python
 
-    from numbox.core.cache_key import keyed_njit
+    from numbox.core.cache_key import numbox_njit
 
 
-    @keyed_njit(cache=True)
+    @numbox_njit(cache=True)
     def index(a, i):
         return a[i]
 
 Suppose you run that once, and then again with ``NUMBA_BOUNDSCHECK=1``. Under ``numba.njit``, the second run loads
 the binary cached by the first, which has no bounds checks, so an index past the end reads past the array. Under
-``keyed_njit``, the key holds the setting, so the second run misses the cache and compiles the function again with
+``numbox_njit``, the key holds the setting, so the second run misses the cache and compiles the function again with
 bounds checks. Both entries remain in the cache, so a third run without the setting loads the first entry.
 
-``keyed_njit`` and ``keyed_cfunc`` take the arguments of ``numba.njit`` and ``numba.cfunc`` unchanged, including
+``numbox_njit`` and ``numbox_cfunc`` take the arguments of ``numba.njit`` and ``numba.cfunc`` unchanged, including
 signatures and options. Without ``cache=True``, they behave exactly as those decorators. numbox sets up the key when
 numba creates the cache, at decoration, so the key applies to an eager compile, for which a signature is given, as
 well as to a lazy one. The key belongs to the cache that numba creates for that decoration, not to the function: a
@@ -46,11 +46,11 @@ In addition to numba's own key, the key of a function that numbox keys holds thr
 - **numbox's version.** numbox's ``@overload`` and ``@intrinsic`` implementations produce part of the code of the
   functions that call them, and numbox's version represents them in the key.
 - **The flags.** The decorator kind, ``njit`` or ``cfunc``, which numba's key does not distinguish; the flags numba
-  compiles under; and the ``locals`` given at decoration, which are the numba types that the decorator assigns to
-  local variables of the function body. The flags are the decorator's options as numba parses them when a compile
-  starts, with numba's defaults filled in. When a callee is compiled during the compilation of its caller, the callee
-  inherits from the caller's compilation any of ``nrt``, ``fastmath``, ``error_model`` and ``forceinline`` that its
-  options leave unset, and the key holds the inherited values.
+  compiles under; and the ``locals`` function body variables' numba types given at decoration. The flags are the
+  decorator's options as numba parses them when a compile starts, with numba's defaults filled in. When a callee is
+  compiled during the compilation of its caller, the callee inherits from the caller's compilation any of ``nrt``,
+  ``fastmath``, ``error_model`` and ``forceinline`` that its options leave unset, and the key holds the inherited
+  values.
 - **The settings.** Each keyed ``NUMBA_*`` setting (see `The settings`_), with the value that ``numba.config`` holds
   when numba looks the function up. numba looks a function up when it is first called for a signature, when it is
   decorated with one, or when it is compiled during the compilation of a caller.
@@ -67,10 +67,10 @@ function cached:
 .. code-block:: python
 
     import settings
-    from numbox.core.cache_key import keyed_njit
+    from numbox.core.cache_key import numbox_njit
 
 
-    @keyed_njit(cache=True)
+    @numbox_njit(cache=True)
     def scaled(x, scale):
         return x * scale
 
@@ -151,7 +151,7 @@ Limits
   - a numba type in ``locals`` that numba names after an object's address, as it names any type that holds a
     jitclass.
 - **numbox installs its key once per process.** If you remove numbox's modules from ``sys.modules`` and import them
-  again, then numba's key will be used in ``keyed_njit``, ``keyed_cfunc``, ``@cres`` and ``@proxy``. numbox's key will
+  again, then numba's key will be used in ``numbox_njit``, ``numbox_cfunc``, ``@cres`` and ``@proxy``. numbox's key will
   not be used. However, ``importlib.reload`` keeps numbox's key.
 - **Saves from several processes at once.** numba's cache save does not acquire a lock (`numba issue 10862
   <https://github.com/numba/numba/issues/10862>`_). Two processes that save new entries for the same function at the
@@ -170,10 +170,10 @@ direct call in this process. It takes a dispatcher, a ``@cfunc``, or the object 
 
 .. code-block:: python
 
-    from numbox.core.cache_key import explain_cache_key, keyed_njit
+    from numbox.core.cache_key import explain_cache_key, numbox_njit
 
 
-    @keyed_njit(cache=True, fastmath=True)
+    @numbox_njit(cache=True, fastmath=True)
     def scaled(x):
         return x * 2.0
 

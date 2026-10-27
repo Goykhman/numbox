@@ -217,7 +217,7 @@ def explain_cache_key(func) -> dict:
     in this process.
 
     ``func`` is a dispatcher or ``@cfunc`` whose cache numbox keys, what ``cres`` returns, or a ``@proxy`` function's
-    ``.as_func``: a function numbox compiled, or one decorated with :func:`keyed_njit` or :func:`keyed_cfunc` with
+    ``.as_func``: a function numbox compiled, or one decorated with :func:`numbox_njit` or :func:`numbox_cfunc` with
     ``cache=True``. The result maps ``"numbox"`` to numbox's version, ``"flags"`` to the flags as the key holds them,
     and ``"settings"`` to each keyed setting's value. Two results that differ belong to two different keys.
     """
@@ -227,7 +227,7 @@ def explain_cache_key(func) -> dict:
     if keyed is None:
         raise ValueError(
             f"{func!r} has no cache numbox keys: it is cached under numba's key alone, or not cached; decorate it "
-            "with keyed_njit or keyed_cfunc and cache=True"
+            "with numbox_njit or numbox_cfunc and cache=True"
         )
     try:
         flags = _flags_text(*keyed)
@@ -262,7 +262,7 @@ def _keys(py_func) -> bool:
     return any(f is py_func for f in getattr(_keying, "funcs", ()))
 
 
-def keyed_njit(*args, **kwargs):
+def numbox_njit(*args, **kwargs):
     """``numba.njit``, taking its arguments unchanged, with numbox's cache key on the function it decorates.
 
     With ``cache=True``, the function is cached under numba's key with numbox's part added, which the
@@ -282,7 +282,7 @@ def keyed_njit(*args, **kwargs):
     return wrap
 
 
-def keyed_cfunc(*args, **kwargs):
+def numbox_cfunc(*args, **kwargs):
     """``numba.cfunc``, taking its arguments unchanged, with numbox's cache key on the function it decorates.
 
     With ``cache=True``, the C callback is cached under numba's key with numbox's part added, which also distinguishes

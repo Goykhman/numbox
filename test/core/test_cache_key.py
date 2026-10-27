@@ -32,7 +32,7 @@ from numba.experimental import jitclass
 
 from numbox.core import cache_key
 from numbox.core.cache_key import (
-    KEYED_SETTINGS, UNKEYED_SETTINGS, UncachedWarning, explain_cache_key, keyed_cfunc, keyed_njit,
+    KEYED_SETTINGS, UNKEYED_SETTINGS, UncachedWarning, explain_cache_key, numbox_cfunc, numbox_njit,
 )
 from numbox.core.proxy import proxy as proxy_module
 from numbox.core.proxy.proxy import proxy
@@ -95,7 +95,7 @@ def test_every_keyed_setting_names_the_config_attribute_numba_reads_it_into():
 
 # ---- The key, in code ----
 
-@keyed_njit(cache=True)
+@numbox_njit(cache=True)
 def _keyed_for_settings(x):
     return x + 1
 
@@ -148,9 +148,9 @@ import sys
 import numba
 import numpy as np
 
-from numbox.core.cache_key import keyed_njit
+from numbox.core.cache_key import numbox_njit
 
-shared = keyed_njit(cache=True, parallel=True, locals={"acc": numba.float64})
+shared = numbox_njit(cache=True, parallel=True, locals={"acc": numba.float64})
 
 
 def total(n):
@@ -191,15 +191,15 @@ _SWEEP_MODULE = '''
 import numpy as np
 from numba import prange
 
-from numbox.core.cache_key import keyed_njit
+from numbox.core.cache_key import numbox_njit
 
 
-@keyed_njit(cache=True)
+@numbox_njit(cache=True)
 def index(a, i):
     return a[i]
 
 
-@keyed_njit(cache=True, parallel=True)
+@numbox_njit(cache=True, parallel=True)
 def parallel_tuple(a, b, c):
     t = (a, b, c)
     out = np.empty_like(a)
@@ -311,10 +311,10 @@ def _plain(x):
     return x + 1
 
 
-def test_keyed_njit_keys_lazy_and_eager_compiles_and_njit_does_not():
-    lazy = keyed_njit(cache=True)(_plain)
-    eager = keyed_njit("float64(float64)", cache=True)(_plain)
-    called = keyed_njit(_plain, cache=True)
+def test_numbox_njit_keys_lazy_and_eager_compiles_and_njit_does_not():
+    lazy = numbox_njit(cache=True)(_plain)
+    eager = numbox_njit("float64(float64)", cache=True)(_plain)
+    called = numbox_njit(_plain, cache=True)
     plain = njit(cache=True)(_plain)
     for keyed in (lazy, eager, called):
         assert keyed._cache._numbox_keyed[0] == "njit"
@@ -322,15 +322,15 @@ def test_keyed_njit_keys_lazy_and_eager_compiles_and_njit_does_not():
     with pytest.raises(ValueError, match="has no cache numbox keys"):
         explain_cache_key(plain)
     with pytest.raises(ValueError, match="has no cache numbox keys"):
-        explain_cache_key(keyed_njit(_plain))
+        explain_cache_key(numbox_njit(_plain))
     assert eager(1.0) == 2.0
 
 
-def test_keyed_cfunc_is_keyed_apart_from_an_njit_of_the_same_function():
+def test_numbox_cfunc_is_keyed_apart_from_an_njit_of_the_same_function():
     """numba keys a ``@cfunc`` and an ``@njit`` of one function and signature alike, though their compiled results
     differ; numbox's flags hold the decorator."""
-    c = keyed_cfunc("float64(float64)", cache=True)(_plain)
-    j = keyed_njit("float64(float64)", cache=True)(_plain)
+    c = numbox_cfunc("float64(float64)", cache=True)(_plain)
+    j = numbox_njit("float64(float64)", cache=True)(_plain)
     assert c._cache._numbox_keyed[0] == "cfunc"
     assert explain_cache_key(c)["flags"].startswith("kind=cfunc;")
     assert explain_cache_key(j)["flags"].startswith("kind=njit;")
@@ -338,9 +338,9 @@ def test_keyed_cfunc_is_keyed_apart_from_an_njit_of_the_same_function():
 
 
 def test_the_flags_are_in_the_key():
-    fast = keyed_njit(cache=True, fastmath=True)(_plain)
-    plain = keyed_njit(cache=True)(_plain)
-    typed = keyed_njit(cache=True, locals={"y": numba.float32})(_plain)
+    fast = numbox_njit(cache=True, fastmath=True)(_plain)
+    plain = numbox_njit(cache=True)(_plain)
+    typed = numbox_njit(cache=True, locals={"y": numba.float32})(_plain)
     assert explain_cache_key(fast)["flags"] != explain_cache_key(plain)["flags"]
     assert ";fastmath=fastmath[fast];" in explain_cache_key(fast)["flags"]
     assert explain_cache_key(typed)["flags"] != explain_cache_key(plain)["flags"]
@@ -353,8 +353,8 @@ def test_a_set_of_fastmath_flags_and_a_dict_of_locals_are_written_in_one_order()
     flags = {"nnan", "ninf", "nsz", "arcp", "contract", "afn", "reassoc"}
     assert cache_key._flag_value_text(FastMathOptions(flags), "x") == "fastmath[" + ",".join(sorted(flags)) + "]"
     one = {"b": numba.float32, "a": numba.int64}
-    forward = keyed_njit(cache=True, locals=one)(_plain)
-    backward = keyed_njit(cache=True, locals=dict(reversed(list(one.items()))))(_plain)
+    forward = numbox_njit(cache=True, locals=one)(_plain)
+    backward = numbox_njit(cache=True, locals=dict(reversed(list(one.items()))))(_plain)
     assert explain_cache_key(forward)["flags"] == explain_cache_key(backward)["flags"]
 
 
@@ -362,7 +362,7 @@ def test_options_numba_takes_in_another_form_are_keyed_as_numba_takes_them():
     """numba turns a numpy bool into a bool, a dict of fast-math flags into the set of those enabled, and an options
     object into its values. The key holds what numba compiles under, so each keys as its plain form does."""
     def flags(**options):
-        return explain_cache_key(keyed_njit(cache=True, **options)(_plain))["flags"]
+        return explain_cache_key(numbox_njit(cache=True, **options)(_plain))["flags"]
 
     assert flags(boundscheck=np.True_, nogil=np.True_) == flags(boundscheck=True, nogil=True)
     assert flags(fastmath={"nnan": np.True_, "ninf": False}) == flags(fastmath={"nnan"})
@@ -383,7 +383,7 @@ def test_a_function_as_the_inline_cost_model_compiles_uncached_with_a_warning():
     """The key holds ``inline='always'`` and ``'never'``. A function given as the cost model is code the key does not
     hold, so the function compiles without a cache."""
     assert cache_key._flag_value_text(InlineOptions("always"), "x") == "inline['always']"
-    modeled = keyed_njit(cache=True, inline=_cost_model)(_plus_two)
+    modeled = numbox_njit(cache=True, inline=_cost_model)(_plus_two)
     modeled._cache.flush()
     with pytest.warns(UncachedWarning, match="the jit flag inline is a cost model"):
         assert modeled(1) == 3
@@ -404,7 +404,7 @@ def _divides_by(a, b):
 
 
 def test_a_pipeline_class_of_ones_own_compiles_uncached_with_a_warning():
-    divides = keyed_njit(cache=True, pipeline_class=_pipeline_for("numpy"))(_divides_by)
+    divides = numbox_njit(cache=True, pipeline_class=_pipeline_for("numpy"))(_divides_by)
     divides._cache.flush()
     with pytest.warns(UncachedWarning, match=r"the pipeline class is _pipeline_for\.<locals>\.Pipeline, not numba's"):
         assert divides(1.0, 0.0) == np.inf
@@ -432,7 +432,7 @@ class _PipelineReadAfresh:
 def test_a_pipeline_without_a_qualname_compiles_uncached_with_one_warning():
     """The refusal message names the pipeline's type, not its ``repr``, so numbox issues one ``UncachedWarning`` per
     process for a function compiled under a pipeline whose ``repr`` returns a different string each time."""
-    halves = keyed_njit(cache=True, pipeline_class=_PipelineReadAfresh())(_halves)
+    halves = numbox_njit(cache=True, pipeline_class=_PipelineReadAfresh())(_halves)
     halves._cache.flush()
     with pytest.warns(UncachedWarning, match="the pipeline class is an instance of _PipelineReadAfresh") as caught:
         assert halves(1.0) == 0.5
@@ -457,7 +457,7 @@ def _recompiled(x):
 def test_a_recompile_after_a_setting_changed_in_code_saves_the_new_value(monkeypatch):
     """Each lookup reads the part afresh, so a recompile under a setting changed in code saves under that setting,
     not under the part the first compile read."""
-    recompiled = keyed_njit(cache=True)(_recompiled)
+    recompiled = numbox_njit(cache=True)(_recompiled)
     recompiled._cache.flush()
     assert recompiled(1) == 2
     monkeypatch.setattr(numba_config, "BOUNDSCHECK", 1)
@@ -480,7 +480,7 @@ def _counts(n):
 def test_a_flag_with_no_stable_form_compiles_uncached_with_a_warning():
     """numba writes a jitclass's type after an address no other process shares; held in ``locals``, it makes the
     function compile without a cache, once warned."""
-    counts = keyed_njit(cache=True, locals={"t": _Tally.class_type.instance_type})(_counts)
+    counts = numbox_njit(cache=True, locals={"t": _Tally.class_type.instance_type})(_counts)
     with pytest.warns(UncachedWarning, match="a type in locals is the numba type"):
         assert counts(3) == 3
     assert counts._cache._cache_file._load_index() == {}
@@ -498,18 +498,18 @@ def test_explain_cache_key_lists_the_parts():
 
 
 def test_the_keyed_decorators_take_numbas_arguments_unchanged():
-    assert keyed_njit(signature_or_function=_plain, cache=True)._cache._numbox_keyed[0] == "njit"
-    c = keyed_cfunc("float64(float64)", {}, True)(_plain)
+    assert numbox_njit(signature_or_function=_plain, cache=True)._cache._numbox_keyed[0] == "njit"
+    c = numbox_cfunc("float64(float64)", {}, True)(_plain)
     assert c._cache._numbox_keyed[0] == "cfunc"
     assert c.ctypes(1.0) == 2.0
 
 
-@keyed_njit(cache=True)
+@numbox_njit(cache=True)
 def _divides(a, b):
     return a / b
 
 
-@keyed_njit(cache=True, error_model="numpy")
+@numbox_njit(cache=True, error_model="numpy")
 def _divides_under_numpy(a, b):
     return _divides(a, b)
 
@@ -546,7 +546,7 @@ def _sums_with_a_typed_local(n):
 def test_a_compile_saves_the_flags_a_later_lookup_reads():
     """numba's SSA pass adds names to ``locals`` during a compile, and the key leaves them out, so the entry a compile
     saves is the one a later lookup asks for."""
-    typed = keyed_njit(cache=True, locals={"acc": numba.float64})(_sums_with_a_typed_local)
+    typed = numbox_njit(cache=True, locals={"acc": numba.float64})(_sums_with_a_typed_local)
     typed._cache.flush()
     before = explain_cache_key(typed)["flags"]
     assert typed(4) == 6.0
@@ -557,7 +557,7 @@ def test_a_compile_saves_the_flags_a_later_lookup_reads():
 def test_a_parallel_dict_compiles_uncached_with_a_warning():
     """numba takes each choice out of a ``parallel`` dict as it parses it, so a later compile given the same dict takes
     numba's defaults. The key does not hold such a dict, and the function compiles without a cache."""
-    parallel = keyed_njit(cache=True, parallel={"fusion": False})(_sums_in_parallel)
+    parallel = numbox_njit(cache=True, parallel={"fusion": False})(_sums_in_parallel)
     parallel._cache.flush()
     with pytest.warns(UncachedWarning, match="the jit flag parallel is a dict"):
         assert parallel(4) == 6.0
@@ -593,7 +593,7 @@ def test_a_refused_parallel_dict_reaches_numba_whole(monkeypatch):
     monkeypatch.setattr(numba_compiler, "compile_extra", recording)
     for given, body in (({"fusion": False}, _sums_in_parallel_given_a_dict),
                         (collections.OrderedDict(fusion=False), _sums_in_parallel_given_a_dict_subclass)):
-        refused = keyed_njit(cache=True, parallel=given)(body)
+        refused = numbox_njit(cache=True, parallel=given)(body)
         refused._cache.flush()
         with pytest.warns(UncachedWarning, match="the jit flag parallel is a dict"):
             refused(4)
@@ -603,9 +603,9 @@ def test_a_refused_parallel_dict_reaches_numba_whole(monkeypatch):
 def test_a_cfuncs_key_holds_the_flags_numba_compiles_it_under():
     """numba's compiler changes a C callback's flags after the parse: no CPython wrapper, no object mode. The key holds
     them as numba compiles them, so ``nopython=True``, which a C callback always is, keys as its absence does."""
-    flags = explain_cache_key(keyed_cfunc("float64(float64)", cache=True)(_plain))["flags"]
+    flags = explain_cache_key(numbox_cfunc("float64(float64)", cache=True)(_plain))["flags"]
     assert ";no_cpython_wrapper=True;" in flags and ";enable_pyobject=False;" in flags
-    assert explain_cache_key(keyed_cfunc("float64(float64)", cache=True, nopython=True)(_plain))["flags"] == flags
+    assert explain_cache_key(numbox_cfunc("float64(float64)", cache=True, nopython=True)(_plain))["flags"] == flags
 
 
 def _sums_into_a_renamed_variable(n):
@@ -619,12 +619,12 @@ def test_a_name_with_a_dot_is_keyed_unless_numbas_ssa_pass_added_it():
     """numba's SSA pass names a variable's later definitions after it, ``x.1`` and on. Given ``x`` in ``locals``, it
     writes those names into ``locals`` with ``x``'s type, and the key leaves them out. Given ``x.1`` alone, numba types
     that definition by it, and the key holds it."""
-    dotted = keyed_njit(cache=True, locals={"x.1": numba.float64})(_sums_into_a_renamed_variable)
-    plain = keyed_njit(cache=True)(_sums_into_a_renamed_variable)
+    dotted = numbox_njit(cache=True, locals={"x.1": numba.float64})(_sums_into_a_renamed_variable)
+    plain = numbox_njit(cache=True)(_sums_into_a_renamed_variable)
     dotted._cache.flush()
     assert isinstance(dotted(4), float) and isinstance(plain(4), int)
     assert "x.1" in explain_cache_key(dotted)["flags"].partition(";locals=")[2]
-    given = keyed_njit(cache=True, locals={"x": numba.float64})(_sums_into_a_renamed_variable)
+    given = numbox_njit(cache=True, locals={"x": numba.float64})(_sums_into_a_renamed_variable)
     given._cache.flush()
     before = explain_cache_key(given)["flags"]
     assert isinstance(given(4), float)
@@ -722,10 +722,10 @@ import json
 import sys
 
 from numbox.core.bindings.libm import cos
-from numbox.core.cache_key import keyed_njit
+from numbox.core.cache_key import numbox_njit
 
 
-@keyed_njit(cache=True)
+@numbox_njit(cache=True)
 def calls_cos(x):
     return cos(x) + 1.0
 

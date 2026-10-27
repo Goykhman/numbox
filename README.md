@@ -8,7 +8,7 @@ Documentation is available at [numbox](https://goykhman.github.io/numbox).
 
 - **Any**: A lightweight structure that wraps any value into the same type leveraging a variant of the type erasure technique.
 - **Bindings**: JIT-wrappers of functions imported from dynamically linked libraries.
-- **Cache key**: Adds the jit flags and code-changing `NUMBA_*` settings to numba's cache key, for what numbox compiles and for `keyed_njit`/`keyed_cfunc`.
+- **Cache key**: Adds the jit flags and code-changing `NUMBA_*` settings to numba's cache key, for what numbox compiles and for `numbox_njit`/`numbox_cfunc`.
 - **Node**: A lightweight JIT-compatible graph node with type-erased dependencies in a uniform dynamically-sized vector (numba List). 
 - **Proxy**: Create a proxy for a decorated function with specified signatures, enabling efficient JIT compilation and caching.
 - **Variable**: Pure Python framework of a graph calculation. JIT-compiled dispatchers can be invoked by it.  
