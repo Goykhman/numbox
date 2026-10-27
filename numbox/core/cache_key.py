@@ -360,7 +360,9 @@ def _install():
     """Wrap numba's cache and the two decorators' cache set-up; once per process.
 
     Every lookup happens before the first assignment, so on a numba version that lacks one of them, nothing is
-    installed.
+    installed. The marker that makes a second install return early is set after the last assignment, and an
+    assignment that fails, the marker's assignment included, restores the attributes assigned before it. A failed
+    install leaves numba unchanged, and the next import attempts it again.
     """
     if getattr(caching, "_numbox_cache_key", False):
         return
@@ -371,9 +373,17 @@ def _install():
         (Dispatcher, "enable_caching", _wrap_enable_caching(Dispatcher.enable_caching, "njit", lambda d: d.py_func)),
         (CFunc, "enable_caching", _wrap_enable_caching(CFunc.enable_caching, "cfunc", lambda c: c._pyfunc)),
     ]
-    caching._numbox_cache_key = True
-    for owner, name, replacement in wrapped:
-        setattr(owner, name, replacement)
+    applied = []
+    try:
+        for owner, name, replacement in wrapped:
+            original = getattr(owner, name)
+            setattr(owner, name, replacement)
+            applied.append((owner, name, original))
+        caching._numbox_cache_key = True
+    except BaseException:
+        for owner, name, original in reversed(applied):
+            setattr(owner, name, original)
+        raise
 
 
 try:
