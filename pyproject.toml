@@ -25,3 +25,9 @@ docs = ["sphinx==8.1.3", "sphinx-sitemap==2.7.2", "sphinx_rtd_theme"]
 
 [tool.setuptools.dynamic]
 version = {attr = "numbox.__version__"}
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    # A function numbox compiles that cannot be keyed recompiles in every process; fail the suite instead.
+    "error::numbox.core.cache_key.UncachedWarning",
+]
