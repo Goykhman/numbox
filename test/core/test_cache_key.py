@@ -787,3 +787,75 @@ def test_every_module_numbox_core_loads_imports_first_in_a_fresh_interpreter(tmp
         if r.returncode:
             failed[name] = r.stderr.strip().splitlines()[-1]
     assert not failed, failed
+
+
+# ---- The install ----
+
+_FAILED_INSTALL = '''
+import builtins
+import json
+import sys
+import types
+import warnings
+
+from numba.core import caching
+from numba.core.ccallback import CFunc
+from numba.core.dispatcher import Dispatcher
+
+HOOKS = [(caching.Cache, "_index_key"), (caching.Cache, "load_overload"), (caching.Cache, "save_overload"),
+         (Dispatcher, "enable_caching"), (CFunc, "enable_caching")]
+plain_setattr = builtins.setattr
+
+
+def refusing_setattr(obj, name, value):
+    if obj is CFunc and name == "enable_caching":
+        raise RuntimeError("refused")
+    plain_setattr(obj, name, value)
+
+
+class RefusingModule(types.ModuleType):
+    def __setattr__(self, name, value):
+        if name == "_numbox_cache_key":
+            raise RuntimeError("refused")
+        super().__setattr__(name, value)
+
+
+def state():
+    return {"marker": getattr(caching, "_numbox_cache_key", None),
+            "installed": [hasattr(getattr(owner, name), "__wrapped__") for owner, name in HOOKS]}
+
+
+if sys.argv[2] == "hook":
+    builtins.setattr = refusing_setattr
+else:
+    caching.__class__ = RefusingModule
+try:
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        import numbox.core.cache_key
+finally:
+    builtins.setattr = plain_setattr
+    caching.__class__ = types.ModuleType
+first = state()
+first["warned"] = [str(w.message) for w in caught if "cache key" in str(w.message)]
+for name in [m for m in sys.modules if m == "numbox" or m.startswith("numbox.")]:
+    del sys.modules[name]
+import numbox.core.cache_key  # noqa: E402,F811
+with open(sys.argv[1], "w", encoding="utf-8") as out:
+    json.dump([first, state()], out)
+'''
+
+
+@pytest.mark.parametrize("refused", ["hook", "marker"])
+def test_a_failed_install_leaves_numba_as_it_was_and_the_next_import_installs(tmp_path, refused):
+    """The last of the five assignments is refused, or the marker's store after them. The process is warned once,
+    keeps none of numbox's hooks and has no marker, so the next import of numbox installs all five."""
+    script = tmp_path / "failed_install.py"
+    script.write_text(_FAILED_INSTALL, encoding="utf-8")
+    first, second = _run(script, _child_env(tmp_path / "cache"), tmp_path / "out.json", refused)
+    assert first["marker"] is None
+    assert first["installed"] == [False] * 5
+    assert len(first["warned"]) == 1
+    assert first["warned"][0].startswith(
+        "numbox: could not add its part to numba's cache key (RuntimeError('refused'))")
+    assert second == {"marker": True, "installed": [True] * 5}
