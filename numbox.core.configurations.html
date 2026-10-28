@@ -1,0 +1,691 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.configurations &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/numbox.core.configurations.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="numbox.core.proxy" href="numbox.core.proxy.html" />
+    <link rel="prev" title="numbox.core.cache_key" href="numbox.core.cache_key.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">numbox</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.any.html">numbox.core.any</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.html">numbox.core.bindings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.sqlite.html">numbox.core.bindings.sqlite</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.cache_key.html">numbox.core.cache_key</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbox.core.configurations</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#where-the-cache-lands">Where the cache lands</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#modules">Modules</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#id2">numbox.core.configurations</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.proxy.html">numbox.core.proxy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.variable.html">numbox.core.variable</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.vector.html">numbox.core.vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.work.html">numbox.core.work</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.utils.html">numbox.utils</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">numbox</a></li>
+      <li class="breadcrumb-item active">numbox.core.configurations</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbox.core.configurations.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbox-core-configurations">
+<h1>numbox.core.configurations<a class="headerlink" href="#numbox-core-configurations" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>Every function numbox caches is decorated under one set of numba options, <code class="docutils literal notranslate"><span class="pre">jit_options</span></code>, read once from
+the <code class="docutils literal notranslate"><span class="pre">NUMBOX_JIT_OPTIONS</span></code> environment variable when this module is first imported; a bare <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> in
+numbox, as in <code class="docutils literal notranslate"><span class="pre">lowlevel.py</span></code>, <code class="docutils literal notranslate"><span class="pre">meminfo.py</span></code> and <code class="docutils literal notranslate"><span class="pre">make_vector</span></code>, is not cached and takes none. The value is a JSON
+object passed to <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> as keyword arguments, and any other shape is refused by name, as is a <code class="docutils literal notranslate"><span class="pre">cache</span></code>
+that is not <code class="docutils literal notranslate"><span class="pre">true</span></code> or <code class="docutils literal notranslate"><span class="pre">false</span></code> (the string <code class="docutils literal notranslate"><span class="pre">&quot;false&quot;</span></code> is true to numba, which reads the option’s truth);
+unset means <code class="docutils literal notranslate"><span class="pre">{&quot;cache&quot;:</span> <span class="pre">true}</span></code>, so numbox compiles into numba’s on-disk cache by default, and
+<code class="docutils literal notranslate"><span class="pre">export</span> <span class="pre">NUMBOX_JIT_OPTIONS='{&quot;cache&quot;:</span> <span class="pre">false}'</span></code> turns that off.</p>
+</section>
+<section id="where-the-cache-lands">
+<span id="id1"></span><h2>Where the cache lands<a class="headerlink" href="#where-the-cache-lands" title="Link to this heading"></a></h2>
+<p>numba writes a cached function’s entries under <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> when that is set, else into the
+<code class="docutils literal notranslate"><span class="pre">__pycache__</span></code> directory beside the function’s source file, else into the user’s cache directory, taking the
+first of those it can write. It sets the cache up when the function is decorated, so with caching on the question
+of where it lands is settled at import. The user’s cache directory is <code class="docutils literal notranslate"><span class="pre">~/Library/Caches/numba</span></code> on macOS,
+<code class="docutils literal notranslate"><span class="pre">%LOCALAPPDATA%\numba\Cache</span></code> on Windows, and <code class="docutils literal notranslate"><span class="pre">$XDG_CACHE_HOME/numba</span></code> elsewhere, <code class="docutils literal notranslate"><span class="pre">~/.cache/numba</span></code> when
+<code class="docutils literal notranslate"><span class="pre">XDG_CACHE_HOME</span></code> is unset.</p>
+<p>Where no cache can be written, numba raises at decoration, and numbox’s import used to die on its first module
+with <code class="docutils literal notranslate"><span class="pre">RuntimeError:</span> <span class="pre">cannot</span> <span class="pre">cache</span> <span class="pre">function</span> <span class="pre">...:</span> <span class="pre">no</span> <span class="pre">locator</span> <span class="pre">available</span> <span class="pre">for</span> <span class="pre">file</span> <span class="pre">...</span></code>. The two placements that do
+that are a read-only install whose user cache directory cannot be written either, and an import from an
+<code class="docutils literal notranslate"><span class="pre">.egg</span></code>, <code class="docutils literal notranslate"><span class="pre">.whl</span></code> or <code class="docutils literal notranslate"><span class="pre">.pyz</span></code> archive, which Spark’s <code class="docutils literal notranslate"><span class="pre">--py-files</span></code> ships. Since every function numbox caches
+decorates under the one <code class="docutils literal notranslate"><span class="pre">jit_options</span></code>, numbox puts the question once, when this module is imported, and
+answers it for the package: for a probe in each directory of the package that holds a module, since numba’s
+in-tree cache is a <code class="docutils literal notranslate"><span class="pre">__pycache__</span></code> beside each source, it runs the cache set-up numba runs at decoration and
+the writability check numba runs at the first save, compiling nothing, and where either fails for any
+directory numbox compiles without a cache and one <code class="docutils literal notranslate"><span class="pre">RuntimeWarning</span></code> names the remedy. Every directory
+counts, whether or not its modules cache anything, so the answer errs toward uncached, which is never wrong.
+A module that survives as <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> alone is asked by the file it was compiled from, which its code keeps and
+numba looks up: the <code class="docutils literal notranslate"><span class="pre">.py</span></code> that is gone where it was compiled in place, or a tree elsewhere, on disk or not.
+For a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>, which numba caches per directory of the archive, each in a location of its own under the
+user’s cache directory, the archive’s directories are listed and the question put for one module of each; a
+<code class="docutils literal notranslate"><span class="pre">.pyc</span></code> in the archive that zipimport would run, which it takes before the <code class="docutils literal notranslate"><span class="pre">.py</span></code> beside it unless it is
+stale against it or of another interpreter, and whose code keeps the file it was compiled from, is asked by
+that file, since that is what numba looks up for it, on disk or gone, and one zipimport would pass over is
+passed over, and a <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> whose code names a member the archive does not hold, one alone with no <code class="docutils literal notranslate"><span class="pre">.py</span></code> beside
+it or one compiled to name another path in the archive, <code class="docutils literal notranslate"><span class="pre">compileall</span> <span class="pre">-d</span></code>, beside its <code class="docutils literal notranslate"><span class="pre">.py</span></code> or not, is asked for
+itself whichever member stands for its directory, since numba 0.68 and later read the member’s source from the
+archive by the name its code gives and find none for it; any other archive has no location at all. A directory of
+the package reached through a symlink
+is walked like the rest, wherever the link points. The check makes the cache directories it asks about, as
+numba would at the first decoration in each; with caching beside the sources that is an empty <code class="docutils literal notranslate"><span class="pre">__pycache__</span></code>
+per directory of the package, a linked one included. numba’s own writability check makes a temporary file,
+one without a name on Linux, and the files it saves have names of a hundred bytes and more, so a location
+within their length of the path limit, 4096 on Linux, passes numba’s check and the first save overflows;
+the check here makes a file named as long as the longest numba writes for the package’s files (128 bytes,
+which a test holds every function of the package under), so that location turns caching off with the
+warning instead.</p>
+<ul class="simple">
+<li><p>For a source file on disk that numba cannot read, which its IPython locator reads for the function’s source and
+every locator reads for the stamp from numba 0.68, the remedy is to make it readable. For one it can, the remedy
+is <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> pointed at a writable directory; where it is
+set and numba passed it over, the warning names it and asks for a writable directory at a short path, since
+numba passes over one too deep to make its directory in as it does an unwritable one; and where
+<code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_LOCATOR_CLASSES</span></code> leaves the user-provided locator out, it is the locations
+the list names made writable, numba never reading the variable. Where the
+location is too long for the file system, the remedy is for the location the error names: numba takes a
+directory under <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> where that is set, else the <code class="docutils literal notranslate"><span class="pre">__pycache__</span></code> beside the source, else a
+directory under the user’s cache directory, each of the two under a cache directory named for the source’s
+directory, by its name and a hash of its path; the path the error names is matched whole against each location
+a locator numba reaches gives it, in the order numba tries them, since the three can nest and
+<code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> set to the user’s cache directory makes one path of two, and the error is read as that
+locator’s, the ones numba tries before it having passed the file over, as numba’s own errors mean and an error a
+caller passes on naming a location numba did not take need not; numba reaches no locator listed
+after its <code class="docutils literal notranslate"><span class="pre">.zip</span></code> one for a path with <code class="docutils literal notranslate"><span class="pre">.zip</span></code> in it, which that locator takes without trying its location, so
+a location one of those would give is none of numba’s. So a shorter <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> for the first; the
+package installed at a shorter path for the second; the user’s cache directory at a shorter path, through
+<code class="docutils literal notranslate"><span class="pre">XDG_CACHE_HOME</span></code> or <code class="docutils literal notranslate"><span class="pre">HOME</span></code>, <code class="docutils literal notranslate"><span class="pre">HOME</span></code> alone on macOS and nothing on Windows, where numba asks the system,
+for the third; and for either of the last two <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> set to a short path, where numba tries it
+before the locator that took the location, or, where it is set and numba passed it over, unwritable or too
+deep, the warning names it and the remedy is a writable directory at a short path. The directory numba names after
+the source’s, under <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> or the user’s cache directory, is that directory’s name and forty-one
+bytes, and one longer than a name can be on the file system holding the location, which the system is asked for,
+255 where it cannot say, in bytes, or in the UTF-16 units Windows and macOS count a name in, can be made at no
+path, and is refused whatever the errno, EINVAL on Windows: an error naming such a location, numba’s no-locator
+error
+for a file on disk where every locator it tried that names its directory so found the name too long for its file
+system, the variable’s unset by that limit, and a frozen application’s are told the name and its length, and the
+file in a directory of a shorter name, with, for a file on disk, the <code class="docutils literal notranslate"><span class="pre">__pycache__</span></code> beside the source made
+writable where the in-tree locator is listed, or that locator listed where it is not, which caches under no such
+name. A cache file numba could not make or open in the location it took, whose name, given after the source’s name
+and the function’s qualified name, is longer than a name can be on that file system, is told the name and its
+length, which no shorter path cures, and a shorter name for the function or its file, the package’s to give,
+and the check’s error for a name as long as the package’s functions get, which that file system takes no name
+as long as, is told the length, with
+<code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> pointed at a directory on a file system that takes a name that long offered where a file
+system in use takes the name, 255 being their limit, less the 29 of the longest name numba writes for the
+function, a data file’s with three digits for its number, numba numbering them from one without bound, through
+the temporary name it writes each file through,
+and numba tries the variable before the locator that took
+the file, as it is offered at a short path for a path too long, and nothing offered for a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> member, which
+the variable does nothing for.
+numba hashes the source’s directory path as UTF-8 for that name and raises for bytes that are not, at
+decoration, where a locator that names its directory so reaches the file, so for such a path the remedy names no
+location under <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> or the user’s cache directory, and a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> under such a path, whose
+archive’s path numba’s <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator hashes the same way for its directory under the user’s cache directory,
+is told the archive under a UTF-8 path, a frozen application under one, whose path numba’s user-wide locator
+hashes the same way, the application under a UTF-8 path, and a file on disk under one is told the
+<code class="docutils literal notranslate"><span class="pre">__pycache__</span></code> beside it too,
+which numba’s in-tree locator hashes no path for: that locator to list before the first that hashes, where the
+list leaves it out or puts it after one, <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> to unset where its locator alone hashes before the
+in-tree one, or that directory to make writable where the in-tree locator came first and passed it over, and
+with any of these where it cannot be written.
+A location that is none of
+numba’s is named as the error names it, with the variable, where numba tries it before any other locator, named
+as set or asked for at a short path, and nothing said of numba passing it over, which that location cannot show.
+The name an error carries is read as a string, bytes or a path object alike, and a name of another kind, an integer
+file descriptor’s, as none. An error can name no file, or carry an
+empty string or empty bytes as its name. A caller can build such an error, and numba’s first save raises one where a
+write fails, as on a full disk. So does inspect where, for numba’s IPython locator, it reads no source in a cell file
+on disk, unreadable or, before Python 3.13, empty, with no errno either, no call of the file system’s having raised
+it, and that error,
+for a file on disk that a locator of IPython’s family numba reaches takes, is told as inspect’s, that locator having
+tried no location: the file to make readable, with the source in it; for a cell, whose source numba reads from
+linecache, where IPython holds it while it runs the cell, as that, numba caching a cell only while IPython holds
+its source; and for a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> member whose archive holds no source, a <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> alone, as the archive’s, its source
+files to ship. Every other OSError that <code class="docutils literal notranslate"><span class="pre">check_cache_location</span></code>
+raises names a file. An error with no name, or an empty
+one, is told the locations numba could have taken, in numba’s order and each once. For a path too long, the remedy is
+to put whichever of them is too long at a shorter path. For a file refused for another reason, such as a full disk,
+the remedy gives the reason and asks for room or a writable directory there. A path object is never empty: pathlib
+reads an empty string as the working directory, which the remedy names as a location that is none of numba’s.
+<code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_LOCATOR_CLASSES</span></code> decides that order, each entry a class of numba’s caching module or, by its
+dotted path, a subclass of one, which takes what its parent takes, caches where it does and is told as it is, or a
+class of none of numba’s families, with a <code class="docutils literal notranslate"><span class="pre">from_function</span></code> and a place of its own, which takes what its
+<code class="docutils literal notranslate"><span class="pre">from_function</span></code>, asked with a probe as numba asks it, takes, where it caches being its own to say: an error
+naming a location that no locator of
+numba’s gives the file is told that location as the error names it, which is then that class’s, and one naming no
+file is told the location numba took as the class’s own, with no path to name, among numba’s locators’ places where
+those are reached; an
+entry numba cannot resolve, which it refuses before any location is tried, or raises importlib’s error for, a
+relative module path’s TypeError, and one that names no class, or a class with no <code class="docutils literal notranslate"><span class="pre">from_function</span></code>, which it
+fails on at a function it decorates where it reaches the entry, are no locators here, and numba’s own error for
+either is raised as it was.
+numba’s IPython locator caches a cell file it takes in <code class="docutils literal notranslate"><span class="pre">numba_cache</span></code> under IPython’s cache directory, with no
+directory per file, and reads the function’s source when it takes the file, as inspect reads it, a file on disk
+itself, a cell from linecache and a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> member through the module’s loader, which the check’s probe has, a
+module of its own whose loader reads the member from the archive as zipimport’s does, the member’s lines then in
+linecache as any reader leaves them; that location too long is told as
+IPython’s cache directory at a shorter path, for a cell file on disk and for a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> member in an ipykernel
+directory alike, where that locator is listed before the <code class="docutils literal notranslate"><span class="pre">.zip</span></code> one, which takes a file without trying its
+location, so that none listed after it is reached, with no <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> offered for a source not on
+disk; a cell, which no other locator of numba’s takes, gets numba’s no-locator error where that locator passes its
+location over, and is told that location, to make writable or put at a shorter path, or IPython’s cache directory
+to make a home for where IPython raised for it, with a class of none of numba’s families listed with it named as
+having passed the cell over too; the remedy asks IPython for that directory where a locator of that family is
+listed
+and takes the file, and leaves IPython alone for every other file, a plain <code class="docutils literal notranslate"><span class="pre">.zip</span></code> member among them, since
+IPython warns when asked under a home it cannot write and leaves a temporary directory behind, a new one on
+every call where it can write neither its cache directory nor its own, in which case numba makes <code class="docutils literal notranslate"><span class="pre">numba_cache</span></code>
+in one and saves in another, the check raises the error numba’s first save would, <code class="docutils literal notranslate"><span class="pre">FileNotFoundError</span></code> naming
+the directory, an error of another errno naming a <code class="docutils literal notranslate"><span class="pre">numba_cache</span></code> being a caller’s, told as the location it
+names, and the warning asks for
+<code class="docutils literal notranslate"><span class="pre">IPYTHONDIR</span></code>, or <code class="docutils literal notranslate"><span class="pre">XDG_CACHE_HOME</span></code> on a POSIX system, where IPython 8 and later read it, at a writable path;
+numba
+imports IPython for the location when it makes it and catches only OSError there, so where IPython is not
+importable it raises ImportError at decoration for a file that locator takes, no cache error, and an error a
+caller passes on naming that location is told it as none of numba’s where another locator numba reaches has a
+place for the file, and the list where none has, as numba’s no-locator error is told it; and where IPython raises
+OSError for its directory numba passes the locator over, as it does a location it cannot make, and the warning,
+asked the same, has no location of IPython’s to match the error against. numba’s IPython locator takes a file on
+disk
+only in an ipykernel directory and its <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator only a path with <code class="docutils literal notranslate"><span class="pre">.zip</span></code> in it, so either ahead of
+the rest changes nothing for any other file; the <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator ahead of them all takes such a path first and
+caches it under the user’s cache directory where a part of the path ends in <code class="docutils literal notranslate"><span class="pre">.zip</span></code>, an archive or a
+directory, or, where none does, finds no archive
+in it, and the warning then asks for a locator for a file on disk listed before it, the user-provided one with
+<code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> set, which alone it takes nothing without; after some of them, it finds no archive once
+those have passed the file over, numba trying none after it, and the warning asks for one of their locations
+made writable or such a locator listed before it. A list with no locator that takes the file is told so, for an
+error a caller passes on under it as for numba’s no-locator one, and so is one whose only locator for the file is
+the user-provided one with <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> unset, which takes nothing without it: the variable to set, as
+numba’s no-locator error is told there. Where the location numba took refuses a file for another reason, a
+full disk or permissions changed since numba’s own check, the warning names the location and the reason and
+asks for room or a writable directory there, with <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> as the alternative where numba tries it
+before that location, or set to another directory where the location is the variable’s own; numba passes over
+a location it cannot make or write in, so only its no-locator error means the variable was passed over. An
+error naming a location that is none of numba’s is told that location as the error names it, and one naming
+no file is told the locations numba could have taken.</p></li>
+<li><p>For a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>, or a frozen application, it is the user’s cache directory made writable, or room made there,
+with the reason the error gives, a full disk or permissions: a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> is the one archive numba caches
+and it caches it there, taking the directory without checking that it can be written; the error names
+that location, or a file numba’s first save writes in it, and the location is told with the reason; an error
+naming a location that is none of numba’s, under the list and in its order, is told that location as the error
+names it, as for a source on disk, with nothing of what moves the user’s cache directory and nothing of where
+numba caches the file, which that location is none of; a frozen
+application (<code class="docutils literal notranslate"><span class="pre">sys.frozen</span></code>) is cached there too, its sources not being on disk, and its error is numba’s
+no-locator one, which gives no reason, numba having passed the location over on its error, unwritable or too deep
+alike, so that directory is named as one numba could not use, to be made writable or put at a shorter path, or,
+where the name numba gives the directory after the source’s is too long for the file system, told so, as is a
+cache file’s name in that location, or in IPython’s <code class="docutils literal notranslate"><span class="pre">numba_cache</span></code> for a member in an ipykernel directory, too
+long for the file system, which no shorter path cures.
+A frozen application’s path with <code class="docutils literal notranslate"><span class="pre">.zip</span></code> in it and no part ending in it gets the <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator’s error instead,
+where the list puts that locator before the user-wide one or once the user-wide one passed its location over, and
+the warning asks for the user-wide locator listed before it, or for that location made writable or put at a
+shorter path.
+numba reads <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> only for a source file on disk, so the variable changes nothing for either.
+An error that names no file, a caller’s, or numba’s first save’s on a full disk, is told the locations numba
+could have taken, as for a source on disk, in its order and each once, with the reason, or, for a path too long,
+to put whichever is too long at a shorter path; for a member in an ipykernel directory where a locator of
+IPython’s family is reached, the warning says nothing of the user’s cache directory as where numba caches the
+file, and IPython’s <code class="docutils literal notranslate"><span class="pre">numba_cache</span></code> is among them where IPython gives its directory.
+A <code class="docutils literal notranslate"><span class="pre">.zip</span></code> whose cache directory holds every entry but can no longer be written falls back too, where numba
+alone would have loaded the entries: the writability check is the rule numba applies to every other
+placement. numba caches a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> through its <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator alone, so a <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_LOCATOR_CLASSES</span></code>
+that leaves that locator out gives numba no locator for a source in a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>, and the warning asks for it to
+be listed; so for a notebook cell and numba’s IPython locator, and for a frozen application and numba’s
+user-wide locator, which alone takes one; any of them is told
+for an error a caller passes on under such a list as for numba’s no-locator one, since numba took no location
+under it, and a source neither in a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> nor a frozen application’s, which no locator takes, is told the
+source files on disk or a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> holding them for any error.</p></li>
+<li><p>For an <code class="docutils literal notranslate"><span class="pre">.egg</span></code>, <code class="docutils literal notranslate"><span class="pre">.whl</span></code> or <code class="docutils literal notranslate"><span class="pre">.pyz</span></code>, a <code class="docutils literal notranslate"><span class="pre">.pyc</span></code>-only install or a <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> in a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>, it is the source
+files on disk or a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> holding them, each with the locator it needs listed where
+<code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_LOCATOR_CLASSES</span></code> leaves it out: one of the three locators for a file on disk for the first, the
+<code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator for the second, and <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> set where the user-provided locator is the one listed for
+a file on disk, which takes nothing without it.</p></li>
+<li><p>From numba 0.68 the archive’s stamp hashes each member’s source, read from the archive by the name the
+module’s code gives under the archive’s path: a member shipped as <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> alone is told the source files, on
+disk or in a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>, naming the member; on Windows under numba 0.68.0 every member is refused, its name
+built with the platform’s separator (<a class="reference external" href="https://github.com/numba/numba/issues/10889">numba issue 10889</a>,
+fixed for 0.68.1), and the warning asks for the install on disk, or a release carrying the fix; and a directory
+whose name
+ends in <code class="docutils literal notranslate"><span class="pre">.zip</span></code> above the
+archive, which numba takes for the archive by the first such part of the path and from 0.68 opens for the
+source, is told as the directory it is, to put the archive under a path with none such above it; a source
+file on disk under such a directory, which that locator takes once the locators before it passed the file
+over, is told to make one of their locations writable or to put the file elsewhere.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">NUMBOX_JIT_OPTIONS='{&quot;cache&quot;:</span> <span class="pre">false}'</span></code> turns caching off and silences the warning in every case, the
+package’s options being what it sets; the anchors’ warning under a caller’s own options, below, is
+silenced by those.</p></li>
+</ul>
+<p>A function numba cannot cache is compiled in every process that uses it, never wrong; that is the cost the
+warning reports. An error at decoration that is not the cache’s is raised as it was.</p>
+<p>A package built on numbox can put the same question for its own files: <code class="docutils literal notranslate"><span class="pre">check_cache_location</span></code> asks it for
+one file, <code class="docutils literal notranslate"><span class="pre">is_a_cache_error</span></code> tells numba’s cache errors from the rest, and <code class="docutils literal notranslate"><span class="pre">cache_remedy</span></code> words the
+remedy, given the package’s name for the two remedies that tell the reader to install it again, at a shorter
+path or with its source files on disk. The bound on file names is the package’s own:
+<code class="docutils literal notranslate"><span class="pre">LONGEST_CACHE_FILE_NAME</span></code> holds numbox’s functions only, so a package passes <code class="docutils literal notranslate"><span class="pre">check_cache_location</span></code> the
+longest name numba writes for its own, as <code class="docutils literal notranslate"><span class="pre">longest_file_name</span></code>, or a location that fits numbox’s names and not
+the package’s passes the check and the first save overflows it.</p>
+<p>The code numbox generates at run time, <code class="docutils literal notranslate"><span class="pre">make_structref</span></code>’s, <code class="docutils literal notranslate"><span class="pre">compile_kernel</span></code>’s, the work builder’s derives
+and the sqlite registrations’, is anchored to a file under <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> or the user’s cache directory
+so that numba can cache it. That directory can be unwritable where the package’s own functions cache, since
+those cache beside their sources, so each anchor puts the same question for its own file when it is written,
+and the code it names compiles without a cache where the answer is no, after a warning of the same shape (the
+builder’s derive falls back without one, as it did). <code class="docutils literal notranslate"><span class="pre">make_structref</span></code>, <code class="docutils literal notranslate"><span class="pre">compile_kernel</span></code> and the builder
+take jit options of the caller’s, which the variable does not reach, and <code class="docutils literal notranslate"><span class="pre">compile_kernel</span></code>’s <code class="docutils literal notranslate"><span class="pre">cache</span></code>
+argument overrides those too, so that warning’s silence is <code class="docutils literal notranslate"><span class="pre">cache</span></code> off in the options the code was given,
+the argument where it takes one, or the variable where the options are the package’s. <code class="docutils literal notranslate"><span class="pre">make_graph</span></code>’s
+kernel is anchored to the builder’s own file and cached beside it, so it puts the question for that file
+under the options it was given, and falls back the same way with the package’s remedy for the placement.
+See the cache-anchor section of <a class="reference internal" href="numbox.utils.html"><span class="doc">numbox.utils</span></a>.</p>
+</section>
+<section id="modules">
+<h2>Modules<a class="headerlink" href="#modules" title="Link to this heading"></a></h2>
+<section id="id2">
+<h3>numbox.core.configurations<a class="headerlink" href="#id2" title="Link to this heading"></a></h3>
+<dl class="py function" id="module-numbox.core.configurations">
+<dt class="sig sig-object py" id="numbox.core.configurations.cache_remedy">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.configurations.</span></span><span class="sig-name descname"><span class="pre">cache_remedy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">py_file</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">failure</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">silence</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">package</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'numbox'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/configurations.html#cache_remedy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.configurations.cache_remedy" title="Link to this definition"></a></dt>
+<dd><p>The remedy for <code class="docutils literal notranslate"><span class="pre">failure</span></code>, numba’s error for a function whose file is <code class="docutils literal notranslate"><span class="pre">py_file</span></code>, ending in <code class="docutils literal notranslate"><span class="pre">silence</span></code>.</p>
+<p>The remedy is one sentence. It names what numba tried, why that failed and what moves it, and ends in
+<code class="docutils literal notranslate"><span class="pre">silence</span></code>, the clause that says how to turn caching off. <code class="docutils literal notranslate"><span class="pre">py_file</span></code> can be a string, bytes or a path object,
+and so can the file name the error carries; both are read as strings. <code class="docutils literal notranslate"><span class="pre">package</span></code> is the package the remedy
+tells the reader to install again, at a shorter path or with its source files on disk. A package built on numbox
+that asks the question for its own files, with <code class="docutils literal notranslate"><span class="pre">check_cache_location</span></code> and <code class="docutils literal notranslate"><span class="pre">is_a_cache_error</span></code>, passes its own
+name, just as it passes <code class="docutils literal notranslate"><span class="pre">check_cache_location</span></code> a <code class="docutils literal notranslate"><span class="pre">longest_file_name</span></code> for its own functions;
+<code class="docutils literal notranslate"><span class="pre">LONGEST_CACHE_FILE_NAME</span></code> is numbox’s.</p>
+<p>Most of the remedy turns on which locator took the file. numba caches a source file on disk in one of three
+places: a directory under <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> if that is set, else the <code class="docutils literal notranslate"><span class="pre">__pycache__</span></code> beside the source, else a
+directory under the user’s cache directory. The first and the third are under a cache directory named after the
+source’s directory, by its name and a hash of its path. The three can nest, and <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> set to the
+user’s cache directory makes one path of two. So the remedy matches the whole path the error names against the
+location each locator numba reaches would give the file, in the order numba tries the locators, and reads the
+error as the first matching locator’s. numba’s own errors mean that the locators before that one passed the
+file over; an error a caller passes on, naming a location numba did not take, need not mean that. numba reaches
+no locator listed after its <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator for a path with <code class="docutils literal notranslate"><span class="pre">.zip</span></code> in it, because that locator takes the file
+without trying its location, so a location that one of those would give is none of numba’s.</p>
+<p><code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_LOCATOR_CLASSES</span></code> decides the order. Each entry is one of three
+things: a class of numba’s caching module; a subclass of such a class, by its dotted path, which takes what its
+parent takes, caches where its parent does, and is told as its parent is; or a class outside numba’s families,
+with a <code class="docutils literal notranslate"><span class="pre">from_function</span></code> and a place of its own, which takes whatever its <code class="docutils literal notranslate"><span class="pre">from_function</span></code> takes when asked with
+a probe, as numba asks it, and caches in a place that only the class can name. An error naming a location that
+no locator of numba’s gives the file is told that location as the error names it; the location is then that
+class’s. An error naming no file is told the location numba took as the outside class’s own, with no path to
+name, among the places of numba’s locators that are reached. numba’s IPython locator takes a file on disk only
+in an ipykernel directory, and its <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator only a path with <code class="docutils literal notranslate"><span class="pre">.zip</span></code> in it, so listing either ahead of
+the rest changes nothing for any other file. The <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator listed first takes such a path before any
+other locator does. It caches the file under the user’s cache directory if a part of the path ends in <code class="docutils literal notranslate"><span class="pre">.zip</span></code>,
+an archive or a directory; if no part does, it finds no archive and raises, and the remedy asks for a locator
+for a file on disk listed before it. The user-provided locator counts only with <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> set, because
+it takes nothing without. Listed after some of the locators for a file on disk, the <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator finds no
+archive and raises once those have passed the file over, and numba tries none after it; the remedy then asks
+for one of their locations to be made writable, or for such a locator to be listed before it. A list with no
+locator that takes the file is told so, and so is a list whose only locator for the file is the user-provided
+one with <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> unset, which is told to set the variable. Both are told the same for an error a
+caller passes on under such a list, as for numba’s no-locator error, because numba took no location under it.</p>
+<p>For a source file on disk, <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> is offered, because that is the only kind of source numba reads
+the variable for. If the variable is set and numba passed it over, the remedy names it and asks for a writable
+directory at a short path. numba passes over a directory too deep to make its own directory in, as it does an
+unwritable one. If <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_LOCATOR_CLASSES</span></code> leaves the user-provided locator out, numba never
+reads the variable, and the remedy asks for the locations the list names to be made writable. If the location
+numba took refuses a file for another reason, a full disk or permissions changed since numba’s own check, the
+remedy names the location and the reason and asks for room or a writable directory there. It offers
+<code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> as the alternative if numba tries the variable before that location’s locator, or the
+variable set to another directory if the location is the variable’s own. numba passes over a location it cannot
+make or write in, so only its no-locator error means the variable was passed over. A location that is none of
+numba’s is named as the error names it. If numba tries <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> before any other locator, the
+variable is named as set, to be made a writable directory at a short path, or, unset, asked for at a short path
+for a path too long and as a writable directory otherwise; nothing is said of numba passing it over, because
+such a location cannot show that.</p>
+<p>For a path too long for the file system, the error names the location, and the remedy fits the one it is: a
+shorter <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> for the first of the three; the package at a shorter path for the second; the user’s
+cache directory at a shorter path for the third, through <code class="docutils literal notranslate"><span class="pre">XDG_CACHE_HOME</span></code> or <code class="docutils literal notranslate"><span class="pre">HOME</span></code>, <code class="docutils literal notranslate"><span class="pre">HOME</span></code> alone on macOS
+and nothing on Windows. For either of the last two the remedy also offers <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> set to a short
+path. It makes that offer if numba tries the variable before the locator that took the location, or before the
+last of the locators that give the file that one path, as the user-wide and <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locators do. If the
+variable is set and numba passed it over, the remedy names the variable and asks for it to be made a writable
+directory at a short path.</p>
+<p>A name can be too long for the file system. The directory numba names after the source’s directory, under
+<code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> or the user’s cache directory, is that directory’s name plus forty-one bytes. A name longer
+than the file system holding the location allows can be made at no path, and is refused whatever the errno,
+<code class="docutils literal notranslate"><span class="pre">EINVAL</span></code> on Windows. The limit is asked of the system, 255 if it cannot say, in bytes, or in the UTF-16 units
+Windows and macOS count a name in. Three errors are told the name and its length, and to put the file in a
+directory of a shorter name. The first is an error naming such a location. The second is numba’s no-locator
+error for a file on disk, or its <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator’s error once the locators before it passed the file over, if
+every locator numba tried that names its cache directory by that hash found the name too long; the variable’s
+locator measures by the limit of the directory the variable is set to, or by 255 if it is unset, and under that
+locator alone, unset, the remedy also asks for the variable to be set. The third is a frozen application’s
+error. For a file on disk the remedy adds the <code class="docutils literal notranslate"><span class="pre">__pycache__</span></code> beside the source, which caches under no such name:
+made writable if numba reaches the in-tree locator; otherwise, under a list, that locator listed, before the
+<code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator or the outside class that took the file if the list puts it after one.</p>
+<p>The files numba writes for a function are named after the source’s name and the function’s qualified name. A
+cache file numba could not make or open in the location it took, because its name is longer than that file
+system allows, is told the name and its length, which no shorter path cures. It is told a shorter name for the
+function or its file, which is the package’s to give. If a file system in use takes the name, the remedy also
+offers <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> pointed at a directory on such a file system: the variable as set, if its own location
+took the file, and otherwise provided numba tries the variable before the locator that took the file, as the
+variable is offered at a short path for a path too long. A file system in use takes the name if the name’s base
+fits in 255, the common limit, less the 29 bytes numba adds for the longest name it writes for the function: a
+data file’s, with three digits for its number, which numba counts from one without bound, written through a
+temporary name; a wider number in the error’s name counts at its own width. The check’s error for a name as long
+as the package’s functions get, on a file system that takes no name that long, is told the length. It is offered
+<code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> pointed at a directory on a file system that takes such a name, on the same terms, whatever
+the name’s length. Nothing is offered for a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> member, which the variable does nothing for.</p>
+<p>A path can hold bytes that are not UTF-8. numba hashes the source’s directory path as UTF-8 for the name of its
+directory, and raises at decoration for such bytes when a locator that names its cache directory by that hash
+reaches the file. For such a path the remedy names no location under <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> or the user’s cache
+directory. A <code class="docutils literal notranslate"><span class="pre">.zip</span></code> under such a path, whose archive path numba’s <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator hashes the same way for its
+directory under the user’s cache directory, is told to put the archive under a UTF-8 path; a frozen application
+under one, whose path the user-wide locator hashes the same way, is told to put the application under a UTF-8
+path. A file on disk under such a path is also told the <code class="docutils literal notranslate"><span class="pre">__pycache__</span></code> beside it, because the in-tree locator
+hashes no path for that directory. If the list leaves the in-tree locator out, or puts it after a locator that
+hashes other than the variable’s, the remedy says to list the in-tree locator before the first locator that
+hashes. If only the variable’s locator hashes before the in-tree locator, the remedy says to unset
+<code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code>. If the in-tree locator came before every locator that hashes and passed the directory over,
+the remedy says to make the <code class="docutils literal notranslate"><span class="pre">__pycache__</span></code> writable. With any of these, the remedy also says to make the
+<code class="docutils literal notranslate"><span class="pre">__pycache__</span></code> writable if it cannot be written.</p>
+<p>numba’s IPython locator caches a cell file in <code class="docutils literal notranslate"><span class="pre">numba_cache</span></code> under IPython’s cache directory, with no directory per
+file, and passes the location over if it cannot make or write in it. No other locator of numba’s takes a cell, so a
+cell then gets numba’s no-locator error. It is told that location, to be made writable or put at a shorter path, or
+IPython’s cache directory to be given a home if IPython raised for it; a class outside numba’s families listed with
+the locator is named as having passed the cell over too. That location too long is told as IPython’s cache directory
+at a shorter path, for a cell file on disk and for a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> member in an ipykernel directory alike, if the IPython
+locator is listed before the <code class="docutils literal notranslate"><span class="pre">.zip</span></code> one; no <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> is offered for a source not on disk. IPython is
+asked for its directory only if a locator of that family is listed and takes the file, never for any other file, a
+plain <code class="docutils literal notranslate"><span class="pre">.zip</span></code> member among them. The reason is that IPython warns when asked under a home it cannot write, and
+leaves a temporary directory behind. numba imports IPython when it makes the location and catches only <code class="docutils literal notranslate"><span class="pre">OSError</span></code>
+there. So if IPython is not importable, numba raises <code class="docutils literal notranslate"><span class="pre">ImportError</span></code> at decoration for a file that the IPython
+locator takes, which is no cache error. An error a caller passes on naming that location is told as none of numba’s
+if another locator numba reaches has a place for the file; if none has, the list is told, as for numba’s no-locator
+error. If IPython raises <code class="docutils literal notranslate"><span class="pre">OSError</span></code> for its directory, numba passes the locator over, as it does a location it
+cannot make, and the remedy, which asks the same question, has no location of IPython’s to match the error against.</p>
+<p>A file in an ipykernel directory that numba’s IPython locator takes, a cell file on disk or a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> member, can
+meet an IPython that gives a new temporary directory as its cache directory on every call. IPython does that if it
+can write neither that directory nor its own. An error naming a file is then told so, with <code class="docutils literal notranslate"><span class="pre">IPYTHONDIR</span></code> or
+<code class="docutils literal notranslate"><span class="pre">XDG_CACHE_HOME</span></code> at a writable path as the remedy; the error numba’s first save raises there is
+<code class="docutils literal notranslate"><span class="pre">FileNotFoundError</span></code>, naming a file in the <code class="docutils literal notranslate"><span class="pre">numba_cache</span></code> directory it could not save in, because numba makes
+<code class="docutils literal notranslate"><span class="pre">numba_cache</span></code> in one such directory and saves in another. An error of another errno naming a <code class="docutils literal notranslate"><span class="pre">numba_cache</span></code> is a
+caller’s, and is told as the location it names. An error naming no file is told the locations numba could have
+taken, with its reason.</p>
+<p>An error can name no file, carry an empty string or empty bytes as its name, or carry a name of another kind, an
+integer file descriptor, which counts as none. A caller can build such an error, and numba’s first save raises
+one when a write fails, as on a full disk. So does inspect when, for numba’s IPython locator, it reads no source
+in a cell file on disk, one that cannot be read or, before Python 3.13, an empty one; that error has no errno
+either, because no call into the file system raised it. For a file on disk that a locator of IPython’s family
+takes, numba having reached it, that error is told as inspect’s, the locator having tried no location: make the
+file readable, with the source in it. For a cell, whose source numba reads from linecache while IPython holds
+it to run the cell, the remedy says that numba caches a cell only while IPython holds its source. For a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>
+member whose archive holds no source, a <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> alone, the remedy is the archive’s: ship its source files.
+Every other <code class="docutils literal notranslate"><span class="pre">OSError</span></code> that <code class="docutils literal notranslate"><span class="pre">check_cache_location</span></code> raises names a file. An error with no name, or an empty
+one, is told the locations numba could have taken, in numba’s order and each once: for a path too long, to put
+whichever of them is too long at a shorter path; for a file refused for another reason, such as a full disk,
+the reason, and room or a writable directory there. A path object is never empty, because pathlib reads an
+empty string as the working directory, <code class="docutils literal notranslate"><span class="pre">.</span></code>, which the remedy names as a location that is none of numba’s.</p>
+<p>numba caches a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> and a frozen application under the user’s cache directory, and the remedy for either is
+that location made writable or given room, with the reason the error gives, a full disk or permissions. The
+<code class="docutils literal notranslate"><span class="pre">.zip</span></code>’s error names the location, a directory of numba’s under the user’s cache directory, or a file numba
+writes in it, as the first save’s error does, and the directory is told. An error naming a location that is none
+of numba’s, under the list and in its order, is told that location as the error names it, as for a source on
+disk. Nothing is said of what moves the user’s cache directory, or of where numba caches the file, which that
+location is none of. The frozen application’s error is numba’s no-locator one, which gives no reason, because
+numba passed the location over on its own error, unwritable or too deep alike; so the user’s cache directory is
+named as one numba could not use, to be made writable or put at a shorter path. If the name numba gives the
+directory after the source’s directory is too long for the file system, that is told instead; so is a cache
+file’s name too long for the file system, in that location or in IPython’s <code class="docutils literal notranslate"><span class="pre">numba_cache</span></code> for a member in an
+ipykernel directory, which no shorter path cures. A <code class="docutils literal notranslate"><span class="pre">.zip</span></code>’s location too long for the file system is the
+user’s cache directory’s doing, because the names numba makes are bounded, and the remedy is that directory at a
+shorter path, through what moves it on the platform. A frozen application’s path with <code class="docutils literal notranslate"><span class="pre">.zip</span></code> in it and no part
+ending in <code class="docutils literal notranslate"><span class="pre">.zip</span></code> gets the <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator’s error instead, if the list puts that locator before the user-wide
+one, or once the user-wide one passed its location over; the remedy is the user-wide locator listed before the
+<code class="docutils literal notranslate"><span class="pre">.zip</span></code> one, or the user-wide location made writable or put at a shorter path. An error that names no file, a
+caller’s or the first save’s on a full disk, is told the locations numba could have taken, as for a source on
+disk, in order and each once. It is told the reason, or, for a path too long, to put whichever is too long at a
+shorter path. For such an error, for a member in an ipykernel directory where a locator of IPython’s family is
+reached, the user’s cache directory is not named as where numba caches the file. IPython’s <code class="docutils literal notranslate"><span class="pre">numba_cache</span></code> is
+among the possible locations whenever IPython gives its directory.</p>
+<p>numba caches a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> through its <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator alone, so a list that leaves that locator out gives numba no
+locator for a source in a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>, and the remedy is to list it. That holds for a member of an archive that
+exists; a directory named <code class="docutils literal notranslate"><span class="pre">.zip</span></code> above a source that is nowhere is no archive. The same holds for a notebook
+cell and numba’s IPython locator, and for a frozen application and numba’s user-wide locator, which alone takes
+one. Either is told for an error a caller passes on under such a list, as for numba’s no-locator error, because
+numba took no location. For any other kind of archive, or a module without its source, the remedy is the source
+files on disk or a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> holding them, each with the locator it needs listed if <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_LOCATOR_CLASSES</span></code>
+leaves it out. The source files on disk need one of the three locators for a file on disk, and
+<code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> set if the user-provided locator is the one listed; the <code class="docutils literal notranslate"><span class="pre">.zip</span></code> needs the <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator.
+A source that is neither in a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> nor a frozen application’s, which no locator takes, is told the same for
+any error.</p>
+<p>From numba 0.68 the archive’s stamp hashes the member’s source, which numba reads from the archive by the name
+the module’s code gives under the archive’s path. zipfile raises <code class="docutils literal notranslate"><span class="pre">KeyError</span></code> for a name the archive does not
+hold. For a module shipped as <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> alone the remedy names the member and asks for the source files, on disk
+or in a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>; for a <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> compiled to name another path in the archive (<code class="docutils literal notranslate"><span class="pre">compileall</span> <span class="pre">-d</span></code>), whose source
+the archive holds beside it, the remedy is to compile the <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> to name its own path, or to leave it out. On
+Windows under numba 0.68.0 every member gets that error, because that release builds the name with the
+platform’s separator (numba issue 10889, fixed for 0.68.1). If the archive holds the member’s source under that
+name with forward slashes, the name a release with the fix reads, the remedy is the install on disk, or a numba
+release carrying the fix; otherwise it is the remedy for any other member. numba takes the first part of the
+path ending in <code class="docutils literal notranslate"><span class="pre">.zip</span></code> for the archive, a directory so named above the file included, and from 0.68 opens it to
+read the source. The <code class="docutils literal notranslate"><span class="pre">IsADirectoryError</span></code> that gives is told the directory: put the archive under a path with
+no such directory above it. A file on disk under such a directory, which the <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator takes once the
+locators before it passed the file over, is told to make one of their locations writable, or, with the <code class="docutils literal notranslate"><span class="pre">.zip</span></code>
+locator listed first, to list a locator for a file on disk before it; or to put the file elsewhere.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.configurations.check_cache_location">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.configurations.</span></span><span class="sig-name descname"><span class="pre">check_cache_location</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">py_file</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">longest_file_name</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/configurations.html#check_cache_location"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.configurations.check_cache_location" title="Link to this definition"></a></dt>
+<dd><p>Raise the error numba would raise if a function whose source file is <code class="docutils literal notranslate"><span class="pre">py_file</span></code> cannot be cached; else return.</p>
+<p><code class="docutils literal notranslate"><span class="pre">py_file</span></code> can be a string, bytes or a path object; it is read as a string.</p>
+<p>The question is put to numba the way decoration puts it, in three steps. First the cache set-up, which picks the
+location for the file, or raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> if no locator takes it. Then the source’s stamp, which decoration
+reads too: for a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> it stats the archive, and from numba 0.68 it also reads the member’s source from the
+archive, as from 0.68 it reads a source on disk for its hash. Then the writability check, which decoration runs
+for every location but a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>’s and the first save runs for all; it raises <code class="docutils literal notranslate"><span class="pre">OSError</span></code>.</p>
+<p>The probe is compiled with <code class="docutils literal notranslate"><span class="pre">py_file</span></code> as its file. That is all a locator reads of it, except numba’s IPython
+locator, which also reads the function’s source, the way inspect reads it. inspect reads a file on disk from the
+file itself, a cell from linecache, where IPython holds the cell while it runs, and a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> member through the
+loader of the function’s module; for a real module that loader is zipimport’s, which gives the member’s source from
+the archive. So the probe is a function of a module of its own, whose loader reads the member as zipimport’s does,
+and that module is in <code class="docutils literal notranslate"><span class="pre">sys.modules</span></code> while numba picks the locator. After the read, the lines linecache holds for
+the file are the member’s own, as any reader would leave them. For a member whose archive holds no source, linecache
+keeps the probe’s loader to ask again later; the check removes that linecache entry, so that no loader of the probe
+outlives the check. A cell linecache does not hold, or a member compiled to <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> alone, raises inspect’s error,
+as it does for numba at decoration.</p>
+<p>Nothing is compiled. Nothing is written but the cache directory itself, with one exception: an IPython that can
+write neither its cache directory nor its own makes a temporary directory on every call, and the check causes
+three such calls, two inside numba’s making of the directory and one of its own.</p>
+<p>An <code class="docutils literal notranslate"><span class="pre">OSError</span></code> from the check names the location numba picked, with three exceptions. inspect’s error names no
+file. For a cell file on disk that numba’s IPython locator takes, inspect reads the source from the file itself
+before the locator tries its location, and raises if it finds no source there: a file it cannot read or, before
+Python 3.13, an empty one, which linecache then holds as a blank line. The stamp’s error names the archive
+that a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> member’s code names, if that archive has since moved or cannot be read; the stamp is read once the
+locator is picked, as numba reads it at decoration. From numba 0.68, where the stamp hashes the source, the stamp’s
+error can also name the source itself, if it cannot be read. It can also name a directory named <code class="docutils literal notranslate"><span class="pre">.zip</span></code> above a
+file on disk, which numba’s <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator takes for the archive and opens.</p>
+<p>A location can be absent once made. numba’s IPython locator asks IPython for its directory at every save, and an
+IPython that can write neither its cache directory nor its own gives a new temporary directory on every call. So
+the directory numba made is not the one it is told next. The check then raises <code class="docutils literal notranslate"><span class="pre">FileNotFoundError</span></code> naming
+<code class="docutils literal notranslate"><span class="pre">numba_cache</span></code> under the last directory IPython gave it, which numba never made. numba’s first save would
+instead name a file in <code class="docutils literal notranslate"><span class="pre">numba_cache</span></code> under the directory IPython gave numba when it set the cache up, a
+different temporary directory.</p>
+<p>numba’s writability check makes a temporary file with a short name, or no file at all on Linux, while the files it
+saves have names of up to a hundred bytes and more. So a location within that length of the path limit passes
+numba’s check, and the first save dies. Given <code class="docutils literal notranslate"><span class="pre">longest_file_name</span></code>, the check also makes and removes a file with a
+name that long in the location, and the <code class="docutils literal notranslate"><span class="pre">OSError</span></code> it raises names the location. The package asks with
+<code class="docutils literal notranslate"><span class="pre">LONGEST_CACHE_FILE_NAME</span></code>, the bound on the names numba gives the package’s own files. If the name is longer than
+the file system holding the location allows, no shorter path cures that, so the error carries the length as
+<code class="docutils literal notranslate"><span class="pre">longest_file_name</span></code> and the remedy asks for a file system that takes the name.</p>
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="numbox.core.configurations.function_struct_size">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.configurations.</span></span><span class="sig-name descname"><span class="pre">function_struct_size</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">3</span></em><a class="headerlink" href="#numbox.core.configurations.function_struct_size" title="Link to this definition"></a></dt>
+<dd><p>Slots in the <cite>FunctionModel</cite> struct: (c_addr, py_addr, jit_addr)</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.configurations.get_jit_options">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.configurations.</span></span><span class="sig-name descname"><span class="pre">get_jit_options</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/configurations.html#get_jit_options"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.configurations.get_jit_options" title="Link to this definition"></a></dt>
+<dd><p>E.g., export NUMBOX_JIT_OPTIONS=’{“cache”: false}’</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.configurations.is_a_cache_error">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.configurations.</span></span><span class="sig-name descname"><span class="pre">is_a_cache_error</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">error</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/configurations.html#is_a_cache_error"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.configurations.is_a_cache_error" title="Link to this definition"></a></dt>
+<dd><p>Whether <code class="docutils literal notranslate"><span class="pre">error</span></code> is numba’s error for a cache it cannot set up.</p>
+<p>That is one of: no locator takes the file, a location numba cannot use, or, from numba 0.68, a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> member
+whose source numba cannot read from the archive.</p>
+<p>numba itself passes over a location on any <code class="docutils literal notranslate"><span class="pre">OSError</span></code> from making its directory or writing a file there: permission
+denied, a read-only file system, a path through a file, a component too long, a full disk. So any <code class="docutils literal notranslate"><span class="pre">OSError</span></code>
+counts. So does the <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> numba raises for an archive under a directory whose name holds <code class="docutils literal notranslate"><span class="pre">.zip</span></code>: its
+<code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator takes the file for that substring and then finds no <code class="docutils literal notranslate"><span class="pre">.zip</span></code> in the path. So does the <code class="docutils literal notranslate"><span class="pre">KeyError</span></code>
+numba 0.68 and later raise when they read a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> member’s source from the archive, which they hash into the
+archive’s stamp. It is zipfile’s error, naming the member, for a name the archive does not hold. The name is
+missing for a module shipped as <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> alone, and on Windows under numba 0.68.0 for any member, because that
+release builds the name with the platform’s separator (numba issue 10889, fixed in 0.68.1). And so does the
+<code class="docutils literal notranslate"><span class="pre">UnicodeEncodeError</span></code> numba raises when it hashes the source’s directory path as UTF-8 for the name of its
+directory under <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> or the user’s cache directory. numba raises it for a path that holds bytes
+which are not UTF-8, decoded with surrogates. A locator that names its cache directory by that hash raises it at
+decoration when numba reaches it, the locators before it having passed the file over, so no location takes the
+file. Without this clause, a package installed under such a directory, with its <code class="docutils literal notranslate"><span class="pre">__pycache__</span></code> unwritable, would
+die at import, while with caching off it imports.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.configurations.uncached_where_no_cache_can_be_written">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.configurations.</span></span><span class="sig-name descname"><span class="pre">uncached_where_no_cache_can_be_written</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">options</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/configurations.html#uncached_where_no_cache_can_be_written"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.configurations.uncached_where_no_cache_can_be_written" title="Link to this definition"></a></dt>
+<dd><p><code class="docutils literal notranslate"><span class="pre">options</span></code> as given, or with <code class="docutils literal notranslate"><span class="pre">cache</span></code> off, after one warning, if numba can write no cache for numbox.</p>
+<p>numba sets a cached function up when the function is decorated, and raises <code class="docutils literal notranslate"><span class="pre">RuntimeError</span></code> there if no cache
+location can be written: in a read-only install whose user cache directory cannot be written either, or on an
+import from an <code class="docutils literal notranslate"><span class="pre">.egg</span></code>, <code class="docutils literal notranslate"><span class="pre">.whl</span></code> or <code class="docutils literal notranslate"><span class="pre">.pyz</span></code> archive, which Spark’s <code class="docutils literal notranslate"><span class="pre">--py-files</span></code> ships. For a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> numba
+takes the user’s cache directory without checking at decoration that it can be written, and the first write
+raises <code class="docutils literal notranslate"><span class="pre">OSError</span></code> instead. Either way the import would die at the first decorated function, with nothing to
+name the way out.</p>
+<p>Every function numbox caches is decorated under the one <code class="docutils literal notranslate"><span class="pre">jit_options</span></code>, so the question is put here, once, for
+a source file in each directory of the package that holds a module, and answered for the whole package. If numba
+can cache no function of one of those files, the options come back with <code class="docutils literal notranslate"><span class="pre">cache</span></code> off, and one warning names the
+remedy, as <code class="docutils literal notranslate"><span class="pre">cache_remedy</span></code> sets it out. For a source file on disk the remedy is <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code>, and, if the
+location is too long for the file system, whatever shortens the location numba took. For a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> it is the
+location numba took under the user’s cache directory, made writable or given room, with the reason; or that
+directory at a shorter path, if the path is too long; or the <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator listed, if
+<code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_LOCATOR_CLASSES</span></code> leaves it out. numba reads <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> only for a source file on disk.
+For any other kind of archive, a <code class="docutils literal notranslate"><span class="pre">.pyc</span></code>-only install or a <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> in a <code class="docutils literal notranslate"><span class="pre">.zip</span></code>, the remedy is the source
+files on disk, or a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> holding them, which numba caches in the user’s cache directory. The
+same goes, from numba 0.68, for a <code class="docutils literal notranslate"><span class="pre">.zip</span></code> member whose archive holds no source for it, a <code class="docutils literal notranslate"><span class="pre">.pyc</span></code> alone, because
+numba then reads the member’s source from the archive for the stamp; the member is named. On Windows under numba
+0.68.0 every member is such a member, because the name is built with the platform’s separator (numba issue
+10889), and the remedy is the install on disk, or a numba release carrying the fix.
+<code class="docutils literal notranslate"><span class="pre">NUMBOX_JIT_OPTIONS='{&quot;cache&quot;:</span> <span class="pre">false}'</span></code> turns caching off and silences the warning. An error that is not the
+cache’s, as <code class="docutils literal notranslate"><span class="pre">is_a_cache_error</span></code> draws the line, is raised as it was.</p>
+<p>A <code class="docutils literal notranslate"><span class="pre">.zip</span></code> whose cache directory holds every entry but can no longer be written takes the fallback too, where
+numba alone would have loaded the entries. The writability check is the rule numba applies to every other
+placement, and the one its <code class="docutils literal notranslate"><span class="pre">.zip</span></code> locator is missing, reported as <a class="reference external" href="https://github.com/numba/numba/issues/10888">https://github.com/numba/numba/issues/10888</a>.</p>
+<p>Options without a <code class="docutils literal notranslate"><span class="pre">cache</span></code> key, which <code class="docutils literal notranslate"><span class="pre">NUMBOX_JIT_OPTIONS</span></code> can give, leave <code class="docutils literal notranslate"><span class="pre">njit</span></code> to its default, which is
+off. But the sqlite virtual-table and table-valued-function callbacks cache under those options, so they are
+asked about too, and come back with <code class="docutils literal notranslate"><span class="pre">cache</span></code> off, explicitly, if the answer is no.</p>
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="numbox.core.cache_key.html" class="btn btn-neutral float-left" title="numbox.core.cache_key" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="numbox.core.proxy.html" class="btn btn-neutral float-right" title="numbox.core.proxy" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

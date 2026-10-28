@@ -1,0 +1,510 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.cache_key &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/cache_key.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.cache_key</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.cache_key</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""numbox's part of numba's on-disk cache key."""</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">contextlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">functools</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">types</span><span class="w"> </span><span class="kn">import</span> <span class="n">FunctionType</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">cfunc</span><span class="p">,</span> <span class="n">njit</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">caching</span><span class="p">,</span> <span class="n">config</span> <span class="k">as</span> <span class="n">numba_config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.ccallback</span><span class="w"> </span><span class="kn">import</span> <span class="n">CFunc</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.compiler</span><span class="w"> </span><span class="kn">import</span> <span class="n">Compiler</span><span class="p">,</span> <span class="n">Flags</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.cpu_options</span><span class="w"> </span><span class="kn">import</span> <span class="n">FastMathOptions</span><span class="p">,</span> <span class="n">InlineOptions</span><span class="p">,</span> <span class="n">ParallelOptions</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.dispatcher</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dispatcher</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">Type</span> <span class="k">as</span> <span class="n">NumbaType</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numbox</span>
+
+
+<span class="c1">#: The ``NUMBA_*`` settings that change the code numba emits, each with the ``numba.config`` attribute numba reads it</span>
+<span class="c1">#: into. A survey of numba 0.63 to 0.68, each minor version at its latest patch release, classified them. The survey</span>
+<span class="c1">#: compiled a fixed corpus with each setting changed in turn and compared the emitted LLVM IR and assembly. Of the</span>
+<span class="c1">#: settings that numba's own key leaves out, one is keyed if and only if changing it changes the code, including</span>
+<span class="c1">#: settings that change only speed or debugging information. ``NUMBA_DUMP_ASSEMBLY``, ``NUMBA_DEBUG`` and</span>
+<span class="c1">#: ``NUMBA_DIFF_IR`` change the code only as a side effect of the dumps they request, and are keyed as well. Three</span>
+<span class="c1">#: settings change the code only in combination with another setting or flag, so a survey that changes one setting at</span>
+<span class="c1">#: a time cannot reveal them. They were found in numba's source: ``NUMBA_DEBUG_NRT_STACK_LIMIT`` changes the code only</span>
+<span class="c1">#: under ``NUMBA_DEBUG_NRT``, and ``NUMBA_FULL_TRACEBACKS`` and ``NUMBA_DEVELOPER_MODE`` (its default) change it only</span>
+<span class="c1">#: where bounds checking is enabled. ``NUMBA_DISABLE_INTEL_SVML`` changes the code only where Intel's SVML library is</span>
+<span class="c1">#: installed, which the survey's machines lacked; numba then calls SVML for vectorized math.</span>
+<span class="n">KEYED_SETTINGS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">"NUMBA_BOUNDSCHECK"</span><span class="p">:</span> <span class="s2">"BOUNDSCHECK"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_OPT"</span><span class="p">:</span> <span class="s2">"OPT"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_LOOP_VECTORIZE"</span><span class="p">:</span> <span class="s2">"LOOP_VECTORIZE"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_SLP_VECTORIZE"</span><span class="p">:</span> <span class="s2">"SLP_VECTORIZE"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_ENABLE_AVX"</span><span class="p">:</span> <span class="s2">"ENABLE_AVX"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_DEBUGINFO"</span><span class="p">:</span> <span class="s2">"DEBUGINFO_DEFAULT"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_ENABLE_PROFILING"</span><span class="p">:</span> <span class="s2">"ENABLE_PROFILING"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_EXTEND_VARIABLE_LIFETIMES"</span><span class="p">:</span> <span class="s2">"EXTEND_VARIABLE_LIFETIMES"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_LLVM_REFPRUNE_PASS"</span><span class="p">:</span> <span class="s2">"LLVM_REFPRUNE_PASS"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_LLVM_REFPRUNE_FLAGS"</span><span class="p">:</span> <span class="s2">"LLVM_REFPRUNE_FLAGS"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_DEBUG_NRT"</span><span class="p">:</span> <span class="s2">"DEBUG_NRT"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_DEBUG_NRT_STACK_LIMIT"</span><span class="p">:</span> <span class="s2">"DEBUG_NRT_STACK_LIMIT"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_FULL_TRACEBACKS"</span><span class="p">:</span> <span class="s2">"FULL_TRACEBACKS"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_DEVELOPER_MODE"</span><span class="p">:</span> <span class="s2">"DEVELOPER_MODE"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_DEBUG_JIT"</span><span class="p">:</span> <span class="s2">"DEBUG_JIT"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_DEBUG_ARRAY_OPT"</span><span class="p">:</span> <span class="s2">"DEBUG_ARRAY_OPT"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_DEBUG_ARRAY_OPT_RUNTIME"</span><span class="p">:</span> <span class="s2">"DEBUG_ARRAY_OPT_RUNTIME"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_PARFOR_MAX_TUPLE_SIZE"</span><span class="p">:</span> <span class="s2">"PARFOR_MAX_TUPLE_SIZE"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_GDB_BINARY"</span><span class="p">:</span> <span class="s2">"GDB_BINARY"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_DUMP_ASSEMBLY"</span><span class="p">:</span> <span class="s2">"DUMP_ASSEMBLY"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_DEBUG"</span><span class="p">:</span> <span class="s2">"DEBUG"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_DIFF_IR"</span><span class="p">:</span> <span class="s2">"DIFF_IR"</span><span class="p">,</span>
+    <span class="s2">"NUMBA_DISABLE_INTEL_SVML"</span><span class="p">:</span> <span class="s2">"DISABLE_INTEL_SVML"</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="n">_IN_NUMBAS_KEY</span> <span class="o">=</span> <span class="s2">"in numba's own key, through the target machine"</span>
+<span class="n">_NO_BINARY</span> <span class="o">=</span> <span class="s2">"produces no binary"</span>
+<span class="n">_NO_CHANGE</span> <span class="o">=</span> <span class="s2">"changes no emitted code"</span>
+<span class="n">_LOCATION</span> <span class="o">=</span> <span class="s2">"chooses where the cache lives, not what goes in it"</span>
+
+<span class="c1"># test_every_setting_numba_reads_is_classified fails when a numba release reads a setting in neither table.</span>
+<span class="c1">#: Every other ``NUMBA_*`` setting that numba 0.63 to 0.68 reads, with the reason it is not keyed.</span>
+<span class="n">UNKEYED_SETTINGS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">"NUMBA_CPU_NAME"</span><span class="p">:</span> <span class="n">_IN_NUMBAS_KEY</span><span class="p">,</span>
+    <span class="s2">"NUMBA_CPU_FEATURES"</span><span class="p">:</span> <span class="n">_IN_NUMBAS_KEY</span><span class="p">,</span>
+    <span class="s2">"NUMBA_DISABLE_JIT"</span><span class="p">:</span> <span class="n">_NO_BINARY</span><span class="p">,</span>
+    <span class="s2">"NUMBA_USE_LEGACY_TYPE_SYSTEM"</span><span class="p">:</span> <span class="n">_NO_BINARY</span><span class="p">,</span>
+    <span class="s2">"NUMBA_CACHE_DIR"</span><span class="p">:</span> <span class="n">_LOCATION</span><span class="p">,</span>
+    <span class="s2">"NUMBA_CACHE_LOCATOR_CLASSES"</span><span class="p">:</span> <span class="n">_LOCATION</span><span class="p">,</span>
+    <span class="o">**</span><span class="nb">dict</span><span class="o">.</span><span class="n">fromkeys</span><span class="p">((</span>
+        <span class="s2">"NUMBA_ALWAYS_WARN_UNINIT_VAR"</span><span class="p">,</span> <span class="s2">"NUMBA_CAPTURED_ERRORS"</span><span class="p">,</span> <span class="s2">"NUMBA_CHROME_TRACE"</span><span class="p">,</span> <span class="s2">"NUMBA_COLOR_SCHEME"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_DEBUG_ARRAY_OPT_STATS"</span><span class="p">,</span> <span class="s2">"NUMBA_DEBUG_CACHE"</span><span class="p">,</span> <span class="s2">"NUMBA_DEBUG_FRONTEND"</span><span class="p">,</span> <span class="s2">"NUMBA_DEBUG_INLINE_CLOSURE"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_DEBUG_PRINT_AFTER"</span><span class="p">,</span> <span class="s2">"NUMBA_DEBUG_PRINT_BEFORE"</span><span class="p">,</span> <span class="s2">"NUMBA_DEBUG_PRINT_WRAP"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_DEBUG_TYPEINFER"</span><span class="p">,</span> <span class="s2">"NUMBA_DISABLE_CUDA"</span><span class="p">,</span> <span class="s2">"NUMBA_DISABLE_ERROR_MESSAGE_HIGHLIGHTING"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_DISABLE_PERFORMANCE_WARNINGS"</span><span class="p">,</span> <span class="s2">"NUMBA_DISABLE_TYPEINFER_FAIL_CACHE"</span><span class="p">,</span> <span class="s2">"NUMBA_DUMP_ANNOTATION"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_DUMP_BYTECODE"</span><span class="p">,</span> <span class="s2">"NUMBA_DUMP_CFG"</span><span class="p">,</span> <span class="s2">"NUMBA_DUMP_FUNC_OPT"</span><span class="p">,</span> <span class="s2">"NUMBA_DUMP_HTML"</span><span class="p">,</span> <span class="s2">"NUMBA_DUMP_IR"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_DUMP_LLVM"</span><span class="p">,</span> <span class="s2">"NUMBA_DUMP_OPTIMIZED"</span><span class="p">,</span> <span class="s2">"NUMBA_DUMP_SSA"</span><span class="p">,</span> <span class="s2">"NUMBA_DYLD_WORKAROUND"</span><span class="p">,</span> <span class="s2">"NUMBA_ENABLE_CUDASIM"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_ENABLE_SYS_MONITORING"</span><span class="p">,</span> <span class="s2">"NUMBA_FORCE_CUDA_CC"</span><span class="p">,</span> <span class="s2">"NUMBA_FUNCTION_CACHE_SIZE"</span><span class="p">,</span> <span class="s2">"NUMBA_HIGHLIGHT_DUMPS"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_JIT_COVERAGE"</span><span class="p">,</span> <span class="s2">"NUMBA_LLVM_PASS_TIMINGS"</span><span class="p">,</span> <span class="s2">"NUMBA_NRT_STATS"</span><span class="p">,</span> <span class="s2">"NUMBA_NUM_THREADS"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_PARALLEL_DIAGNOSTICS"</span><span class="p">,</span> <span class="s2">"NUMBA_SHOW_HELP"</span><span class="p">,</span> <span class="s2">"NUMBA_THREADING_LAYER"</span><span class="p">,</span> <span class="s2">"NUMBA_THREADING_LAYER_PRIORITY"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_TRACE"</span><span class="p">,</span> <span class="s2">"NUMBA_USE_LLVMLITE_MEMORY_MANAGER"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_CUDA_ARRAY_INTERFACE_SYNC"</span><span class="p">,</span> <span class="s2">"NUMBA_CUDA_DEBUGINFO"</span><span class="p">,</span> <span class="s2">"NUMBA_CUDA_DEFAULT_PTX_CC"</span><span class="p">,</span> <span class="s2">"NUMBA_CUDA_DRIVER"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_CUDA_ENABLE_MINOR_VERSION_COMPATIBILITY"</span><span class="p">,</span> <span class="s2">"NUMBA_CUDA_INCLUDE_PATH"</span><span class="p">,</span> <span class="s2">"NUMBA_CUDA_LOG_API_ARGS"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_CUDA_LOG_LEVEL"</span><span class="p">,</span> <span class="s2">"NUMBA_CUDA_LOG_SIZE"</span><span class="p">,</span> <span class="s2">"NUMBA_CUDA_LOW_OCCUPANCY_WARNINGS"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_CUDA_MAX_PENDING_DEALLOCS_COUNT"</span><span class="p">,</span> <span class="s2">"NUMBA_CUDA_MAX_PENDING_DEALLOCS_RATIO"</span><span class="p">,</span> <span class="s2">"NUMBA_CUDA_MEMORY_MANAGER"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_CUDA_PER_THREAD_DEFAULT_STREAM"</span><span class="p">,</span> <span class="s2">"NUMBA_CUDA_USE_NVIDIA_BINDING"</span><span class="p">,</span> <span class="s2">"NUMBA_CUDA_VERBOSE_JIT_LOG"</span><span class="p">,</span>
+        <span class="s2">"NUMBA_CUDA_WARN_ON_IMPLICIT_COPY"</span><span class="p">,</span>
+    <span class="p">),</span> <span class="n">_NO_CHANGE</span><span class="p">),</span>
+<span class="p">}</span>
+
+
+<span class="n">_WHY</span> <span class="o">=</span> <span class="s2">"numbox's cache key cannot hold it reliably, so the function is not cached."</span>
+
+
+<div class="viewcode-block" id="UncachedWarning">
+<a class="viewcode-back" href="../../../numbox.core.cache_key.html#numbox.core.cache_key.UncachedWarning">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">UncachedWarning</span><span class="p">(</span><span class="ne">RuntimeWarning</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""A function numbox keys is compiled without an on-disk cache, because the key cannot hold one of its flags.</span>
+
+<span class="sd">    That is a ``parallel`` dict, which numba empties as it parses it; a pipeline class other than numba's default; a</span>
+<span class="sd">    function given as the ``inline`` cost model; or a type in ``locals`` that numba names after an object's address.</span>
+<span class="sd">    The warning names the function and what the key could not hold.</span>
+<span class="sd">    """</span></div>
+
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_Unkeyable</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Raised inside the key computation for a flag the key cannot hold; the cache wrappers treat it as a cache miss."""</span>
+
+
+<span class="c1"># ---- The settings ----</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_setting_value</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""The canonical text of one setting's value.</span>
+
+<span class="sd">    numba's ``NUMBA_OPT`` is an ``int`` that keeps the value it was given, such as ``max``, in ``_raw_value``. A bool</span>
+<span class="sd">    and an int that numba treats as equal have the same canonical text.</span>
+<span class="sd">    """</span>
+    <span class="n">raw</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="s2">"_raw_value"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">raw</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="n">raw</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">repr</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_current_settings</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Each keyed setting and its value, as ``numba.config`` holds it now."""</span>
+    <span class="k">return</span> <span class="nb">tuple</span><span class="p">((</span><span class="n">env</span><span class="p">,</span> <span class="n">_setting_value</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">numba_config</span><span class="p">,</span> <span class="n">attr</span><span class="p">,</span> <span class="kc">None</span><span class="p">)))</span> <span class="k">for</span> <span class="n">env</span><span class="p">,</span> <span class="n">attr</span> <span class="ow">in</span> <span class="n">KEYED_SETTINGS</span><span class="o">.</span><span class="n">items</span><span class="p">())</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_settings_canon</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""The settings part of the key, with the current values.</span>
+
+<span class="sd">    Shared with the content-addressed names of the kernels :mod:`numbox.core.variable.compile_kernel` generates and</span>
+<span class="sd">    the derives :mod:`numbox.core.work.builder` anchors, which include it in their digests.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="nb">repr</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">_current_settings</span><span class="p">()))</span>
+
+
+<span class="c1"># ---- The flags ----</span>
+
+<span class="c1">#: How numba's text for a type names an object of this process by its address: a jitclass's types, a deferred type, and</span>
+<span class="c1">#: the default repr of a function or dispatcher inside a type.</span>
+<span class="n">_ADDRESS</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">" at 0x[0-9a-fA-F]+|jitclass\.[\w.]*#[0-9a-fA-F]+|DeferredType#\d+"</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_type_text</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">where</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""A type given in ``locals``, as the key holds it: numba's text for it, unless that text names an address."""</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">repr</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">NumbaType</span><span class="p">):</span>
+        <span class="n">text</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">_ADDRESS</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">text</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">_Unkeyable</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">where</span><span class="si">}</span><span class="s2"> is the numba type </span><span class="si">{</span><span class="n">text</span><span class="si">}</span><span class="s2">, which names an object by its address"</span><span class="p">)</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">"numbatype(</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="vm">__module__</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="vm">__qualname__</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">text</span><span class="si">}</span><span class="s2">)"</span>
+    <span class="k">raise</span> <span class="n">_Unkeyable</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">where</span><span class="si">}</span><span class="s2"> is of type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">, which has no stable form"</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_flag_value_text</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">where</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""One of the flags numba compiles under, as the key holds it: a plain value as its ``repr``, a set of fast-math</span>
+<span class="sd">    flags in order, each parallel option separately, or the inlining choice."""</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">generic</span><span class="p">):</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="n">value</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="p">(</span><span class="nb">bool</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">str</span><span class="p">)):</span>
+        <span class="k">return</span> <span class="nb">repr</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">FastMathOptions</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s2">"fastmath["</span> <span class="o">+</span> <span class="s2">","</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">value</span><span class="o">.</span><span class="n">flags</span><span class="p">))</span> <span class="o">+</span> <span class="s2">"]"</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">ParallelOptions</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s2">"parallel["</span> <span class="o">+</span> <span class="s2">","</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">=</span><span class="si">{</span><span class="n">_flag_value_text</span><span class="p">(</span><span class="n">v</span><span class="p">,</span><span class="w"> </span><span class="n">where</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">value</span><span class="o">.</span><span class="n">_get_values</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">())</span> <span class="o">+</span> <span class="s2">"]"</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">InlineOptions</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">"inline[</span><span class="si">{</span><span class="n">value</span><span class="o">.</span><span class="n">value</span><span class="si">!r}</span><span class="s2">]"</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="n">InlineOptions</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">_Unkeyable</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">where</span><span class="si">}</span><span class="s2"> is a cost model, a function the key does not hold"</span><span class="p">)</span>
+    <span class="k">raise</span> <span class="n">_Unkeyable</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">where</span><span class="si">}</span><span class="s2"> is of type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">, which has no stable form"</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_flags_text</span><span class="p">(</span><span class="n">kind</span><span class="p">,</span> <span class="n">compiler</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""The decorator kind, the flags numba compiles under and the ``locals`` given at decoration.</span>
+
+<span class="sd">    The flags come from numba's own parse of the decorator's options, followed by the changes numba's compiler then</span>
+<span class="sd">    makes to them, including those for a C callback. When the function is compiled during the compilation of a caller,</span>
+<span class="sd">    the parse takes from the caller's compilation any of ``nrt``, ``fastmath``, ``error_model`` and ``forceinline``</span>
+<span class="sd">    that the options leave unset, as numba's parse does. For a variable given in ``locals`` that it renames, numba's SSA</span>
+<span class="sd">    pass adds each new name, the variable's name and a number after a dot, typed as the variable. Those names are left</span>
+<span class="sd">    out, since the given type determines them. A name with a dot whose part before the last dot is not given is the</span>
+<span class="sd">    caller's own, and is kept.</span>
+<span class="sd">    """</span>
+    <span class="n">options</span> <span class="o">=</span> <span class="n">compiler</span><span class="o">.</span><span class="n">targetoptions</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">options</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"parallel"</span><span class="p">),</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">_Unkeyable</span><span class="p">(</span><span class="s2">"the jit flag parallel is a dict, which numba empties as it parses it"</span><span class="p">)</span>
+    <span class="n">pipeline</span> <span class="o">=</span> <span class="n">compiler</span><span class="o">.</span><span class="n">pipeline_class</span>
+    <span class="k">if</span> <span class="n">pipeline</span> <span class="ow">is</span> <span class="ow">not</span> <span class="n">Compiler</span><span class="p">:</span>
+        <span class="n">name</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="vm">__qualname__</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">pipeline</span><span class="p">,</span> <span class="nb">type</span><span class="p">)</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">"an instance of </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">pipeline</span><span class="p">)</span><span class="o">.</span><span class="vm">__qualname__</span><span class="si">}</span><span class="s2">"</span>
+        <span class="k">raise</span> <span class="n">_Unkeyable</span><span class="p">(</span><span class="sa">f</span><span class="s2">"the pipeline class is </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">, not numba's default"</span><span class="p">)</span>
+    <span class="n">given</span> <span class="o">=</span> <span class="n">compiler</span><span class="o">.</span><span class="n">locals</span> <span class="ow">or</span> <span class="p">{}</span>
+    <span class="n">locals_</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">((</span><span class="n">name</span><span class="p">,</span> <span class="n">ty</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">ty</span> <span class="ow">in</span> <span class="n">given</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">name</span><span class="o">.</span><span class="n">rpartition</span><span class="p">(</span><span class="s2">"."</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">given</span><span class="p">)</span>
+    <span class="n">flags</span> <span class="o">=</span> <span class="n">Flags</span><span class="p">()</span>
+    <span class="n">compiler</span><span class="o">.</span><span class="n">targetdescr</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">parse_as_flags</span><span class="p">(</span><span class="n">flags</span><span class="p">,</span> <span class="n">options</span><span class="p">)</span>
+    <span class="n">flags</span> <span class="o">=</span> <span class="n">compiler</span><span class="o">.</span><span class="n">_customize_flags</span><span class="p">(</span><span class="n">flags</span><span class="p">)</span>
+    <span class="n">values</span> <span class="o">=</span> <span class="s2">";"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">=</span><span class="si">{</span><span class="n">_flag_value_text</span><span class="p">(</span><span class="n">value</span><span class="p">,</span><span class="w"> </span><span class="sa">f</span><span class="s1">'the jit flag </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">flags</span><span class="o">.</span><span class="n">values</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">())</span>
+    <span class="p">)</span>
+    <span class="n">types</span> <span class="o">=</span> <span class="s2">","</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">_type_text</span><span class="p">(</span><span class="n">ty</span><span class="p">,</span><span class="w"> </span><span class="s1">'a type in locals'</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">ty</span> <span class="ow">in</span> <span class="n">locals_</span><span class="p">)</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"kind=</span><span class="si">{</span><span class="n">kind</span><span class="si">}</span><span class="s2">;flags=[</span><span class="si">{</span><span class="n">values</span><span class="si">}</span><span class="s2">];locals=[</span><span class="si">{</span><span class="n">types</span><span class="si">}</span><span class="s2">]"</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_key_part</span><span class="p">(</span><span class="n">keyed</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""numbox's part of the key for the next compile: its version, the flags and the settings."""</span>
+    <span class="n">kind</span><span class="p">,</span> <span class="n">compiler</span> <span class="o">=</span> <span class="n">keyed</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">numbox</span><span class="o">.</span><span class="n">__version__</span><span class="p">,</span> <span class="n">_flags_text</span><span class="p">(</span><span class="n">kind</span><span class="p">,</span> <span class="n">compiler</span><span class="p">),</span> <span class="n">_settings_canon</span><span class="p">())</span>
+
+
+<div class="viewcode-block" id="explain_cache_key">
+<a class="viewcode-back" href="../../../numbox.core.cache_key.html#numbox.core.cache_key.explain_cache_key">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">explain_cache_key</span><span class="p">(</span><span class="n">func</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""The parts numbox adds to ``func``'s cache key, with their current values, for the next compile of a direct call</span>
+<span class="sd">    in this process.</span>
+
+<span class="sd">    ``func`` is a dispatcher or ``@cfunc`` whose cache numbox keys, what ``cres`` returns, or a ``@proxy`` function's</span>
+<span class="sd">    ``.as_func``: a function numbox compiled, or one decorated with :func:`numbox_njit` or :func:`numbox_cfunc` with</span>
+<span class="sd">    ``cache=True``. The result maps ``"numbox"`` to numbox's version, ``"flags"`` to the flags as the key holds them,</span>
+<span class="sd">    and ``"settings"`` to each keyed setting's value. Two results that differ belong to two different keys.</span>
+<span class="sd">    """</span>
+    <span class="n">func</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="s2">"_numbox_dispatcher"</span><span class="p">,</span> <span class="n">func</span><span class="p">)</span>
+    <span class="n">cache</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="s2">"_cache"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">keyed</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">cache</span><span class="p">,</span> <span class="s2">"_numbox_keyed"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">keyed</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">func</span><span class="si">!r}</span><span class="s2"> has no cache numbox keys: it is cached under numba's key alone, or not cached; decorate it "</span>
+            <span class="s2">"with numbox_njit or numbox_cfunc and cache=True"</span>
+        <span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">flags</span> <span class="o">=</span> <span class="n">_flags_text</span><span class="p">(</span><span class="o">*</span><span class="n">keyed</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">_Unkeyable</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">func</span><span class="si">!r}</span><span class="s2"> compiles without an on-disk cache: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="kc">None</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">"numbox"</span><span class="p">:</span> <span class="n">numbox</span><span class="o">.</span><span class="n">__version__</span><span class="p">,</span> <span class="s2">"flags"</span><span class="p">:</span> <span class="n">flags</span><span class="p">,</span> <span class="s2">"settings"</span><span class="p">:</span> <span class="nb">dict</span><span class="p">(</span><span class="n">_current_settings</span><span class="p">())}</span></div>
+
+
+
+<span class="c1"># ---- The opt-in ----</span>
+
+<span class="n">_keying</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">local</span><span class="p">()</span>
+
+
+<span class="nd">@contextlib</span><span class="o">.</span><span class="n">contextmanager</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_keyed</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Mark the cache that numba sets up for ``func`` while the context is active, so that numbox keys it."""</span>
+    <span class="n">stack</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">_keying</span><span class="p">,</span> <span class="s2">"funcs"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">stack</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">stack</span> <span class="o">=</span> <span class="n">_keying</span><span class="o">.</span><span class="n">funcs</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">stack</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">yield</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">stack</span><span class="o">.</span><span class="n">pop</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_keys</span><span class="p">(</span><span class="n">py_func</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Whether numbox keys the cache of ``py_func``: numbox's own code, or a function being decorated by numbox."""</span>
+    <span class="n">module</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">py_func</span><span class="p">,</span> <span class="s2">"__module__"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">""</span>
+    <span class="k">if</span> <span class="n">module</span> <span class="o">==</span> <span class="s2">"numbox"</span> <span class="ow">or</span> <span class="n">module</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">"numbox."</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">return</span> <span class="nb">any</span><span class="p">(</span><span class="n">f</span> <span class="ow">is</span> <span class="n">py_func</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">_keying</span><span class="p">,</span> <span class="s2">"funcs"</span><span class="p">,</span> <span class="p">()))</span>
+
+
+<div class="viewcode-block" id="numbox_njit">
+<a class="viewcode-back" href="../../../numbox.core.cache_key.html#numbox.core.cache_key.numbox_njit">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">numbox_njit</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""``numba.njit``, taking its arguments unchanged, with numbox's cache key on the function it decorates.</span>
+
+<span class="sd">    With ``cache=True``, the function is cached under numba's key with numbox's part added, which the</span>
+<span class="sd">    ``numbox.core.cache_key`` documentation page describes. numbox sets up the key when numba creates the cache, at</span>
+<span class="sd">    decoration, so the key applies to an eager compile, for which a signature is given, as well as to a lazy one.</span>
+<span class="sd">    Without ``cache=True``, it behaves exactly as ``numba.njit``.</span>
+<span class="sd">    """</span>
+    <span class="n">func</span> <span class="o">=</span> <span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">args</span> <span class="k">else</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"signature_or_function"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">FunctionType</span><span class="p">):</span>
+        <span class="k">with</span> <span class="n">_keyed</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">njit</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="n">decorator</span> <span class="o">=</span> <span class="n">njit</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">wrap</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+        <span class="k">with</span> <span class="n">_keyed</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">decorator</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">wrap</span></div>
+
+
+
+<div class="viewcode-block" id="numbox_cfunc">
+<a class="viewcode-back" href="../../../numbox.core.cache_key.html#numbox.core.cache_key.numbox_cfunc">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">numbox_cfunc</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""``numba.cfunc``, taking its arguments unchanged, with numbox's cache key on the function it decorates.</span>
+
+<span class="sd">    With ``cache=True``, the C callback is cached under numba's key with numbox's part added, which also distinguishes</span>
+<span class="sd">    it from an ``njit`` of the same function. Without ``cache=True``, it behaves exactly as ``numba.cfunc``.</span>
+<span class="sd">    """</span>
+    <span class="n">decorator</span> <span class="o">=</span> <span class="n">cfunc</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">wrap</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+        <span class="k">with</span> <span class="n">_keyed</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">decorator</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">wrap</span></div>
+
+
+
+<span class="c1"># ---- The hooks ----</span>
+
+<span class="n">_uncached_reported</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_qualname</span><span class="p">(</span><span class="n">cache</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">py_func</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">cache</span><span class="p">,</span> <span class="s2">"_py_func"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">py_func</span><span class="p">,</span> <span class="s2">"__qualname__"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">cache</span><span class="p">,</span> <span class="s2">"_name"</span><span class="p">,</span> <span class="s2">"?"</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_warn_uncached</span><span class="p">(</span><span class="n">cache</span><span class="p">,</span> <span class="n">exc</span><span class="p">):</span>
+    <span class="n">report</span> <span class="o">=</span> <span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">cache</span><span class="p">,</span> <span class="s2">"_name"</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span> <span class="nb">str</span><span class="p">(</span><span class="n">exc</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">report</span> <span class="ow">in</span> <span class="n">_uncached_reported</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="n">_uncached_reported</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">report</span><span class="p">)</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"numbox: </span><span class="si">{</span><span class="n">_qualname</span><span class="p">(</span><span class="n">cache</span><span class="p">)</span><span class="si">}</span><span class="s2"> is compiled without an on-disk cache: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">. </span><span class="si">{</span><span class="n">_WHY</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span>
+        <span class="n">UncachedWarning</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
+    <span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_wrap_index_key</span><span class="p">(</span><span class="n">original</span><span class="p">):</span>
+    <span class="nd">@functools</span><span class="o">.</span><span class="n">wraps</span><span class="p">(</span><span class="n">original</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_index_key</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span><span class="p">):</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="n">original</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span><span class="p">)</span>
+        <span class="n">keyed</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">"_numbox_keyed"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">key</span> <span class="k">if</span> <span class="n">keyed</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">key</span> <span class="o">+</span> <span class="p">(</span><span class="n">_key_part</span><span class="p">(</span><span class="n">keyed</span><span class="p">),)</span>
+    <span class="k">return</span> <span class="n">_index_key</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_wrap_load_overload</span><span class="p">(</span><span class="n">original</span><span class="p">):</span>
+    <span class="nd">@functools</span><span class="o">.</span><span class="n">wraps</span><span class="p">(</span><span class="n">original</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">load_overload</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="n">target_context</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">original</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="n">target_context</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">_Unkeyable</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="n">_warn_uncached</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">load_overload</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_wrap_save_overload</span><span class="p">(</span><span class="n">original</span><span class="p">):</span>
+    <span class="nd">@functools</span><span class="o">.</span><span class="n">wraps</span><span class="p">(</span><span class="n">original</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">save_overload</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">original</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sig</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">_Unkeyable</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="n">_warn_uncached</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">save_overload</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_wrap_enable_caching</span><span class="p">(</span><span class="n">original</span><span class="p">,</span> <span class="n">kind</span><span class="p">,</span> <span class="n">py_func_of</span><span class="p">):</span>
+    <span class="nd">@functools</span><span class="o">.</span><span class="n">wraps</span><span class="p">(</span><span class="n">original</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">enable_caching</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">original</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">_keys</span><span class="p">(</span><span class="n">py_func_of</span><span class="p">(</span><span class="bp">self</span><span class="p">)):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cache</span><span class="o">.</span><span class="n">_numbox_keyed</span> <span class="o">=</span> <span class="p">(</span><span class="n">kind</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_compiler</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">enable_caching</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_install</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Wrap numba's cache and the two decorators' cache set-up; once per process.</span>
+
+<span class="sd">    Every lookup happens before the first assignment, so on a numba version that lacks one of them, nothing is</span>
+<span class="sd">    installed. The marker that makes a second install return early is set after the last assignment, and an</span>
+<span class="sd">    assignment that fails, the marker's assignment included, restores the attributes assigned before it. A failed</span>
+<span class="sd">    install leaves numba unchanged, and the next import attempts it again.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">caching</span><span class="p">,</span> <span class="s2">"_numbox_cache_key"</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+        <span class="k">return</span>
+    <span class="n">wrapped</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="p">(</span><span class="n">caching</span><span class="o">.</span><span class="n">Cache</span><span class="p">,</span> <span class="s2">"_index_key"</span><span class="p">,</span> <span class="n">_wrap_index_key</span><span class="p">(</span><span class="n">caching</span><span class="o">.</span><span class="n">Cache</span><span class="o">.</span><span class="n">_index_key</span><span class="p">)),</span>
+        <span class="p">(</span><span class="n">caching</span><span class="o">.</span><span class="n">Cache</span><span class="p">,</span> <span class="s2">"load_overload"</span><span class="p">,</span> <span class="n">_wrap_load_overload</span><span class="p">(</span><span class="n">caching</span><span class="o">.</span><span class="n">Cache</span><span class="o">.</span><span class="n">load_overload</span><span class="p">)),</span>
+        <span class="p">(</span><span class="n">caching</span><span class="o">.</span><span class="n">Cache</span><span class="p">,</span> <span class="s2">"save_overload"</span><span class="p">,</span> <span class="n">_wrap_save_overload</span><span class="p">(</span><span class="n">caching</span><span class="o">.</span><span class="n">Cache</span><span class="o">.</span><span class="n">save_overload</span><span class="p">)),</span>
+        <span class="p">(</span><span class="n">Dispatcher</span><span class="p">,</span> <span class="s2">"enable_caching"</span><span class="p">,</span> <span class="n">_wrap_enable_caching</span><span class="p">(</span><span class="n">Dispatcher</span><span class="o">.</span><span class="n">enable_caching</span><span class="p">,</span> <span class="s2">"njit"</span><span class="p">,</span> <span class="k">lambda</span> <span class="n">d</span><span class="p">:</span> <span class="n">d</span><span class="o">.</span><span class="n">py_func</span><span class="p">)),</span>
+        <span class="p">(</span><span class="n">CFunc</span><span class="p">,</span> <span class="s2">"enable_caching"</span><span class="p">,</span> <span class="n">_wrap_enable_caching</span><span class="p">(</span><span class="n">CFunc</span><span class="o">.</span><span class="n">enable_caching</span><span class="p">,</span> <span class="s2">"cfunc"</span><span class="p">,</span> <span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="n">c</span><span class="o">.</span><span class="n">_pyfunc</span><span class="p">)),</span>
+    <span class="p">]</span>
+    <span class="n">applied</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">owner</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">replacement</span> <span class="ow">in</span> <span class="n">wrapped</span><span class="p">:</span>
+            <span class="n">original</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">owner</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
+            <span class="nb">setattr</span><span class="p">(</span><span class="n">owner</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">replacement</span><span class="p">)</span>
+            <span class="n">applied</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">owner</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">original</span><span class="p">))</span>
+        <span class="n">caching</span><span class="o">.</span><span class="n">_numbox_cache_key</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">except</span> <span class="ne">BaseException</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">owner</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">original</span> <span class="ow">in</span> <span class="nb">reversed</span><span class="p">(</span><span class="n">applied</span><span class="p">):</span>
+            <span class="nb">setattr</span><span class="p">(</span><span class="n">owner</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">original</span><span class="p">)</span>
+        <span class="k">raise</span>
+
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">_install</span><span class="p">()</span>
+<span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">_exc</span><span class="p">:</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"numbox: could not add its part to numba's cache key (</span><span class="si">{</span><span class="n">_exc</span><span class="si">!r}</span><span class="s2">); what numbox compiles is cached under "</span>
+        <span class="s2">"numba's key alone"</span><span class="p">,</span>
+        <span class="ne">RuntimeWarning</span><span class="p">,</span>
+    <span class="p">)</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
