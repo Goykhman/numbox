@@ -5,7 +5,7 @@ Overview
 ++++++++
 
 Functionality for fully-jitted and light-weight calculation on a graph. Fully jitted means that the whole
-calculation, the walk over the graph included, runs in numba-compiled code rather than in Python.
+calculation, including the traversal of the graph, runs in numba-compiled code rather than in Python.
 
 Modules
 ++++++++
@@ -19,7 +19,8 @@ Overview
 ********
 
 Pure Python abstraction for creation of JIT'ed graph of :class:`numbox.core.work.work.Work` nodes.
-The examples of this overview continue one another, so run them in order, in one session.
+Later examples of this overview use names that earlier examples define, so run the examples in order, in one
+session.
 Users can define the specs of end nodes [#f1]_::
 
     from numba.core.types import int16
@@ -59,7 +60,7 @@ Suppose more values, `w3`, `w4`, `w7`, `w8`, `w9`, `w10`, are derived as follows
         return (w3_ + w4_ + w7_) * 0.1 + (w8_ - w9_)
 
 `End` and `Derived` are node specs rather than nodes: the actual node objects are the instances of
-:class:`numbox.core.work.work.Work` that the builder makes from them. Users can then declare the specs of the
+:class:`numbox.core.work.work.Work` that the builder creates from them. Users can then declare the specs of the
 derived nodes as::
 
     from numbox.core.work.builder import Derived
@@ -153,8 +154,8 @@ Here `w3`, the first source of `w10`, is taken from `w10.sources`::
     w3 = w10.sources[0]
     w3_n = w3.as_node()
 
-The `Node` representation enables an assortment of utilities, which `Work` provides as methods that work through
-it. `all_inputs_names` lists the inputs transitively: the inputs of `w7` include `w1` and `w2`, the inputs of its
+The `Node` representation enables an assortment of utilities, which `Work` provides as methods that delegate to the
+`Node`. `all_inputs_names` lists the inputs transitively: the inputs of `w7` include `w1` and `w2`, the inputs of its
 source `w3`::
 
     assert w3.all_inputs_names() == ["w1", "w2"]
@@ -191,7 +192,7 @@ Values can be loaded into graph nodes through the access node as follows [#f3]_:
     assert sheaf["w1"].get_as(int16) == 12
 
 `load` clears the `derived` flag of each loaded node and of each node that depends on it, up to the node on which
-`load` is called. Recalculating the graph then renders new values of the affected nodes [#f4]_::
+`load` is called. Recalculating the graph then computes new values of the affected nodes [#f4]_::
 
     w10.calculate()
     w10.combine(sheaf)
@@ -207,7 +208,7 @@ The `init_value` attribute of the `End` and `Derived` specs can be assigned a va
 including scalars, arrays, and instances of `StructRef`. Only the numba type of each value enters the builder's
 cache key, so a changed value, a `StructRef` included, does not make the builder recompile.
 
-From each given access node, one can trace down its derivation to all the `End` nodes::
+From each given access node, one can trace its derivation to all the `End` nodes::
 
     from numbox.core.work.explain import explain
 
@@ -288,8 +289,8 @@ obtained from their respective registries.
 .. [#f1] For simplicity, this example illustrates nodes that contain scalar data (integers and floats). More complex
    types of data, like numpy arrays, strings, and aggregates (numba StructRef's, typed lists and dictionaries) are
    supported as well.
-.. [#f2] Behind the scenes, :func:`numbox.core.work.builder.make_graph` compiles (and optionally caches) a graph maker
-   with low-level intrinsic constructors of the individual work nodes inlined into it. All the Python 'derive' functions
+.. [#f2] Internally, :func:`numbox.core.work.builder.make_graph` compiles (and optionally caches) a graph maker with
+   low-level intrinsic constructors of the individual work nodes inlined into it. All the Python 'derive' functions
    defined for the `Derived` specs are compiled for the signatures inferred from the types of the derived nodes and
    their sources.
 .. [#f3] For numpy-compatible data types, additional utilities are available in :mod:`numbox.core.work.loader_utils`.
@@ -425,8 +426,8 @@ produces::
         |
         n3--n1
 
-Here it is understood that both references to 'n1' point to the same node,
-that happens to be a source of two other nodes, 'n2' and 'n3'.
+Both references to 'n1' point to the same node,
+which is a source of two other nodes, 'n2' and 'n3'.
 
 .. automodule:: numbox.core.work.print_tree
    :members:
@@ -482,9 +483,9 @@ argument and read `derive_work` from the global scope, numba could not cache `ru
 
 For performance-critical large graphs, with hundreds of nodes or more created in a jitted scope,
 :func:`numbox.core.work.work.make_work` is not feasible. Called from jitted code, it results in large memory use,
-and it takes up a lot of disk space when the jitted caller is cached. Declaring `make_work` with numba's
-`inline=True` directive would give a much slimmer and optimized final compilation result, but it would take a
-substantial time to compile. For such graphs it is recommended to use the low-level intrinsic
+and in large disk use when the jitted caller is cached. Declaring `make_work` with numba's `inline=True` directive
+would produce a much smaller and optimized final compilation result, but its compilation would take a
+substantial time. For such graphs it is recommended to use the low-level intrinsic
 ``numbox.core.work.lowlevel_work_utils.ll_make_work`` as follows::
 
     from numba import njit
@@ -576,7 +577,8 @@ When the exception is lost
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 In three cases ``calculate`` returns normally although the ``derive`` raised. Python prints the exception to stderr
-below a line that begins ``Exception ignored in:``, which means that the exception was printed and then dropped.
+below a line that begins ``Exception ignored in:``, which means that the exception was printed and then
+discarded.
 ``calculate`` stores a zero-filled value of the ``derive``'s return type in ``data``, such as ``0.0`` or an empty
 array, and sets ``derived``. A later ``calculate`` therefore does not run the ``derive`` again, and the node keeps the
 zero-filled value.
@@ -589,54 +591,56 @@ zero-filled value.
 The three cases are:
 
 - A ``derive`` passed from Python to a jitted function whose parameter is declared as numba's ``FunctionType``, from
-  ``numba.types``. This page calls numba's own type the plain ``FunctionType``; numbox gives a ``cres`` function
-  ``DeriveFunctionType``, a subclass of it. For example, ``@njit(float64(FunctionType(float64(float64))))`` declares
-  one parameter of the plain type, for a function that takes and returns a ``float64``. The exception is lost because
-  numba converts the value to the plain type when Python hands it to the jitted function. The loss happens only at
-  that hand-over: within jitted code, a ``derive`` passed on to a function that declares the plain ``FunctionType``
-  keeps its exception. To keep it, let numba infer the parameter's type, or declare the parameter as
-  ``DeriveFunctionType(float64(float64))``, with ``DeriveFunctionType`` from :mod:`numbox.utils.derive_wap`. A
-  parameter declared that way accepts only ``cres`` functions and ``.as_func`` values.
+  ``numba.types``. This page calls numba's own type the plain ``FunctionType``; numbox assigns a ``cres`` function the
+  type ``DeriveFunctionType``, a subclass of it. For example, ``@njit(float64(FunctionType(float64(float64))))``
+  declares one parameter of the plain type, for a function that takes and returns a ``float64``. The exception is lost
+  because numba converts the value to the plain type when Python passes it to the jitted function. The loss occurs only
+  at that boundary between Python and jitted code: within jitted code, a ``derive`` passed on to a function that
+  declares the plain ``FunctionType`` still propagates its exception. For the exception to propagate, let numba infer
+  the parameter's type, or declare the parameter as ``DeriveFunctionType(float64(float64))``, with
+  ``DeriveFunctionType`` from :mod:`numbox.utils.derive_wap`. A parameter declared that way accepts only ``cres``
+  functions and ``.as_func`` values.
 - A ``CompileResultWAP`` that you build with numba directly. ``CompileResultWAP``, from
   ``numba.core.types.function_type``, is numba's function value for one compiled function, and
   ``CompileResultWAP(f.get_compile_result(sig))`` builds one for an ``@njit`` function ``f``. The exception is lost
   when such a value reaches jitted code as an argument or as a global variable, because the value has the plain
   ``FunctionType``. :func:`~numbox.core.work.work.make_work` upgrades the value when Python calls ``make_work``, but a
-  jitted function that receives the value cannot upgrade it. To keep the exception, build the ``derive`` with
-  ``cres``, or upgrade the value in Python with :func:`~numbox.utils.derive_wap.rewrap_derive` before jitted code
-  receives it.
+  jitted function that receives the value cannot upgrade it. For the exception to propagate, build the ``derive``
+  with ``cres``, or upgrade the value in Python with :func:`~numbox.utils.derive_wap.rewrap_derive` before jitted
+  code receives it.
 - A ``@cfunc`` used as a ``derive``, whether it reaches ``make_work`` from Python or from jitted code. The exception is
-  lost because a ``@cfunc`` has the plain ``FunctionType`` and nothing upgrades it. To keep the exception, compile the
-  function with ``cres`` instead.
+  lost because a ``@cfunc`` has the plain ``FunctionType`` and numbox does not upgrade a ``@cfunc``. For the exception
+  to propagate, compile the function with ``cres`` instead.
 
-numba can call a function value through two entry points. The numba entry point follows numba's own calling
-convention and carries an exception back to the caller. The C entry point, the kind that ``@cfunc`` builds, cannot:
-numba drops the exception there, as `numba issue 8246 <https://github.com/numba/numba/issues/8246>`_ describes. numba
-records the numba entry point of a value only when the value comes from a dispatcher. For that reason an ``@njit``
-function compiled for a signature keeps its exception when it is passed to a parameter of the plain ``FunctionType``.
-The compile result behind a ``cres`` function would be called through its C entry point, so ``cres`` wraps it in a
-:class:`~numbox.utils.derive_wap.DeriveWAP`, and numbox gives that value the numba type
-:class:`~numbox.utils.derive_wap.DeriveFunctionType`. That type records the numba entry point, and ``calculate`` calls
-a ``derive`` of that type through it. In the three cases above, the ``derive`` reaches ``calculate`` as a value of the
-plain ``FunctionType`` with only its C entry point. :mod:`numbox.utils.derive_wap` describes the mechanism.
+numba can call a function value through two entry points. The numba entry point follows numba's own calling convention
+and propagates an exception to the caller. The C entry point, the kind that ``@cfunc`` builds, does not propagate an
+exception: numba discards the exception there, as `numba issue 8246 <https://github.com/numba/numba/issues/8246>`_
+describes. numba records the numba entry point of a value only when the value comes from a dispatcher. For that reason
+an ``@njit`` function compiled for a signature still propagates its exception when it is passed to a parameter of the
+plain ``FunctionType``. A compile result that numba's own ``CompileResultWAP`` wraps is called through its C entry
+point. ``cres`` therefore wraps its compile result in a :class:`~numbox.utils.derive_wap.DeriveWAP` instead, and numbox
+assigns that wrapper the numba type :class:`~numbox.utils.derive_wap.DeriveFunctionType`. That type records the numba
+entry point, and ``calculate`` calls a ``derive`` of that type through it. In the three cases above, the ``derive``
+reaches ``calculate`` as a value of the plain ``FunctionType`` with only its C entry point.
+:mod:`numbox.utils.derive_wap` describes the mechanism.
 
 Other limits
 ~~~~~~~~~~~~
 
 .. _derive_mixed_function_values:
 
-Jitted code can receive several function values at once as the elements of a tuple, for example the ``derive``
-functions of the nodes it builds. Below numba 0.68.0, function values that take the same number of arguments can be
-elements of one tuple only if they have the same type, such as ``cres`` functions of one signature. Values that take
-different numbers of arguments are not affected, on any numba version. Four kinds of function value break the rule as
-elements of one tuple with a ``cres`` function: a ``@cfunc``, an ``@njit`` function compiled for a signature, numba's
-own ``CompileResultWAP``, and a ``cres`` function of another signature. Such a tuple fails with an ``AssertionError``
-that has no message. The assertion is numba's own check, and two plain function values of different types fail it as
-well. A ``cres`` function fails it more often, because numbox gives it ``DeriveFunctionType`` while numba gives the
-other kinds the plain ``FunctionType``. numba 0.68.0 accepts every such tuple, and each ``cres`` function in it keeps
-its exception.
+Jitted code can receive several function values at once as the elements of a tuple, for example the ``derive`` functions
+of the nodes it builds. Below numba 0.68.0, function values that take the same number of arguments can be elements of
+one tuple only if they have the same type, such as ``cres`` functions of one signature. Values that take different
+numbers of arguments are not affected, on any numba version. Four kinds of function value therefore cannot be elements
+of one tuple with a ``cres`` function: a ``@cfunc``, an ``@njit`` function compiled for a signature, numba's own
+``CompileResultWAP``, and a ``cres`` function of another signature. Such a tuple fails with an ``AssertionError`` that
+has no message. The assertion is numba's own check, and two plain function values of different types fail it as well. A
+``cres`` function fails the check more often, because numbox assigns it ``DeriveFunctionType``, while numba assigns the
+other kinds the plain ``FunctionType``. numba 0.68.0 accepts every such tuple, and each ``cres`` function in it still
+propagates its exception.
 
-Under ``python -O``, which removes assertions, numba below 0.68.0 skips that check and gives the whole tuple the type
+Under ``python -O``, which removes assertions, numba below 0.68.0 skips that check and assigns the whole tuple the type
 of its first element. A ``cres`` function that comes after another kind in the tuple then loses its exception. Another
 kind that comes after a ``cres`` function raises a ``TypeError`` that names the value's class.
 
@@ -651,7 +655,7 @@ The message means that numba typed the whole tuple as ``DeriveFunctionType`` and
 value, the lazily compiled function. Compile that function with ``cres`` too.
 
 The ``.as_func`` value of a proxied function counts as a ``cres`` function in these rules. The proxy page's section on
-:ref:`passing the function as a value <proxy_passing_as_value>` states them from that side.
+:ref:`passing the function as a value <proxy_passing_as_value>` states the same rules for ``.as_func``.
 
 A jitted caller can catch the exception of a ``derive`` only with a bare ``except:`` or with ``except Exception:``.
 numba accepts no other ``except`` clause, and it cannot bind the exception to a name with ``as``; see numba's
@@ -665,28 +669,28 @@ A ``raise`` written directly in the body of a ``prange`` loop makes numba run th
 parallel only if the loop has a single exit (see numba's `explicit parallel loops
 <https://numba.readthedocs.io/en/stable/user/parallel.html#explicit-parallel-loops>`_), and it warns with a
 ``NumbaPerformanceWarning`` when it cannot. A ``derive`` whose own ``prange`` loop raises in this way therefore
-propagates its exception as usual. A ``derive`` compiled with ``nogil=True`` propagates its exception as usual too,
-because ``nogil`` only releases Python's global interpreter lock while the ``derive`` runs. The ``derive`` still runs
-on the thread that called it, with no parallel loop.
+propagates its exception like any other ``derive``. A ``derive`` compiled with ``nogil=True`` also propagates its
+exception like any other ``derive``, because ``nogil`` only releases Python's global interpreter lock while the
+``derive`` runs. The ``derive`` still runs on the thread that called it, and no parallel loop is involved.
 
-An exception raised in a function that the body of a parallel loop calls is different, because numba does run that
-loop in parallel. The thread that ran the failing iteration skips the rest of its share of the loop, so the result
-lacks the work of that iteration and of the iterations after it in that share. With numba's omp threading layer, the
-call from Python raises ``SystemError: ... returned a result with an exception set`` when the failing iteration ran
-on the calling thread, and returns normally when it ran on another thread. With the workqueue layer, the call always
-returns normally. The ``SystemError`` means that the jitted function returned while the exception was still pending.
-Its ``__cause__`` is the original exception, and an ``except`` clause for the original exception's type does not
-catch the ``SystemError``. Either way, the jitted code after the loop runs as if the loop had succeeded. A plain
-jitted function behaves the same way, with numbox uninvolved.
+An exception raised in a function that the body of a parallel loop calls is different, because numba does run that loop
+in parallel. The thread that ran the failing iteration skips the rest of the iterations assigned to it, so the result
+does not include the computation of that iteration or of the later iterations assigned to that thread. With numba's omp
+threading layer, the call from Python raises ``SystemError: ... returned a result with an exception set`` when the
+failing iteration ran on the calling thread, and returns normally when it ran on another thread. With the workqueue
+layer, the call always returns normally. The ``SystemError`` means that the jitted function returned while the exception
+was still pending. Its ``__cause__`` is the original exception, and an ``except`` clause for the original exception's
+type does not catch the ``SystemError``. Either way, the jitted code after the loop runs as if the loop had succeeded. A
+plain jitted function that does not use numbox behaves the same way.
 
 If ``calculate`` runs in the body of a parallel loop and the ``derive`` raises, the node is left intact: it keeps its
 ``data``, and ``derived`` stays unset. Check ``node.derived`` after the loop to learn whether the ``derive``
 succeeded. A later ``calculate`` outside the loop raises the exception normally.
 
 If the ``derive`` itself runs a parallel loop and a function called from its body raises, the ``derive`` returns
-normally as far as ``calculate`` can tell. ``calculate`` stores the incomplete result in ``data`` and sets
-``derived``, so the failure stays cached, even when the call from Python then raises the ``SystemError``. In a
-``derive``, keep raises out of the functions that a parallel loop calls.
+normally to ``calculate``, which cannot detect the failure. ``calculate`` stores the incomplete result in ``data`` and
+sets ``derived``, so the failure stays cached, even when the call from Python then raises the ``SystemError``. In a
+``derive``, do not raise exceptions in the functions that a parallel loop calls.
 
 After you upgrade or downgrade numbox
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -697,43 +701,44 @@ that numbox generated for its calls of ``calculate``, and numba's key for the en
 functions it calls (:ref:`what the key leaves out <cache_key_leaves_out>`). As long as the function's file and
 signature stay unchanged, numba keeps loading that code.
 
-A cached function that takes a ``cres`` function, or a node built from one, recompiles on its own, because numbox
-0.7.3 gives a ``cres`` function a new numba type on numba 0.61 or later. Consider instead a cached function whose
-parameter is declared as the plain ``FunctionType``. If it receives an ``@njit`` function compiled for a signature, it
-keeps its 0.7.2 code, which loses the exception that 0.7.3 propagates. Delete that function's cache files, or save its
-source file again so that numba sees a newer modification time; the configurations page says
+A cached function that takes a ``cres`` function, or a node built from one, recompiles automatically, because numbox
+0.7.3 assigns a ``cres`` function a new numba type on numba 0.61 or later. Consider instead a cached function whose
+parameter is declared as the plain ``FunctionType``. If it receives an ``@njit`` function compiled for a signature,
+numba continues to load its 0.7.2 code, which discards the exception that 0.7.3 propagates. Delete that function's cache
+files, or save its source file again so that numba sees a newer modification time; the configurations page says
 :ref:`where the cache lands <where_the_cache_lands>`. For later upgrades, decorate such a function with
-:func:`~numbox.core.cache_key.numbox_njit`, which numbox provides from 0.7.8. Its key includes numbox's version, so
-the function recompiles after every upgrade, as the cache_key page explains under
+:func:`~numbox.core.cache_key.numbox_njit`, which numbox provides from 0.7.8. Its key includes numbox's version, so the
+function recompiles after every upgrade, as the cache_key page explains under
 :ref:`After you upgrade numbox <cache_key_after_upgrade>`.
 
-numbox 0.7.4 gives the ``.as_func`` value of a proxied function the numba type of a ``cres`` function, on numba 0.61
-or later; before, it was a plain function value. From 0.7.4 on, a tuple that mixes ``.as_func`` with a plain
+numbox 0.7.4 assigns the ``.as_func`` value of a proxied function the numba type of a ``cres`` function, on numba
+0.61 or later; before, it was a plain function value. From 0.7.4 on, a tuple that mixes ``.as_func`` with a plain
 ``CompileResultWAP`` therefore fails below numba 0.68.0, as :ref:`the tuple rule <derive_mixed_function_values>`
 describes.
 
-A downgrade to numbox 0.7.2 or earlier, with numba's version unchanged, can leave a cache that numba cannot read. A
-call of a cached function that received a ``cres`` function, or a node built from one, then raises
+A downgrade to numbox 0.7.2 or earlier, with numba's version unchanged, can leave a cache that numba cannot read. A call
+of a cached function that received a ``cres`` function, or a node built from one, then raises
 ``ModuleNotFoundError: No module named 'numbox.utils.derive_wap'`` while numba loads its cache. The message means that
-the cache index names a numbox type that the older numbox lacks. numba reads the types in the index before it checks
-the source file, so saving the file again does not help. Delete the function's cache files. An edit that moves the
-function's decorator to another line works too, because numba includes that line number in the cache file names. If
-numba's version changes as well, numba skips the old index without reading it, and the function recompiles. numbox
-0.7.2 requires numba below 0.67, so a setup on numba 0.67 or later changes numba's version with the downgrade.
+the cache index names a numbox type that the older numbox lacks. numba reads the types in the index before it checks the
+source file, so saving the file again does not clear the error. Delete the function's cache files. An edit that moves
+the function's decorator to another line works too, because numba includes that line number in the cache file names. If
+numba's version changes as well, numba skips the old index without reading it, and the function recompiles. numbox 0.7.2
+requires numba below 0.67, so downgrading numbox from an installation with numba 0.67 or later also changes numba's
+version.
 
 Graph manager
 *************
 
 While not a requirement, it is recommended that the `Work` instance's `name` attribute matches the name
 of the variable to which that instance is assigned.
-Moreover, no out-of-the-box assertion of the uniqueness of `Work` names is provided; only the builder's
+Moreover, no built-in assertion of the uniqueness of `Work` names is provided; only the builder's
 registries refuse a repeated name, as :ref:`the builder overview <builder>` describes.
 The users are free to implement their own graph managers that register the `Work`
 nodes and assert additional requirements on the names as needed. The core numbox library
 takes no position on whether such an overhead is universally beneficial (and
 worth the performance tradeoff).
 
-One option to build a graph manager would be via the constructor such as:
+One option for building a graph manager is a constructor such as the following:
 
 .. code-block:: python
 
@@ -768,9 +773,9 @@ module that the example imports can be defined as follows:
 Implementation details
 **********************
 
-Behind the scenes, `Work` accommodates individual access to its `sources`
+Internally, `Work` accommodates individual access to its `sources`
 (the other `Work` nodes on the DAG that the given `Work` node depends on)
-via a 'Python-native compiler' backdoor: before numba compiles an overload, numbox generates its Python source
+via a 'Python-native compiler' technique: before numba compiles an overload, numbox generates its Python source
 for the given number of sources and runs it with Python's `compile` and `exec` functions.
 This technique is fully compatible with caching of
 jitted functions and facilitates a natural Python counterpart to virtual functions (unsupported in numba).
