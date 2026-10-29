@@ -228,7 +228,7 @@ Loading a library
 
 You need :func:`~numbox.core.bindings.utils.load_lib` only to bind a library of your own, because each numbox binding
 module calls it for its own library when imported. ``load_lib`` takes a short name, such as ``"c"``, ``"m"`` or
-``"sqlite3"``, and returns the library's handle, an ordinary ``ctypes.CDLL``. The handle stays loaded for the lifetime
+``"sqlite3"``, and returns the library's handle, an ordinary ``ctypes.CDLL``. The handle remains loaded for the lifetime
 of the process. A second call with the same name returns the same handle. On Linux and macOS, ``load_lib`` finds the
 file with ``ctypes.util.find_library``. That function uses the system's library search and does not look in the Python
 installation, as the `ctypes documentation <https://docs.python.org/3/library/ctypes.html#finding-shared-libraries>`_
@@ -289,10 +289,10 @@ writes its buffer only when the buffer fills, when the program flushes it, or wh
 code and lines from Python can then appear out of order. If the process crashes, C never writes the text that remains in
 its buffer. To keep the order, flush Python's buffer with ``sys.stdout.flush()`` before the jitted call. In jitted code,
 call ``fflush(stdout())`` after the write, as ``report`` does; ``fflush(0)`` flushes every C stream. On Linux, C writes
-stderr without a buffer (`setbuf(3) <https://man7.org/linux/man-pages/man3/setbuf.3.html>`_), so a warning appears at
-once. On Windows, C flushes a stderr that goes to a file or a pipe only when its buffer fills (`Microsoft's stream I/O
-<https://learn.microsoft.com/en-us/cpp/c-runtime-library/stream-i-o#stream-io-routines>`_), so call ``fflush(stderr())``
-there as well.
+stderr without a buffer (`setbuf(3) <https://man7.org/linux/man-pages/man3/setbuf.3.html>`_), so a warning appears
+immediately. On Windows, C flushes a stderr that goes to a file or a pipe only when its buffer fills (`Microsoft's
+stream I/O <https://learn.microsoft.com/en-us/cpp/c-runtime-library/stream-i-o#stream-io-routines>`_), so call
+``fflush(stderr())`` there as well.
 
 Reading errno after a failed call
 +++++++++++++++++++++++++++++++++
@@ -329,8 +329,8 @@ therefore reads the ``errno`` of the thread that runs it. Read ``errno`` in the 
 the caller's ``errno`` after the loop depends on the threading layer. Under OpenMP, which numba selects when TBB is not
 installed (`threading layers
 <https://numba.readthedocs.io/en/stable/user/threading-layer.html#setting-the-threading-layer-selection-priority>`_),
-the calling thread runs some iterations itself. After the loop, its ``errno`` holds the value that those iterations
-left. Under the workqueue layer, the calling thread runs no iterations, and its ``errno`` is unchanged.
+the calling thread runs some iterations itself. After the loop, its ``errno`` holds the value set by those iterations.
+Under the workqueue layer, the calling thread runs no iterations, and its ``errno`` is unchanged.
 
 Turning an error number into a message
 --------------------------------------

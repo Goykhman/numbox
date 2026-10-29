@@ -201,10 +201,10 @@ The speedup is largest when the formulas are small. One call of ``execute`` on a
 took a few hundred times as long as one call of its kernel.
 
 numba caches the compiled kernel on disk, so a later run of the program loads it instead of compiling it again. numba
-finds a cached function by its name and by the file that holds its source. numbox derives the kernel's name, and with
-it the name of that file, from a digest of the formulas and of what they read. An edit to a formula, or to a
-value that a formula reads, therefore gives the kernel a new name. numba finds no cache entry under the new name and
-compiles the kernel again. What the digest covers, and the few edits it misses, are listed in `When the kernel compiles
+finds a cached function by its name and by the file that holds its source. numbox derives the kernel's name, and with it
+the name of that file, from a digest of the formulas and of what they read. An edit to a formula, or to a value that a
+formula reads, therefore gives the kernel a new name. numba finds no cache entry under the new name and compiles the
+kernel again. What the digest covers, and the few edits that it does not cover, are listed in `When the kernel compiles
 again`_.
 
 A formula may be an ordinary Python function, which numbox decorates with ``@njit`` itself, or one already compiled
@@ -295,8 +295,8 @@ Unless the types are declared, as described in `Declaring the types`_, numba com
 the types of that call's arguments. A later call with other types, such as integers, makes numba compile and cache
 another version, as for any numba function. Before the first call, ``ck.kernel`` is a numbox method that compiles the
 kernel and then calls it. Once numba has compiled the kernel as one function, ``ck.kernel`` is numba's dispatcher
-itself. A name bound to ``ck.kernel`` before the first call still calls the kernel, but every call through it passes
-through numbox's method first, so a loop should bind the name after the first call.
+itself. A name bound to ``ck.kernel`` before the first call still calls the kernel, but every call through it first
+invokes numbox's method, so a loop should bind the name after the first call.
 
 ``compile_kernel`` checks the graph's structure before anything compiles, and its error names the variable at fault.
 It refuses:
@@ -411,8 +411,8 @@ numbox warns, here for a formula named ``double``:
 The warning means that a formula is, or calls, a dispatcher made with ``@njit(cache=True)``, and that numbox has
 disabled the kernel's cache. Such a dispatcher has a cache entry of its own, and numba's key for that entry leaves out
 the globals that the dispatcher reads and the jit options that it compiles under. The entry can therefore be stale, and
-a kernel cached with it would contain the stale code. The remedy is to drop ``cache=True`` from the formula's decorator,
-or to pass as the formula the plain function that the dispatcher keeps as its `py_func
+a kernel cached with it would contain the stale code. The remedy is to remove ``cache=True`` from the formula's
+decorator, or to pass as the formula the plain function that the dispatcher keeps as its `py_func
 <https://numba.readthedocs.io/en/stable/reference/jit-compilation.html#Dispatcher.py_func>`_, here ``double.py_func``.
 The kernel's cache then holds the formula's code.
 
@@ -460,9 +460,9 @@ numbox warns, here for a read-only ``NUMBA_CACHE_DIR``:
     cache argument where it takes one, or NUMBOX_JIT_OPTIONS='{"cache": false}' where the options are the package's
 
 The warning means that numbox could not write the kernel's file, or that numba has no cache location for it, so the
-kernel compiles without a cache. The text in parentheses is the error that numbox caught, here the
-``PermissionError`` raised when numbox tried to create the directory. The warning names the remedy itself: a writable
-``NUMBA_CACHE_DIR``, or caching disabled, which also silences the warning.
+kernel compiles without a cache. The text in parentheses is the error that numbox caught, here the ``PermissionError``
+raised when numbox tried to create the directory. The warning itself states the remedy: a writable ``NUMBA_CACHE_DIR``,
+or caching disabled, which also silences the warning.
 
 If the kernel compiles in every process without a warning
 *********************************************************

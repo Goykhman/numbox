@@ -128,7 +128,7 @@ numba's CUDA decorators, so the functions they compile are cached under numba's 
 What the key holds
 ++++++++++++++++++
 
-numbox appends its part to numba's key and changes nothing else in the key. The part holds three things.
+numbox appends its part to numba's key and changes nothing else in the key. The part holds three items.
 
 The first is numbox's version. numba compiles numbox's ``@overload`` and ``@intrinsic`` code into each function that
 calls that code, while numba's key covers only the caller's own bytecode. With the version in the key, a keyed caller
@@ -138,10 +138,9 @@ upgrade numbox`_ says what the version is in a release and in a source checkout.
 The second is the jit options. numba parses them into what it calls flags, filling in its defaults, and the key holds
 the flags together with the decorator kind, ``njit`` or ``cfunc``, and the types given in ``locals``. The key records
 the options that numba compiles under, because they can differ from the ones in the decorator. When numba compiles a
-function for a caller that it is compiling, the callee takes the caller's ``fastmath``, ``error_model``,
-``forceinline`` and ``nrt`` (which enables numba's runtime for memory management) wherever the callee's own options
-leave them unset. The callee's key holds the values it took, so numba saves the code from that compile in a separate
-entry.
+function for a caller that it is compiling, the callee takes the caller's ``fastmath``, ``error_model``, ``forceinline``
+and ``nrt`` (which enables numba's runtime for memory management) wherever the callee's own options leave them unset.
+The callee's key holds the values that the callee used, so numba saves the code from that compile in a separate entry.
 
 The third is the settings that change the emitted code and that numba's own key leaves out. The key holds each with
 its value in ``numba.config``, the module where numba keeps the current value of every setting. numbox reads the
@@ -382,7 +381,7 @@ compile starts.
 numba documents its settings as environment variables, not as values to assign in ``numba.config``. numba does build its
 target machine from a value assigned to ``numba.config`` before the first jit decoration. Such an assignment is too
 late, however, for a setting that numba uses only when it is imported, such as ``NUMBA_DISABLE_INTEL_SVML``. A plain
-``numba.config.OPT = 0`` before the first decoration makes that decoration fail with
+``numba.config.OPT = 0`` before the first decoration causes that decoration to fail with
 ``AttributeError: 'int' object has no attribute 'is_opt_max'``; set ``NUMBA_OPT`` in the environment instead.
 
 A running process keeps the compiled code of every function it has compiled until it exits. A setting changed later
@@ -429,10 +428,10 @@ numbox's release builds write the release's version into ``numbox.__version__``,
 it. The first run after an upgrade from one release to another therefore compiles each keyed function again, once for
 each signature and each combination of jit options and settings that it runs under. Later runs load the new entries.
 
-The entries that your keyed functions saved under the old version stay on disk. They match a lookup again only if you
+The entries that your keyed functions saved under the old version remain on disk. They match a lookup again only if you
 reinstall that version. To reclaim the space, delete the functions' cache files, as described in
 `Deleting a function's cache files`_. numbox's own functions have no old entries in their index. An upgrade replaces
-their source files, so numba starts their index afresh at the first save. If you reinstall the old version, numba
+their source files, so numba starts a new index for them at the first save. If you reinstall the old version, numba
 compiles them again.
 
 In a source checkout, ``numbox.__version__`` is an empty string, and it stays empty when the checkout changes. An

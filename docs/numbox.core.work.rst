@@ -721,10 +721,10 @@ of a cached function that received a ``cres`` function, or a node built from one
 ``ModuleNotFoundError: No module named 'numbox.utils.derive_wap'`` while numba loads its cache. The message means that
 the cache index names a numbox type that the older numbox lacks. numba reads the types in the index before it checks the
 source file, so saving the file again does not clear the error. Delete the function's cache files. An edit that moves
-the function's decorator to another line works too, because numba includes that line number in the cache file names. If
-numba's version changes as well, numba skips the old index without reading it, and the function recompiles. numbox 0.7.2
-requires numba below 0.67, so downgrading numbox from an installation with numba 0.67 or later also changes numba's
-version.
+the function's decorator to another line also works, because numba includes that line number in the cache file names.
+If numba's version changes as well, numba skips the old index without reading it, and the function recompiles. numbox
+0.7.2 requires numba below 0.67, so downgrading numbox from an installation with numba 0.67 or later also changes
+numba's version.
 
 Graph manager
 *************

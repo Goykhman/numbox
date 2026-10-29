@@ -344,11 +344,11 @@ propagates, as it does when ``.as_func`` is passed as an argument. ``twice`` is 
 constant, it links the body's compiled code into the caller, as numba does for an ordinary callee. Because of the two
 costs below, prefer passing ``.as_func`` as an argument unless the inlining matters.
 
-The first cost is the one the overview describes: ``twice`` embeds its own copy of the compiled body. The second is
-that the copy becomes stale silently. The caller's compiled code names no alias, so numbox's check cannot detect an edit
-to the body, and numba checks only the caller's own source file for changes. After you edit the body, ``twice`` may keep
-returning the old result with no warning. The same happens after a numbox upgrade when the constant is a numbox binding.
-A ``StaleProxyCacheWarning`` in the same run names other callers, but it never names this caller.
+The first cost is the one the overview describes: ``twice`` embeds its own copy of the compiled body. The second is that
+the copy becomes stale silently. The caller's compiled code names no alias, so numbox's check cannot detect an edit to
+the body, and numba checks only the caller's own source file for changes. After you edit the body, ``twice`` may keep
+returning the old result, and numbox gives no warning. The same happens after a numbox upgrade when the constant is a
+numbox binding. A ``StaleProxyCacheWarning`` in the same run names other callers, but it never names this caller.
 
 The remedy is to delete the caller's cache files. Their names are the module, the function, the line of its decorator
 and the Python version, here ``constant.twice-8.py312.nbi`` and ``constant.twice-8.py312.1.nbc``. They are:
@@ -365,7 +365,7 @@ A binding that ``proxy_if_available`` may find absent needs care in this form. W
 that was cached while the symbol was present still loads. When that caller runs, the process can end in a segmentation
 fault without any message on stderr. With an empty cache, a caller such as ``use_const`` below fails to compile with a
 ``TypingError``. A run with a warm cache and a run with an empty cache therefore behave differently. Strict mode cannot
-catch this, because the caller's compiled code names no alias for the check to find.
+detect this case, because the caller's compiled code names no alias for the check to find.
 
 Two forms cannot become stale. In the first form, your module reads ``.as_func`` with no check and therefore requires
 the symbol: where the symbol is absent, the import fails on the missing attribute before any cache is reached. In the

@@ -128,11 +128,11 @@ compiles all of its functions without a cache and warns once, as here:
     NUMBA_CACHE_DIR to a writable directory, or NUMBOX_JIT_OPTIONS='{"cache": false}' to turn caching off and silence
     this warning
 
-The warning has three parts. The parentheses contain the error that stopped the check, here numba's own: no locator
-accepted the file. In that error, ``_cache_probe`` is the probe, a stand-in function that the check builds to ask numba
-about a file; `How numbox checks`_ describes it. The last sentence is the remedy, which says what to change so that
-numba can cache. Every remedy ends with a clause that suggests disabling caching instead. Following that advice silences
-the warning, because the check does not run when ``"cache"`` is ``false``.
+The warning has three parts. The parentheses contain the error that stopped the check, here numba's own error: no
+locator accepted the file. In that error, ``_cache_probe`` is the probe, a stand-in function that the check builds to
+ask numba about a file; `How numbox checks`_ describes it. The last sentence is the remedy, which says what to change so
+that numba can cache. Every remedy ends with a clause that suggests disabling caching instead. Following that advice
+silences the warning, because the check does not run when ``"cache"`` is ``false``.
 
 Each case below says first what to do, and then quotes its remedy so that you can match it to your warning.
 
@@ -337,7 +337,7 @@ A name can be too long regardless of its path. If the file system that holds the
 remedy then contains the words ``so no shorter path cures it``.
 
 The 128 bytes bound the cache file names that numba writes for numbox's own functions, numba's temporary suffix
-included, and a numbox test checks that they stay under it. The names of generated code fit as well.
+included, and a numbox test checks that they stay under it. The names of generated code also remain within the limit.
 :func:`~numbox.utils.highlevel.make_structref` generates a numba ``StructRef`` type, called a struct below, from a name
 and a list of fields. It shortens long names in the code that it writes. `If generated code cannot be cached`_ describes
 that code.
@@ -458,11 +458,11 @@ The check then repeats the other steps that numba takes at decoration and at the
 
 The last step matters for a location near the path limit. numba's own test creates a temporary file. On Linux, that file
 is usually unnamed. It has no entry in the directory, so it has no name that could be too long. Elsewhere its name is
-short. The files that numba saves later carry the source file's name, the function's qualified name and line, and the
-Python version. numba writes each of them first under a temporary name 21 bytes longer. The 128 bytes cover the longest
-such name for numbox's functions, temporary suffix included. Without this step, a location close to the path limit would
-pass numba's test. numba would then fail with ``File name too long`` the first time it opened a function's index file,
-which for numbox happens at import.
+short. The names of the files that numba saves later include the source file's name, the function's qualified name and
+line, and the Python version. numba writes each of them first under a temporary name 21 bytes longer. The 128 bytes
+allow for the longest such name for numbox's functions, temporary suffix included. Without this step, a location close
+to the path limit would pass numba's test. numba would then fail with ``File name too long`` the first time it opened a
+function's index file, which for numbox happens at import.
 
 The check asks first about this module's own file, and then about one source file in each directory of numbox that
 contains a module, because numba's ``__pycache__`` locations are per directory. It follows symbolic links, so it also
@@ -480,9 +480,10 @@ when it caches a function there, and for a ``.zip`` only at the first save. Some
 none of numba's files until a function in them is compiled. The cache directory for numbox's top-level directory never
 holds any of numba's files, because the top-level directory holds no compiled code.
 
-The error in a warning's parentheses is usually numba's own, as numba would raise it at decoration. In three cases, the
-check raises its own error instead. That error names the location that numba chose. The three are a failed test of
-the location, a 128-byte file that cannot be created, and a temporary directory from IPython that does not exist.
+The error in a warning's parentheses is usually numba's own error, as numba would raise it at decoration. In three
+cases, the check raises its own error instead. That error names the location that numba chose. The three are a failed
+test of the location, a 128-byte file that cannot be created, and a temporary directory from IPython that does not
+exist.
 
 Only numba's cache errors lead to the warning. They are the errors for which
 :func:`~numbox.core.configurations.is_a_cache_error` returns ``True``:
@@ -591,8 +592,8 @@ every file first under a temporary name 21 bytes longer. For up to 999 compiled 
 therefore ``len(f"{stem}.{qualname}-{line}.py{major}{minor}{abiflags}.999.nbc".encode()) + 21`` bytes. Allow one
 byte more for each further digit of the counter.
 
-For ``kernels.py`` the formula gives 51 bytes, well under the bound of 128. ``LONGEST_CACHE_FILE_NAME``, numbox's own
-bound of 128 bytes, covers numbox's functions only. A location that fits numbox's names but not yours passes the
+For ``kernels.py``, the formula gives 51 bytes, which is below the bound of 128. ``LONGEST_CACHE_FILE_NAME``, numbox's
+own bound of 128 bytes, covers numbox's functions only. A location that fits numbox's names but not yours passes the
 check, and numba fails later with ``File name too long``.
 
 numba's cache locations are per directory, so if your package has modules in several directories, check one file in
@@ -601,11 +602,11 @@ first error, as numbox does. The same calls can check a function that a user pas
 ``check_cache_location(inspect.getfile(func), ...)``. That file is a cell when the user works in a notebook, and the
 remedies under `In IPython and Jupyter`_ then apply.
 
-A name in your package can be too long even where numbox's names fit. numba names its subdirectory under
-``NUMBA_CACHE_DIR`` or the user's cache directory with the source directory's name, an underscore and the 40 hexadecimal
-digits of a SHA-1 hash. The subdirectory's name is 41 bytes longer than the source directory's name. A directory whose
-name is longer than 214 bytes therefore gets a subdirectory name longer than 255 bytes, the limit of nearly every file
-system. The remedy then names the subdirectory and its length, with the words
+A name in your package can be too long even where numbox's names are within the limit. numba names its subdirectory
+under ``NUMBA_CACHE_DIR`` or the user's cache directory with the source directory's name, an underscore and the 40
+hexadecimal digits of a SHA-1 hash. The subdirectory's name is 41 bytes longer than the source directory's name. A
+directory whose name is longer than 214 bytes therefore has a subdirectory name longer than 255 bytes, the limit of
+nearly every file system. The remedy then names the subdirectory and its length, with the words
 ``261 bytes, which is longer than a name can be on that file system (255)``. It asks for the file to be put in a
 directory with a shorter name. As an alternative, it offers the ``__pycache__`` beside the source, whose name contains
 no hash. The limit in parentheses is the one that the file system holding the location reports, or 255 where the file
