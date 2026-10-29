@@ -4,461 +4,578 @@ numbox.core.bindings
 Overview
 ++++++++
 
-Loads dynamic libraries available in the Python environment, such as, `libc`, `libm`, and `libsqlite3`
-in global symbol mode (`RTLD_GLOBAL`) via `ctypes`.
-This adds global symbols (including native API) exported from those libraries to the LLVM symbol table.
-These functions can then be invoked from the numba jitted code [#f1]_, complementing the suite
-of numba-supported functionality.
+A binding lets jitted code call a C function. It is a numbox function with the C function's name and arguments, and a
+jitted call of it runs the C function. numbox has bindings for the C standard library, the C math library and SQLite.
+They include functions that `numba's own support <https://numba.readthedocs.io/en/stable/reference/pysupported.html>`_
+lacks: files through ``fopen`` and ``fwrite``, raw memory through ``memcpy``, formatted output to C streams and buffers
+through ``printf`` and ``snprintf``, math functions such as ``remainder``, and the SQLite API. A jitted function that
+calls bindings can be cached with ``cache=True``, and it keeps working when a later process loads it from the cache. Its
+compiled code refers to each binding and each C function by name, never by address, and numbox loads the libraries in
+that process as well, so that LLVM finds the names again.
 
-Analogous technique can be expanded as needed for the user custom code.
+numbox loads the dynamic libraries that it binds, such as ``libc``, ``libm`` and ``libsqlite3``, through ``ctypes``. On
+Linux and macOS, ``ctypes.util.find_library`` finds each library by its short name in the system's library search, not
+in the Python installation. On Windows, numbox loads the C runtime ``msvcrt.dll`` for libc and libm, and the
+``sqlite3.dll`` that comes with Python. On Linux and macOS, numbox opens the libraries in global symbol mode
+(``RTLD_GLOBAL``, see `dlopen(3) <https://man7.org/linux/man-pages/man3/dlopen.3.html>`_). Global mode makes the symbols
+that the libraries export, their native C API, visible to LLVM, which finds a symbol by name when it links compiled code
+into the process. Jitted code can then call these C functions [#f1]_, which complement the functions that numba supports
+itself.
+
+The same technique serves for a C library of your own. Load the library with
+:func:`~numbox.core.bindings.utils.load_lib` or :func:`~numbox.core.bindings.utils.load_lib_path`, declare each function
+with numba's ``ExternalFunction``, and call it from a function decorated with :func:`~numbox.core.proxy.proxy.proxy`.
+The ``proxy`` decorator compiles the function once, when its module is imported, and every jitted caller then calls that
+one compiled copy by name. Use :func:`~numbox.core.proxy.proxy.proxy_if_available` instead for a symbol that some
+versions of the library lack. The proxy page shows such a binding in :ref:`its section on optional C symbols
+<proxy_optional_c_symbols>`.
 
 .. rubric:: References
 
-.. [#f1] See `numbsql <https://github.com/cpcloud/numbsql>`_ for previous work on jit-wrapping FFI imported functions.
+.. [#f1] See `numbsql <https://github.com/cpcloud/numbsql>`_ for earlier work on calling C functions from jitted code
+   through a foreign function interface.
+
+Calling a binding
++++++++++++++++++
+
+Import a binding from its module and call it in jitted code:
+
+.. code-block:: python
+
+    from numba import njit
+
+    from numbox.core.bindings.libc import strlen
+    from numbox.core.bindings.libm import remainder
+    from numbox.utils.lowlevel import get_unicode_data_p
+
+
+    @njit(cache=True)
+    def demo(word):
+        return remainder(7.0, 2.0), strlen(get_unicode_data_p(word))
+
+
+    print(demo("numbox"))   # (-1.0, 6)
+
+C's ``remainder`` rounds the quotient 3.5 to the nearest even integer, 4, and returns ``7.0 - 4 * 2.0``, which is
+``-1.0``. ``strlen`` takes a pointer, passed as an ``intp`` integer, and
+:func:`~numbox.utils.lowlevel.get_unicode_data_p` returns the address of a string's characters. C reads those characters
+as text only for an ASCII string, as the section `Pointers and memory`_ explains. Python code can call the same
+bindings, and ``remainder(7.0, 2.0)`` returns ``-1.0`` there too.
 
 Bindings module conventions
 +++++++++++++++++++++++++++
 
-Every binding in the ``numbox.core.bindings`` family (``libc``, ``libm``,
-``stdio``, ``errno``, ``strerror``, ``fmtio``, and the
-``numbox.core.bindings.sqlite`` subpackage — see
-:doc:`numbox.core.bindings.sqlite`) uses
-extern-symbol references via
-:func:`~numbox.core.bindings.call._call_lib_func`, so the ABI dispatch is
-ASLR-safe. Pointer arguments are typed as ``intp`` -- the caller is
-responsible for liveness, alignment, and ownership of the underlying memory.
+The bindings live in these modules:
 
-All wrappers are decorated with :func:`~numbox.core.proxy.proxy.proxy` --
-safe to reference from a user ``@njit(cache=True)`` caller. ``proxy``
-declares the callee's ``llvm_cfunc_wrapper_name`` as an extern in the
-caller's module and lets llvmlite's JIT linker resolve it per process, so
-cached caller IR re-resolves the function pointer correctly under ASLR.
+- :mod:`numbox.core.bindings.libc`: string, memory, file and environment functions of the C standard library, such
+  as ``strlen``, ``memcpy``, ``fopen`` and ``getenv``;
+- :mod:`numbox.core.bindings.libm`: the functions of the C math library, on ``float64``;
+- :mod:`numbox.core.bindings.stdio`: the standard streams;
+- :mod:`numbox.core.bindings.errno`: reading and setting ``errno``;
+- :mod:`numbox.core.bindings.strerror`: a thread-safe message for an error number;
+- :mod:`numbox.core.bindings.fmtio`: ``printf``, ``fprintf``, ``snprintf`` and ``sscanf``;
+- the subpackage ``numbox.core.bindings.sqlite``: the SQLite API, described on
+  :doc:`its own page <numbox.core.bindings.sqlite>`.
 
-References for individual binding semantics:
+The remaining modules are internals, which you seldom call yourself:
 
-- POSIX / Linux glibc: `man7.org <https://man7.org/linux/man-pages/man3/>`_
-- macOS Darwin: `Apple Open Source Libc
-  <https://github.com/apple-oss-distributions/Libc>`_
-- Windows UCRT: `Microsoft Learn
-  <https://learn.microsoft.com/en-us/cpp/c-runtime-library/c-run-time-library-reference>`_
+- :mod:`numbox.core.bindings.call`: ``_call_lib_func``, the internal helper through which the libc, libm and SQLite
+  bindings call C, described in `its source
+  <https://github.com/Goykhman/numbox/blob/main/numbox/core/bindings/call.py>`_;
+- :mod:`numbox.core.bindings.abi`: the rules by which the helper passes values on each platform;
+- :mod:`numbox.core.bindings.signatures`: the table of C signatures;
+- :mod:`numbox.core.bindings.utils`: :func:`~numbox.core.bindings.utils.load_lib`,
+  :func:`~numbox.core.bindings.utils.load_lib_path` and helpers for the binding modules.
 
-ABI dispatch
-++++++++++++
+The helper knows the calling conventions of x86-64 on Linux, macOS and Windows, and of 64-bit Arm on Linux and macOS. On
+another machine, the first import of libc, libm or a SQLite module fails with a ``RuntimeError`` that names the
+platform, because the import compiles the bindings through the helper.
 
-LLVM's JIT treats ABI lowering as a frontend responsibility — it won't insert the right calling convention
-for struct args/returns by itself. ``numbox.core.bindings.call._call_lib_func`` dispatches per platform and
-per struct shape, using primitives from ``numbox.core.bindings.abi`` (platform identification via
-``_current_platform``, struct-shape classification via ``_classify``, struct-size measurement via
-``_struct_bytes``). The two ABI families that matter:
+A binding in libc, libm, fmtio or the SQLite subpackage has its C function's name and takes the C function's arguments
+in their C order. The C function's manual page is therefore its reference: the `Linux man pages
+<https://man7.org/linux/man-pages/man3/>`_, `Apple's Libc sources <https://github.com/apple-oss-distributions/Libc>`_
+for macOS, and `Microsoft's C runtime reference
+<https://learn.microsoft.com/en-us/cpp/c-runtime-library/c-run-time-library-reference>`_ for Windows. libm's ``round``
+and ``pow`` are C's functions, not Python's: C's ``round(2.5)`` is ``3.0``, and Python's is ``2``. Import the module, as
+in ``from numbox.core.bindings import libm``, and call ``libm.round``, so that the name ``round`` keeps its Python
+meaning.
 
-- **Windows x64** — passes aggregates >8 bytes via caller-allocated pointers and returns them via ``sret``;
-  sizes 1/2/4/8 go directly in registers.
-- **SysV x86-64 / AAPCS64** — pass and return ≤16-byte aggregates directly in GP registers; on SysV x86-64,
-  >16-byte by-value args use a ``byval`` + ``optnone`` + ``noinline`` idiom so the LLVM optimizer doesn't
-  elide the caller-side stack copy before the callee reads it.
+Every binding outside fmtio is a proxied function, made with the ``proxy`` decorator that the Overview describes. numbox
+compiles it once, when its module is imported, and a jitted caller calls it by name instead of compiling a copy of its
+code into each caller. A caller's own compiled code therefore stays small, and a cached caller works in a later process.
+The price is that each call is a real function call, which LLVM cannot inline. Python code can call a proxied binding as
+well.
 
-References:
+A binding's ``.as_func`` is a first-class function value for the binding's signature, and a jitted function can take it
+as an argument, as the proxy page's section on :ref:`passing the function as a value <proxy_passing_as_value>` shows.
+Pass ``.as_func``, not the binding itself. The binding is a numba dispatcher, the object that ``@njit`` returns, and its
+numba type names the address of the function it wraps, so a cached function that receives it compiles again on every
+run.
 
-- `llvmlite#300 <https://github.com/numba/llvmlite/issues/300#issuecomment-327235846>`_
-- `llvm-project#85417 <https://github.com/llvm/llvm-project/issues/85417>`_
-- `Windows x64 calling convention <https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention>`_
-- `AAPCS64 <https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst>`_
+numba caches the bindings under numbox's jit options, the numba options that the ``NUMBOX_JIT_OPTIONS`` environment
+variable sets (:doc:`numbox.core.configurations`). A later import loads the bindings from the cache unless those options
+turn caching off; numbox also turns caching off itself, with a warning, where no cache can be written. The package
+``numbox.core.bindings`` imports none of its modules, so a module you do not import is never compiled.
 
-Stdio handles, errno, and thread-safe strerror
-++++++++++++++++++++++++++++++++++++++++++++++
+Cached callers of a binding keep working after a numbox upgrade from one release to another. The bindings compile again,
+because their cache key holds numbox's version, as :ref:`after you upgrade numbox <cache_key_after_upgrade>` explains.
+numbox repairs each cached caller of a binding whose code the new release changed, at the caller's next run and with one
+warning, as the proxy page says under :ref:`After you upgrade numbox <proxy_after_upgrade>`. The one case that repair
+does not cover is a caller that holds a binding's ``.as_func`` in a module-level variable. Clear that caller's cache by
+hand, as :ref:`holding the function as a module-level constant <proxy_module_level_constant>` explains.
 
-**Stdio handles.** ``stdout()``, ``stderr()``, and ``stdin()`` are exposed as JIT-callable functions
-rather than module-level Python constants because the C library's stdio ``FILE *`` values can be either
-data symbols or accessor functions:
+A few SQLite bindings name symbols that some builds of SQLite lack, such as ``sqlite3_changes64``, which SQLite added in
+version 3.37. Where the symbol is missing, the binding is a stub, and a jitted caller fails to compile, as :ref:`the
+proxy page's section on optional C symbols <proxy_optional_c_symbols>` explains. fmtio's functions are not proxied:
+numba compiles each call of them into its caller, and the section `Caching callers of the formatted I/O functions`_ says
+how that changes a cached caller's behavior after an upgrade.
 
-- **Linux (glibc and musl)** — data symbols (``stdout``, ``stderr``, ``stdin`` global variables, declared in
-  `<stdio.h> <https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/stdio.h.html>`_)
-- **macOS Darwin** — data symbols (``__stdoutp``, ``__stderrp``, ``__stdinp`` — what the libc headers'
-  ``stdout`` / ``stderr`` / ``stdin`` macros expand to per
-  `Apple's _stdio.h <https://github.com/apple-oss-distributions/Libc/blob/main/include/_stdio.h#L218-L220>`_)
-- **Windows** — accessor function (`__acrt_iob_func(0|1|2)
-  <https://learn.microsoft.com/en-us/cpp/c-runtime-library/internal-crt-globals-and-functions>`_);
-  UCRT-only (Windows 10+ / VS 2015+)
+The bindings in libc, libm and the SQLite subpackage take their signatures from one table, the dictionary ``signatures``
+in `numbox/core/bindings/signatures.py
+<https://github.com/Goykhman/numbox/blob/main/numbox/core/bindings/signatures.py>`_, keyed by C name. ``strchr``, for
+example, is ``intp(intp, int32)``: it takes a pointer and an ``int32`` and returns a pointer. The table writes C's
+``int`` as ``int32``, ``long long`` as ``int64``, ``double`` as ``float64``, and ``size_t`` and every pointer as
+``intp``. It holds no C ``long``, which has 64 bits on Linux and macOS and 32 bits on Windows; when you declare a C
+function that takes a ``long``, use ``int64`` on Linux and macOS and ``int32`` on Windows. A jitted caller may pass
+another numeric type, and numba converts it to the table's type without a warning: ``65.7`` passed for an ``int32``
+arrives as ``65``, and so does ``2**40 + 65``. The stdio, errno and strerror modules declare their signatures in their
+own code.
 
-Both shapes are wrapped behind a uniform ``() -> intp`` interface using extern-symbol references in LLVM IR —
-never literal addresses — so that ``cache=True`` remains correct under ASLR: the address is resolved at
-JIT link time on each run rather than being baked into the cached object.
+Pointers and memory
++++++++++++++++++++
 
-Example — write to stderr from inside @njit:
+A pointer is an ``intp`` integer, and numbox does not check it. The caller keeps the memory alive while C uses it, and
+makes it large enough, and aligned, for what C reads or writes. :mod:`numbox.utils.lowlevel` converts between Python
+objects and pointers:
 
-.. code-block:: python
+- :func:`~numbox.utils.lowlevel.array_data_p` returns the address of a NumPy array's data;
+- :func:`~numbox.utils.lowlevel.get_unicode_data_p` returns the address of a string's characters;
+- :func:`~numbox.utils.lowlevel.get_str_from_p_as_int` copies a NUL-terminated C string into a ``str``, one
+  character per byte.
 
-    from numba import njit
-    from numbox.core.bindings.stdio import stderr
-    from numbox.core.bindings.libc import fputs, fflush
+In jitted code, numba frees an array or a string as soon as the code no longer refers to it, and an address taken from
+the object does not count as a reference. A temporary, such as the result of ``a + b`` in
+``strlen(get_unicode_data_p(a + b))``, is therefore freed before ``strlen`` reads it. A named array goes the same way
+when ``array_data_p(x)`` is the last place that names ``x``. C then reads freed memory: a small object may still hold
+its old bytes, and a large one ends the process with a segmentation fault. Name the object and refer to it after the C
+call, for example by reading its length, or pass it in from the caller, as the examples on this page do. A string
+literal or a module-level string is safe: numba holds it as a constant and never frees it, so
+``get_unicode_data_p("r")`` inside a call works.
 
-    @njit(cache=True)
-    def log_to_stderr(msg_p):
-        fputs(msg_p, stderr())
-        fflush(stderr())
+Called from Python, ``get_unicode_data_p`` returns an address inside the ``str`` object itself, so keep the string alive
+while C uses it.
 
-**errno.** ``errno_get()`` and ``errno_set(v)`` reach the per-thread errno location on every call via the
-platform's accessor function (`__errno_location
-<https://man7.org/linux/man-pages/man3/errno.3.html>`_ on Linux glibc and musl,
-`__error <https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/intro.2.html>`_
-on Darwin, `_errno <https://learn.microsoft.com/en-us/cpp/c-runtime-library/errno-doserrno-sys-errlist-and-sys-nerr>`_
-on Windows UCRT). This makes the wrappers correct under ``@njit(parallel=True)``: each ``prange`` worker
-sees its own thread's errno. A Python caller observes errno set inside a normal ``@njit`` function (same
-OS thread), but not errno set inside a ``prange`` worker (different OS thread).
-
-Example — read and report errno after a syscall-style binding:
-
-.. code-block:: python
-
-    from numba import njit
-    from numbox.core.bindings.errno import errno_get, errno_set
-
-    @njit(cache=True)
-    def clear_then_call_and_report(do_work):
-        errno_set(0)
-        result = do_work()
-        return result, errno_get()
-
-**Thread-safe strerror.** ``strerror_safe(errnum, buf, buflen)`` writes the error message into a
-caller-supplied buffer, returning 0 on success and a positive errno code on failure. The underlying
-symbol is selected at lowering time:
-
-- **glibc Linux** — `__xpg_strerror_r
-  <https://codebrowser.dev/glibc/glibc/string/xpg-strerror.c.html>`_ (POSIX XSI form, present on glibc
-  2.3.4+ which shipped in 2004)
-- **musl Linux** — also ``__xpg_strerror_r``, exported as a `weak alias
-  <https://git.musl-libc.org/cgit/musl/tree/src/string/strerror_r.c>`_ to musl's own ``strerror_r``
-  (which is itself the POSIX form; musl never shipped the GNU char-pointer form)
-- **macOS Darwin** — `strerror_r
-  <https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/strerror_r.3.html>`_
-  (POSIX form)
-- **Windows** — `strerror_s
-  <https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/strerror-s-strerror-s-wcserror-s-wcserror-s>`_
-  with reordered args (buffer, size, errnum)
-
-Other Linux libcs are not supported: on glibc the plain ``strerror_r`` symbol is the
-`GNU form <https://man7.org/linux/man-pages/man3/strerror_r.3.html>`_ (returns ``char *``) and would
-not match the POSIX-shaped IR this module generates. The Linux selector unconditionally picks
-``__xpg_strerror_r``, which resolves correctly on both glibc and musl (the musl path goes through the
-weak alias). A ``strerror_r`` fallback remains in the selector as defense-in-depth in case a future
-libc drops ``__xpg_strerror_r``, but the fallback is currently unreachable on every supported libc.
-
-The Linux selector logic is verified by an IR-inspection test (Linux-only) that monkeypatches
-``ll.address_of_symbol`` to drive the fallback branch. The musl symbol layout (``strerror_r``
-and ``__xpg_strerror_r`` both exported, both resolving to the same address via musl's weak
-alias) is a runtime invariant the binding depends on; an Alpine-container CI canary that pins
-the assumption via ``nm -D`` is a straightforward way to verify it.
-
-Example — render the message for ``ENOENT`` (errno 2 on POSIX) into a buffer:
+C reads a string's characters as text only if the string is ASCII. numba and CPython store each string at one, two or
+four bytes per character, a width set by its widest character, and never as UTF-8. For other text, encode the string as
+UTF-8 in Python, add a NUL, and pass the address of the bytes as a ``uint8`` array:
 
 .. code-block:: python
 
-    import errno
     import numpy as np
     from numba import njit
-    from numbox.core.bindings.strerror import strerror_safe
+
+    from numbox.core.bindings.libc import strlen
     from numbox.utils.lowlevel import array_data_p
 
+
     @njit(cache=True)
-    def explain(errnum, buf):
-        rc = strerror_safe(errnum, array_data_p(buf), buf.size)
-        return rc
+    def byte_count(text):
+        return strlen(array_data_p(text))
 
-    buf = np.zeros(128, dtype=np.uint8)
-    rc = explain(errno.ENOENT, buf)
-    msg = bytes(buf[:buf.tolist().index(0)]).decode()
-    # rc == 0; msg is the (locale-dependent) string for ENOENT
 
-Variadic formatted I/O — printf / fprintf / snprintf / sscanf
-+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    text = np.frombuffer("caf\u00e9".encode("utf-8") + b"\0", dtype=np.uint8)
+    print(byte_count(text))   # 5: four characters, five UTF-8 bytes
 
-``printf``, ``fprintf``, ``snprintf`` (and ``sscanf`` for the parsing
-direction) are dual-mode bindings: each is a regular Python function with
-an ``@overload`` registration that routes to a private ``@intrinsic``
-codegen path when called inside ``@njit``. Same source runs unchanged
-in plain Python AND under ``@njit``, matching numba's own convention
-for builtins like ``print`` and ``range``.
+:func:`~numbox.utils.cstrings.c_string` builds the same bytes from Python and keeps them alive for the length of a
+``with`` block.
 
-**Call convention** — C-like ``*args`` after the format string, no tuple
-wrapper at the call site::
+Passing a struct
+++++++++++++++++
 
-    printf("x = %d, ratio = %.3f\n", n, ratio)
-    fprintf(stderr(), "warning: %s\n", msg)
-    snprintf(array_data_p(buf), buf.size, "[%d:%d]", lo, hi)
-    sscanf(buf_p, "%d %lf", array_data_p(n_out), array_data_p(x_out))
-    printf("no args here\n")
+numbox's bindings pass only numbers and pointers. A C function that takes a pointer to a struct gets it from a
+one-element NumPy structured array: pass ``array_data_p`` of the array. Build the dtype with ``align=True``, so that
+NumPy places the fields where a C compiler does: ``np.dtype([("x", np.int32), ("y", np.float64)], align=True)`` puts
+``y`` at offset 8, as C does, and without ``align=True`` NumPy puts it at offset 4.
 
-The internal ``@intrinsic`` still uses tuple-as-args because numba's
-``@intrinsic`` typing function doesn't accept Python-level ``*args``;
-the ``@overload`` impl bundles the user's ``*args`` into a tuple before
-calling the intrinsic.
+A C function that takes a struct by value is harder to call. numba's ``ExternalFunction`` cannot pass a struct by value
+at all: a jitted call of a function declared with a tuple argument fails to compile with an ``AssertionError``. Passing
+one through numbox's internal helper and its table of signatures is numbox's own recipe, and it is fragile: a struct
+written as a numba tuple reaches C intact, on x86-64 Linux only, in these four cases:
 
-**Dual-mode in action:**
+- it has a single field;
+- it is larger than 16 bytes;
+- it is exactly 16 bytes, with one field in each 8-byte half;
+- it is exactly 16 bytes, with two or more fields in a half, and neither half is made only of floating-point fields.
+
+``(int32, int32, int64)`` falls under the last case and arrives intact. ``(int32, int32, float64)`` does not: its upper
+half holds only a ``float64``, and C reads the second ``int32`` wrong. A struct smaller than 16 bytes with two or more
+fields, such as the 8-byte ``div_t`` that C's ``div`` returns, arrives wrong as well.
+
+A numba record fares worse. Passed as an argument, it reaches C as the address of its data instead of its fields, and a
+record result of 16 bytes or less ends the process with a segmentation fault.
+
+The helper also refuses some calls when numba compiles them, with a ``TypingError`` whose message contains the text
+below:
+
+- ``is unavailable in the LLVM context``: no loaded library exports the symbol; load its library with ``load_lib``
+  first;
+- ``Undefined signature for``: the table has no entry for the name;
+- ``Record returns >16 bytes are not yet supported``: return a tuple of the same fields instead;
+- ``has no fixed bitwidth``: a tuple field, such as a ``voidptr``, has no fixed size; pass the pointer as an ``intp``.
+
+Loading a library
++++++++++++++++++
+
+You need :func:`~numbox.core.bindings.utils.load_lib` only to bind a library of your own, because each numbox binding
+module calls it for its own library when imported. ``load_lib`` takes a short name, such as ``"c"``, ``"m"`` or
+``"sqlite3"``, and returns the library's handle, an ordinary ``ctypes.CDLL``. The handle stays loaded for the life of
+the process, and a second call with the same name returns the same handle. On Linux and macOS, ``load_lib`` finds the
+file with ``ctypes.util.find_library``, which asks the system's library search, as the `ctypes documentation
+<https://docs.python.org/3/library/ctypes.html#finding-shared-libraries>`_ describes, and not the Python installation.
+It then opens the file in global symbol mode. A plain ``ctypes.CDLL`` opens a library in local mode instead, where LLVM
+cannot see its symbols, and a jitted call of one of its functions through ``ExternalFunction`` ends the process with a
+segmentation fault.
+
+When ``find_library`` finds no file, ``load_lib`` raises ``RuntimeError: Could not find shared library for <name>``.
+Pass the file's path to :func:`~numbox.core.bindings.utils.load_lib_path` instead, which opens the file in the same mode
+and returns a new handle on each call. On Windows, ``"c"`` and ``"m"`` load the C runtime ``msvcrt.dll``. For any other
+name, ``load_lib`` prefers the DLL bundled with the Python installation to one found on the ``PATH``, and for
+``"sqlite3"`` it takes only the bundled one.
+
+On Linux, every libm binding runs the system's libm. On Windows, 26 of them, such as ``cos``, ``pow``, ``sqrt`` and
+``fmod``, run CPython's C runtime instead of the ``msvcrt.dll`` that numbox loads for ``"m"``. numba registers those 26
+names for its own math support, and LLVM looks up numba's registration before any library.
+
+When numba's JIT is disabled
+++++++++++++++++++++++++++++
+
+Under ``NUMBA_DISABLE_JIT=1``, numba compiles nothing, and importing any module of proxied bindings fails with
+``AttributeError: 'function' object has no attribute 'get_compile_result'``. The message means that ``proxy`` needs
+numba's compiler, which the setting turns off; unset the variable to use these bindings. fmtio still imports, and
+``printf`` runs under Python. ``fprintf`` fails with the same ``AttributeError``, because it imports the stdio bindings.
+``snprintf`` writes through a ``ctypes`` call that accepts only a Python ``int`` as the address, and with numba's JIT
+off ``array_data_p`` returns a NumPy integer, so pass ``int(array_data_p(buf))``.
+
+Writing to stdout and stderr
+++++++++++++++++++++++++++++
+
+C functions that work on a stream, such as ``fputs``, ``fflush`` and ``fprintf``, take the stream's ``FILE *``.
+:func:`~numbox.core.bindings.stdio.stdout`, :func:`~numbox.core.bindings.stdio.stderr` and
+:func:`~numbox.core.bindings.stdio.stdin` return the current process's three standard streams as ``intp`` values, in
+jitted code and under Python. They are functions, not constants, because a cached caller must not keep the address from
+the process that compiled it: a stream's address changes from one process to the next, and each call reads the address
+in the running process. Here jitted code writes one line to each stream:
 
 .. code-block:: python
 
     from numba import njit
+
+    from numbox.core.bindings.libc import fflush, fputs
+    from numbox.core.bindings.stdio import stderr, stdout
+    from numbox.utils.lowlevel import get_unicode_data_p
+
+
+    @njit(cache=True)
+    def report(line, warning):
+        fputs(get_unicode_data_p(line), stdout())
+        fflush(stdout())
+        fputs(get_unicode_data_p(warning), stderr())
+
+
+    report("42 rows written\n", "2 rows skipped\n")
+
+C keeps a buffer for its stdout, and Python keeps another for ``sys.stdout``. When stdout is a file or a pipe, each
+writes its buffer only when the buffer fills, when the program flushes it, or when the process exits. Lines from jitted
+code and lines from Python can then land out of order, and a crash loses what C still holds. To keep the order, flush
+Python's buffer with ``sys.stdout.flush()`` before the jitted call. In jitted code, call ``fflush(stdout())`` after the
+write, as ``report`` does; ``fflush(0)`` flushes every C stream. On Linux, C writes stderr without a buffer (`setbuf(3)
+<https://man7.org/linux/man-pages/man3/setbuf.3.html>`_), so a warning appears at once. On Windows, C flushes a stderr
+that goes to a file or a pipe only when its buffer fills (`Microsoft's stream I/O
+<https://learn.microsoft.com/en-us/cpp/c-runtime-library/stream-i-o#stream-io-routines>`_), so call ``fflush(stderr())``
+there as well.
+
+Reading errno after a failed call
++++++++++++++++++++++++++++++++++
+
+A C function that fails, such as ``fopen`` on a missing file, returns a failure value and leaves the reason in ``errno``
+(`errno(3) <https://man7.org/linux/man-pages/man3/errno.3.html>`_). :func:`~numbox.core.bindings.errno.errno_get`
+returns the current thread's ``errno`` as an ``int32``. :func:`~numbox.core.bindings.errno.errno_set` sets it, and
+narrows its argument to ``int32``. Read ``errno`` in the jitted function that made the call, right after the call,
+because a later C call may change it:
+
+.. code-block:: python
+
+    from numba import njit
+
+    from numbox.core.bindings.errno import errno_get
+    from numbox.core.bindings.libc import fclose, fopen
+    from numbox.utils.lowlevel import get_unicode_data_p
+
+
+    @njit(cache=True)
+    def open_error(path):
+        fp = fopen(get_unicode_data_p(path), get_unicode_data_p("r"))
+        if fp == 0:
+            return errno_get()
+        fclose(fp)
+        return 0
+
+
+    print(open_error("/no/such/file"))   # 2, which is errno.ENOENT
+
+Each thread has its own ``errno``, and both functions look up the current thread's on every call. In a ``prange`` loop
+(`parallel loops <https://numba.readthedocs.io/en/stable/user/parallel.html#explicit-parallel-loops>`_), an iteration
+therefore reads the ``errno`` of the thread that runs it. Read ``errno`` in the iteration that made the C call, because
+the caller's ``errno`` after the loop depends on the threading layer. Under OpenMP, which numba picks when TBB is not
+installed (`threading layers
+<https://numba.readthedocs.io/en/stable/user/threading-layer.html#setting-the-threading-layer-selection-priority>`_),
+the calling thread runs some iterations itself, and its ``errno`` afterwards is whatever those iterations left. Under
+the workqueue layer, the calling thread runs no iterations, and its ``errno`` is unchanged.
+
+Turning an error number into a message
+--------------------------------------
+
+:func:`~numbox.core.bindings.strerror.strerror_safe` writes the message for an error number into a buffer that the
+caller provides, and ends the message with a NUL. It returns 0 on success and an error number on failure. libc's
+``strerror`` may return a buffer that a later call overwrites; ``strerror_safe`` keeps no buffer of its own, so threads
+can call it at the same time:
+
+.. code-block:: python
+
+    import numpy as np
+    from numba import njit
+
+    from numbox.core.bindings.strerror import strerror_safe
+    from numbox.utils.lowlevel import array_data_p, get_str_from_p_as_int
+
+
+    @njit(cache=True)
+    def describe(errnum, buf):
+        rc = strerror_safe(errnum, array_data_p(buf), buf.size)
+        return rc, get_str_from_p_as_int(array_data_p(buf))
+
+
+    print(describe(2, np.zeros(128, dtype=np.uint8)))   # (0, 'No such file or directory')
+
+With glibc, an unknown number makes ``strerror_safe`` return ``EINVAL`` (22) and write ``Unknown error`` followed by the
+number. A buffer too short for the message makes it return ``ERANGE`` (34) and write as much of the message as fits. On
+Linux, ``strerror_safe`` calls ``__xpg_strerror_r``, the POSIX form of `strerror_r
+<https://man7.org/linux/man-pages/man3/strerror_r.3.html>`__ that glibc exports, and falls back to ``strerror_r`` where
+the C library lacks it; on macOS it calls ``strerror_r``, and on Windows `strerror_s
+<https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/strerror-s-strerror-s-wcserror-s-wcserror-s>`__.
+
+Formatted output and input
+++++++++++++++++++++++++++
+
+:func:`~numbox.core.bindings.fmtio.printf`, :func:`~numbox.core.bindings.fmtio.fprintf`,
+:func:`~numbox.core.bindings.fmtio.snprintf` and :func:`~numbox.core.bindings.fmtio.sscanf` take a format string and the
+values after it, as C's functions do (`printf(3) <https://man7.org/linux/man-pages/man3/printf.3.html>`__, `sscanf(3)
+<https://man7.org/linux/man-pages/man3/sscanf.3.html>`__). They are ordinary Python functions that numba also compiles,
+as it compiles ``print``, so one function body can run under Python and in jitted code:
+
+.. code-block:: python
+
+    from numba import njit
+
     from numbox.core.bindings.fmtio import printf
     from numbox.core.bindings.libc import fflush
     from numbox.core.bindings.stdio import stdout
 
-    def debug_kernel(x, label):
-        printf("step %d: %s\n", x, label)
+
+    def step(n, label):
+        printf("step %d: %s\n", n, label)
         fflush(stdout())
-        return x * 2
+        return 2 * n
 
-    debug_kernel(7, "before")        # pure Python: writes via sys.stdout
-    njit(debug_kernel)(7, "before")  # jitted: writes via libc printf
-    # NUMBA_DISABLE_JIT=1 mode: also works (decorator becomes no-op)
 
-**Format string must be a literal in @njit.** Required to embed it as an
-IR global constant at typing time. A runtime-built ``unicode`` raises a
-clean ``TypingError``. In pure-Python mode the format string can be any
-str.
+    step(7, "in Python")
+    njit(step)(7, "in jitted code")
 
-**Format string encoding: UTF-8.** Non-ASCII codepoints in the literal
-are encoded as UTF-8 byte sequences and embedded into the IR global.
-printf treats every non-``%`` byte as opaque pass-through, so the bytes
-flow through libc to stdout / ``FILE *`` / the snprintf buffer unmodified.
-Modern terminals, files, and Windows 10+ consoles all expect UTF-8.
+Under Python, ``printf`` formats the values with Python's ``%`` operator and writes the text to the current
+``sys.stdout``, so a redirection such as ``contextlib.redirect_stdout`` reaches it. ``fprintf`` maps the addresses that
+``stdout()``, ``stderr()`` and ``stdin()`` return to the ``sys.stdout``, ``sys.stderr`` and ``sys.stdin`` objects that
+it finds at its first call. A redirection installed after that first call does not change where ``fprintf`` writes.
+``fprintf`` raises ``RuntimeError`` for any other ``FILE *``, such as one from ``fopen``. ``snprintf`` writes the text
+into memory at the address it receives, such as ``array_data_p(buf)``. In jitted code, numba compiles each call into a
+call of C's function, which writes to C's streams and accepts any ``FILE *``. ``sscanf`` runs only in jitted code, as
+the section `Parsing with sscanf`_ describes.
 
-  .. note::
-     ``%-Ns`` width is byte-counted by printf in every libc, so non-ASCII
-     output won't right-pad to a codepoint count. That's printf's
-     contract. Pad in numba-side string formatting (``f"{s:<10}"``)
-     before passing through ``%s`` if codepoint-counted widths matter.
+The format string and its arguments
+-----------------------------------
 
-**String args auto-conversion.** When the @overload sees an arg whose
-type is ``unicode_type`` or ``Literal[str]``, it auto-wraps the arg with
-``get_unicode_data_p`` so libc's ``%s`` receives a NUL-terminated C
-string. User code passes a raw Python str — no ``get_unicode_data_p``
-ceremony at the call site::
+In jitted code, the format must be a string that numba reads as a constant: a string literal, a module-level string or a
+closure variable. A format built at run time fails to compile with
+``TypingError: printf: format string must be a literal str``; pass the part that varies as an argument instead, such as
+a ``%s``. numbox encodes the format as UTF-8, so non-ASCII text in the format prints as written. Each conversion takes
+one kind of argument:
 
-    printf("hello %s\n", "world")  # works in both modes; no get_unicode_data_p
+======================================================  ========================
+Conversions                                             Argument
+======================================================  ========================
+``%d``, ``%i``, ``%o``, ``%u``, ``%x``, ``%X``, ``%c``  an integer or a ``bool``
+``%e``, ``%f``, ``%g``, ``%a`` and their capitals       a float
+``%s``                                                  a ``str``, or a pointer
+``%p``                                                  a pointer
+======================================================  ========================
 
-The pre-conversion form (``printf("hello %s\n", get_unicode_data_p(s))``)
-is still supported for backward compat or when the user has a
-precomputed pointer.
+When numba compiles the call, numbox checks the format against the arguments, as GCC's `-Wformat
+<https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html#index-Wformat>`_ does. The compile fails with a ``TypingError``
+that names the problem when:
 
-**Integer promotion to 64-bit.** The @njit impl widens every integer
-variadic arg to 64-bit before the libc call (``sext`` for signed, ``zext``
-for unsigned, ``bool``→``int64`` via ``zext``, ``float32``→``float64``
-via ``fpext``). This diverges from strict C ABI (C only promotes
-sub-int-width values) but makes ``%lld`` against ``int32`` work in
-@njit, matching pure-Python's ``%`` which ignores length modifiers and
-uses the value's natural width. The cost is one LLVM widening
-instruction per arg — free at runtime.
+- the format has more or fewer conversions than there are arguments; a ``*`` width or precision counts as one more
+  integer argument;
+- a conversion gets an argument of another kind than the one it takes;
+- an argument has a type that no conversion takes, such as an array, a complex number or a tuple; pass the element or
+  the field you mean, such as ``a[0]`` or ``z.real``;
+- the format holds ``%n``, which would make C write the number of characters printed so far through a pointer;
+- the format holds the ``'`` flag for digit grouping, which POSIX defines and C99 and Python's ``%`` lack.
 
-.. list-table::
-   :header-rows: 1
+numba lists each of these errors next to a second message, ``format string must be a literal str, got unicode_type``;
+read the message that names the mismatch. A literal percent sign followed by ``n``, ``%%n``, is allowed. Under Python,
+``%n`` and the ``'`` flag raise ``ValueError``.
 
-   * - Numba type
-     - Widened to (in varargs slot)
-   * - ``float32``
-     - ``float64`` (``fpext``)
-   * - ``float64``
-     - pass through
-   * - ``bool``
-     - ``int64`` (``zext``)
-   * - ``int8`` / ``int16`` / ``int32`` (signed)
-     - ``int64`` (``sext``)
-   * - ``uint8`` / ``uint16`` / ``uint32`` (unsigned)
-     - ``int64`` (``zext``)
-   * - ``int64`` / ``uint64`` / ``intp``
-     - pass through
-   * - ``unicode_type`` / ``Literal[str]``
-     - auto-converted via ``get_unicode_data_p`` → ``intp``
+The check cannot tell a pointer from an integer, because numba represents a pointer as an ``intp``, which is an
+``int64``. A ``%s`` given an ``int64`` value compiles, and C then reads memory at that address, which usually ends the
+process with a segmentation fault. Pass ``%s`` a ``str``, or the address of a NUL-terminated buffer. ``%p`` only prints
+its argument as an address, so an ``int64`` there is harmless.
 
-**Unsupported types raise ``TypingError`` at compile time** — numpy
-arrays (``Array``), complex numbers (``Complex``), tuples
-(``UniTuple``/``Tuple``), records, and anything else outside the table
-above. Without that guard, an aggregate LLVM value would flow straight
-into libc's variadic call and the printf would read scrambled bytes
-from neighboring stack slots — silent miscompilation rather than a
-clean error. Pass the field you want explicitly (``arr[0]``, ``c.real``,
-``t[0]``).
+For ``%s``, numbox passes a ``str`` as the address of its characters, so the ASCII limit from the section
+`Pointers and memory`_ applies: ``"caf\xe9"`` prints its last character as the single byte ``0xE9``, not as UTF-8. Pass
+other text as a ``uint8`` array of UTF-8 bytes, built as that section shows. A width, as in ``%-10s``, counts bytes, not
+characters.
 
-**Pure-Python format-spec compatibility.** Python's ``str.__mod__`` is
-printf-derived but rejects C length modifiers (``%lld``, ``%ld``,
-``%lf``, ``%hd``, etc.) with ``ValueError``. The pure-Python impl
-strips length modifiers via a regex before formatting (``%lld``→``%d``,
-``%.3lf``→``%.3f``, etc.) so the same format string works in both modes.
+When Python and C print differently
+-----------------------------------
 
-  .. warning::
-     ``%ld`` is the most common cross-platform footgun. On LP64 (Linux,
-     macOS) ``long`` is 8 bytes; on Win64 (LLP64) it's 4 bytes. In
-     @njit on Win64, ``printf("%ld", int64_val)`` truncates the high
-     32 bits. Pure-Python mode hides this because Python's ``%`` ignores
-     ``l``. Prefer ``%lld`` + ``int64`` for portable 8-byte width — and
-     test on Windows if you have any ``%ld`` in your format strings.
+Give every integer an ``ll`` conversion, ``%lld`` for a signed value and ``%llu`` for an unsigned one, and it prints the
+same under Python and in jitted code. Other conversions can print differently. Python's ``%`` operator ignores a single
+``h``, ``l`` or ``L`` and rejects any other length modifier, as its `documentation
+<https://docs.python.org/3/builtins/stdtypes.html#printf-style-string-formatting>`_ says: ``"%lld" % 5`` raises
+``ValueError: unsupported format character 'l'``. Under Python, numbox therefore removes every length modifier from the
+format before it formats, and with the modifiers gone, Python prints each value at its full size. In jitted code, numbox
+passes every integer and ``bool`` as 64 bits and every float as a ``float64``, and C converts each value to the type
+that its conversion names, such as ``int`` for ``%d`` or ``signed char`` for ``%hhd``. A value that fits that type
+prints the same under Python and in jitted code, and a value that does not fit prints differently:
 
-**``snprintf`` truncation rc on Windows** diverges from C99/POSIX.
-Linux/macOS @njit and pure-Python all return the would-have-written
-count (excluding NUL); Windows @njit targets MSVCRT ``_snprintf`` which
-returns ``-1`` on truncation and doesn't guarantee NUL-termination.
-The portable check ``(rc < 0) or (rc >= size)`` works on every
-platform / mode. (UCRT's C99-compliant ``snprintf`` is a header-only
-inline over ``__stdio_common_vsnprintf`` and isn't directly linkable
-in the simple C99 calling shape — declaring ``i32 @snprintf(...)`` in
-LLVM IR and letting the JIT linker resolve it crashes with an access
-violation on Windows.)
+========  =============  =================  =================
+Format    Value          Python             jitted code
+========  =============  =================  =================
+``%lld``  ``2**40 + 5``  ``1099511627781``  ``1099511627781``
+``%d``    ``2**40 + 5``  ``1099511627781``  ``5``
+``%hhd``  ``300``        ``300``            ``44``
+``%x``    ``-1``         ``-1``             ``ffffffff``
+========  =============  =================  =================
 
-**``fprintf`` to non-stdio ``FILE *`` in pure Python.** The Python impl
-caches the addresses of ``stdout()`` / ``stderr()`` / ``stdin()`` at
-first use and routes those handles to the corresponding ``sys.*``
-streams. ``fopen``-returned ``FILE *`` values can't be dereferenced from
-Python without ctypes, so they raise a clear ``RuntimeError`` in
-pure-Python mode (use ``open()`` + ``f.write()`` for Python-side file
-I/O, or wrap the call in ``@njit``).
+The Python path has one known inconsistency: its stripping does not skip the ``%%`` escape, so it also removes a
+modifier that follows a literal ``%%``, and ``printf("%%lld\n")`` prints ``%d`` under Python and ``%lld`` in jitted
+code. On Windows, C's ``long`` has 32 bits (`Microsoft's data type ranges
+<https://learn.microsoft.com/en-us/cpp/cpp/data-type-ranges>`_), so ``%ld`` reads only 32 bits of an ``int64`` there.
+Python accepts some calls that jitted code refuses, such as ``%f`` with an integer and ``%d`` with a float. ``%p`` works
+only in jitted code, because Python's ``%`` rejects it.
 
-**``sscanf`` is @njit-only.** Pure-Python parsing is better served by
-``int()``, ``float()``, or ``re``. Calling ``sscanf`` from pure Python
-raises ``NotImplementedError`` with a pointer at the alternatives.
+Checking snprintf for truncation
+--------------------------------
 
-**Stdout buffering.** ``stdout`` is line-buffered to a terminal and
-block-buffered when redirected. The pure-Python impl auto-flushes
-``sys.stdout`` after each ``printf`` to mirror the line-buffer-to-tty
-behavior; @njit users should call ``fflush(stdout())`` explicitly when
-output needs to appear immediately (e.g. before a long-running compute
-or under pytest's ``capfd``).
+``snprintf(buf, size, fmt, ...)`` writes at most ``size`` bytes into ``buf``, the terminating NUL included, and returns
+the length of the whole text. A return value of ``size`` or more therefore means that the text was cut short. In jitted
+code, ``buf`` and ``size`` must be ``intp`` values. ``a.size``, ``np.intp(16)`` and an ``int64`` argument of the jitted
+function, such as a Python ``int`` passed in, are ``intp``, but a literal is not: ``snprintf(p, 16, ...)`` fails to
+compile with ``TypingError: snprintf: size must be intp (size_t-as-int), got Literal[int](16)``. The message means that
+numba typed the literal ``16`` as a literal integer; pass ``a.size`` or ``np.intp(16)`` instead.
 
-**Caching.** ``@njit(cache=True)`` callers cache cleanly across
-processes: each call site emits a direct extern reference to the libc
-symbol and a deterministic format-string global constant. The JIT
-linker resolves the libc symbol per-process, so the cached IR is
-ASLR-safe. No ``@proxy`` indirection needed — the variadic intrinsics
-inline the call directly into the caller.
-
-Example — log to stderr with `fprintf(3) <https://man7.org/linux/man-pages/man3/fprintf.3.html>`_,
-dual-mode:
-
-.. code-block:: python
-
-    from numba import njit
-    from numbox.core.bindings.fmtio import fprintf
-    from numbox.core.bindings.libc import fflush
-    from numbox.core.bindings.stdio import stderr
-
-    def warn(code, msg):
-        fprintf(stderr(), "warning code=%d: %s\n", code, msg)
-        fflush(stderr())
-
-    warn(7, "disk getting full")        # plain Python
-    njit(warn)(7, "disk getting full")  # jitted — identical output
-
-Example — format into a buffer with `snprintf(3) <https://man7.org/linux/man-pages/man3/snprintf.3.html>`_,
-detect truncation, decode:
+On Windows, jitted code calls C's `_snprintf
+<https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/snprintf-snprintf-snprintf-l-snwprintf-snwprintf-l>`_
+instead. It returns ``-1`` when the text is longer than ``size``, and when the text is exactly ``size`` bytes long it
+returns ``size`` and writes no terminating NUL. The test ``n < 0 or n >= size`` covers both cases on every platform:
 
 .. code-block:: python
 
     import numpy as np
     from numba import njit
+
     from numbox.core.bindings.fmtio import snprintf
     from numbox.utils.lowlevel import array_data_p
 
-    def fmt_range(lo, hi, buf):
-        return snprintf(array_data_p(buf), buf.size, "[%d:%d]", lo, hi)
 
-    buf = np.zeros(64, dtype=np.uint8)
-    n = njit(fmt_range)(7, 11, buf)
-    # Portable truncation check (works on Linux/macOS C99 snprintf
-    # *and* Windows MSVCRT _snprintf — see snprintf docstring):
-    truncated = (n < 0) or (n >= buf.size)
-    if not truncated:
-        msg = bytes(buf[:n]).decode()  # "[7:11]"
+    @njit(cache=True)
+    def format_range(buf, lo, hi):
+        n = snprintf(array_data_p(buf), buf.size, "[%d:%d]", lo, hi)
+        return -1 if n < 0 or n >= buf.size else n
 
-.. warning::
-   ``snprintf`` truncation semantics **diverge on Windows**. POSIX / C99
-   ``snprintf`` returns the would-have-written count (excluding NUL) and
-   always NUL-terminates the buffer when ``size > 0``. The Windows
-   binding targets MSVCRT's `_snprintf
-   <https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/snprintf-snprintf-snprintf-l-snwprintf-snwprintf-l>`_
-   — that returns ``-1`` on truncation and does NOT guarantee
-   NUL-termination of the buffer. We attempted to bypass this by
-   declaring UCRT's C99 ``snprintf`` directly, but the call crashed with
-   an access violation: UCRT exports a header-inline wrapper whose
-   in-process shape does not match the naive ``declare i32 @snprintf(...)``
-   LLVM declaration. The portable check
-   ``(rc < 0) or (rc >= size)`` works on every platform.
 
-**Parsing direction: `sscanf <https://man7.org/linux/man-pages/man3/sscanf.3.html>`_.**
-The inverse of the printf family: parse fields from a NUL-terminated input
-buffer into caller-supplied output pointers. Shape differs from the writers:
+    buf = np.zeros(16, dtype=np.uint8)
+    n = format_range(buf, 7, 11)
+    print(n, bytes(buf[:n]).decode())   # 6 [7:11]
 
-- ``buf`` is an ``intp`` pointing at the input bytes (e.g. from
-  ``get_unicode_data_p``).
-- Variadic ``*args`` are ``intp`` *output pointers* — each one points at
-  writable storage that sscanf fills based on the corresponding format
-  specifier. Typically obtained via ``array_data_p`` of a 1-element numpy
-  array of the right dtype.
-- Returns the count of items successfully assigned (``int32``), or
-  ``-1`` (``EOF``) on input failure before the first conversion.
+Under Python, ``snprintf`` follows the C99 rule on every platform.
 
-Unlike printf-family, ``sscanf`` is **@njit-only** — pure-Python calls
-raise ``NotImplementedError`` pointing the user at Python's ``int()`` /
-``float()`` / ``re`` for native parsing. There is **no default-argument
-promotion** (pointers don't promote) and **no string auto-conversion**
-(args are output pointers, not values). The binding validates only that
-every variadic arg has type ``intp``, so you can't accidentally pass an
-integer value where a pointer is expected. The pointed-to storage must
-still be the right size for the format spec — the binding cannot check
-that:
+Parsing with sscanf
+-------------------
 
-================   =============================================
-Format spec        Required output points at
-================   =============================================
-``%hhd``           ``int8`` (1 byte)
-``%hd``            ``int16`` (2 bytes)
-``%d``             ``int32`` (4 bytes)
-``%ld``            ``int64`` on LP64 (Linux/macOS); ``int32`` on Win64 (LLP64) — ``long`` is 8 bytes on LP64 and 4 bytes on Win64
-``%lld``           ``int64`` (8 bytes — portable across LP64 and LLP64)
-``%u``             ``uint32``
-``%llu``           ``uint64``
-``%f``             ``float32`` (4 bytes — NOT double, ``%lf`` is for that)
-``%lf``            ``float64`` (8 bytes)
-``%s``             ``char`` buffer (caller responsible for size + NUL room)
-``%n``             accepted in ``sscanf`` only — writes the byte-count consumed so far to the
-                   corresponding output pointer. ``printf`` / ``fprintf`` / ``snprintf`` reject
-                   ``%n`` at compile time (``TypingError``) — it's a memory-write hazard widely
-                   flagged by static analyzers and disabled by glibc's ``_FORTIFY_SOURCE``;
-                   pure-Python's ``%`` operator also rejects it, so rejecting matches dual-mode
-                   behavior. Use ``snprintf`` + ``len()`` if you need byte counts in the writer
-                   family. ``%%n`` (a literal ``%`` followed by ``n``) is allowed.
-================   =============================================
-
-The ``%ld`` row is the most common cross-platform footgun. Prefer
-``%lld`` with an ``int64`` output slot when you want a portable
-8-byte width.
-
-Example — parse a "<int> <double>" pair into typed numpy slots:
+``sscanf(buf, fmt, ...)`` reads values from the NUL-terminated text at ``buf`` into storage that the caller provides. It
+returns the number of values that it stored, or ``-1`` (``EOF``) when the text ends before the first conversion. Unlike
+the other three functions, it runs only in jitted code. Under Python it raises ``NotImplementedError``, and ``int()``,
+``float()`` or ``re`` do its work there:
 
 .. code-block:: python
 
     import numpy as np
     from numba import njit
+
     from numbox.core.bindings.fmtio import sscanf
     from numbox.utils.lowlevel import array_data_p, get_unicode_data_p
 
-    @njit(cache=True)
-    def parse_pair(text_p, n_out, x_out):
-        return sscanf(text_p, "%d %lf",
-                      array_data_p(n_out), array_data_p(x_out))
 
-    n_out = np.zeros(1, dtype=np.int32)
-    x_out = np.zeros(1, dtype=np.float64)
-    rc = parse_pair(get_unicode_data_p("42 3.14"), n_out, x_out)
-    # rc == 2; n_out[0] == 42; x_out[0] == 3.14
+    @njit(cache=True)
+    def parse_pair(text):
+        count = np.zeros(1, dtype=np.int32)
+        ratio = np.zeros(1, dtype=np.float64)
+        n = sscanf(get_unicode_data_p(text), "%d %lf", array_data_p(count), array_data_p(ratio))
+        return n, count[0], ratio[0]
+
+
+    print(parse_pair("42 0.25"))   # (2, 42, 0.25)
+
+``buf`` must be an ``intp``, so pass ``get_unicode_data_p(text)``, not the string; the ASCII limit from the section
+`Pointers and memory`_ applies to the text. Each argument after the format is the address of the storage for one
+conversion, also as an ``intp``. numbox checks only that type, so an ``int64`` value that is not an address compiles,
+and C writes to whatever address it names. numbox does not compare the format with the arguments either, so their number
+and their sizes are the caller's to get right. Each conversion writes storage of its own size:
+
+==================  ==================================================
+Conversion          Storage
+==================  ==================================================
+``%hhd``            ``int8``
+``%hd``             ``int16``
+``%d``, ``%u``      ``int32``, ``uint32``
+``%lld``, ``%llu``  ``int64``, ``uint64``
+``%ld``             ``int64`` on Linux and macOS, ``int32`` on Windows
+``%f``              ``float32``
+``%lf``             ``float64``
+``%s``              a ``uint8`` array
+``%n``              ``int32``
+==================  ==================================================
+
+Give ``%s`` a width one less than the array's size, such as ``%15s`` for 16 bytes, so that the characters and the NUL
+fit. Unlike the output functions, ``sscanf`` accepts ``%n``: it stores the number of characters read so far, and the
+return value does not count it.
+
+Caching callers of the formatted I/O functions
+----------------------------------------------
+
+A jitted call of ``printf``, ``fprintf``, ``snprintf`` or ``sscanf`` compiles into its caller: the caller's code names
+C's function and holds the format as a constant. A caller cached with ``cache=True`` works in a later process, which
+finds C's function by name. After you upgrade numbox, though, a cached caller keeps running the fmtio code of the numbox
+version that compiled it, because numba's cache key covers the caller's own file and not the code of the functions it
+calls (:ref:`what the key leaves out <cache_key_leaves_out>`). Delete the caller's cache files after an upgrade;
+:ref:`where the cache lands <where_the_cache_lands>` says where they are. Alternatively, decorate the caller with
+:func:`~numbox.core.cache_key.numbox_njit`, whose cache key holds numbox's version, so that an upgrade from one release
+to another recompiles it. The cache_key page lists :ref:`which functions numbox keys <cache_key_which_functions>` and
+says :ref:`what an upgrade changes <cache_key_after_upgrade>`, in a source checkout as well, where the version stays
+empty.
 
 Modules
 ++++++++
-
-numbox.core.bindings.abi
-------------------------
-
-.. automodule:: numbox.core.bindings.abi
-   :members:
-   :show-inheritance:
-   :undoc-members:
 
 numbox.core.bindings.libc
 -------------------------
@@ -468,10 +585,10 @@ numbox.core.bindings.libc
    :show-inheritance:
    :undoc-members:
 
-numbox.core.bindings.errno
---------------------------
+numbox.core.bindings.libm
+-------------------------
 
-.. automodule:: numbox.core.bindings.errno
+.. automodule:: numbox.core.bindings.libm
    :members:
    :show-inheritance:
    :undoc-members:
@@ -480,6 +597,14 @@ numbox.core.bindings.stdio
 --------------------------
 
 .. automodule:: numbox.core.bindings.stdio
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
+numbox.core.bindings.errno
+--------------------------
+
+.. automodule:: numbox.core.bindings.errno
    :members:
    :show-inheritance:
    :undoc-members:
@@ -500,10 +625,10 @@ numbox.core.bindings.fmtio
    :show-inheritance:
    :undoc-members:
 
-numbox.core.bindings.libm
--------------------------
+numbox.core.bindings.abi
+------------------------
 
-.. automodule:: numbox.core.bindings.libm
+.. automodule:: numbox.core.bindings.abi
    :members:
    :show-inheritance:
    :undoc-members:

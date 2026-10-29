@@ -253,6 +253,8 @@ Without the check, the entry would load with the old alias, and the process woul
 ``LLVM ERROR: Symbol not found`` abort. No import order needs arranging: a caller imports the module of the function it
 calls, that module imports ``numbox.core.proxy.proxy``, and the check is installed when that module is imported.
 
+.. _proxy_after_upgrade:
+
 After you upgrade numbox
 ------------------------
 
