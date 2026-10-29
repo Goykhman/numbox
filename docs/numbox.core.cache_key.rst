@@ -55,6 +55,8 @@ In addition to numba's own key, the key of a function that numbox keys holds thr
   when numba looks the function up. numba looks a function up when it is first called for a signature, when it is
   decorated with one, or when it is compiled during the compilation of a caller.
 
+.. _cache_key_leaves_out:
+
 What the key leaves out
 +++++++++++++++++++++++
 

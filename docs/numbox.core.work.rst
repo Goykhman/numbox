@@ -558,6 +558,8 @@ save for ``lower_constant``, which ``numba.extending`` does not re-export; the d
 model, wrapper protocol and conversion types they build on sit outside it too. No numba
 internals are patched: nothing replaces numba behaviour, it only registers against it.
 
+.. _derive_mixed_function_values:
+
 These limits are worth knowing:
 
 - A `derive` built directly against numba as a ``CompileResultWAP`` rather than through

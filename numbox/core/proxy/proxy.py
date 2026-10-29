@@ -398,11 +398,13 @@ def {func_proxy_name}({func_args_str}):
         }
         if ns.get(func_proxy_name) is not None:
             raise ValueError(f"Name {func_proxy_name} in module {inspect.getmodule(func)} is reserved")
-        # Anchor the wrapper at func's source file: prepend blank lines so the
-        # wrapper's @njit decorator lands at func.__code__.co_firstlineno (the
-        # user's @proxy decorator line). See docs/numbox.core.proxy.rst —
-        # section "Cache-anchor mechanism" — for the design rationale + the
-        # findsource-finds-@-in-docstring hazard this avoids.
+        # Anchor the wrapper at func's source file. The code prepends blank lines so that the wrapper's @njit decorator
+        # lands on func.__code__.co_firstlineno, the line of the user's @proxy decorator. Python records a decorated
+        # function's line as its first decorator's. numba then stamps the wrapper's cache with the user's file and
+        # notices edits to it. The exact line matters to inspect.findsource, which numba's annotation pipeline calls on
+        # the wrapper. findsource scans backward from co_firstlineno for a line that starts with "@", docstring lines
+        # included, and tokenizes from there. Anchored on the decorator line itself, it matches at once and never
+        # tokenizes a docstring, where an apostrophe would raise TokenError (CPython issue 122981).
         code_lines = code_txt.split('\n')
         njit_lineno_in_txt = next(
             i + 1 for i, line in enumerate(code_lines) if line.startswith('@njit(')
