@@ -23,7 +23,9 @@ Using the decorator
 
 Decorate the function with its signature. The signature is required, because the body is compiled at import time,
 before any call could supply argument types. Saved as ``mymodule.py``, with a docstring whose length `Where the function
-may start`_ explains::
+may start`_ explains:
+
+.. code-block:: python
 
     """A module with a proxied function and a cached caller.
 
@@ -84,7 +86,9 @@ Default arguments
 
 For a function with default arguments, pass ``@proxy`` a list of signatures. The first is the main signature. Each
 further signature describes a call that omits trailing defaulted parameters; each omitted parameter appears there as
-numba's ``Omitted`` type carrying the default value::
+numba's ``Omitted`` type carrying the default value:
+
+.. code-block:: python
 
     """A proxied function with a default argument.
 
@@ -113,13 +117,17 @@ exception back. Python prints the exception to stderr as ignored, and the call r
 type. If the body can raise, pass the function as a value, as the next section shows, or report failure through the
 return value.
 
+.. _proxy_passing_as_value:
+
 Passing the function as a value
 +++++++++++++++++++++++++++++++
 
 Jitted code that takes a function as an argument needs a function value, not a dispatcher. The dispatcher carries one
 for the main signature, ``.as_func``, a `first-class function value
 <https://numba.readthedocs.io/en/stable/reference/types.html#functions>`_. Passing it keeps the body's exceptions and
-keeps the receiving function cacheable. In a second file, ``callers.py``::
+keeps the receiving function cacheable. In a second file, ``callers.py``:
+
+.. code-block:: python
 
     from numba import njit
 
@@ -166,7 +174,9 @@ Optional C symbols
 A binding to a C library can name a symbol that older versions of the library lack.
 :func:`~numbox.core.proxy.proxy.proxy_if_available` takes the loaded library and, before anything else, checks it for
 an attribute with the decorated function's name. The function must therefore be named after the C symbol. Saved as
-``mybindings.py``::
+``mybindings.py``:
+
+.. code-block:: python
 
     """A binding to a C symbol that may be absent.
 
@@ -195,7 +205,9 @@ for a symbol such as ``sqlite3_changes64``, which SQLite added in version 3.37 a
 If the symbol is present, the result is an ordinary proxied function. If it is absent, the result is a stub: a Python
 call raises ``NotImplementedError``, and a jitted caller fails to compile with a ``TypingError`` that names the binding
 and says that its C symbol is missing. The stub has no ``.as_func``, so code that passes the function as a value checks
-for it first::
+for it first:
+
+.. code-block:: python
 
     from callers import apply
     from mybindings import cos
@@ -295,7 +307,9 @@ Holding the function as a module-level constant
 +++++++++++++++++++++++++++++++++++++++++++++++
 
 numba reads a module-level variable as a compile-time constant, so jitted code can read ``.as_func`` from one, although
-it cannot read ``scale.as_func`` itself. Saved as ``constant.py``::
+it cannot read ``scale.as_func`` itself. Saved as ``constant.py``:
+
+.. code-block:: python
 
     from numba import njit
 
@@ -340,7 +354,9 @@ Two forms cannot go stale. Reading ``.as_func`` with no check cannot, but it mak
 where the symbol is absent, the import fails on the missing attribute before any cache is reached. Passing ``.as_func``
 as an argument, as ``apply`` does, cannot either: the value arrives at call time, and a stub has no value to pass.
 
-Of the two guarded forms below, one is safe and one is not::
+Of the two guarded forms below, one is safe and one is not:
+
+.. code-block:: python
 
     from numba import njit
 
