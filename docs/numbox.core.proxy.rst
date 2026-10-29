@@ -5,25 +5,26 @@ Overview
 ++++++++
 
 When one numba function calls another, numba links a copy of the callee's compiled code into the caller. For a few
-small functions that cost hardly matters. For a function that many jitted callers share, each caller's compiled code
-embeds its own copy of the callee, and each cached caller stores that copy on disk.
+small functions, the cost of these copies is negligible. For a function that many jitted callers share, each caller's
+compiled code embeds its own copy of the callee, and each cached caller stores that copy on disk.
 
 :func:`~numbox.core.proxy.proxy.proxy` separates the caller from the callee. The decorated function, called the proxied
 function below, is compiled when its module is imported, for the signature passed to the decorator. A caller's compiled
-code holds a declaration of the compiled function and a call to it, not a copy, so the compiled function lives in one
-place. The module-level constant form described in `Holding the function as a module-level constant`_ embeds a copy
-after all.
+code holds a declaration of the compiled function and a call to it, not a copy. The compiled function therefore exists
+in one place. The module-level constant form described in `Holding the function as a module-level constant`_ is the
+exception: it embeds a copy.
 
-The price is that LLVM cannot inline the call, so the decorator suits functions whose work outweighs a call. numbox
-uses it mainly for its bindings: a binding is a proxied function that wraps one C function, such as the bindings to
-libc and to SQLite in :doc:`numbox.core.bindings`. Any function that many cached callers share is a candidate.
+The drawback is that LLVM cannot inline the call. The decorator is therefore suited to functions whose work takes longer
+than the call itself. numbox uses it mainly for its bindings: a binding is a proxied function that wraps one C function,
+such as the bindings to libc and to SQLite in :doc:`numbox.core.bindings`. Any function that many cached callers share
+is a candidate.
 
 Using the decorator
 +++++++++++++++++++
 
 Decorate the function with its signature. The signature is required, because the body is compiled at import time,
-before any call could supply argument types. Saved as ``mymodule.py``, with a docstring whose length `Where the function
-may start`_ explains:
+before any call could supply argument types. `Where the function may start`_ explains the length of the module docstring
+below. The following example is saved as ``mymodule.py``:
 
 .. code-block:: python
 
@@ -51,18 +52,17 @@ After the decoration, the name ``scale`` refers to a numba dispatcher for a smal
 the compiled body. The wrapper is named ``__scale``, so expect that name, not ``scale``, in numba's messages. Python
 code calls ``scale`` as before. Jitted code such as ``total`` calls the body by a name that numbox registers in every
 process, the alias that `Caching`_ describes. When ``total`` is cached, its cache entry holds that name instead of a
-copy of the body's code. A call with an argument numba can convert to the signature's type, such as an ``int`` for a
-``float64``, goes through. A call from Python with any other type raises numba's ``TypeError: No matching definition
-for argument type(s)``; from jitted code, such a call fails to compile, and numba reports a failed cast to the
-signature's type.
+copy of the body's code. A call succeeds when numba can convert the argument to the signature's type, such as an ``int``
+for a ``float64``. A call from Python with any other type raises numba's ``TypeError: No matching definition for
+argument type(s)``; from jitted code, such a call fails to compile, and numba reports a failed cast to the signature's
+type.
 
 The body is cached only on request. The second argument, ``jit_options``, is passed to ``njit`` for the body and for
 the generated wrapper. Pass ``{"cache": True}`` as above, or pass ``numbox.core.configurations.jit_options``, the
-setting numbox's own bindings use. That setting caches unless the ``NUMBOX_JIT_OPTIONS`` environment variable turns
-caching off. It also turns caching off when numba can write no cache for numbox's own files, and your function is then
-not cached either (:doc:`numbox.core.configurations`). Under ``NUMBA_OPT=0``, a debugging setting, numba does not
-cache a caller of a proxied function and warns that the caller uses dynamic globals; the caller then compiles on every
-run.
+setting numbox's own bindings use. That setting enables caching unless the ``NUMBOX_JIT_OPTIONS`` environment variable
+disables it. It also disables caching when numba can write no cache for numbox's own files, and your function is then
+not cached either (:doc:`numbox.core.configurations`). Under ``NUMBA_OPT=0``, a debugging setting, numba does not cache
+a caller of a proxied function and warns that the caller uses dynamic globals; the caller then compiles on every run.
 
 .. _proxy_where_the_function_may_start:
 
@@ -71,14 +71,15 @@ Where the function may start
 
 The function's first decorator line must be on line 8 of its file or later. That line is the ``@proxy`` line, or the
 topmost decorator when others are stacked above it, because Python records the line of a decorated function as the line
-of its first decorator. numbox compiles the generated wrapper as though it stood at that line of your file, so that
-numba caches the wrapper with your module and notices your edits. The wrapper's own source has seven lines of helper
-code above its decorator, so the decorator cannot stand above line 8. A function nearer the top is refused at import
-with a ``ValueError`` that says where to move it. The module docstring in the example makes the room.
+of its first decorator. numbox compiles the generated wrapper as though it were defined at that line of your file, so
+that numba caches the wrapper with your module and detects your edits. The wrapper's own source has seven lines of
+helper code above its decorator. That decorator therefore cannot be above line 8. A function nearer the top is refused
+at import with a ``ValueError`` that says where to move it. In the example, the module docstring moves the ``@proxy``
+line to line 8 or later.
 
-Other decorators may be stacked above ``@proxy``, but no other decorator may sit between ``@proxy`` and ``def``. A
-decorator there runs first and hands ``@proxy`` the function it returns: numba cannot compile that function, and its
-source is in the decorator's file, not yours.
+Other decorators may be stacked above ``@proxy``, but no other decorator may appear between ``@proxy`` and ``def``. A
+decorator in that position runs first, so ``@proxy`` receives the function that this decorator returns. numba cannot
+compile that function. Its source is also in the decorator's file, not in yours.
 
 A proxied function cannot take ``*args`` or ``**kwargs``. Such a function fails at import; with an ordinary signature
 the error is numba's signature-mismatch ``TypeError``.
@@ -87,8 +88,8 @@ Default arguments
 -----------------
 
 For a function with default arguments, pass ``@proxy`` a list of signatures. The first is the main signature. Each
-further signature describes a call that omits trailing defaulted parameters; each omitted parameter appears there as
-numba's ``Omitted`` type carrying the default value:
+further signature describes a call that omits trailing defaulted parameters. In such a signature, each omitted parameter
+appears as numba's ``Omitted`` type, constructed with the default value:
 
 .. code-block:: python
 
@@ -114,20 +115,21 @@ Exceptions
 ----------
 
 If the body raises an exception, a call to ``scale``, from Python or from jitted code, does not propagate it. The call
-reaches the body through its C entry point, of the kind ``@cfunc`` builds, and that entry point cannot carry a Python
-exception back. Python prints the exception to stderr as ignored, and the call returns a zero of the signature's return
-type. If the body can raise, pass the function as a value, as the next section shows, or report failure through the
-return value.
+reaches the body through its C entry point, of the kind that ``@cfunc`` builds. That entry point cannot propagate a
+Python exception to its caller. Python prints the exception to stderr below a line that begins
+``Exception ignored in:``. The call returns a zero of the signature's return type. If the body can raise, pass the
+function as a value, as the next section shows, or report failure through the return value.
 
 .. _proxy_passing_as_value:
 
 Passing the function as a value
 +++++++++++++++++++++++++++++++
 
-Jitted code that takes a function as an argument needs a function value, not a dispatcher. The dispatcher carries one
-for the main signature, ``.as_func``, a `first-class function value
-<https://numba.readthedocs.io/en/stable/reference/types.html#functions>`_. Passing it keeps the body's exceptions and
-keeps the receiving function cacheable. In a second file, ``callers.py``:
+Jitted code that takes a function as an argument needs a function value, not a dispatcher. The dispatcher's attribute
+``.as_func`` is such a value for the main signature: a `first-class function value
+<https://numba.readthedocs.io/en/stable/reference/types.html#functions>`_. When you pass ``.as_func``, an exception
+raised in the body propagates. The receiving function also remains cacheable. The following example is saved in a second
+file, ``callers.py``:
 
 .. code-block:: python
 
@@ -143,24 +145,24 @@ keeps the receiving function cacheable. In a second file, ``callers.py``:
 
     apply(scale.as_func, 3.0)
 
-Read ``.as_func`` in Python and pass the value in. Jitted code cannot read an attribute of a dispatcher, and
-``scale.as_func`` inside a jitted function fails to compile. The value carries the main signature only, so a call
-through it must pass every parameter: ``shift.as_func`` takes two arguments, and the default for ``y`` applies only to
-calls of ``shift`` itself.
+Read ``.as_func`` in Python and pass the value to the jitted function as an argument. Jitted code cannot read an
+attribute of a dispatcher, and ``scale.as_func`` inside a jitted function fails to compile. The value has only the main
+signature, so a call through it must pass every parameter: ``shift.as_func`` takes two arguments, and the default for
+``y`` applies only to calls of ``shift`` itself.
 
 An exception raised inside the body propagates out of a call made through ``.as_func``. To keep that propagation, let
 numba infer the type of the parameter that receives the value, as ``apply`` does. The value then keeps its own type,
 which numba prints as ``DeriveFunctionType[float64(float64)]``, and the exception propagates.
 
 If the parameter is declared as a plain numba function type instead, numba converts the value to a plain function
-value on the way in and calls the body through its C entry point. An exception is then dropped, as it is for a call to
-the dispatcher. Such a declaration is ``@njit(float64(FunctionType(float64(float64)), float64))``, with
-``FunctionType`` from ``numba.types``.
+value when Python code passes it to the jitted function. The jitted function calls the body through its C entry point.
+An exception is then discarded, as it is for a call to the dispatcher. Such a declaration is
+``@njit(float64(FunctionType(float64(float64)), float64))``, with ``FunctionType`` from ``numba.types``.
 
-Do not pass the dispatcher itself, as in ``apply(scale, 3.0)``. numba gives that parameter a type derived from the
-dispatcher object, and the type's name includes the memory address of the function the dispatcher wraps, which differs
-in every process. A cached ``apply`` then recompiles on every run and adds a cache entry each time. ``.as_func`` has the
-same type in every process, so ``apply`` compiles once and loads from the cache after that.
+Do not pass the dispatcher itself, as in ``apply(scale, 3.0)``. numba derives the type of that parameter from the
+dispatcher object. The type's name includes the memory address of the function that the dispatcher wraps, an address
+that differs in every process. A cached ``apply`` then recompiles on every run and adds a cache entry each time.
+``.as_func`` has the same type in every process, so ``apply`` compiles once and loads from the cache after that.
 
 Below numba 0.68.0, every function value in a tuple must have the same type, such as ``.as_func`` values of one
 signature. A tuple that mixes ``.as_func`` with a ``@cfunc``, an ``@njit`` function compiled for a signature, numba's
@@ -176,9 +178,9 @@ Optional C symbols
 ++++++++++++++++++
 
 A binding to a C library can name a symbol that older versions of the library lack.
-:func:`~numbox.core.proxy.proxy.proxy_if_available` takes the loaded library and, before anything else, checks it for
-an attribute with the decorated function's name. The function must therefore be named after the C symbol. Saved as
-``mybindings.py``:
+:func:`~numbox.core.proxy.proxy.proxy_if_available` takes the loaded library and first checks it for an attribute with
+the decorated function's name. The function must therefore be named after the C symbol. The following example is saved
+as ``mybindings.py``:
 
 .. code-block:: python
 
@@ -203,8 +205,9 @@ an attribute with the decorated function's name. The function must therefore be 
 its symbols; a ``ctypes.CDLL`` opened without that mode is not visible to the compiled code. The body calls the C
 function through numba's ``ExternalFunction``, which names the symbol and its C signature. numbox's own bindings call a
 private helper instead, ``_call_lib_func``, which serves only the symbols in numbox's table
-``numbox.core.bindings.signatures``. Every libm has ``cos``, so this example never takes the stub path; it stands in
-for a symbol such as ``sqlite3_changes64``, which SQLite added in version 3.37 and numbox guards this way.
+``numbox.core.bindings.signatures``. Every libm has ``cos``, so ``proxy_if_available`` never returns a stub in this
+example. The example uses ``cos`` in place of a symbol such as ``sqlite3_changes64``, which SQLite added in
+version 3.37. numbox guards that symbol in the same way.
 
 If the symbol is present, the result is an ordinary proxied function. If it is absent, the result is a stub: a Python
 call raises ``NotImplementedError``, and a jitted caller fails to compile with a ``TypingError`` that names the binding
@@ -222,9 +225,9 @@ for it first:
 Caching
 +++++++
 
-Three things can change under a cached caller: the proxied function, after you edit it; numbox, after an upgrade; and
-the C library behind a binding. numbox repairs the first two cases on its own and reports the third. The one form it
-cannot repair is the module-level constant of `Holding the function as a module-level constant`_.
+After a caller is cached, three things can change: the proxied function, when you edit it; numbox, when you upgrade it;
+and the C library that a binding calls. numbox repairs the first two cases automatically and reports the third. The one
+form it cannot repair is the module-level constant of `Holding the function as a module-level constant`_.
 
 After you edit a proxied function
 ---------------------------------
@@ -237,34 +240,37 @@ warns once per stale cache entry::
     since the caller was cached, or the binding is no longer available): numbox_pxy_scale_e653de386ea6678b
 
 The first name in the warning is the caller's cache entry: its module, its function, the line of its decorator and the
-Python version, here a caller ``vec_scale`` in a module ``pipeline``. Later runs are quiet, and you need not clear
-anything. Callers in the same file as the proxied function recompile anyway, because numba sees that file change. The
-repair covers callers decorated with ``@njit``, ``@vectorize``, ``@guvectorize`` and ``@cfunc``. The exception is a
-caller that holds ``.as_func`` as a module-level constant; see `Holding the function as a module-level constant`_.
+Python version, here a caller ``vec_scale`` in a module ``pipeline``. In later runs, numbox issues no such warning. You
+do not need to clear the cache. numba itself recompiles the callers in the same file as the proxied function, because it
+detects that the file has changed. The repair covers callers decorated with ``@njit``, ``@vectorize``, ``@guvectorize``
+and ``@cfunc``. The exception is a caller that holds ``.as_func`` as a module-level constant; see `Holding the function
+as a module-level constant`_.
 
 The name at the end of the warning is the alias of the compiled body: a symbol that numbox registers in each process,
 through which callers reach the body. numbox computes the alias from the body's code and the values it captures
 (closure variables, defaults and the globals it reads), from the function's module and name, and from its signature and
-jit options. The same body therefore gets the same alias in every process, and any change to those renames it.
+jit options. The same body therefore has the same alias in every process. Any change to those inputs renames the alias.
 
 numba's cache key for a caller :ref:`does not include the callees <cache_key_leaves_out>`, so numbox checks each cache
 entry as numba loads it, and discards and recompiles an entry that refers to an alias this process has not registered.
 Without the check, the entry would load with the old alias, and the process would end in a segmentation fault or an
-``LLVM ERROR: Symbol not found`` abort. No import order needs arranging: a caller imports the module of the function it
-calls, that module imports ``numbox.core.proxy.proxy``, and the check is installed when that module is imported.
+``LLVM ERROR: Symbol not found`` abort. The check does not depend on import order: a caller imports the module of the
+function it calls, that module imports ``numbox.core.proxy.proxy``, and the check is installed when that module is
+imported.
 
 .. _proxy_after_upgrade:
 
 After you upgrade numbox
 ------------------------
 
-numbox's version is part of the cache key of every proxied function (:doc:`numbox.core.cache_key` says how), so the
-first run after an upgrade compiles each proxied body and its wrapper once more and caches them again. The alias does
-not include the version, so cached callers load as before. A release that changes the code of one of numbox's bindings
-renames that binding's alias, and one that changes how aliases are computed renames every alias, yours included. That
-run repairs each affected cached caller with one warning of the kind above. The recompilation and the repairs are
-one-time costs. A caller that holds a numbox binding as a module-level constant is the exception again, and its cache
-entry must be cleared by hand; `Holding the function as a module-level constant`_ says how.
+numbox's version is part of the cache key of every proxied function, as :doc:`numbox.core.cache_key` explains. The first
+run after an upgrade therefore compiles each proxied body and its wrapper once more and caches them again. The alias
+does not include the version, so cached callers load as before. A release that changes the code of one of numbox's
+bindings renames that binding's alias. A release that changes how aliases are computed renames every alias, including
+the aliases of your own proxied functions. numbox repairs each affected cached caller in the first run after such a
+release and issues one warning of the kind shown above per caller. The recompilation and the repairs are one-time costs.
+A caller that holds a numbox binding as a module-level constant is again the exception. You must clear its cache entry
+manually, as `Holding the function as a module-level constant`_ explains.
 
 .. _proxy_alias_collision:
 
@@ -274,13 +280,14 @@ If numbox warns of an alias collision
 An :class:`~numbox.core.proxy.proxy.AliasCollisionWarning` means that two different proxied functions computed the
 same alias. The alias can include a captured value only if the value is the same in every process. A numba
 ``ExternalFunction`` is the same in every process, and so is a C function reached as an attribute of the loaded
-library, such as ``lib.strlen``. A ctypes function built from a raw integer address is not, because address space
-layout randomization moves it between processes, so numbox leaves it out of the alias. Two bodies that differ only in
-such a value are then indistinguishable and get one alias.
+library, such as ``lib.strlen``. A ctypes function built from a raw integer address is not the same in every process,
+because address space layout randomization changes the address from one process to the next. numbox therefore excludes
+such a function from the alias. Two bodies that differ only in such a value then have the same alias, because numbox
+cannot distinguish them.
 
 The remedy is to reach the C function as an attribute of the loaded library rather than through a pointer built from
-an address. Until you apply it, numbox gives the second body a name used only in this process and stops using the
-shared alias; cached callers of either body then recompile in every process instead of running the wrong body.
+an address. Until you apply it, numbox assigns the second body a name that is used only in this process and stops using
+the shared alias. Cached callers of either body then recompile in every process instead of running the wrong body.
 Registering the same body twice is not a collision. After a module reload, or when a function that builds proxied
 functions is called twice with equal arguments, the alias is pointed at the new compilation and numbox keeps using it.
 
@@ -291,17 +298,17 @@ If a C symbol disappears
 ------------------------
 
 Suppose a caller of a ``proxy_if_available`` binding was cached where the library has the symbol, and later runs where
-it does not. numbox discards the caller's cache entry with a ``StaleProxyCacheWarning``, and the recompile fails with
-the ``TypingError`` a fresh compile gives.
+it does not. numbox discards the caller's cache entry with a ``StaleProxyCacheWarning``. The recompilation then fails
+with the same ``TypingError`` as a compilation with an empty cache.
 
 Strict mode
 -----------
 
 Set ``NUMBOX_PROXY_CACHE_STRICT`` to make a stale entry fail instead of being repaired, for example to make a test run
 fail or to keep the entry on disk for inspection. Any value except ``0``, ``false``, ``no``, ``off`` or the empty
-string, in upper or lower case, turns it on. A stale alias then raises
-:class:`~numbox.core.proxy.proxy.StaleProxyCacheError` before the discard. A test run can also turn the warning itself
-into an error with pytest's ``-W error::numbox.core.proxy.proxy.StaleProxyCacheWarning``.
+string, in upper or lower case, enables strict mode. For a stale alias, numbox then raises
+:class:`~numbox.core.proxy.proxy.StaleProxyCacheError` instead of discarding the entry. A test run can also turn the
+warning itself into an error with pytest's ``-W error::numbox.core.proxy.proxy.StaleProxyCacheWarning``.
 
 If numbox cannot check a cache entry
 ------------------------------------
@@ -317,7 +324,7 @@ Holding the function as a module-level constant
 +++++++++++++++++++++++++++++++++++++++++++++++
 
 numba reads a module-level variable as a compile-time constant, so jitted code can read ``.as_func`` from one, although
-it cannot read ``scale.as_func`` itself. Saved as ``constant.py``:
+it cannot read ``scale.as_func`` itself. The following example is saved as ``constant.py``:
 
 .. code-block:: python
 
@@ -332,37 +339,38 @@ it cannot read ``scale.as_func`` itself. Saved as ``constant.py``:
     def twice(x):
         return SCALE(x) + SCALE(x)
 
-This form gives a direct call, which LLVM can inline, and an exception raised in the body propagates as it does
-through an argument. ``twice`` is cacheable: when numbox lowers the constant, it links the body's compiled code into
-the caller, as numba does for an ordinary callee. Because of the two costs below, prefer passing ``.as_func`` as an
-argument unless the inlining matters.
+In this form, the caller makes a direct call to the body. LLVM can inline that call. An exception raised in the body
+propagates, as it does when ``.as_func`` is passed as an argument. ``twice`` is cacheable: when numbox lowers the
+constant, it links the body's compiled code into the caller, as numba does for an ordinary callee. Because of the two
+costs below, prefer passing ``.as_func`` as an argument unless the inlining matters.
 
 The first cost is the one the overview describes: ``twice`` embeds its own copy of the compiled body. The second is
-that the copy goes stale silently. The caller's compiled code names no alias, so numbox's check cannot see an edit to
-the body, and numba checks only the caller's own source file for changes. After you edit the body, ``twice`` may keep
-returning the old result with no warning. The same happens after a numbox upgrade when the constant is a numbox
-binding. A ``StaleProxyCacheWarning`` in the same run names other callers, never this one.
+that the copy becomes stale silently. The caller's compiled code names no alias, so numbox's check cannot detect an edit
+to the body, and numba checks only the caller's own source file for changes. After you edit the body, ``twice`` may keep
+returning the old result with no warning. The same happens after a numbox upgrade when the constant is a numbox binding.
+A ``StaleProxyCacheWarning`` in the same run names other callers, but it never names this caller.
 
 The remedy is to delete the caller's cache files. Their names are the module, the function, the line of its decorator
 and the Python version, here ``constant.twice-8.py312.nbi`` and ``constant.twice-8.py312.1.nbc``. They are:
 
 - in a subdirectory of ``NUMBA_CACHE_DIR`` named after the source's directory, if that variable is set;
 - otherwise in the ``__pycache__`` directory beside the caller's source;
-- or in numba's user cache directory, if numba could not write that ``__pycache__``; the configurations page says
+- or in numba's user cache directory, if numba could not write that ``__pycache__``; the configurations page explains
   :ref:`where the cache lands <where_the_cache_lands>`.
 
 Even when ``twice`` and ``scale`` return the same result, the cache entry may still hold the old body, so delete the
 files after every edit of the body.
 
 A binding that ``proxy_if_available`` may find absent needs care in this form. Where the symbol is missing, a caller
-cached while it was present still loads, and calling it can end the process in a segmentation fault with nothing on
-stderr. With an empty cache, a caller such as ``use_const`` below fails to compile with a ``TypingError``, so a warm and
-a cold run disagree. Strict mode cannot catch this, because the caller's compiled code names no alias for the check to
-find.
+that was cached while the symbol was present still loads. When that caller runs, the process can end in a segmentation
+fault without any message on stderr. With an empty cache, a caller such as ``use_const`` below fails to compile with a
+``TypingError``. A run with a warm cache and a run with an empty cache therefore behave differently. Strict mode cannot
+catch this, because the caller's compiled code names no alias for the check to find.
 
-Two forms cannot go stale. Reading ``.as_func`` with no check cannot, but it makes your module require the symbol:
-where the symbol is absent, the import fails on the missing attribute before any cache is reached. Passing ``.as_func``
-as an argument, as ``apply`` does, cannot either: the value arrives at call time, and a stub has no value to pass.
+Two forms cannot become stale. In the first form, your module reads ``.as_func`` with no check and therefore requires
+the symbol: where the symbol is absent, the import fails on the missing attribute before any cache is reached. In the
+second form, the caller receives ``.as_func`` as an argument, as ``apply`` does: the value is supplied at call time, and
+a stub has no value to pass.
 
 Of the two guarded forms below, one is safe and one is not:
 
