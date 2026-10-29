@@ -399,8 +399,8 @@ def {func_proxy_name}({func_args_str}):
         if ns.get(func_proxy_name) is not None:
             raise ValueError(f"Name {func_proxy_name} in module {inspect.getmodule(func)} is reserved")
         # Anchor the wrapper at func's source file. The code prepends blank lines so that the wrapper's @njit decorator
-        # lands on func.__code__.co_firstlineno, the line of the user's @proxy decorator. Python records a decorated
-        # function's line as its first decorator's. numba then stamps the wrapper's cache with the user's file and
+        # lands on func.__code__.co_firstlineno, the line of the user's first decorator: the @proxy line, or the topmost
+        # decorator stacked above it. numba then stamps the wrapper's cache with the user's file and
         # notices edits to it. The exact line matters to inspect.findsource, which numba's annotation pipeline calls on
         # the wrapper. findsource scans backward from co_firstlineno for a line that starts with "@", docstring lines
         # included, and tokenizes from there. Anchored on the decorator line itself, it matches at once and never

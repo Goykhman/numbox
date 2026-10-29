@@ -67,12 +67,12 @@ run.
 Where the function may start
 ----------------------------
 
-The ``@proxy`` line must be on line 8 of its file or later. When other decorators are stacked above it, the topmost of
-them must be on line 8 or later, because Python records the line of a decorated function as the line of its first
-decorator. numbox compiles the generated wrapper as though it stood at that line of your file, so that numba caches
-the wrapper with your module and notices your edits. The wrapper's own source has seven lines of helper code above its
-decorator, so the decorator cannot stand above line 8. A function nearer the top is refused at import with a
-``ValueError`` that says where to move it. The module docstring in the example makes the room.
+The function's first decorator line must be on line 8 of its file or later. That line is the ``@proxy`` line, or the
+topmost decorator when others are stacked above it, because Python records the line of a decorated function as the line
+of its first decorator. numbox compiles the generated wrapper as though it stood at that line of your file, so that
+numba caches the wrapper with your module and notices your edits. The wrapper's own source has seven lines of helper
+code above its decorator, so the decorator cannot stand above line 8. A function nearer the top is refused at import
+with a ``ValueError`` that says where to move it. The module docstring in the example makes the room.
 
 Other decorators may be stacked above ``@proxy``, but no other decorator may sit between ``@proxy`` and ``def``. A
 decorator there runs first and hands ``@proxy`` the function it returns: numba cannot compile that function, and its
@@ -252,13 +252,13 @@ calls, that module imports ``numbox.core.proxy.proxy``, and the check is install
 After you upgrade numbox
 ------------------------
 
-numbox's version is part of the cache key of every proxied function, so the first run after an upgrade compiles each
-proxied body and its wrapper once more and caches them again. The alias does not include the version, so cached callers
-load as before. A release that changes the code of one of numbox's bindings renames that binding's alias, and one that
-changes how aliases are computed renames every alias, yours included. That run repairs each affected cached caller with
-one warning of the kind above. The recompilation and the repairs are one-time costs. A caller that holds a numbox
-binding as a module-level constant is the exception again, and its cache entry must be cleared by hand; `Holding the
-function as a module-level constant`_ says how.
+numbox's version is part of the cache key of every proxied function (:doc:`numbox.core.cache_key` says how), so the
+first run after an upgrade compiles each proxied body and its wrapper once more and caches them again. The alias does
+not include the version, so cached callers load as before. A release that changes the code of one of numbox's bindings
+renames that binding's alias, and one that changes how aliases are computed renames every alias, yours included. That
+run repairs each affected cached caller with one warning of the kind above. The recompilation and the repairs are
+one-time costs. A caller that holds a numbox binding as a module-level constant is the exception again, and its cache
+entry must be cleared by hand; `Holding the function as a module-level constant`_ says how.
 
 If numbox warns of an alias collision
 -------------------------------------
