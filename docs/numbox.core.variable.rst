@@ -318,7 +318,7 @@ numba checks a cached function against the file that defines it. An edit to that
 again. An edit to a function that it calls from another file does not, and neither does a new value of a global that
 it reads, as numba's `caching limitations
 <https://numba.readthedocs.io/en/stable/developer/caching.html#caching-limitations>`_ note. When a formula changes, the
-kernel's own file stays as it was, so numba's file check alone would load a stale kernel.
+kernel's own file does not change, so numba's file check alone would load a stale kernel.
 
 numba loads a cached kernel only when two things match. The first is numba's key, which must match as for any cached
 function: numba's own parts, and the part that numbox adds for every function it compiles, made of numbox's version, the
@@ -368,8 +368,8 @@ of its own:
   set, ``numbox-compile-kernel`` is a directory under it, and numba writes the compiled kernel to another directory
   under ``NUMBA_CACHE_DIR``, whose name starts with ``numbox-compile-kernel_``.
 - Otherwise, ``numbox-compile-kernel`` is under numba's user cache directory, and numba writes the compiled kernel to
-  ``numbox-compile-kernel/__pycache__``. :ref:`Where the cache lands <where_the_cache_lands>` names the user cache
-  directory for each system.
+  ``numbox-compile-kernel/__pycache__``. :ref:`Where numba writes the cache <where_the_cache_lands>` names the user
+  cache directory for each system.
 
 numbox never deletes the files of an old kernel, so they accumulate as the formulas change. To reclaim disk space,
 delete ``numbox-compile-kernel`` and, when ``NUMBA_CACHE_DIR`` is set, the directories beside it whose names start

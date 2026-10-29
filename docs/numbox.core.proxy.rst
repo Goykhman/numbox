@@ -356,7 +356,7 @@ and the Python version, here ``constant.twice-8.py312.nbi`` and ``constant.twice
 - in a subdirectory of ``NUMBA_CACHE_DIR`` named after the source's directory, if that variable is set;
 - otherwise in the ``__pycache__`` directory beside the caller's source;
 - or in numba's user cache directory, if numba could not write that ``__pycache__``; the configurations page explains
-  :ref:`where the cache lands <where_the_cache_lands>`.
+  :ref:`where numba writes the cache <where_the_cache_lands>`.
 
 Even when ``twice`` and ``scale`` return the same result, the cache entry may still hold the old body, so delete the
 files after every edit of the body.

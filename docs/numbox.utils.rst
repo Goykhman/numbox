@@ -321,12 +321,12 @@ Where the generated code is written
 '''''''''''''''''''''''''''''''''''
 
 The anchors are under ``NUMBA_CACHE_DIR`` when that variable is set, and otherwise under numba's user cache directory,
-which the configurations page gives for each platform (:ref:`where the cache lands <where_the_cache_lands>`). Each kind
-of code has a subdirectory of its own there: ``numbox-structref``, ``numbox-compile-kernel``, ``numbox-derive``,
-``numbox-sqlite-udaf`` and ``numbox-sqlite-tvf``. An anchor's name ends in a digest that covers the generated code and
-the functions of yours that the code calls. A new version of the generated code, or of a function of yours that it
-calls, therefore has an anchor of its own. For the struct of the example above, the anchor is a file such as
-``numbox-structref/DataStruct_b62da08f4520823e.py``.
+which the configurations page gives for each platform (:ref:`where numba writes the cache <where_the_cache_lands>`).
+Each kind of code has a subdirectory of its own there: ``numbox-structref``, ``numbox-compile-kernel``,
+``numbox-derive``, ``numbox-sqlite-udaf`` and ``numbox-sqlite-tvf``. An anchor's name ends in a digest that covers the
+generated code and the functions of yours that the code calls. A new version of the generated code, or of a function of
+yours that it calls, therefore has an anchor of its own. For the struct of the example above, the anchor is a file such
+as ``numbox-structref/DataStruct_b62da08f4520823e.py``.
 
 numba names the cache files of the functions in an anchor after the anchor, as in
 ``DataStruct_b62da08f4520823e.make_datastruct-43.py312.nbi``. They are in the ``__pycache__`` directory beside the
@@ -343,7 +343,7 @@ therefore caches the kernel beside that module. Its cache files have names such 
 ``builder._make_<digest>-2.py312.nbi``, in the ``__pycache__`` directory beside ``builder.py`` or, when
 ``NUMBA_CACHE_DIR`` is set, in a directory under it whose name starts with ``work_``. If numba cannot write there, as in
 a read-only installation, the kernel compiles without a cache after a warning whose remedy is the one for numbox's own
-modules (:ref:`where the cache lands <where_the_cache_lands>`).
+modules (:ref:`where numba writes the cache <where_the_cache_lands>`).
 
 numbox never deletes an anchor, so the anchor and the cache files of every version of the generated code remain on disk.
 You can delete them between runs

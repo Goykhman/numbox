@@ -569,9 +569,9 @@ C's function and holds the format as a constant. A caller cached with ``cache=Tr
 finds C's function by name. After you upgrade numbox, however, a cached caller still runs the fmtio code of the numbox
 version that compiled it. This happens because numba's cache key covers the caller's own file and not the code of the
 functions it calls (:ref:`what the key leaves out <cache_key_leaves_out>`). Delete the caller's cache files after an
-upgrade; :ref:`where the cache lands <where_the_cache_lands>` says where they are. Alternatively, decorate the caller
-with :func:`~numbox.core.cache_key.numbox_njit`, whose cache key holds numbox's version, so that an upgrade from one
-release to another recompiles it. The cache_key page lists :ref:`which functions numbox keys
+upgrade; :ref:`where numba writes the cache <where_the_cache_lands>` says where they are. Alternatively, decorate the
+caller with :func:`~numbox.core.cache_key.numbox_njit`, whose cache key holds numbox's version, so that an upgrade from
+one release to another recompiles it. The cache_key page lists :ref:`which functions numbox keys
 <cache_key_which_functions>`. It also explains :ref:`what an upgrade changes <cache_key_after_upgrade>`, both between
 releases and in a source checkout, where the version stays empty.
 

@@ -259,8 +259,8 @@ numba keeps them in the first of these places that it can write to:
 - under ``NUMBA_CACHE_DIR``, if that variable is set, in a subdirectory named after the source's directory: the
   directory's base name, an underscore and the SHA-1 hash of its full path;
 - otherwise in the ``__pycache__`` directory beside the source;
-- otherwise in numba's user cache directory, which the configurations page describes in :ref:`where the cache lands
-  <where_the_cache_lands>`.
+- otherwise in numba's user cache directory, which the configurations page describes in
+  :ref:`where numba writes the cache <where_the_cache_lands>`.
 
 Delete the function's ``.nbi`` file and all its ``.nbc`` files. numba then compiles the function again and saves new
 files.

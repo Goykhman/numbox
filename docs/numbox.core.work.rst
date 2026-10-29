@@ -706,7 +706,7 @@ A cached function that takes a ``cres`` function, or a node built from one, reco
 parameter is declared as the plain ``FunctionType``. If it receives an ``@njit`` function compiled for a signature,
 numba continues to load its 0.7.2 code, which discards the exception that 0.7.3 propagates. Delete that function's cache
 files, or save its source file again so that numba sees a newer modification time; the configurations page says
-:ref:`where the cache lands <where_the_cache_lands>`. For later upgrades, decorate such a function with
+:ref:`where numba writes the cache <where_the_cache_lands>`. For later upgrades, decorate such a function with
 :func:`~numbox.core.cache_key.numbox_njit`, which numbox provides from 0.7.8. Its key includes numbox's version, so the
 function recompiles after every upgrade, as the cache_key page explains under
 :ref:`After you upgrade numbox <cache_key_after_upgrade>`.
