@@ -64,6 +64,8 @@ not cached either (:doc:`numbox.core.configurations`). Under ``NUMBA_OPT=0``, a 
 cache a caller of a proxied function and warns that the caller uses dynamic globals; the caller then compiles on every
 run.
 
+.. _proxy_where_the_function_may_start:
+
 Where the function may start
 ----------------------------
 
@@ -168,6 +170,8 @@ numba version: the call raises a ``TypeError``. The :ref:`work page <derive_mixe
 alongside related ones. For reference, the value's class is :class:`~numbox.utils.derive_wap.DeriveWAP` and its numba
 type is :class:`~numbox.utils.derive_wap.DeriveFunctionType`.
 
+.. _proxy_optional_c_symbols:
+
 Optional C symbols
 ++++++++++++++++++
 
@@ -260,6 +264,8 @@ run repairs each affected cached caller with one warning of the kind above. The 
 one-time costs. A caller that holds a numbox binding as a module-level constant is the exception again, and its cache
 entry must be cleared by hand; `Holding the function as a module-level constant`_ says how.
 
+.. _proxy_alias_collision:
+
 If numbox warns of an alias collision
 -------------------------------------
 
@@ -302,6 +308,8 @@ The check reads the compiled code in each cache entry to find the aliases it ref
 entry, because a numba release changed the entry's layout or the file is damaged, numbox loads the entry unchecked and
 warns once per process with :class:`~numbox.core.proxy.proxy.UnvalidatedProxyCacheWarning`. In strict mode the load
 raises :class:`~numbox.core.proxy.proxy.UnvalidatedProxyCacheError` instead.
+
+.. _proxy_module_level_constant:
 
 Holding the function as a module-level constant
 +++++++++++++++++++++++++++++++++++++++++++++++
