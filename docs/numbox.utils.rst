@@ -1,13 +1,13 @@
 numbox.utils
 ============
 
-The modules of ``numbox.utils`` are the tools that the rest of numbox is built on, and several of them are useful on
-their own. :func:`~numbox.utils.highlevel.make_structref` defines a numba StructRef in one call.
+The rest of numbox depends on the modules of ``numbox.utils``. A program can also use several of these modules directly.
+:func:`~numbox.utils.highlevel.make_structref` defines a numba StructRef in one call.
 :func:`~numbox.utils.highlevel.cres` compiles a function into a value that jitted code can take as an argument, an
 instance of :class:`~numbox.utils.derive_wap.DeriveWAP`. ``lowlevel``, ``meminfo``, ``cstrings`` and ``pysqlite_bridge``
 pass pointers between Python, jitted code and C libraries. ``preprocessing``, ``digest`` and ``fingerprint`` let numbox
-cache the code that it generates at run time and tell one version of that code from another. ``timer`` times calls
-made from Python.
+cache the code that it generates at run time and distinguish one version of that code from another. ``timer`` times
+calls made from Python.
 
 numbox.utils.highlevel
 ----------------------
@@ -20,9 +20,9 @@ Defining a numba
 mutable structure that Python code and jitted code share by reference, requires writing a lot of boilerplate code.
 :func:`~numbox.utils.highlevel.make_structref` defines a StructRef type in one call, and the code it generates supports
 caching. It needs a type class: an empty subclass of numba's ``StructRef``, registered with numba's ``@register``. numba
-uses the type class as the class of the struct's numba type. A type class defined in the script that you run makes every
-run after the first fail, as `shown below <If the second run fails with "No conversion"_>`_. Define the type class in a
-separate module that your program imports instead, such as ``type_classes.py``::
+uses the type class as the class of the struct's numba type. If the type class is defined in the script that you run,
+every run after the first fails, as `shown below <If the second run fails with "No conversion"_>`_. Define the type
+class in a separate module that your program imports instead, such as ``type_classes.py``::
 
     from numba.experimental.structref import register
     from numba.core.types import StructRef
@@ -32,7 +32,7 @@ separate module that your program imports instead, such as ``type_classes.py``::
     class DataStructTypeClass(StructRef):
         pass
 
-Then, in a different module, ``main.py``::
+Then define the struct in a different module, ``main.py``::
 
     from numba.core.types import float32, unicode_type
     from numpy import isclose
@@ -90,11 +90,11 @@ struct needs a type class of its own: a second ``make_structref`` call with the 
 If the second run fails with "No conversion"
 ''''''''''''''''''''''''''''''''''''''''''''
 
-The type class must live in a module that the script imports, not in the script itself. numba pickles the struct's numba
-type into its cache, along with the compiled constructor. The pickler stores a class from the running script by value.
-The next run therefore reads back a copy of the type class, not the class that the script has just defined. The two
-classes have the same name, but numba cannot convert one to the other, and every run after the first fails at the
-``make_structref`` call:
+The type class must be defined in a module that the script imports, not in the script itself. numba pickles the struct's
+numba type into its cache, along with the compiled constructor. The pickler stores a class from the running script by
+value. In the next run, numba therefore loads a copy of the type class from the cache, not the class that the script has
+just defined. The two classes have the same name, but numba cannot convert one to the other, and every run after the
+first fails at the ``make_structref`` call:
 
 .. code-block:: text
 
@@ -118,23 +118,23 @@ If a method cannot find a global name
 '''''''''''''''''''''''''''''''''''''
 
 A method's source is copied into the generated code, which runs in a namespace of its own, not in the method's module. A
-module or a function that the method reads as a global, such as ``np`` or a jitted helper, is therefore missing there.
-The first call of the method fails with a ``TypingError`` whose text includes ``NameError: name 'np' is not defined``.
-Pass each such global to ``make_structref`` in its ``ns`` argument, as in ``ns={"np": np}``. The values in ``ns`` that a
-method reads become part of the method's fingerprint, which the section on `numbox.utils.fingerprint`_ describes. A new
-value therefore changes the generated code, which is compiled again.
+module or a function that the method reads as a global, such as ``np`` or a jitted helper, is therefore not defined in
+that namespace. The first call of the method fails with a ``TypingError`` whose text includes
+``NameError: name 'np' is not defined``. Pass each such global to ``make_structref`` in its ``ns`` argument, as in
+``ns={"np": np}``. The values in ``ns`` that a method reads become part of the method's fingerprint, which the section
+on `numbox.utils.fingerprint`_ describes. A new value therefore changes the generated code, which is compiled again.
 
 After you edit a struct's method
 ''''''''''''''''''''''''''''''''
 
-``make_structref`` notices the edit: the next run generates new code and compiles it. A cached jitted function in
-another file that calls the method, such as ``use`` in ``run.py``, does not notice. Its cache entry holds the compiled
-code of the method, and numba checks the entry only against the caller's own file (`numba's caching limitations
-<https://numba.readthedocs.io/en/stable/user/jit.html#cache>`_). The caller then returns the old method's result,
-with no warning. After you edit a method, delete the cache files of each cached caller in another file. numba names
-them after the caller's module, the function's name, the line of its first decorator and the Python version: for
-``use``, ``run.use-6.py312.nbi`` and ``run.use-6.py312.1.nbc`` under Python 3.12. The configurations page says
-:ref:`where they are <where_the_cache_lands>`.
+``make_structref`` detects the edit: the next run generates new code and compiles it. A cached jitted function in
+another file that calls the method, such as ``use`` in ``run.py``, does not detect the edit. Its cache entry holds the
+compiled code of the method, and numba checks the entry only against the caller's own file
+(`numba's caching limitations <https://numba.readthedocs.io/en/stable/user/jit.html#cache>`_). The caller then returns
+the result of the old method, and numba gives no warning. After you edit a method, delete the cache files of each cached
+caller in another file. numba names them after the caller's module, the function's name, the line of its first decorator
+and the Python version: for ``use``, ``run.use-6.py312.nbi`` and ``run.use-6.py312.1.nbc`` under Python 3.12. The
+configurations page describes :ref:`where numba writes them <where_the_cache_lands>`.
 
 Compiling a function into a value
 '''''''''''''''''''''''''''''''''
@@ -143,9 +143,9 @@ A cached jitted function that takes a dispatcher as an argument compiles again i
 `numbox.utils.derive_wap`_ below explains. :func:`~numbox.utils.highlevel.cres` avoids that. It compiles a function for
 one signature when it is decorated, as ``njit`` does when it is given a signature. It returns a first-class function
 value instead of a dispatcher, and a cached function that takes the value as an argument loads from the cache in the
-next run. The same section shows how such a value is called and what becomes of an exception raised in it. A derive is
-the function that computes the value of a node in a numbox calculation graph, and a ``cres`` value can serve as one
-(:doc:`work page <numbox.core.work>`).
+next run. The same section shows how jitted code calls such a value and in which cases an exception raised in it
+propagates to the caller. A derive is the function that computes the value of a node in a numbox calculation graph, and
+a ``cres`` value can serve as one (:doc:`work page <numbox.core.work>`).
 
 A binding is a jitted function that calls one function of a C library. :func:`~numbox.utils.highlevel.cres_if_available`
 builds one for a C function that older versions of the library lack. It takes the library, as the ``ctypes.CDLL`` handle
@@ -171,11 +171,11 @@ of a compiled function as data: jitted code can take one as an argument, read on
 decorated with :func:`~numbox.core.proxy.proxy.proxy` (:ref:`passing the function as a value <proxy_passing_as_value>`).
 Both are instances of :class:`~numbox.utils.derive_wap.DeriveWAP`. WAP stands for numba's wrapper address protocol:
 ``WrapperAddressProtocol`` is numba's base class for the Python objects that jitted code can call as first-class
-functions. numbox gives a ``DeriveWAP`` the numba type :class:`~numbox.utils.derive_wap.DeriveFunctionType`, a subclass
-of numba's own ``FunctionType``. This page calls numba's type the plain ``FunctionType``.
+functions. numbox assigns a ``DeriveWAP`` the numba type :class:`~numbox.utils.derive_wap.DeriveFunctionType`, a
+subclass of numba's own ``FunctionType``. This page calls numba's type the plain ``FunctionType``.
 
-An exception raised in the body of a ``DeriveWAP`` propagates out of a call in jitted code, as it does out of a call
-to a dispatcher. Saved as ``ops.py``:
+An exception raised in the body of a ``DeriveWAP`` propagates out of a call in jitted code, as it does out of a call to
+a dispatcher. The file ``ops.py`` defines a ``cres`` value whose body raises ``ValueError`` for a negative input:
 
 .. code-block:: python
 
@@ -190,7 +190,7 @@ to a dispatcher. Saved as ``ops.py``:
             raise ValueError("negative input")
         return x ** 0.5
 
-In a second file, ``callers.py``:
+A second file, ``callers.py``, passes the value to a cached jitted function:
 
 .. code-block:: python
 
@@ -222,15 +222,15 @@ numba stores a first-class function value as three addresses. The first is the f
 of its code in numba's own calling convention. The second is its C entry point, a wrapper of the kind that ``@cfunc``
 builds, and the third is the address of the Python object. When the value holds a numba entry point, a call from jitted
 code goes through it, and an exception raised in the body propagates to the caller. Without one, the call goes through
-the C entry point, which cannot pass an exception on: numba prints the exception to stderr as ignored, and the call
-returns zero (`numba issue 8246 <https://github.com/numba/numba/issues/8246>`_).
+the C entry point, which cannot propagate an exception. numba then prints the exception to stderr as ignored, and the
+call returns zero (`numba issue 8246 <https://github.com/numba/numba/issues/8246>`_).
 
 numba records the numba entry point only for a dispatcher. A ``DeriveWAP`` records the numba entry point of the function
-that ``cres`` or ``@proxy`` compiled. When the value enters jitted code as an argument, numbox fills in the numba entry
-point from the recorded address. When jitted code reads the value as a constant, numbox declares the numba entry point
-by its symbol name instead, as `described below <Holding the value as a module-level constant_>`_. For a ``cres`` value,
-:func:`~numbox.utils.lowlevel.get_func_tuple` shows that the numba entry point is set. numba's own ``_get_jit_address``
-returns 0 for the same value, because it resolves an address only for a dispatcher.
+that ``cres`` or ``@proxy`` compiled. When Python code passes the value to a jitted function as an argument, numbox sets
+the value's numba entry point to the recorded address. When jitted code reads the value as a constant, numbox declares
+the numba entry point by its symbol name instead, as `described below <Holding the value as a module-level constant_>`_.
+For a ``cres`` value, :func:`~numbox.utils.lowlevel.get_func_tuple` shows that the numba entry point is set. numba's own
+``_get_jit_address`` returns 0 for the same value, because it resolves an address only for a dispatcher.
 
 Where an exception is still dropped
 '''''''''''''''''''''''''''''''''''
@@ -243,23 +243,24 @@ cases:
   ``CompileResultWAP(njit(sig)(f).get_compile_result(sig))``, with ``CompileResultWAP`` from
   ``numba.core.types.function_type``;
 - a ``DeriveWAP`` passed from Python to a parameter declared with the plain ``FunctionType``, as in
-  ``@njit(float64(FunctionType(float64(float64)), float64))`` with ``FunctionType`` from ``numba.types``. numba
-  converts the value to the plain ``FunctionType`` on the way in and keeps only its C entry point.
+  ``@njit(float64(FunctionType(float64(float64)), float64))`` with ``FunctionType`` from ``numba.types``. numba converts
+  the value to the plain ``FunctionType`` during the call from Python. The converted value holds the C entry point but
+  no numba entry point.
 
-For the last case, let numba infer the parameter's type, or declare it as ``DeriveFunctionType(float64(float64))``, and
-the exception propagates. Inside jitted code, by contrast, a ``DeriveWAP`` passed on to a parameter of the plain
-``FunctionType`` keeps its numba entry point, because numbox converts the value there without loss. For a ``@cfunc``,
-compile the function with ``cres`` instead. For a ``CompileResultWAP``, call
-:func:`~numbox.utils.derive_wap.rewrap_derive` from Python, which turns it into a ``DeriveWAP``.
-:func:`~numbox.core.work.work.make_work` calls ``rewrap_derive`` for every derive that it receives from Python. A tuple
-that mixes ``DeriveWAP`` values with other function values is subject to further limits, which the
-:ref:`work page <derive_mixed_function_values>` lists.
+In the last case, the exception propagates if numba infers the parameter's type, or if the signature declares the
+parameter as ``DeriveFunctionType(float64(float64))``. Inside jitted code, by contrast, a ``DeriveWAP`` passed to a
+parameter of the plain ``FunctionType`` still holds its numba entry point. numba stores values of both types as the same
+three addresses, so numbox converts the value there without changing it. For a ``@cfunc``, compile the function with
+``cres`` instead. For a ``CompileResultWAP``, call :func:`~numbox.utils.derive_wap.rewrap_derive` from Python to convert
+the value to a ``DeriveWAP``. :func:`~numbox.core.work.work.make_work` calls ``rewrap_derive`` for every derive that it
+receives from Python. A tuple that mixes ``DeriveWAP`` values with other function values is subject to further limits,
+which the :ref:`work page <derive_mixed_function_values>` lists.
 
 Holding the value as a module-level constant
 ''''''''''''''''''''''''''''''''''''''''''''
 
-numba reads a module-level variable as a compile-time constant, so jitted code can also call the value as a global.
-In a third file, ``constant.py``:
+numba reads a module-level variable as a compile-time constant, so jitted code can also call the value as a global. A
+third file, ``constant.py``, shows this form:
 
 .. code-block:: python
 
@@ -307,12 +308,12 @@ file. ``@njit(cache=True)`` on a function ``g`` compiled from a string raises
 ``RuntimeError: cannot cache function 'g': no locator available for file '<string>'``.
 
 numbox therefore writes each piece of generated code to an anchor of its own. It compiles the code in memory under the
-anchor's file name, so numba finds the file and caches the code against it. ``make_structref`` and the SQLite
-registrations write the anchor even with caching off, because numba quotes the code from it in its messages.
-``compile_kernel`` and the work builder write one only when they cache. ``@proxy`` works differently. numbox compiles
-the code that it generates for a proxied function as though that code stood in your own file. That is why the function's
-first decorator must be on line 8 of its file or later (:ref:`where the function may start
-<proxy_where_the_function_may_start>`).
+anchor's file name, so numba finds the file and stores the compiled code in cache files named after the anchor.
+``make_structref`` and the SQLite registrations write the anchor even with caching disabled, because numba quotes the
+code from it in its messages. ``compile_kernel`` and the work builder write one only when caching is enabled. ``@proxy``
+works differently. numbox compiles the code that it generates for a proxied function as though that code were part of
+your own file. That is why the function's first decorator must be on line 8 of its file or later
+(:ref:`where the function may start <proxy_where_the_function_may_start>`).
 
 .. _utils_generated_code_location:
 
@@ -324,7 +325,7 @@ which the configurations page gives for each platform (:ref:`where the cache lan
 of code has a subdirectory of its own there: ``numbox-structref``, ``numbox-compile-kernel``, ``numbox-derive``,
 ``numbox-sqlite-udaf`` and ``numbox-sqlite-tvf``. An anchor's name ends in a digest that covers the generated code and
 the functions of yours that the code calls. A new version of the generated code, or of a function of yours that it
-calls, therefore gets an anchor of its own. For the struct of the example above, the anchor is a file such as
+calls, therefore has an anchor of its own. For the struct of the example above, the anchor is a file such as
 ``numbox-structref/DataStruct_b62da08f4520823e.py``.
 
 numba names the cache files of the functions in an anchor after the anchor, as in
@@ -337,22 +338,23 @@ such as ``numbox-structref/DataStruct_6ed7f92aca43a51f.py`` and a line in it. Op
 that line; the source of your methods is near its end.
 
 :func:`~numbox.core.work.builder.make_graph` writes no anchor for the kernel it generates. It compiles the kernel under
-a name that carries a digest, as though the kernel stood in numbox's own module ``numbox.core.work.builder``, so numba
-caches it beside that module. Its cache files have names such as ``builder._make_<digest>-2.py312.nbi``, in the
-``__pycache__`` directory beside ``builder.py`` or, when ``NUMBA_CACHE_DIR`` is set, in a directory under it whose name
-starts with ``work_``. If numba cannot write there, as in a read-only installation, the kernel compiles without a cache
-after a warning whose remedy is the one for numbox's own modules (:ref:`where the cache lands <where_the_cache_lands>`).
+a name that contains a digest, as though the kernel were part of numbox's own module ``numbox.core.work.builder``. numba
+therefore caches the kernel beside that module. Its cache files have names such as
+``builder._make_<digest>-2.py312.nbi``, in the ``__pycache__`` directory beside ``builder.py`` or, when
+``NUMBA_CACHE_DIR`` is set, in a directory under it whose name starts with ``work_``. If numba cannot write there, as in
+a read-only installation, the kernel compiles without a cache after a warning whose remedy is the one for numbox's own
+modules (:ref:`where the cache lands <where_the_cache_lands>`).
 
-numbox never deletes an anchor, so every version of the generated code leaves its anchor and its cache files behind.
-You can delete them between runs (`numba's notes on clearing the cache
-<https://numba.readthedocs.io/en/stable/developer/caching.html#cache-clearing>`_). numbox writes an anchor again when it
-needs one, and numba compiles again whatever it can no longer load from the cache.
+numbox never deletes an anchor, so the anchor and the cache files of every version of the generated code remain on disk.
+You can delete them between runs
+(`numba's notes on clearing the cache <https://numba.readthedocs.io/en/stable/developer/caching.html#cache-clearing>`_).
+numbox writes an anchor again when it needs one, and numba compiles again whatever it can no longer load from the cache.
 
 If numbox warns that numba cannot cache generated code
 ''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-With caching on, numbox writes the anchor and asks numba whether it can cache a function of that file before the code
-is compiled. If either step fails, the code compiles without a cache, after one warning such as this one:
+With caching enabled, numbox writes the anchor and asks numba whether it can cache a function of that file before the
+code is compiled. If either step fails, the code compiles without a cache, after one warning such as this one:
 
 .. code-block:: text
 
@@ -373,11 +375,12 @@ parenthesized text is the underlying error; the list below gives the right ``NUM
 - For any other error, such as the permission error above, set ``NUMBA_CACHE_DIR`` to a directory that you can
   write.
 
-The derives of the work builder fall back to compiling without a cache in the same cases, but without a warning. To
-silence the warning, compile the code without a cache: pass ``jit_options={"cache": False}`` to ``make_structref`` or to
-``make_graph``, or ``cache=False`` to ``compile_kernel``. ``NUMBOX_JIT_OPTIONS='{"cache": false}'`` turns caching off in
-numbox's default jit options, the numba options that numbox compiles with. That silences the warning for every numbox
-function that compiles under those options, the SQLite registrations included, since they take no options of their own.
+The derives of the work builder fall back to compiling without a cache in the same cases, but numbox gives no warning
+for them. To silence the warning, compile the code without a cache: pass ``jit_options={"cache": False}`` to
+``make_structref`` or to ``make_graph``, or ``cache=False`` to ``compile_kernel``.
+``NUMBOX_JIT_OPTIONS='{"cache": false}'`` disables caching in numbox's default jit options, the numba options that
+numbox compiles with. That silences the warning for every numbox function that compiles under those options, the SQLite
+registrations included, since they take no options of their own.
 
 Names longer than 40 bytes
 ''''''''''''''''''''''''''
@@ -397,26 +400,26 @@ the name; the second, ``_d1964660f30366df``, is the code digest that ends every 
 Cache-anchor mechanism
 ''''''''''''''''''''''
 
-Each version of the generated code needs a file of its own, because numba's cache cannot tell some versions apart. numba
-checks each cache entry against a stamp of its source file, so an edit to a file of yours invalidates the entries of the
-functions in it. It names the cache files after the source file, the function's qualified name and the line of its first
-decorator. It keys each entry in those files on the function's signature, the target machine, and hashes of the
-function's bytecode and closure values.
+Each version of the generated code needs a file of its own, because numba's cache cannot distinguish between some
+versions. numba checks each cache entry against a stamp of its source file, so an edit to a file of yours invalidates
+the entries of the functions in it. It names the cache files after the source file, the function's qualified name and
+the line of its first decorator. It keys each entry in those files on the function's signature, the target machine, and
+hashes of the function's bytecode and closure values.
 
 That key hashes the function's bytecode but not the tables of constants and names kept beside it, nor the function's
-default values. An edit that changes only a literal, a default value or a name can therefore leave the key as it was.
+default values. An edit that changes only a literal, a default value or a name can therefore leave the key unchanged.
 Python 3.14 writes the integers 0 to 255 into the bytecode itself, so on 3.14 an edit that changes such an integer does
 change the key.
 
 If one shared file held every version of a struct's code, that file would never change, so its stamp would never
 invalidate an entry. Two versions that differ only by such an edit would then have the same cache files and the same
-key. The second would load the binary compiled for the first. The digest in the anchor's name rules this out: each
-version of the code has a file of its own, and so cache files of its own.
+key. The second would load the binary compiled for the first. The digest in the anchor's name prevents this: each
+version of the code has a file of its own, so it also has cache files of its own.
 
 This is also how a new value in ``ns`` changes the generated code. The generated struct code gives each method a
 compiled helper, a jitted function that the method calls. numbox names the helper after the method and the method's
-fingerprint. A change that the method's source does not show, such as a new value in ``ns``, therefore changes that
-name, and with it the generated code and its anchor.
+fingerprint. A change outside the method's source, such as a new value in ``ns``, therefore changes the helper's name.
+The new name changes the generated code, and numbox writes the new code to a new anchor.
 
 
 .. automodule:: numbox.utils.preprocessing
@@ -432,8 +435,8 @@ subject is an object whose ``repr`` identifies the code that you generate, such 
 hash to name a cache entry or a generated file for code that you build around functions passed in by a user. numbox does
 so for SQLite's aggregate, window and table-valued functions. The hash changes when the subject's ``repr`` changes, when
 the fingerprint of one of the functions changes, when numbox's default jit options change, or when numba's version
-changes. The section on `numbox.utils.fingerprint`_ below says what a fingerprint covers. A dispatcher in the list is
-hashed together with the options it compiles under:
+changes. The section on `numbox.utils.fingerprint`_ below describes what a fingerprint covers. A dispatcher in the list
+is hashed together with the options it compiles under:
 
 .. code-block:: python
 
@@ -450,9 +453,9 @@ hashed together with the options it compiles under:
     fast = digest("state", [njit(fastmath=True)(plus_one)])
     print(fast == digest("state", [njit(plus_one)]))   # False: the options differ
 
-For a Python function or a dispatcher, the hash is the same in every process. A function that reads
-`a value without a fingerprint <When a function reads a value without a fingerprint_>`_ gets a weaker fingerprint, and
-the SQLite registrations then miss some edits, as explained
+For a Python function or a dispatcher, the hash is the same in every process. ``digest`` computes a weaker fingerprint
+for a function that reads `a value without a fingerprint <When a function reads a value without a fingerprint_>`_. The
+SQLite registrations then do not detect some edits, as explained
 `below <If a SQLite function keeps returning old results_>`_.
 
 If the digest differs in every process
@@ -461,8 +464,8 @@ If the digest differs in every process
 A ``functools.partial``, a builtin and a callable object have no code for the fingerprint to read, so ``digest`` hashes
 a pickle of the object instead. The pickle is the same in every process when the object's class is defined in an
 imported module. When the class is defined in the script that you run, the pickle holds the class itself. It also holds
-an identifier that cloudpickle, the pickler that numba uses, draws at random in each process. The pickle, and with it
-the digest, then differs in every process, and a cache named after the digest misses on every run. Define such a class
+an identifier that cloudpickle, the pickler that numba uses, draws at random in each process. The pickle then differs in
+every process, and so does the digest. A cache named after the digest therefore misses on every run. Define such a class
 in a module that the script imports.
 
 .. automodule:: numbox.utils.digest
@@ -473,11 +476,11 @@ in a module that the script imports.
 numbox.utils.fingerprint
 ------------------------
 
-numbox fingerprints the Python functions that you give it, to tell when code it generated and cached earlier no longer
-fits them. It does so for struct methods, ``compile_kernel`` formulas, the work builder's derives and the body of a
-``@proxy`` function, and ``digest`` does so for the callbacks of the SQLite registrations. A fingerprint is a text
-that describes a function. numbox hashes it into the name of the generated code, so a function with a new fingerprint
-gets new code, which is compiled again. The fingerprint of a function is built from:
+numbox fingerprints the Python functions that you pass to it, to determine whether code that it generated and cached
+earlier still matches them. It does so for struct methods, ``compile_kernel`` formulas, the work builder's derives and
+the body of a ``@proxy`` function, and ``digest`` does so for the callbacks of the SQLite registrations. A fingerprint
+is a text that describes a function. numbox hashes it into the name of the generated code, so a new fingerprint produces
+new code, which is compiled again. The fingerprint of a function is built from:
 
 - its module and qualified name;
 - its bytecode, its literals and the names it uses, and the same for each function or comprehension defined
@@ -489,10 +492,11 @@ gets new code, which is compiled again. The fingerprint of a function is built f
 - for each function or dispatcher among these values, that function's own fingerprint, and the options that a
   dispatcher compiles under.
 
-An edit to any of these changes the fingerprint. That includes the edits that numba's own key misses: a new literal or
-default value, a renamed attribute or global, and a new value of a global. Renaming a local variable or moving the
-function to another line leaves the fingerprint as it was. Most other edits change it, even an edit to the docstring,
-which changes nothing that the function computes. ``digest`` shows the fingerprint at work:
+An edit to any of these changes the fingerprint. Such edits include those that leave numba's own key unchanged: a new
+literal or default value, a renamed attribute or global, and a new value of a global. Renaming a local variable or
+moving the function to another line does not change the fingerprint. Most other edits change it, even an edit to the
+docstring, which changes nothing that the function computes. The following example uses ``digest`` to show the effect of
+two edits on the fingerprint:
 
 .. code-block:: python
 
@@ -533,46 +537,47 @@ none, and neither has an ``@intrinsic``. No jitted helper of ``numbox.utils.lowl
 a function that calls a binding keeps its fingerprint. A jitted function that reads a value without a fingerprint has
 none itself.
 
-When a struct method, a ``compile_kernel`` formula or a derive reads such a value, numbox cannot tell one version of the
-function from another. The code that depends on the function then compiles without an on-disk cache: it compiles again
-in every process and never runs a stale version, and numbox gives no warning. To tell, look for the struct's cache
-files: a struct that compiles without a cache has none named after its anchor. To keep such a struct cached, do not
-import a value that never changes, such as a numba type or a builtin function, by name. Reach it through its module
-instead, as in ``math.sqrt`` after ``import math`` or ``numba.float64`` after ``import numba``. The fingerprint leaves
-out a module attribute whose value is not data, so the method then reads no value without a fingerprint, and it has a
-fingerprint of its own.
+When a struct method, a ``compile_kernel`` formula or a derive reads such a value, numbox cannot distinguish one version
+of the function from another. The code that depends on the function then compiles without an on-disk cache: it compiles
+again in every process and never runs a stale version, and numbox gives no warning. Look for the struct's cache files to
+find out whether it compiles without a cache. A struct that compiles without a cache has none named after its anchor. To
+keep such a struct cached, do not import a value that never changes, such as a numba type or a builtin function, by
+name. Reach it through its module instead, as in ``math.sqrt`` after ``import math`` or ``numba.float64`` after
+``import numba``. The fingerprint leaves out a module attribute whose value is not data, so the method then reads no
+value without a fingerprint, and it has a fingerprint of its own.
 
-A value that a module provides only through a module-level ``__getattr__`` is not read at all, so a change to it leaves
-the fingerprint as it was. Delete the cache files of the code that depends on such a value after it changes. For a
-``@proxy`` function, numbox computes from such a fingerprint the name under which callers reach the compiled body. The
-proxy page explains what happens when the body reads a value without a fingerprint (:ref:`if numbox warns of an alias
-collision <proxy_alias_collision>`).
+The fingerprint leaves out a value that a module provides only through a module-level ``__getattr__``. A change to such
+a value therefore does not change the fingerprint. Delete the cache files of the code that depends on such a value after
+it changes. For a ``@proxy`` function, numbox computes from such a fingerprint the name under which callers reach the
+compiled body. The proxy page explains what happens when the body reads a value without a fingerprint
+(:ref:`if numbox warns of an alias collision <proxy_alias_collision>`).
 
 If a SQLite function keeps returning old results
 ''''''''''''''''''''''''''''''''''''''''''''''''
 
 A SQLite aggregate, window or table-valued function can keep running code compiled from an earlier version of its
-callbacks, with no warning. This happens when a callback reads a value without a fingerprint: ``digest`` then gives the
-callback a weaker fingerprint. The weaker fingerprint still covers the callback's code and the values of the globals it
+callbacks. This happens when a callback reads a value without a fingerprint: ``digest`` then computes a weaker
+fingerprint for the callback. The weaker fingerprint still covers the callback's code and the values of the globals it
 reads by name. It puts the name of each value's type in place of a value without a fingerprint, though, and it leaves
-out every module attribute. A later change to such a value, or to a module attribute that the callback reads, keeps
-the old anchor, and the registration loads the code compiled before the change.
+out every module attribute. A later change to such a value, or to a module attribute that the callback reads, therefore
+leaves the anchor's name unchanged. The registration then loads the code compiled before the change, and numbox gives no
+warning.
 
-This is the common case, not a rare one. A step callback receives the number of SQL arguments as ``argc`` and the
-address of SQLite's array of pointers to the argument values as ``argv_pp``, as the docstring of
+For a SQLite callback, the weaker fingerprint is the common case. A step callback receives the number of SQL arguments
+as ``argc`` and the address of SQLite's array of pointers to the argument values as ``argv_pp``, as the docstring of
 :func:`~numbox.core.bindings.sqlite.udf_helpers.register_aggregate` lists. The usual way to read the arguments,
 ``carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)``, calls numbox's ``_cast_int_to_void_p``, an
-``@intrinsic``, before numba's ``carray`` makes an array of the address. A callback that reads its arguments this way
-therefore always gets the weaker fingerprint.
+``@intrinsic``, before numba's ``carray`` makes an array of the address. ``digest`` therefore always computes the weaker
+fingerprint for a callback that reads its arguments this way.
 
 Read the values that a callback depends on as names in the callback's own module, as in ``from config import SCALE``,
 not as module attributes such as ``config.SCALE``, which the weaker fingerprint leaves out. This is the reverse of the
 advice for a full fingerprint, where reaching a value through its module keeps a struct cached. Delete the
-registration's anchor and its cache files after a change that the weaker fingerprint cannot see, such as an edit to a
-helper without a fingerprint. The anchor is ``numbox-sqlite-udaf/udaf_<name>_<digest>.py`` for an aggregate,
+registration's anchor and its cache files after a change that the weaker fingerprint does not cover, such as an edit to
+a helper without a fingerprint. The anchor is ``numbox-sqlite-udaf/udaf_<name>_<digest>.py`` for an aggregate,
 ``numbox-sqlite-udaf/wudaf_<name>_<digest>.py`` for a window function and ``numbox-sqlite-tvf/tvf_<name>_<digest>.py``
-for a table-valued function. Its cache files start with the same name (:ref:`where the generated code is written
-<utils_generated_code_location>`).
+for a table-valued function. Its cache files start with the same name
+(:ref:`where the generated code is written <utils_generated_code_location>`).
 
 .. automodule:: numbox.utils.fingerprint
    :members:
@@ -604,8 +609,8 @@ numbox's bindings take for a pointer:
 Called on a value, a numba type converts it, so ``int32(7)`` is a 32-bit integer and ``store_at`` writes four bytes.
 
 :func:`~numbox.utils.lowlevel.get_str_from_p_as_int` copies a NUL-terminated C string into a ``str``, one character per
-byte. For the UTF-8 bytes of ``"caf\u00e9"``, it returns the five characters ``'caf\xc3\xa9'``. Call the returned string
-``s``: ``s.encode("latin-1").decode("utf-8")`` recovers the text. :func:`~numbox.utils.lowlevel.cast` reinterprets a
+byte. For the UTF-8 bytes of ``"caf\u00e9"``, it returns the five characters ``'caf\xc3\xa9'``. For a returned string
+``s``, ``s.encode("latin-1").decode("utf-8")`` recovers the text. :func:`~numbox.utils.lowlevel.cast` reinterprets a
 structref as another structref type over the same memory. :func:`~numbox.utils.lowlevel.get_func_tuple` returns the
 three addresses that a first-class function value holds, which the section on `numbox.utils.derive_wap`_ describes. The
 functions that take a context and a builder, such as :func:`~numbox.utils.lowlevel.extract_struct_member`, are for code
@@ -619,16 +624,16 @@ that you write inside an ``@intrinsic``.
 numbox.utils.meminfo
 --------------------
 
-Handing a reference through a pointer
+Passing a reference through a pointer
 '''''''''''''''''''''''''''''''''''''
 
 Some code can hold a structref only as an integer. A C library that keeps a ``void *`` for its caller is one example,
 and the slot that holds the state of numbox's SQLite aggregates is another. :func:`~numbox.utils.meminfo.export_meminfo`
 returns the address of the structref's MemInfo, numba's reference-counted header for its memory, as an ``intp``.
 ``export_meminfo`` also takes a reference, which keeps the structref alive.
-:func:`~numbox.utils.meminfo.borrow_structref`, called from jitted code or from Python, turns the address back into a
-structref of the type you pass it. :func:`~numbox.utils.meminfo.release_meminfo` gives the reference back. With
-``main.py`` from the highlevel section:
+:func:`~numbox.utils.meminfo.borrow_structref`, called from jitted code or from Python, converts the address back to a
+structref of the type that you pass to it. :func:`~numbox.utils.meminfo.release_meminfo` releases the reference that
+``export_meminfo`` took. The following example uses ``main.py`` from the highlevel section:
 
 .. code-block:: python
 
@@ -652,12 +657,12 @@ structref of the type you pass it. :func:`~numbox.utils.meminfo.release_meminfo`
     release_meminfo(p)
     print(get_nrt_refcount(d))   # 1
 
-The structref stays alive while the exported reference is held, even after Python drops its own. ``borrow_structref``
-adds a reference for the structref it returns, and that reference goes away when the structref goes out of scope, so a
-borrow leaves the count as it was. Release each exported address once, and do not use it afterward, because the
-structref's memory may then be freed. ``export_meminfo`` also accepts a NumPy array, and the address then keeps the
-array alive until it is released. ``borrow_structref`` can rebuild a structref from an address, but it cannot rebuild an
-array.
+The structref stays alive while the exported reference is held, even after Python releases its own reference.
+``borrow_structref`` adds a reference for the structref that it returns. numba releases that reference when the
+structref goes out of scope, so a borrow does not change the reference count. Release each exported address once, and do
+not use it afterward, because the structref's memory may then be freed. ``export_meminfo`` also accepts a NumPy array,
+and the address then keeps the array alive until it is released. ``borrow_structref`` can rebuild a structref from an
+address, but it cannot rebuild an array.
 
 After upgrading from numbox 0.7.5 or earlier on numba 0.65 or earlier
 ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -668,9 +673,9 @@ while numba stays at the same version. Such a function keeps loading its old cod
 for it leaves out the code of the functions it calls. In that old code, ``export_meminfo`` takes no reference. An
 optimization pass of numba 0.65 and earlier, ``removerefctpass``, removed the reference count change from
 ``export_meminfo``. The pass removes every reference count change from a function that seems not to need one. The
-address that ``export_meminfo`` gives that function then no longer keeps the array alive, and the array's memory can be
-freed while the address is in use. numbox 0.7.6 and later mark ``export_meminfo`` so that the pass leaves it alone, and
-numba 0.66 removed the pass.
+address that ``export_meminfo`` returns to its caller then no longer keeps the array alive, and the array's memory can
+be freed while the address is in use. numbox 0.7.6 and later mark ``export_meminfo`` so that the pass does not remove
+its reference count change. numba 0.66 removed the pass.
 
 .. automodule:: numbox.utils.meminfo
    :members:
@@ -684,9 +689,9 @@ Allocating C strings for the bindings layer
 '''''''''''''''''''''''''''''''''''''''''''
 
 numbox's bindings, such as those in ``numbox.core.bindings.libc`` and ``numbox.core.bindings.sqlite``, take every text
-argument as an ``intp`` pointer to a NUL-terminated C string. From Python, :func:`~numbox.utils.cstrings.c_string` makes
-one. It copies the UTF-8 encoding of a ``str`` into a new C buffer, yields the buffer's address, and frees the buffer
-when the ``with`` block ends:
+argument as an ``intp`` pointer to a NUL-terminated C string. From Python, :func:`~numbox.utils.cstrings.c_string`
+creates such a string. It copies the UTF-8 encoding of a ``str`` into a new C buffer, yields the buffer's address, and
+frees the buffer when the ``with`` block ends:
 
 .. code-block:: python
 
@@ -710,10 +715,11 @@ with one byte per character, so its last character is the single Latin-1 byte ``
 From jitted code
 ''''''''''''''''
 
-``c_string`` works only in Python. numba does not compile a ``with`` statement over it and raises
-``UnsupportedBytecodeError``, with the message ``The 'with (context manager) as (variable):' construct is not
-supported``. For jitted code, encode the text in Python, add a NUL byte, and pass the bytes as a ``uint8`` array.
-:func:`~numbox.utils.lowlevel.array_data_p` gives the array's address inside the jitted function:
+``c_string`` works only in Python. numba does not compile a ``with`` statement that uses ``c_string`` as its context
+manager. It raises ``UnsupportedBytecodeError`` with the message
+``The 'with (context manager) as (variable):' construct is not supported``. For jitted code, encode the text in Python,
+add a NUL byte, and pass the bytes as a ``uint8`` array. :func:`~numbox.utils.lowlevel.array_data_p` gives the array's
+address inside the jitted function:
 
 .. code-block:: python
 
@@ -761,11 +767,11 @@ handle as an ``int``, so Python code and the bindings can use one connection:
     db_p = extract_connection_ptr(conn)
     print(sqlite3_changes(db_p))   # 3, the rows that the last INSERT changed
 
-The handle belongs to ``conn``, and an ``int`` cannot keep ``conn`` alive. Keep ``conn`` open and referenced for as
-long as any code uses the handle: after ``conn.close()``, or once ``conn`` is garbage-collected, the handle points to
-freed memory.
+``conn`` owns the handle. The handle is a plain ``int``, so it holds no reference to ``conn``. Keep ``conn`` open and
+referenced for as long as any code uses the handle: after ``conn.close()``, or once ``conn`` is garbage-collected, the
+handle points to freed memory.
 
-numbduck is a sister package that brings DuckDB's C API to numba. Its
+numbduck is a related package that makes DuckDB's C API callable from jitted code. Its
 `pybridge <https://github.com/Goykhman/numbduck/blob/main/numbduck/pybridge.py>`_ module reads a DuckDB connection's
 handle the same way, and ``extract_connection_ptr`` follows its approach.
 
@@ -780,11 +786,12 @@ instead, and the message names both versions. The module docstring below gives t
 copy first with ``DYLD_INSERT_LIBRARIES``.
 
 After reading the handle, the function checks it by calling ``sqlite3_errmsg``, and it raises ``RuntimeError`` unless
-SQLite answers ``not an error``. A closed connection raises ``extracted null sqlite3* from sqlite3.Connection`` before
-that call. A live connection whose last statement failed raises, too, with the text
-``extracted connection pointer failed validation: b'near "SELEC": syntax error'`` after a failed ``SELEC 1``; the
-function works again once a statement on the connection succeeds. An argument that is not a ``sqlite3.Connection``
-raises ``TypeError``.
+the call returns ``not an error``. For a closed connection, the function raises ``RuntimeError`` with the message
+``extracted null sqlite3* from sqlite3.Connection`` before that call. The function also raises ``RuntimeError`` for a
+live connection whose last statement failed. After a failed ``SELEC 1``, the message is
+``extracted connection pointer failed validation: b'near "SELEC": syntax error'``. The function works again once a
+statement on the connection succeeds. The function raises ``TypeError`` for an argument that is not a
+``sqlite3.Connection``.
 
 .. automodule:: numbox.utils.pysqlite_bridge
    :members:
