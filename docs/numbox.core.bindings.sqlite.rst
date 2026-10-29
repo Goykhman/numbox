@@ -1,11 +1,10 @@
 numbox.core.bindings.sqlite
 ===========================
 
-SQLite bindings, grouped in the ``numbox.core.bindings.sqlite`` subpackage.
-Import from the specific module, e.g.
-``from numbox.core.bindings.sqlite.conn import sqlite3_open``. The package
-``__init__`` is empty, so importing one module does not pull in (or compile)
-the rest of the SQLite subsystem.
+The ``numbox.core.bindings.sqlite`` subpackage holds the bindings to SQLite's C API and the helpers built on them,
+one module for each group. Import a function from its module, as in
+``from numbox.core.bindings.sqlite.conn import sqlite3_open``. The package's ``__init__`` is empty, so importing one
+module neither imports nor compiles the others.
 
 numbox.core.bindings.sqlite.conn
 --------------------------------
