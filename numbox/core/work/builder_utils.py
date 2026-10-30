@@ -1,3 +1,6 @@
+"""Queries on a graph of node specs, or of the ``Work`` nodes built from them. :func:`infer_sources_dependencies` finds,
+for each node, the nodes that depend on it.
+"""
 from typing import NamedTuple, Tuple
 
 from numbox.core.work.builder import SpecTy, End
@@ -15,15 +18,18 @@ def _infer_sources_dependencies(spec: SpecTy, sources_dependencies_):
 
 def infer_sources_dependencies(access_nodes: NamedTuple | Tuple):
     """
-    For all nodes names accessible from the given `access_nodes`,
-    return dictionary of all nodes names that depend on each of the
-    nodes in the accessible graph. For instance::
+    Return a dictionary from the name of each node of the graph of ``access_nodes`` to the names of its dependents.
+
+    A node's dependents are the nodes that read it as a source, directly or through other nodes. ``access_nodes`` holds
+    specs, such as ``End`` and ``Derived``, or the ``Work`` nodes that :func:`~numbox.core.work.builder.make_graph`
+    returns. An access node without sources has no entry. In the graph below, ``m1`` has the sources ``m2`` and
+    ``m4``, ``m2`` has the source ``m3``, and ``m3`` has the source ``m5``::
 
         m1 -- m2 -- m3 -- m5
               |
               m4
 
-    will return::
+    For the access node ``m1``, the function returns::
 
         {
             "m1": set(),

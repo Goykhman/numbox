@@ -33,93 +33,142 @@ deleted_work_ctor_error = "Use `make_work` instead"
 
 class Work(NodeBase):
     """
-    Structure describing a unit of work.
+    A node of a jitted calculation graph: a value, the nodes it is computed from, and the function that computes it.
 
-    Instances of this class can be connected in a graph with other `Work` instances.
+    Nodes are created with :func:`make_work`, with ``ll_make_work`` in jitted code, or by
+    :func:`~numbox.core.work.builder.make_graph`. Calling ``Work`` raises ``NotImplementedError`` in Python and fails
+    to compile in jitted code. The attributes below are the fields that jitted code reads; the properties of this class
+    read most of them from Python.
 
     Attributes
     ----------
     name : str
-        Name of the structure instance.
+        The node's name.
     inputs : UniTuple[NodeBaseType]
-        Uniform tuple of `Work.sources`, cast as `NodeBaseType`.
+        The sources, cast to ``NodeBaseType``.
     data : Any
-        Scalar or array data payload contained in (and calculated by) this structure.
+        The node's value. Its numba type is set when the node is created, and ``calculate`` stores the derive's result
+        in it.
     sources : Tuple[Work, ...]
-        Heterogeneous tuple of `Work` instances that this `Work` instance depends on.
+        The nodes whose ``data`` the derive reads, in a tuple that can hold ``Work`` nodes of different types.
     derive : FunctionType
-        Function of the signature determined by the data types of `sources` and `data`.
-        An exception raised inside it propagates out of
-        `calculate`, leaving `data` untouched and `derived` unset, so the node can be
-        calculated again once the cause is addressed. numba's error path holds the
-        references it took, so a node whose derive has ever failed stays pinned, along
-        with what it references, for the life of the process; retrying the same node
-        adds nothing further. Some cases still discard the exception and cache a
-        zero-filled `data`. One is a plain `CompileResultWAP` built directly against numba
-        rather than through `numbox.utils.highlevel.cres` and reached from jitted scope,
-        where it cannot be upgraded. A `@proxy` binding's `.as_func` is not such a plain
-        `CompileResultWAP`. It is a `DeriveWAP` and propagates on those same jitted-scope
-        paths. Another is a `cfunc`, which is not upgraded either. The last is a 'derive'
-        handed from Python to a jitted parameter declared as a plain `FunctionType`, which
-        degrades on the way in.
+        The function that computes ``data`` from the ``data`` of the sources, or ``None`` for a node without one. Its
+        signature is the type of ``data`` over the types of the sources' ``data``.
+        :meth:`~numbox.core.work.work.Work.calculate` describes what happens when it raises.
     derived : int8
-        Flag indicating whether the `data` has already been calculated.
+        1 once ``data`` has been calculated, otherwise 0.
     node : NodeType
-        Work as Node, with its sources in a List.
+        The node's :class:`~numbox.core.work.node.Node` representation, which ``as_node`` creates on its first call;
+        null until then.
 
-    (`name`, ) attributes of the `Work` structure payload are
-    homogeneously typed across all instances of `Work` and accommodate
-    cast-ability to the :obj:`numbox.core.node_base.NodeBase` base of `NodeBaseType`.
+    The ``name`` field comes first in every ``Work`` payload and has the same type in all of them, so a ``Work`` node
+    can be cast to ``NodeBaseType``, the type of :obj:`numbox.core.work.node_base.NodeBase`.
     """
     def __new__(cls, *args, **kws):
         raise NotImplementedError(deleted_work_ctor_error)
 
+    # Each jitted method compiles with numbox's jit options, so numba caches it by default. numba compiles and caches
+    # it once for each Work type it is called on. A node whose data is an @njit function has a type that holds a
+    # dispatcher, and numba misses the cache index for such a type in every new process. The cache files of these
+    # methods, and of the overloads below, then grow by one entry per process. No entry is ever stale.
     @property
     @njit(**jit_options)
     def inputs(self):
+        """The sources cast to ``NodeBaseType``, as a tuple of :class:`~numbox.core.work.node_base.NodeBase` proxies."""
         return self.inputs
 
     @property
     @njit(**jit_options)
     def data(self):
+        """The node's value. An array is returned without a copy, so writing to it changes the node's value."""
         return self.data
 
     @property
     @njit(**jit_options)
     def sources(self):
+        """The nodes this node is computed from, as a tuple of ``Work`` nodes."""
         return self.sources
 
     @property
     @njit(**jit_options)
     def derive(self):
+        """The derive's addresses, as a tuple of three integers.
+
+        The integers are the derive's C entry point, the address of its Python object and numba's entry point. The
+        third is 0 when the derive has no numba entry point, and then ``calculate`` loses the derive's exception.
+        Reading this property on a node without a derive raises ``TypeError``.
+        """
         return _get_func_tuple(self.derive)
 
     @property
     @njit(**jit_options)
     def derived(self):
+        """1 once the node's ``data`` has been calculated, otherwise 0."""
         return self.derived
 
     @njit(**jit_options)
     def as_node(self):
+        """Return the node's :class:`~numbox.core.work.node.Node` representation, creating it on the first call.
+
+        The first call also creates the representations of the sources that lack one, and the new ``Node`` takes
+        those as its inputs. Later calls return the stored ``Node``.
+        """
         return self.as_node()
 
     @njit(**jit_options)
     def calculate(self):
+        """Calculate the node's ``data``, after calculating each source that is not yet calculated.
+
+        The call returns at once for a node that is already calculated, and only marks a node without a derive as
+        calculated. Otherwise ``calculate`` calls the derive on the ``data`` of the sources, stores the result in
+        ``data`` and sets ``derived``. If the derive raises, the exception propagates with its type and message,
+        ``data`` keeps its value and ``derived`` stays unset, so a later call runs the derive again. numba's error path
+        keeps the references it took. A node whose derive has failed therefore stays in memory, with everything it
+        references, until the process ends. Another failure of the same node adds no further reference.
+
+        Three ways of passing a derive lose the exception: from Python into a jitted parameter declared as numba's
+        plain ``FunctionType``; as a ``CompileResultWAP`` built with numba directly that reaches jitted code, where
+        ``make_work`` cannot upgrade it; and as a ``@cfunc``. ``calculate`` then stores a zero-filled result and sets
+        ``derived``. The ``.as_func`` value of a ``@proxy`` function is not such a ``CompileResultWAP``, and its
+        exception propagates. The documentation of ``numbox.core.work`` describes these cases under "When the
+        exception is lost".
+        """
         return self.calculate()
 
     @njit(**jit_options)
     def load(self, data):
+        """Set the nodes' ``data`` from the dictionary ``data``, in this node's graph, and return whether any was set.
+
+        The graph is this node and the nodes it depends on. ``data`` is a typed dictionary from node names to
+        :class:`~numbox.core.any.any_type.Any` values. ``load`` reads each value as the node's data type, with no
+        conversion, so a value must have that type. It sets ``derived`` back to 0 on each node it loads and on each
+        node between that node and this one, so the next ``calculate`` computes them again. A loaded node that has a
+        derive is computed again as well, and its loaded value is replaced.
+        """
         return self.load(data)
 
     @njit(**jit_options)
     def combine(self, data):
+        """Copy the ``data`` of the named nodes of this node's graph into the dictionary ``data``, under their names.
+
+        ``data`` is a typed dictionary from node names to :class:`~numbox.core.any.any_type.Any` values, such as
+        :func:`~numbox.core.work.combine_utils.make_sheaf_dict` makes. The walk covers this node and the nodes it
+        depends on, depth first, and stops once it has found a node for every name. A name that no node of the graph
+        has keeps its value.
+        """
         return self.combine(data)
 
     @njit(**jit_options)
     def get_input(self, i):
+        """Return the source at index ``i`` as its :class:`~numbox.core.work.node.Node` representation.
+
+        The call creates the representations of the sources that lack one. A negative index, or one past the last
+        source, raises ``NumbaError``.
+        """
         return self.get_input(i)
 
     def get_inputs_names(self):
+        """Return the names of the sources, as a list."""
         return list(self._get_inputs_names())
 
     @njit(**jit_options)
@@ -128,9 +177,19 @@ class Work(NodeBase):
 
     @njit(**jit_options)
     def make_inputs_vector(self):
+        """Return the :class:`~numbox.core.work.node.Node` representations of the sources, as a typed list.
+
+        The list holds ``NodeBaseType`` values. If ``as_node`` has created this node's own representation, the list is
+        that representation's list of inputs. Otherwise it is a new list, and the representations of the sources that
+        lack one are created.
+        """
         return self.make_inputs_vector()
 
     def all_inputs_names(self):
+        """Return the names of all the nodes this node depends on, each once, in depth-first order.
+
+        The call reads the graph through ``as_node``, which creates the node's ``Node`` representation if needed.
+        """
         return list(self._all_inputs_names())
 
     @njit(**jit_options)
@@ -138,6 +197,10 @@ class Work(NodeBase):
         return self.all_inputs_names()
 
     def all_end_nodes(self):
+        """Return the names of the nodes without sources that this node depends on, each once.
+
+        The call reads the graph through ``as_node``, which creates the node's ``Node`` representation if needed.
+        """
         return list(self._all_end_nodes())
 
     @njit(**jit_options)
@@ -146,6 +209,7 @@ class Work(NodeBase):
 
     @njit(**jit_options)
     def depends_on(self, obj_):
+        """Return whether this node depends on ``obj_``, a node name or a ``Work`` node, directly or through others."""
         return self.depends_on(obj_)
 
 
@@ -165,54 +229,57 @@ def _make_work_jit(name, data, sources=(), derive=None):
 
 
 def make_work(name, data, sources=(), derive=None):
-    """Create a `Work` from Python scope.
+    """Create a ``Work`` node, from Python or from jitted code.
 
-    A derive compiled by :func:`~numbox.utils.highlevel.cres` already propagates
-    its exceptions. One built directly against numba does not, so it is upgraded
-    here. The upgrade has to happen in Python because the check is on the object's
-    class, which a jitted body cannot see.
+    ``data`` is the node's initial value and sets its numba type. ``sources`` is a tuple of ``Work`` nodes, and
+    ``derive`` computes the node's value from their ``data``. ``derive`` is ``None`` or a function value compiled for
+    one signature, the type of ``data`` over the types of the sources' ``data``, such as a
+    :func:`~numbox.utils.highlevel.cres` function. A ``derive`` of another signature raises ``ValueError``, and a lazily
+    compiled ``@njit`` function fails an assertion.
 
-    Jitted callers reach the overload below, which takes the value as given: by
-    then the type is fixed and nothing can be re-wrapped.
+    Called from Python, ``make_work`` upgrades a ``CompileResultWAP`` built with numba directly to a
+    :class:`~numbox.utils.derive_wap.DeriveWAP` with :func:`~numbox.utils.derive_wap.rewrap_derive`, so that an
+    exception the derive raises propagates out of ``calculate``. The node then holds the upgraded wrapper. Called from
+    jitted code, ``make_work`` takes ``derive`` as it is: its numba type is already fixed there, and the upgrade depends
+    on the value's Python class, which jitted code cannot see.
 
-    ``make_work.py_func`` is preserved from when this function was itself a
-    dispatcher, since that attribute was part of the surface callers could reach for.
-    It is not callable, then or now: the body it exposes calls the `ll_make_work`
-    intrinsic and raises `NotImplementedError`. Note it is `_make_work_jit`'s body
-    rather than this one, so it does not carry the `rewrap_derive` call above.
+    ``make_work.py_func`` is the body of the jitted constructor that ``make_work`` calls. Calling it from Python raises
+    ``NotImplementedError``, because that body calls the ``ll_make_work`` intrinsic, and it does not upgrade ``derive``.
     """
+    # rewrap_derive stores the DeriveWAP it makes on the caller's CompileResultWAP and returns it, so the node holds
+    # that wrapper: a jitted function that returns the node's derive gives back the DeriveWAP, not the caller's object.
     return _make_work_jit(name, data, sources, rewrap_derive(derive))
 
 
 @overload(make_work, strict=False, jit_options=jit_options)
 def ol_make_work(name, data, sources=(), derive=None):
+    """Implement ``make_work`` in jitted code with ``ll_make_work``, taking ``derive`` as it is.
+
+    A ``CompileResultWAP`` built with numba directly is not upgraded here, so its exception is lost.
+    """
     def _(name, data, sources=(), derive=None):
         return ll_make_work(name, data, sources, derive)
     return _
 
 
+# Code that treats make_work as a dispatcher reads its py_func, so make_work carries that of the jitted constructor.
 make_work.py_func = _make_work_jit.py_func
 
 
 @intrinsic
 def _call_derive(typingctx: Context, derive_ty: FunctionType, sources_ty: Tuple):
-    """Call the derive, propagating an exception it raises where possible.
+    """Call a node's derive on the ``data`` of its sources and return the result.
 
-    Three cases, and only the second needs a runtime test. The first is settled once
-    the field's type is known. The third is reached at runtime, where the slot is null:
-
-    - a ``DeriveFunctionType`` field carries a populated ``jit_addr`` by
-      construction, so the propagating convention is selected outright with no
-      runtime branch;
-    - a plain ``FunctionType`` field may still carry one, because numba's own
-      unboxing populates it for an njit dispatcher passed as a
-      ``FunctionType``-typed argument, so ``jit_addr`` is tested at runtime;
-    - a null ``jit_addr`` has no entry point that can carry an exception, so the
-      previous C call is emitted unchanged.
+    An exception that the derive raises propagates to the caller only if the derive's value holds numba's entry point,
+    its ``jit_addr``. A ``DeriveFunctionType`` value always holds it. A value of the plain ``FunctionType`` holds it
+    only when numba filled it in, as numba does when it unboxes an ``@njit`` function passed as an argument of that
+    type. A value without it is called through its C entry point, which discards the exception and returns a
+    zero-filled result.
     """
     fsig = derive_ty.signature
 
     def codegen(context, builder, signature, arguments):
+        """Emit the call of the derive on the sources' ``data`` and return its result."""
         derive_struct, sources = arguments
         derive_args = []
         for source_ind, source_ty in enumerate(sources_ty):
@@ -221,6 +288,7 @@ def _call_derive(typingctx: Context, derive_ty: FunctionType, sources_ty: Tuple)
             derive_args.append(data)
 
         def emit_propagating_call(jit_addr):
+            """Call the derive through numba's entry point ``jit_addr``, which propagates an exception."""
             func_ty = context.call_conv.get_function_type(fsig.return_type, fsig.args)
             derive_p = builder.bitcast(jit_addr, func_ty.as_pointer())
             status, res = context.call_conv.call_function(
@@ -231,6 +299,7 @@ def _call_derive(typingctx: Context, derive_ty: FunctionType, sources_ty: Tuple)
             return res
 
         def emit_c_call():
+            """Call the derive through its C entry point, which discards an exception, and return the result."""
             derive_p_raw = get_func_p_from_func_struct(builder, derive_struct)
             derive_ty_ll = get_ll_func_sig(context, derive_ty)
             derive_p = builder.bitcast(derive_p_raw, derive_ty_ll.as_pointer())
@@ -238,12 +307,20 @@ def _call_derive(typingctx: Context, derive_ty: FunctionType, sources_ty: Tuple)
 
         jit_addr = cgutils.create_struct_proxy(derive_ty)(
             context, builder, value=derive_struct).jit_addr
+        # numbox fills jit_addr whenever it unboxes or lowers a DeriveFunctionType value, so the type alone selects
+        # the propagating call, with no test at run time.
         if isinstance(derive_ty, DeriveFunctionType):
             return emit_propagating_call(jit_addr)
 
+        # A plain FunctionType value holds jit_addr only if numba filled it in, so the slot is tested at run time.
         res_slot = cgutils.alloca_once(builder, context.get_value_type(fsig.return_type))
         with builder.if_else(cgutils.is_null(builder, jit_addr), likely=False) as (null, populated):
             with null:
+                # Only the C entry point is left. The three ways of passing a derive that lose its exception end
+                # here: from Python into a parameter declared as the plain FunctionType, as a CompileResultWAP built
+                # with numba directly that reached jitted code, and as a @cfunc. The C entry point discards the
+                # exception (numba issue 8246, https://github.com/numba/numba/issues/8246), so calculate stores the
+                # zero-filled result.
                 builder.store(emit_c_call(), res_slot)
             with populated:
                 builder.store(emit_propagating_call(jit_addr), res_slot)
@@ -266,6 +343,8 @@ def _get_source_{source_ind}(typingctx: Context, sources_ty: Tuple):
 """
 
 
+# The generated _calculate_ sets derived only after _call_derive returns. A derive whose exception propagates thus
+# leaves derived unset and data unchanged, and a later calculate runs the derive again.
 def _make_calculate_code(num_sources):
     code_txt = StringIO()
     code_txt.write("""
@@ -292,8 +371,11 @@ _calculate_registry = {}
 
 
 def ensure_presence_of_source_getters_in_ns(num_sources_, ns_):
-    """ Define `_get_source_{i}` in `ns_` for every `i < num_sources_` that `ns_` does not define yet. `ns_` is
-     either the module namespace or a copy of it extended by `ns_extras`, so presence is checked in `ns_` itself. """
+    """Define ``_get_source_{i}`` in ``ns_`` for each ``i`` below ``num_sources_`` that ``ns_`` lacks.
+
+    ``_get_source_{i}`` is an intrinsic that returns element ``i`` of a node's ``sources`` tuple. ``ns_`` is the module
+    namespace or a copy of it that ``_codegen_method`` extends, so the check reads ``ns_`` itself.
+    """
     for source_i in range(num_sources_):
         if f"_get_source_{source_i}" in ns_:
             continue
@@ -303,10 +385,12 @@ def ensure_presence_of_source_getters_in_ns(num_sources_, ns_):
 
 
 def _codegen_method(num_sources, registry, make_code, exec_name, ns_extras=None):
-    """ Return the generated implementation of a `Work` method for `num_sources`
-     sources, building and caching it in `registry` on first use. `make_code`
-     renders the source, which is executed into the module namespace (or a copy
-     of it extended by `ns_extras`) and must define `exec_name`. """
+    """Return the generated implementation of a ``Work`` method for a node with ``num_sources`` sources.
+
+    The first call for a number of sources renders the code with ``make_code`` and runs it in the module namespace, or
+    in a copy of that namespace extended by ``ns_extras``. The code must define ``exec_name``, and ``registry`` keeps
+    that function for later calls.
+    """
     impl = registry.get(num_sources, None)
     if impl is not None:
         return impl
@@ -323,6 +407,10 @@ def _codegen_method(num_sources, registry, make_code, exec_name, ns_extras=None)
 
 @overload_method(WorkTypeClass, "calculate", strict=False, jit_options=jit_options)
 def ol_calculate(self_ty):
+    """Implement ``Work.calculate()`` in jitted code: calculate the sources not yet calculated, then the node itself.
+
+    A jitted caller can catch the derive's exception only with a bare ``except:`` or with ``except Exception:``.
+    """
     derive_ty = self_ty.field_dict["derive"]
     if isinstance(derive_ty, NoneType):
         def _(self):
@@ -333,12 +421,14 @@ def ol_calculate(self_ty):
     return _codegen_method(num_sources, _calculate_registry, _make_calculate_code, "_calculate_")
 
 
+# This intrinsic reads the payload of an Any value as the node's data type, with no check and no conversion.
 @intrinsic
 def _cast_to_work_data(typingctx, work_ty, data_as_erased_ty: ErasedType):
     data_ty = work_ty.field_dict["data"]
     sig = data_ty(work_ty, data_as_erased_ty)
 
     def codegen(context, builder, signature, arguments):
+        """Emit a load of the erased payload as the node's data type, with a new reference."""
         data_as_erased = arguments[1]
         data_ty_ll = context.get_data_type(data_ty)
         _, meminfo_p = context.nrt.get_meminfos(builder, data_as_erased_ty, data_as_erased)[0]
@@ -380,9 +470,10 @@ _loader_registry = {}
 
 @overload_method(WorkTypeClass, "load", strict=False, jit_options=jit_options)
 def ol_load(work_ty, data_ty: DictType):
-    """ Load `data` into the graph with the root node `work`.
-     Data is provided as dictionary mapping node name to `Any` type
-     containing erased payload `p` of the `work.data` type. """
+    """Implement ``Work.load(data)`` in jitted code: set the ``data`` of the named nodes from ``Any`` values.
+
+    Each value's erased payload ``p`` must hold the node's data type, because ``load`` reads it without a conversion.
+    """
     num_sources = work_ty.field_dict["sources"].count
     return _codegen_method(num_sources, _loader_registry, _make_loader_code, "_loader_")
 
@@ -418,9 +509,11 @@ _combine_registry = {}
 
 @overload_method(WorkTypeClass, "combine", strict=False, jit_options=jit_options)
 def ol_combine(work_ty, data_ty: DictType, harvested_ty=NoneType):
-    """ Harvest nodes data from the graph with the root node `work`.
-     `data` is provided as dictionary mapping node name to `Any` type
-     containing erased payload `p` to be reset to `data`. """
+    """Implement ``Work.combine(data)`` in jitted code: store the ``data`` of the named nodes in ``Any`` values.
+
+    ``combine`` resets the erased payload ``p`` of each value to the node's ``data``. The optional ``harvested``
+    dictionary records the names found so far, and the walk passes it on to the sources.
+    """
     num_sources = work_ty.field_dict["sources"].count
     return _codegen_method(num_sources, _combine_registry, _make_combine_code, "_combine_",
                            {"boolean": boolean, "Dict": Dict})
@@ -428,6 +521,10 @@ def ol_combine(work_ty, data_ty: DictType, harvested_ty=NoneType):
 
 @overload_method(WorkTypeClass, "get_input", strict=False, jit_options=jit_options)
 def ol_get_input(self_ty, i_ty):
+    """Implement ``Work.get_input(i)`` in jitted code: return the source at index ``i`` as a ``Node``.
+
+    A negative index, or one past the last source, raises ``NumbaError``.
+    """
     def _(self, i):
         num_inputs = len(self.inputs)
         if i < 0 or i >= num_inputs:
@@ -439,6 +536,7 @@ def ol_get_input(self_ty, i_ty):
 
 @overload_method(WorkTypeClass, "get_inputs_names", strict=False, jit_options=jit_options)
 def ol_get_inputs_names(self_ty):
+    """Implement ``Work.get_inputs_names()`` in jitted code, returning the names as a typed list."""
     def _(self):
         names_ = List.empty_list(unicode_type)
         for s in self.inputs:
@@ -474,6 +572,7 @@ _inputs_vector_registry = {}
 
 @overload_method(WorkTypeClass, "make_inputs_vector", strict=False, jit_options=jit_options)
 def ol_make_inputs_vector(self_ty):
+    """Implement ``Work.make_inputs_vector()`` in jitted code, with code generated for the node's number of sources."""
     num_sources = self_ty.field_dict["sources"].count
     if num_sources == 0:
         def _(self):
@@ -486,6 +585,7 @@ def ol_make_inputs_vector(self_ty):
 
 @overload_method(WorkTypeClass, "as_node", strict=False, jit_options=jit_options)
 def ol_as_node(self_ty):
+    """Implement ``Work.as_node()`` in jitted code, creating the ``Node`` representation on the first call."""
     def _(self):
         node = self.node
         if is_not_null(node):
@@ -500,6 +600,7 @@ def ol_as_node(self_ty):
 
 @overload_method(WorkTypeClass, "all_inputs_names", strict=False, jit_options=jit_options)
 def ol_all_inputs_names(self_ty):
+    """Implement ``Work.all_inputs_names()`` in jitted code, through the node's ``Node`` representation."""
     def _(self):
         node = self.as_node()
         return node.all_inputs_names()
@@ -508,6 +609,7 @@ def ol_all_inputs_names(self_ty):
 
 @overload_method(WorkTypeClass, "all_end_nodes", strict=False, jit_options=jit_options)
 def ol_all_end_nodes(self_ty):
+    """Implement ``Work.all_end_nodes()`` in jitted code, through the node's ``Node`` representation."""
     def _(self):
         node = self.as_node()
         return node.all_end_nodes()
@@ -516,6 +618,10 @@ def ol_all_end_nodes(self_ty):
 
 @overload_method(WorkTypeClass, "depends_on", strict=False, jit_options=jit_options)
 def ol_depends_on(self_ty, obj_ty):
+    """Implement ``Work.depends_on(obj)`` in jitted code, for a name or a ``Work`` node.
+
+    An argument of another type fails an assertion when numba compiles the call.
+    """
     if isinstance(obj_ty, (Literal, UnicodeType,)):
         def _(self, name_):
             node = self.as_node()

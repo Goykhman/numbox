@@ -1,3 +1,9 @@
+"""Node specs and the builder that compiles them into a jitted graph of :class:`~numbox.core.work.work.Work` nodes.
+:class:`End` and :class:`Derived` declare the nodes, and each spec is registered under its name in a registry, by
+default ``_specs_registry``. :func:`make_graph` compiles a function, the graph maker, that creates the requested access
+nodes and every node they depend on, and returns the access nodes as ``Work`` nodes. The module also computes the names
+under which numba caches the graph maker and the derives, so that numba compiles them again after a change to a node.
+"""
 from collections import namedtuple
 from hashlib import sha256
 from inspect import getfile, getmodule
@@ -44,6 +50,13 @@ def _new(cls, super_proxy, *args, **kwargs):
 
 
 class End(_End):
+    """Spec of an end node: a node whose value is given rather than computed.
+
+    ``name`` and ``registry`` must be passed by keyword, because the registration reads them from the keywords. The
+    spec is registered under ``name`` in ``registry``, by default the module's ``_specs_registry``, and a name that the
+    registry already holds raises ``ValueError``. ``init_value`` is the node's initial value. ``ty``, a numba type,
+    sets the node's type in place of the type of ``init_value``, and numba converts the initial value to it.
+    """
     __slots__ = ()
 
     def __new__(cls, *args, **kwargs):
@@ -60,6 +73,12 @@ class _Derived(NamedTuple):
 
 
 class Derived(_Derived):
+    """Spec of a derived node: a node whose value ``derive`` computes from the values of ``sources``.
+
+    ``derive`` is a plain Python function with one parameter per source, and :func:`make_graph` compiles it for the
+    node's type over the types of the sources. ``sources`` is a tuple of specs. ``init_value`` is the value that the
+    node holds until it is calculated. ``name``, ``registry`` and ``ty`` follow the rules of :class:`End`.
+    """
     __slots__ = ()
 
     def __new__(cls, *args, **kwargs):
@@ -84,6 +103,7 @@ def _input_line(input_: End, ns: dict, initializers: dict):
 
 
 def get_ty(spec_):
+    """Return the numba type of a spec's node: its ``ty`` if given, otherwise numba's type for its ``init_value``."""
     return spec_.ty or typeof(spec_.init_value)
 
 
@@ -93,40 +113,28 @@ _derive_funcs = {}
 def _derive_fingerprint(derive) -> tuple[str, bool, bool]:
     """Return ``(fingerprint, derive_cacheable, kernel_safe)`` for a derive.
 
-    Routes the derive through the deep walker so its referenced-global *values*
-    enter the kernel fingerprint, replacing a bare ``sha256(getsource(...))``
-    that was blind to them (and raised ``OSError`` on exec/REPL-defined derives).
+    The fingerprint folds the derive's code, its defaults and closure, and the values of the globals it reads,
+    recursing into the functions among them, and it enters the graph maker's name. It is computed from the code
+    object, not from the source text, so a derive defined by ``exec`` or at an interactive prompt has one too.
 
-    A derive that reads module globals is fingerprinted but **not** cacheable:
-    it is compiled as a standalone dispatcher (not inlined into the
-    content-addressed kernel), and numba's own cache key covers only
-    ``co_code`` + closure, so a changed global would silently serve a stale
-    binary. Such a derive is compiled uncached -- recompiled per process,
-    never wrong -- mirroring ``compile_kernel``'s degrade path. Its fingerprint
-    is still process-stable and captures the global's value at build time, so
-    the enclosing kernel stays cacheable (``kernel_safe`` True): a changed global
-    re-keys the kernel.
+    A derive that loads a name from its module's globals compiles without a cache: ``derive_cacheable`` is False, and
+    every process compiles the derive again. The fingerprint does not cover everything such a name can lead to, such
+    as the implementation of an ``@overload``. It does hold the values of those globals, so the graph maker stays
+    cacheable (``kernel_safe`` True) and gets a new name when one of them changes.
 
-    An **un-fingerprintable** derive is different: ``_fingerprint_function``
-    raises, and the best-effort placeholder used instead is process-stable (never
-    an address, so the kernel name no longer explodes per run) but cannot be
-    trusted to change when the un-canonicalizable state does. Both the derive and
-    the enclosing kernel must therefore compile uncached (``kernel_safe`` False):
-    recompiled per process, never wrong. This is the orphan-per-run class
-    -- ``@id``-based names and unconditional kernel caching re-opened it.
-
-    "Reads module globals" is measured off the instruction stream
-    (``_loaded_global_names``), not ``co_names``: a record-field access such as
-    ``a_[t].c1`` is a ``LOAD_ATTR`` whose name would otherwise collide with a
-    module global of the same name, spuriously marking the derive uncacheable
-    (and, via ``_fingerprint_function``, forcing the best-effort fallback below).
-    A genuine ``cfg.SCALE`` read still counts -- its base ``cfg`` is a real
-    ``LOAD_GLOBAL`` -- so module-state derives stay uncacheable.
+    A derive that ``_fingerprint_function`` cannot fingerprint gets the placeholder fingerprint of
+    ``_fingerprint_function_best_effort`` instead. The placeholder holds no address and is the same in every process,
+    but it does not change when a value without a canonical form changes. The derive and the graph maker then both
+    compile without a cache (``kernel_safe`` False), as ``compile_kernel`` does with a formula it cannot fingerprint.
     """
     try:
         fingerprint = _fingerprint_function(derive, set())
     except (_Unfingerprintable, RecursionError):
         return _fingerprint_function_best_effort(derive), False, False
+    # The check reads the instruction stream (_loaded_global_names), not co_names, because co_names also holds
+    # attribute names: the record field c1 in a_[t].c1 is a LOAD_ATTR, and a module global named c1 would otherwise
+    # count as module state. A cfg.SCALE read still counts, through the LOAD_GLOBAL of its base cfg.
+    # _fingerprint_function reads globals the same way, so such a name does not force the placeholder fingerprint.
     reads_module_state = any(
         name in derive.__globals__ for name in _loaded_global_names(derive.__code__)
     )
@@ -134,38 +142,32 @@ def _derive_fingerprint(derive) -> tuple[str, bool, bool]:
 
 
 _DERIVE_ANCHOR_SUBDIR = "numbox-derive"
-# Clear `.tmp-*` anchors left behind by a SIGKILL'd writer, as every other
-# anchor-writing module does for its own subdir.
+# Remove the `.tmp-*` files that a writer killed by SIGKILL left among the derive anchors, as each module that writes
+# anchors does for its own directory.
 _orphan_anchor_sweep(_DERIVE_ANCHOR_SUBDIR)
 
 
 def _derive_anchor_cres(derive_sig, sig_canon, derive, derive_fp, jit_options):
-    """Compile ``derive`` under a cache identity that depends on what it reads.
+    """Compile ``derive`` for ``derive_sig`` under a cache entry keyed on what it reads, or return ``None``.
 
-    The derive is compiled as its own ``cres``, whose cache numbox keys on the
-    jit flags and the settings (``numbox.core.cache_key``). That key, like
-    numba's, leaves out what the derive reads: the values of its globals and the
-    code of the functions it calls.
+    numbox's key for a cached ``cres`` function holds the jit flags and numba's settings (see
+    :mod:`numbox.core.cache_key`). Like numba's key, it leaves out the values of the function's globals and the code of
+    the functions it calls. The derive is therefore compiled through a generated wrapper, named after a digest of the
+    derive's fingerprint, its signature, the flags and the settings.
 
-    So the derive is compiled through a generated wrapper whose *name* carries a
-    digest of the derive fingerprint plus the effective flags, written to its own
-    on-disk anchor. A change to either moves the name. The name moves the anchor,
-    and the anchor moves numba's cache file. Mirrors ``compile_kernel._compile``.
-
-    The wrapper delegates to the derive njit-wrapped with ``cache=False``: it is
-    linked into the wrapper's cached artifact, and it must not carry a cache of
-    its own, which numba would key on neither its flags nor what it reads.
-
-    Returns ``None`` if the flags cannot be canonicalized or no anchor can be
-    written; the caller must then compile the derive **uncached**, because the
-    anchor is what keys a cached derive on what it reads.
+    The result is ``None`` when a flag has no canonical form, when no anchor file can be written, or when numba has no
+    cache location for the anchor. The caller must then compile the derive without a cache, because only the wrapper's
+    name keys a cached derive on what it reads.
     """
     flags = _effective_flags(jit_options)
     flags_canon, ok_flags = _flags_canon(flags)
     if not ok_flags:
-        # A flag with no canonical form cannot be keyed on; a key blind to a flag
-        # cannot protect the binary that flag produced.
+        # A key cannot hold a flag that has no canonical form, and a key without the flag cannot tell apart the
+        # binaries that two values of it produce.
         return None
+    # The digest names the wrapper and its anchor file, and numba names the wrapper's cache files after both. A change
+    # to the fingerprint, the signature, the flags or the settings therefore gives a new cache entry.
+    # compile_kernel._compile names its kernels the same way.
     digest = sha256(
         f"derive-anchor-v2\n{derive_fp}\n# sig: {sig_canon}\n# flags: {flags_canon}"
         f"\n# settings: {_settings_canon()}".encode("utf-8")
@@ -179,16 +181,18 @@ def _derive_anchor_cres(derive_sig, sig_canon, derive, derive_fp, jit_options):
     )
     anchor = _anchor_root(_DERIVE_ANCHOR_SUBDIR) / f"{name}.py"
     if _anchor_or_error(anchor, src) is not None:
-        # No anchor on disk, or none numba can cache from: a warm anchor whose
-        # directory can no longer be written and no other location left.
+        # No anchor could be written, or numba has no cache location for it. An anchor already on disk has none when
+        # its directory is no longer writable and numba has no other location.
         return None
+    # The wrapper calls the derive compiled without a cache. numba links the derive's code into the wrapper's cached
+    # code, and a cache entry of the derive's own would be keyed on neither its flags nor what it reads.
     ns = {
         "_cres": cres,
         "_derive_sig": derive_sig,
         "_derive_jit_options": jit_options,
         "_inner": njit(**{**flags, "cache": False})(derive),
-        # __name__ must be an importable module so numba can rebuild the cached
-        # overload's environment in another process; mirrors compile_kernel.
+        # numba imports __name__ to rebuild a cached function's environment in another process, so it must name an
+        # importable module; compile_kernel sets it the same way.
         "__name__": __name__,
     }
     code = compile(src, str(anchor), "exec")
@@ -209,27 +213,24 @@ def _derived_cres(ty, sources: Sequence[End], derive, jit_options=None, derive_f
         if anchored is not None:
             _derive_funcs[id(anchored)] = derive
             return anchored
-        # The anchor is what keys a cached derive on what it reads. Falling back
-        # to a plain cache=True compile here would restore the cache entry the
-        # anchor exists to avoid, named after the derive's own source file and
-        # qualname and blind to its globals and callees. So the degrade must drop
-        # the cache too: recompiled per process, never wrong.
+        # Only the anchor keys a cached derive on what it reads. A plain cache=True compile would store the derive under
+        # a cache entry named after its own source file and qualified name, keyed on neither its globals' values nor
+        # its callees' code. The derive therefore compiles without a cache, and every process compiles it again.
         jit_options = {**jit_options, "cache": False}
     elif jit_options.get("cache") and not sig_cacheable:
-        # A source type -- e.g. a Dispatcher wrapping an un-fingerprintable body
-        # -- has only a best-effort identity: the anchor name would be process-
-        # stable but blind to a change in that type, so a later process could link
-        # a stale derive binary. Drop the cache instead: recompiled per process,
-        # never wrong.
+        # The node's type or a source's type holds a dispatcher, at the top or inside a container, so
+        # _signature_identity reports it uncacheable. numba misses its cache index for such a signature in every new
+        # process and adds an entry, and a dispatcher whose body cannot be fingerprinted has only a placeholder
+        # identity, which does not change when the body does. The derive therefore compiles without a cache.
         jit_options = {**jit_options, "cache": False}
     try:
         derive_cres = cres(derive_sig, **jit_options)(derive)
     except RuntimeError as e:
-        # numba refuses cache=True for a function whose source file it cannot
-        # locate (an exec/<string>- or <stdin>-defined derive). Fall back to
-        # uncached rather than crashing -- a body numba cannot cache cannot go
-        # stale anyway. Derives defined in real modules or notebooks have a
-        # locator and are unaffected.
+        # numba raises RuntimeError for cache=True when it has no cache locator for the function's source file, as for
+        # a derive defined by exec or read from <stdin>. The derive then compiles without a cache, and a derive
+        # compiled without a cache cannot be stale. A derive defined in a module file or a notebook has a locator.
+        # make_graph always passes a fingerprint, so its cached derives go through the anchor. This compile has
+        # caching enabled only for a caller that passes none.
         if jit_options.get("cache") and "locator" in str(e):
             derive_cres = cres(derive_sig, **{**jit_options, "cache": False})(derive)
         else:
@@ -263,33 +264,30 @@ def _derived_line(
 
 
 def code_block_hash(code_txt: str):
-    """ Re-compile and re-save cache when source code has changed. """
+    """Return the SHA-256 hex digest of ``code_txt``.
+
+    ``_kernel_fingerprint`` hashes the graph maker's code text together with the derives' fingerprints, the nodes'
+    types, the jit flags and numba's settings, and the maker is named after the digest. A change to any of them gives
+    the maker a new name, so numba compiles and caches it again rather than load the old one.
+    """
     return sha256(code_txt.encode("utf-8")).hexdigest()
 
 
 def _kernel_fingerprint(code_block: str, derive_hashes: list, type_sigs: list, jit_options=None) -> tuple[str, bool]:
-    """Return ``(hash, flags_cacheable)`` for the generated kernel.
+    """Return ``(hash, flags_cacheable)`` for the generated graph maker, whose name is ``_make_<hash>``.
 
-    The hash is baked into the name ``_make_<hash>``.
-
-    Folds each node's declared type (``type_sigs``) in alongside the body text and
-    derive source hashes, since a declared ty reaches the generated code only as the
-    bare global name ``{name}_ty`` and so is not otherwise captured by the body.
-
-    Also folds the resolved jit flags and the ``NUMBA_*`` settings that change the
-    emitted code (see :mod:`numbox.core.cache_key`). The body text renders the
-    flags only as the literal ``@njit(**jit_options)``, so the fold gives two
-    graphs that differ solely in ``error_model`` or ``fastmath`` two
-    ``_make_<hash>`` names. numbox's key holds the flags of the kernel's cache as
-    well; the names keep the two in separate cache files besides.
-
-    ``flags_cacheable`` is False when a flag had no canonical form (a
-    ``pipeline_class``, a numba-typed ``locals``). The fold then degrades to
-    ``repr``, which is neither process-stable for a default-repr object nor
-    guaranteed to distinguish two behaviourally different values, so the caller
-    must compile the kernel uncached -- the same contract ``_derive_anchor_cres``
-    and ``compile_kernel`` already honour for this flag.
+    The hash covers the code text, the derives' fingerprints, each node's type (``type_sigs``), the jit flags in effect
+    and the ``NUMBA_*`` settings that change the emitted code (see :mod:`numbox.core.cache_key`). A change to any of
+    them gives the maker a new name. ``flags_cacheable`` is False when a flag has no canonical form, such as a
+    ``pipeline_class`` or a ``locals`` dictionary of numba types. The caller must then compile the maker without a
+    cache, as ``_derive_anchor_cres`` and ``compile_kernel`` do.
     """
+    # A node's type reaches the code text only as the global name {name}_ty, if at all, so type_sigs carries it. The
+    # text shows the flags only as @njit(**jit_options), so without the fold two graphs that differ only in
+    # error_model or fastmath would share a name. numbox's key for the maker's cache holds the flags as well; the
+    # names keep the two graphs in separate cache files besides.
+    # Without a canonical form, _flags_canon falls back to repr, which differs between processes for an object with
+    # the default repr and may not tell two different values apart.
     flags_canon, ok_flags = _flags_canon(_effective_flags(jit_options))
     return code_block_hash(
         f"code_block = {code_block} derive_hashes = {derive_hashes} type_sigs = {type_sigs}"
@@ -309,6 +307,12 @@ def _infer_end_and_derived_nodes(spec: SpecTy, all_inputs_: Dict[str, Type], all
 
 
 def infer_end_and_derived_nodes(access_nodes: PyTuple[SpecTy, ...], registry):
+    """Return the specs of the end nodes and of the derived nodes that ``access_nodes`` need, as two lists.
+
+    The walk starts at each access node and follows the sources depth first, so a derived node comes after the
+    derived nodes it reads; the access nodes are included. Each spec in the lists is the one that ``registry`` holds
+    under the node's name, and a name that ``registry`` lacks raises ``KeyError``.
+    """
     all_inputs_ = dict()
     all_derived_ = dict()
     for access_node in access_nodes:
@@ -323,15 +327,32 @@ def make_graph(
     registry: Optional[dict] = None,
     jit_options: Optional[dict] = None
 ):
+    """Create the graph that the given access node specs need, and return the access nodes as ``Work`` nodes.
+
+    The specs are looked up by name in ``registry``, by default ``_specs_registry``. The result is a named tuple with
+    one field per access node, named after the node, and each call creates new nodes.
+
+    ``jit_options`` take precedence over numbox's jit options for each derive and for the graph maker, the function that
+    creates the nodes. With caching enabled, as by default, numba caches the graph maker as a function of this module's
+    file. numba compiles the maker again after a change to a node's name, sources, type or derive, to a jit
+    option other than ``cache``, or to a numba setting that changes the generated code. A change to an ``init_value``
+    alone reuses the cached maker, because the initial values are the maker's arguments.
+
+    The maker compiles without a cache when numbox cannot fingerprint a derive, when a node's type holds a dispatcher,
+    or when a jit option has no canonical form. It also compiles without a cache, after a ``RuntimeWarning``, when
+    numba has no cache location for this module's file. A derive that reads its module's globals always compiles
+    without a cache.
+    """
     if registry is None:
         registry = _specs_registry
     all_inputs_, all_derived_ = infer_end_and_derived_nodes(access_nodes, registry)
     if jit_options is None:
         jit_options = {}
     jit_options = {**jit_options_, **jit_options}
-    # The kernel below is anchored to this file and cached beside it; a
-    # caller's cache option reaches numba past the package's answer. The
-    # derives cache under anchors of their own and keep the options as given.
+    # numba caches the graph maker as a function of this file. A caller's cache option overrides the answer that
+    # numbox's own jit options hold for this location, so _cached_at_or_uncached asks numba again, and it turns caching
+    # off with a warning where numba has no cache location. The derives cache under anchors of their own and take the
+    # options as given.
     kernel_options = _cached_at_or_uncached(getfile(_file_anchor), jit_options)
     ns = {
         **getmodule(_file_anchor).__dict__,
@@ -355,18 +376,19 @@ def make_graph(
     hash_, flags_cacheable = _kernel_fingerprint(code_txt.getvalue(), derive_hashes, type_sigs, jit_options)
     kernel_cacheable = flags_cacheable and all(kernel_safe_flags) and all(c for _name, (_h, c) in type_ids)
     if not kernel_cacheable:
-        # A derive with only a best-effort fingerprint, a node typed as a
-        # Dispatcher wrapping an un-fingerprintable body, or a jit flag with no
-        # canonical form has a content-blind identity folded into the kernel name;
-        # compile the kernel without an on-disk cache so a stale binary cannot be
-        # linked -- recompiled per process, never wrong. The
-        # name (fed by type_sigs) is unchanged, so nothing else re-keys.
+        # The graph maker compiles without a cache when a derive has only a placeholder fingerprint, when a node's type
+        # holds a dispatcher, or when a jit flag has no canonical form. A placeholder does not change when the values
+        # it stands for change. A flag's repr may differ between processes. numba misses its cache index for a type
+        # that holds a dispatcher in every new process. The maker's name stays as computed above.
         ns["jit_options"] = {**kernel_options, "cache": False}
     access_nodes_names = [n.name for n in access_nodes]
     tup_ = ", ".join(access_nodes_names) + ","
     code_txt.write(f"""\n\taccess_tuple = ({tup_})""")
     code_txt.write("\n\treturn access_tuple")
     code_txt = code_txt.getvalue()
+    # The derives and the initial values are the maker's parameters, not constants in its code, so only the numba
+    # types of the initial values enter its name, through type_sigs. A new init_value of the same type, a StructRef of
+    # any repr included, reuses the cached maker.
     make_params = ", ".join(chain(_make_args, initializers.keys()))
     make_name = f"_make_{hash_}"
     code_txt = f"""

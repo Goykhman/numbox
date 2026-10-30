@@ -11,12 +11,20 @@ deleted_node_base_ctor_error = "Intended for inheritance."
 
 
 class NodeBase(StructRefProxy):
+    """A node seen only by its name: the Python proxy of ``NodeBaseType`` and the base class of Node and Work.
+
+    ``NodeBaseType`` has one field, ``name``. The payloads of :class:`~numbox.core.work.node.Node` and
+    :class:`~numbox.core.work.work.Work` nodes begin with that field, so a node of either kind can be cast to
+    ``NodeBaseType``, as the inputs of a ``Node`` are. Calling ``NodeBase`` raises ``NotImplementedError`` in Python and
+    fails to compile in jitted code.
+    """
     def __new__(cls, name):
         raise NotImplementedError(deleted_node_base_ctor_error)
 
     @property
     @njit(**jit_options)
     def name(self):
+        """The node's name."""
         return self.name
 
     def __str__(self):
@@ -25,6 +33,7 @@ class NodeBase(StructRefProxy):
 
 @register
 class NodeBaseTypeClass(StructRef):
+    """The numba type class of ``NodeBaseType``, the type of a node seen only by its name."""
     pass
 
 
