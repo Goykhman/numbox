@@ -1,13 +1,15 @@
-"""Tests for the content-fingerprint walker (numbox.utils.fingerprint).
+"""Tests for ``numbox.utils.fingerprint``, the texts that describe functions and values the same way in every process.
 
-Two concerns run through these: canonicalizing a *value* stably (so that two artifacts
-differing only in captured data get different digests), and telling a genuine global read
-(``LOAD_GLOBAL``) apart from an attribute access (``LOAD_ATTR``) whose name merely collides
-with a module global. ``co_names`` pools the latter two, so folding globals off it either
-over-invalidates the fingerprint (a colliding global that canonicalizes) or makes the whole
-function un-fingerprintable (a colliding global that does not) -- which, on the builder's
-derive path, forces an address-bearing fallback and unbounded cache growth.
-``_loaded_global_names`` reads the opcodes instead.
+The tests check that ``_canon_value`` gives different texts to values that numba compiles into different code, such
+as structured arrays with the same bytes, two C symbols, ctypes pointers whose ``argtypes`` differ and two kinds of
+function value. They check that it raises ``_Unfingerprintable`` for a value with no text that means the same thing in
+another process.
+Other tests check that a fingerprint folds the globals and the module attributes that a function reads, and not a
+module global that only shares an attribute's name. ``co_names`` holds both kinds of name, so ``_loaded_global_names``
+reads the opcodes. Folding such a global would change the fingerprint when only the global changes, and a global
+without a fingerprint would make the fingerprint fail, so the work builder would compile the derive without a cache.
+The last tests cover ``_opaque_values_match`` and the ``@proxy`` aliases that a collision retires. The tests that need
+a C math library skip if ``open_libm`` finds none.
 """
 import textwrap
 
@@ -22,15 +24,15 @@ from test.auxiliary_utils import open_libm
 
 
 def _make(src, **globs):
-    """Compile ``src`` (defining ``f``) with ``globs`` as its module globals."""
+    """Return the function ``f`` that the source ``src`` defines, compiled with ``globs`` as its module globals."""
     ns = dict(globs)
     exec(textwrap.dedent(src), ns)  # nosec B102 - test helper compiling a fixed snippet
     return ns["f"]
 
 
 def test_canon_value_structured_dtype_preserves_layout():
-    # dtype.str is |V<n> for structured dtypes (field layout erased), so same-byte
-    # different-layout arrays would collide. The full descriptor discriminates them.
+    # dtype.str is |V<itemsize> for every structured dtype and drops the fields, so arrays with the same bytes and
+    # different layouts would have one text. _dtype_key folds the dtype's str, descr and itemsize.
     raw = (1).to_bytes(4, "little") + (2).to_bytes(4, "little")
     two_i4 = np.frombuffer(raw, dtype=np.dtype([("a", "<i4"), ("b", "<i4")])).copy()
     two_f4 = np.frombuffer(raw, dtype=np.dtype([("a", "<f4"), ("b", "<f4")])).copy()
@@ -47,11 +49,9 @@ def test_canon_value_plain_dtype_unchanged():
 
 
 def test_proxy_binding_callback_fingerprints_cleanly_and_distinctly():
-    # A callback that calls a @proxy'd binding used to abort the walker (the
-    # wrapper recurses into its @intrinsic, which has no canonical form), so the
-    # cache digest degraded to a coarse fallback. The dispatcher is now identified
-    # by its stable alias, so the callback fingerprints cleanly and two callbacks
-    # calling different bindings differ.
+    # A @proxy function is folded as proxy(<alias>), so the walk does not reach the @intrinsic that its wrapper calls,
+    # which has no fingerprint. A callback that calls a binding therefore has a fingerprint, and callbacks that call
+    # different bindings have different fingerprints.
     from numbox.core.bindings.sqlite.value import sqlite3_value_int64, sqlite3_value_double
 
     def cb_int(v):
@@ -74,16 +74,15 @@ def test_proxy_binding_canon_does_not_recurse_into_intrinsic():
 
 
 def test_unfingerprintable_value_still_raises_for_strict_walker():
-    # The strict walker must keep raising on a genuinely un-canonicalizable value
-    # (so degrade-to-uncached consumers still trigger); only the best-effort walker
-    # swallows it.
+    # _fingerprint_function raises for a value without a fingerprint, so the callers that compile such code without a
+    # cache detect it. Only _fingerprint_function_best_effort puts a placeholder in place of the value.
     class Opaque:
         pass
 
     def cb():
         return Opaque()
 
-    # Opaque() is a const-less local; reference it via a closure to force the walk.
+    # cb2 captures an instance of Opaque in its closure, and the fingerprint folds closure values.
     marker = Opaque()
 
     def cb2():
@@ -98,7 +97,11 @@ def test_unfingerprintable_value_still_raises_for_strict_walker():
 
 
 def test_loaded_global_names_distinguishes_globals_from_attributes():
-    """An attribute access is a ``LOAD_ATTR``; only ``LOAD_GLOBAL`` / ``LOAD_NAME`` name globals."""
+    """``_loaded_global_names`` returns the names that a function reads as globals, also in a comprehension.
+
+    ``co_names``, which ``_referenced_global_names`` reads, also holds the name of an attribute that the function reads,
+    and ``_loaded_global_names`` leaves that name out.
+    """
     attr = _make("def f(a):\n    return a.c1\n")
     assert _referenced_global_names(attr.__code__) == {"c1"}, "co_names should pool the attribute name"
     assert _loaded_global_names(attr.__code__) == set(), "an attribute access names no global"
@@ -111,34 +114,33 @@ def test_loaded_global_names_distinguishes_globals_from_attributes():
 
 
 def test_fingerprint_ignores_a_global_shadowed_by_an_attribute_name():
-    """A record-field / chained attribute whose name matches a module global must not fold that global.
+    """The fingerprint of a function that reads the attribute ``a.c1`` does not fold a module global named ``c1``.
 
-    With a canonicalizable colliding global the old behaviour over-invalidated (folded a value the body
-    never reads); with an un-canonicalizable one it raised, discarding the whole fingerprint. Neither may
-    happen now: ``a.c1`` reads an attribute, not the global ``c1``.
+    Folding it would change the fingerprint when only the global changes, and a global without a fingerprint would make
+    the fingerprint fail.
     """
     canon = _make("def f(a):\n    return a.c1\n", c1=3)
     assert "c1=" not in _fingerprint_function(canon, set()), "folded a global the body only accesses as an attribute"
 
     uncanon = _make("def f(a):\n    return a.c1\n", c1=np.array([object()], dtype=object))
-    # Must not raise despite the colliding global having no canonical form.
+    # The global c1 has no fingerprint, and the fingerprint of f must not raise.
     fp = _fingerprint_function(uncanon, set())
     assert "c1=" not in fp
 
-    # The fingerprint depends on the attribute name itself (it is still in co_names), so a different
-    # field is a different body -- the fix drops only the spurious global-value fold, not the attribute.
+    # The attribute's name is still in co_names, which the fingerprint folds, so a function that reads another
+    # attribute has another fingerprint.
     other = _make("def f(a):\n    return a.c2\n", c1=3)
     assert _fingerprint_function(canon, set()) != _fingerprint_function(other, set())
 
 
 def test_fingerprint_still_folds_a_genuine_global_read():
-    """A real ``LOAD_GLOBAL`` read is folded, and changing its value re-keys the fingerprint."""
+    """The fingerprint folds the value of a global that the function reads, so a new value gives a new fingerprint."""
     f = _make("def f(x):\n    return x * K\n", K=2)
     assert "K=" in _fingerprint_function(f, set())
     g = _make("def f(x):\n    return x * K\n", K=9)
     assert _fingerprint_function(f, set()) != _fingerprint_function(g, set())
 
-    # An un-canonicalizable *genuine* global read still raises -- that degrade path is intended and unchanged.
+    # A global that the function reads and that has no fingerprint makes _fingerprint_function raise.
     bad = _make("def f(x):\n    return x * K\n", K=np.array([object()], dtype=object))
     try:
         _fingerprint_function(bad, set())
@@ -149,9 +151,11 @@ def test_fingerprint_still_folds_a_genuine_global_read():
 
 
 def test_module_attribute_read_still_rekeys(tmp_path):
-    """Non-regression: a value read through a module (``cfg.SCALE``) is still folded, so changing it
-    re-keys; an attribute present on the module but never referenced (``cfg.OFFSET``) does not. The fix keeps
-    passing the full ``co_names`` set to the module-attribute walk, so this path is unaffected."""
+    """The fingerprint folds a module attribute that the function reads, such as ``cfg.SCALE``, not one it never reads.
+
+    The walk of module attributes takes every name in ``co_names``, so it receives the attribute names that
+    ``_loaded_global_names`` leaves out.
+    """
     import types
 
     cfg = types.ModuleType("cfgfake")
@@ -167,13 +171,11 @@ def test_module_attribute_read_still_rekeys(tmp_path):
 
 
 def test_an_external_function_is_canonicalized_by_symbol_and_signature():
-    """Two bindings a factory made over different C symbols must not share a fingerprint.
+    """``_canon_value`` gives an ``ExternalFunction`` a text of its symbol and signature, so two C symbols differ.
 
-    ``ExternalFunction`` has no ``_canon_value`` branch of its own until one is written for it,
-    so it used to reach the terminal ``raise`` and, on the best-effort path that the ``@proxy``
-    alias runs on, collapse to ``<opaque:ExternalFunction>``: the same placeholder for every
-    symbol. numba's own key for the type is ``(symbol, signature)``, both of which mean the same
-    thing in the next process, so folding those separates the two without costing stability.
+    The text is numba's own key for the type, and both parts mean the same thing in the next process. Without that
+    case, the best-effort fingerprint that names a ``@proxy`` body would give every ``ExternalFunction`` one
+    placeholder.
     """
     from numba.core.types import ExternalFunction, float64
 
@@ -187,12 +189,11 @@ def test_an_external_function_is_canonicalized_by_symbol_and_signature():
 
 
 def test_a_library_bound_ctypes_pointer_is_canonicalized_by_library_and_symbol():
-    """The same for a pointer reached by attribute access on a loaded library.
+    """A ctypes pointer taken from a loaded library has a text of the library's name and the symbol.
 
-    What is folded is the string the library was opened with, not the library the loader
-    resolved it to, so two handles on one library opened under different strings -- a soname
-    and an absolute path -- do canonicalize differently. That is over-discrimination: it
-    costs a recompile the load-time guard heals, never a wrong answer.
+    Two symbols of one library have different texts, and two handles opened with one string give one text. The text
+    holds the string that opened the library, so one library opened under a soname and under a path gives two texts.
+    The difference can cause a recompile but never a wrong result.
     """
     libm = open_libm()
     if libm is None:
@@ -206,17 +207,11 @@ def test_a_library_bound_ctypes_pointer_is_canonicalized_by_library_and_symbol()
 
 
 def test_a_ctypes_pointer_built_from_an_address_stays_unfingerprintable():
-    """The residual class, and why it is deliberate.
+    """``_canon_value`` raises ``_Unfingerprintable`` from its ctypes case for a pointer built from a raw address.
 
-    A pointer built from a raw address carries no library and no symbol name. The only thing
-    separating two of them is the address, which ASLR moves, so folding it would buy
-    discrimination at the cost of the process-stability the fingerprint exists for. Refusing is
-    the honest answer, and it leaves the caller to detect the collision instead of hiding it.
-
-    The refusal has to come from the ctypes branch deciding it, not from the walker never
-    reaching one. A walker with no ctypes handling at all refuses this pointer too, and would
-    satisfy a bare ``pytest.raises``; what separates the two is the message, which the terminal
-    raise fills with the type name and the ctypes branch fills with its own reason.
+    Only the address separates two such pointers, and ASLR changes it in every process, so the caller must decide how
+    to treat the pointer. The final ``raise`` of ``_canon_value`` gives the type name as its message, so the test
+    requires another message, the one from the ctypes case.
     """
     import ctypes
 
@@ -234,20 +229,13 @@ def test_a_ctypes_pointer_built_from_an_address_stays_unfingerprintable():
 
 
 def test_a_proxied_binding_and_a_cres_are_not_canonicalized_alike_as_function_values():
-    """Two first-class function values must not fold onto one canonical form.
+    """The ``.as_func`` of a ``@proxy`` function and a ``cres`` value with the same body have different texts.
 
-    ``CompileResultWAP`` had no branch here, so a body capturing one reached the terminal
-    ``raise`` and collapsed to ``<opaque:{type name}>`` on the best-effort path the alias
-    runs on. That placeholder holds a Python type name and nothing else, so what separated
-    a proxied binding's ``.as_func`` from a :func:`~numbox.utils.highlevel.cres` value was
-    the accident that one was a ``CompileResultWAP`` and the other a ``DeriveWAP``. Two
-    otherwise-identical bodies over those two handles then shared an alias the moment both
-    became the same type, which retires the alias and costs both cross-process caching.
-
-    What is folded instead means the same thing next run: the binding's own content-addressed
-    alias for the first, and the compiled body's fingerprint with its signature for the
-    second. The wrapper itself offers neither -- it carries a compiled address and a mangled
-    name holding a per-process counter -- so numbox tags the two it mints.
+    A function value holds only an address and a mangled name with a per-process counter, so numbox tags the two kinds
+    of value that it creates. ``_canon_value`` folds the alias of the ``@proxy`` function for the first, and the body's
+    fingerprint with the signature for the second. If the two had one text, two bodies that differ only in which of the
+    values they capture would compute one alias. The collision would retire it, and neither body would be cached across
+    processes.
     """
     from numba import float64
 
@@ -277,17 +265,11 @@ def test_a_proxied_binding_and_a_cres_are_not_canonicalized_alike_as_function_va
 
 
 def test_a_function_value_numbox_did_not_mint_stays_unfingerprintable():
-    """The residual class here, for the same reason as the raw-address pointer.
+    """``_canon_value`` raises ``_Unfingerprintable`` for an untagged ``CompileResultWAP`` built with numba directly.
 
-    A ``CompileResultWAP`` built directly against numba carries no tag, and the compile
-    result identifies its body only by a compiled address and a mangled name whose abi-tag
-    is a per-process counter. Neither means the same thing next run, so refusing is the
-    honest answer and leaves the collision to be detected rather than hidden.
-
-    Refusing this one only means something while numbox's own function value of the same shape
-    is accepted. The untagged wrapper falls through to the very terminal raise a walker with no
-    ``CompileResultWAP`` branch at all would give it, so the ``cres`` below is what says the tag
-    is doing the separating rather than the type being unreachable.
+    Its compile result identifies the body only by an address and by a mangled name whose abi tag is a per-process
+    counter. The test also checks that a ``cres`` value has a text, so the refusal comes from the missing tag and not
+    from the type.
     """
     from numba import float64, njit
     from numba.core.types.function_type import CompileResultWAP
@@ -310,14 +292,11 @@ def test_a_function_value_numbox_did_not_mint_stays_unfingerprintable():
 
 
 def test_two_python_callbacks_sharing_a_name_are_not_canonicalized_alike():
-    """A Python callback is not a library symbol, and must not be keyed as if it were.
+    """``_canon_value`` raises ``_Unfingerprintable`` for a ctypes callback built from a Python function.
 
-    ``_objects["0"]`` holds the loaded library for a pointer taken off one, but for a
-    callback built from a Python function it holds the CThunkObject instead, which has no
-    ``_name``. Reading that as a library folded the ``None`` into the key, so two
-    unrelated callbacks that happened to share a ``__name__`` -- which any decorator
-    copying ``__name__`` arranges -- canonicalized alike, and the alias they mint stopped
-    telling them apart.
+    For such a callback, ``_objects["0"]`` holds a ``CThunkObject``, which has no ``_name``, instead of a library. A
+    text that folded the missing name would be the same for two callbacks with one ``__name__``, as a decorator that
+    copies the name gives them.
     """
     import ctypes
 
@@ -333,22 +312,18 @@ def test_two_python_callbacks_sharing_a_name_are_not_canonicalized_alike():
 
 
 def test_unset_and_empty_argtypes_are_canonicalized_apart():
-    """An unset ``argtypes`` and an empty one must not fold onto one canonical form.
+    """A ctypes pointer whose ``argtypes`` is unset and one whose ``argtypes`` is empty have different texts.
 
-    numba refuses a call through a pointer whose ``argtypes`` is unset and accepts one
-    declared to take nothing, so a key folding the two together pairs a caller with a body
-    it cannot call. ``getattr(value, "argtypes", None) or ()`` folds them together, and that
-    is the implementation this rules out: the two pointers below differ in nothing else, so
-    their canonical forms have to differ with that attribute.
-
-    They come off two handles because ``CDLL.__getattr__`` caches the pointer it builds on
-    the instance: one handle asked twice hands back one object, and setting ``argtypes``
-    would set it on both. ``open_libm`` opening a fresh handle per call is what keeps this a
-    two-object comparison, and is pinned by ``test_open_libm_hands_back_a_usable_handle``.
+    numba refuses a call through the first and accepts a call through the second, so one text for both would pair a
+    caller with a body that it cannot call. A text that read ``argtypes or ()`` would give both pointers one text,
+    because they differ in nothing else.
     """
     libm = open_libm()
     if libm is None:
         pytest.skip("No math library discoverable to take a symbol from")
+    # The pointers come from two handles, because CDLL.__getattr__ stores the pointer that it builds on the handle.
+    # One handle would return one object twice, and setting argtypes on it would set it for both. open_libm opens a new
+    # handle on each call, which test_open_libm_hands_back_a_usable_handle in test/core/test_proxy.py checks.
     unset = open_libm().floor
     assert unset.argtypes is None, "ctypes stopped leaving argtypes unset by default"
     empty = open_libm().floor
@@ -360,29 +335,22 @@ def test_unset_and_empty_argtypes_are_canonicalized_apart():
 
 
 def test_two_prototypes_over_one_address_are_not_read_as_one_value():
-    """An address is not a call, so it cannot decide on its own that two values are one body.
+    """``_opaque_values_match`` takes two ctypes pointers over one address for one value only if their prototypes match.
 
-    ``_opaque_values_match`` answers whether two equal fingerprints stood on the same values,
-    and a raw-address ctypes pointer is what reaches it, because :func:`_ctypes_func_key`
-    refuses one for want of a process-stable identity. Comparing two of them by the address
-    alone is the implementation this rules out. numba types a call from ``restype``,
-    ``argtypes`` and the convention and lowers it against them, so one symbol reached through
-    two prototypes is two calls that compile to two different bodies; reading them as one
-    value hands the second the alias the first was published under, with no collision to
-    report and no warning.
-
-    The three mismatching pairs differ from the first pointer in the return type, in the
-    arguments, and in both, so a fix folding only one half of the prototype still fails one
-    of them. The matching pair is what stops the check reading every module reload and every
-    twice-called factory as a collision, which retires their alias and costs both bodies
-    cross-process caching for nothing. It has to be two objects over one address, or the
-    identity test at the top of the comparison answers before the pointer branch is reached.
+    numba types and lowers a call from the pointer's ``restype``, ``argtypes`` and calling convention, so two prototypes
+    over one symbol describe two calls. If the two pointers counted as one value, the second body would receive the
+    alias of the first, and no collision would be reported.
     """
     import ctypes
 
     libm = open_libm()
     if libm is None:
         pytest.skip("No math library discoverable to take a symbol address from")
+    # A raw-address pointer reaches _opaque_values_match because _ctypes_func_key finds no library and symbol for it.
+    # The three pointers that must not match as_double differ from it in the return type, in the arguments and in both,
+    # so a comparison of only one part of the prototype fails the test. again must match as_double, or every module
+    # reload and every factory called twice would count as a collision and retire the alias. again is a second object,
+    # because the comparison accepts an object compared with itself before it reaches the ctypes case.
     addr = ctypes.cast(libm.floor, ctypes.c_void_p).value
     as_double = ctypes.CFUNCTYPE(ctypes.c_double, ctypes.c_double)(addr)
     other_restype = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_double)(addr)
@@ -409,19 +377,11 @@ def test_two_prototypes_over_one_address_are_not_read_as_one_value():
 
 
 def test_a_retired_alias_is_not_folded_into_a_body_that_captured_it():
-    """A name that stopped identifying a body must not go on identifying it to its captors.
+    """A ``@proxy`` function and its ``.as_func`` have no text once a collision has retired their alias.
 
-    An alias is retired when two bodies reach it, because which of them ends up under the
-    shared name and which under the minted one is decided by the order this process built
-    them in. That reasoning does not stop at the two bodies. A third body capturing one of
-    them and folding ``proxy(<alias>)`` gets a fingerprint that means the other body in a
-    process that built the pair the other way round, and it is published under a fresh name
-    that resolves, so unlike the colliding pair it keeps a cross-process cache that is now
-    wrong.
-
-    Falling through to the ordinary walk is what prevents it. The dispatcher has no canonical
-    form there, so a derived body reaches ``_opaque_values_match`` like any other pair the
-    fingerprint cannot separate, and its own alias is retired in turn.
+    A process gives the shared alias to the colliding body that it builds first. A body that captured one of them and
+    folded the alias could therefore mean the other body in another process. The comment above ``_ABSENT_ALIASES`` in
+    ``numbox/utils/fingerprint.py`` describes how the walk treats such a body.
     """
     import ctypes
 
@@ -434,6 +394,8 @@ def test_a_retired_alias_is_not_folded_into_a_body_that_captured_it():
         pytest.skip("No math library discoverable to take two distinct symbol addresses from")
     proto = ctypes.CFUNCTYPE(ctypes.c_double, ctypes.c_double)
 
+    # Each body captures a ctypes pointer built from a raw address, which has no fingerprint, so the two bodies compute
+    # one alias and collide.
     def make(symbol):
         fp = proto(ctypes.cast(getattr(libm, symbol), ctypes.c_void_p).value)
 
@@ -461,11 +423,11 @@ def test_a_retired_alias_is_not_folded_into_a_body_that_captured_it():
 
 
 def test_a_live_alias_is_still_folded():
-    """The refusal above is keyed on retirement, not on being a proxied binding at all.
+    """A ``@proxy`` function with an alias that is not retired, and its ``.as_func``, are folded by that alias.
 
-    A binding whose alias still identifies it is the ordinary case and has to keep folding by
-    that alias, or every body capturing any proxied binding becomes un-fingerprintable and the
-    cache digests that rest on it degrade.
+    The refusal in the test above depends on the retirement alone. If every proxied function had no text, no body that
+    captures one would have a fingerprint, so code generated for such a body would compile without a cache or be named
+    by the weaker fingerprint.
     """
     from numba import float64
 

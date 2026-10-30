@@ -1,3 +1,11 @@
+"""Tests for ``numbox.utils.meminfo``, which passes a structref through an integer address and reads its MemInfo.
+
+The tests read numba's ``MemInfo`` structure and a structref's data with ``ctypes``, at the addresses that
+``structref_meminfo`` returns. They check the reference counts that ``export_meminfo``, ``borrow_structref`` and
+``release_meminfo`` produce, and the ``TypingError`` for an address of a narrower integer type. Two tests check the
+marker that keeps the ``removerefctpass`` of numba 0.65 and earlier from deleting the increment of an exported
+reference.
+"""
 import ctypes
 import numba
 import numpy
@@ -7,12 +15,17 @@ from test.auxiliary_utils import collect_and_run_tests
 from test.common_structrefs import S1, S2
 
 
-# see https://github.com/numba/numba/blob/main/numba/core/runtime/nrt.cpp#L17
+# numba's MemInfo structure has six fields of eight bytes, and its data field is the fourth, at index 3:
+# https://github.com/numba/numba/blob/main/numba/core/runtime/nrt.cpp#L17
 size_of_meminfo = 6
 offset_to_data_p_in_meminfo_p = 3
 
 
 def test_s1():
+    """The data field of an ``S1``'s MemInfo holds the address of the struct's data, which follows the MemInfo.
+
+    The three fields are read with ``ctypes`` at offsets of 0, 8 and 16 bytes from the start of the data.
+    """
     x1 = 137
     x2 = 314
     x3 = 2.17
@@ -40,12 +53,13 @@ def test_s1():
 
 
 def test_s2():
+    """The data of an ``S2`` starts with the address of its array's MemInfo, whose data field is the array's data."""
     x1 = numpy.array([[137], [214], [317]], dtype=numpy.int64)
     s2 = S2(x1)
     assert get_nrt_refcount(s2) == 1
     s2_meminfo_p_as_int, s2_data_p_as_int = structref_meminfo(s2)
 
-    # `x1` member in `s2` structure's data
+    # The array is the first field of s2's data, and an array's data model starts with its MemInfo pointer.
     x1_member_meminfo_pp = s2_data_p_as_int
     x1_member_meminfo_p = ctypes.c_int64.from_address(x1_member_meminfo_pp).value
     x1_data_pp = x1_member_meminfo_p + offset_to_data_p_in_meminfo_p * 8
@@ -55,6 +69,7 @@ def test_s2():
 
 
 def test_bridge_refcount_ladder():
+    """``export_meminfo`` raises the count to 2, a borrow leaves it there, and ``release_meminfo`` returns it to 1."""
     from numbox.utils.meminfo import (
         borrow_structref, export_meminfo, get_nrt_refcount, release_meminfo,
     )
@@ -91,7 +106,10 @@ def test_bridge_round_trip_recovers_fields():
 
 
 def test_bridge_intrinsics_reject_non_intp():
-    """Wrong-width integer args should raise at typing time, not corrupt at runtime."""
+    """``_incref_meminfo`` raises ``TypingError`` for an address typed ``int32`` when the caller compiles.
+
+    An ``int32`` holds only the low 32 bits of a 64-bit address, so the increment would change the wrong memory.
+    """
     import pytest
     from numba import int32, njit
     from numba.core.errors import TypingError
@@ -106,10 +124,12 @@ def test_bridge_intrinsics_reject_non_intp():
 
 
 def test_incref_survives_refcount_pruning():
-    """A ``void(intp)`` caller passes the legality check of numba's ``removerefctpass`` (numba <= 0.65), which strips
-    NRT_incref by name; the incref must survive it. The refcounts can only fail where that pass exists, so the test
-    also looks for the ``numba_args_may_always_need_nrt`` tag that keeps the pass off, which the IR carries on every
-    numba."""
+    """The ``removerefctpass`` of numba 0.65 and earlier does not delete the increment of ``_incref_meminfo``.
+
+    The pass deletes every ``NRT_incref`` of a function whose types need no reference counting, and a ``void(intp)``
+    function passes its check. The counts can fail only where the pass exists, so the test also checks the IR for the
+    ``numba_args_may_always_need_nrt`` marker that stops the pass, which numbox adds on every numba.
+    """
     from numbox.utils.meminfo import _incref_meminfo, export_meminfo, get_nrt_refcount, release_meminfo
     from test.common_structrefs import S1
 
@@ -129,10 +149,13 @@ def test_incref_survives_refcount_pruning():
 
 
 def test_export_meminfo_keeps_its_incref_for_an_array():
-    """An array argument is legal for numba's ``removerefctpass`` (numba <= 0.65), so without the
-    ``numba_args_may_always_need_nrt`` tag the pass strips the +1 from ``export_meminfo`` compiled for an array, and
-    the pointer it returns names a MemInfo already freed. Unboxing wraps the array in a MemInfo that holds a Python
-    reference to it, and that is the MemInfo exported, so the +1 shows on the array's Python refcount."""
+    """``export_meminfo`` keeps its increment for an array, which shows as one more Python reference to the array.
+
+    A function with an array argument passes the check of the ``removerefctpass`` of numba 0.65 and earlier. Without
+    the ``numba_args_may_always_need_nrt`` marker, the pass would delete the increment, and the returned address would
+    name a MemInfo that is already freed. The unboxing wraps the array in a MemInfo that holds a Python reference to
+    the array, and that MemInfo is the one exported.
+    """
     import sys
 
     from numbox.utils.meminfo import export_meminfo, release_meminfo

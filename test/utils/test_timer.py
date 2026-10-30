@@ -1,8 +1,8 @@
-"""Tests for ``numbox.utils.timer``.
+"""Tests for ``numbox.utils.timer``, the decorator that times calls made from Python.
 
-``Timer`` is a library utility, so importing it must leave the process-wide
-root logger alone and its per-call timing must be routine (INFO) output that
-the application opts into.
+The tests check that a timed function returns its result and records its duration in ``Timer.times``, and that each
+call is logged at INFO on the ``numbox.utils.timer`` logger. A subprocess checks that importing the module adds no
+handler to the root logger, so that the application decides whether the records appear.
 """
 import logging
 import subprocess
@@ -24,8 +24,11 @@ def test_timer_records_duration_and_returns_result():
 
 
 class _Records(logging.Handler):
-    """Keeps every record it is handed. A plain handler rather than pytest's ``caplog`` fixture, so the file also runs
-    through its own ``collect_and_run_tests`` block, which calls each test with no arguments."""
+    """A logging handler that keeps every record it receives in ``records``.
+
+    The test uses it instead of pytest's ``caplog`` fixture, so the file also runs through its ``collect_and_run_tests``
+    block, which calls each test without arguments.
+    """
 
     def __init__(self):
         super().__init__()
@@ -57,6 +60,8 @@ def test_timer_logs_at_info():
 
 
 def test_import_leaves_root_logger_unconfigured():
+    # A new interpreter runs the import, so the handlers that pytest adds to the root logger in this process do not
+    # count.
     code = (
         "import logging\n"
         "import numbox.utils.timer\n"

@@ -1,3 +1,11 @@
+"""Structrefs written by hand that several test modules share.
+
+``S1``, ``S12``, ``S2`` and ``S3`` follow numba's pattern for a StructRef: a type class registered with
+``structref.register``, a proxy class with its boxing, an ``@overload`` constructor and a jitted constructor for one
+signature. The one field of ``S12`` has the type of the first field of ``S1``, so ``cast`` can read an ``S1`` as an
+``S12``. ``S2`` holds a two-dimensional array, and ``S3`` holds an ``S1``. Python code cannot create an ``S4``, and
+jitted code creates one with ``ll_make_s4``.
+"""
 from numba import njit, float64, int16, int64
 from numba.core import types
 from numba.experimental import structref
@@ -200,13 +208,11 @@ structref.define_boxing(S4TypeClass, S4)
 
 @intrinsic(prefer_literal=False)
 def ll_make_s4(typingctx, x_ty):
-    """
-    Purely intrinsic structref constructor.
+    """Return a new ``S4`` whose field ``x`` holds ``x``, in jitted code.
 
-    It's preferable to use this kind of constructor when a lot
-    of instances of the corresponding structure are expected to
-    be created in a jitted scope, as it significantly reduces
-    compilation time, cache size, and memory needs.
+    The field takes the type of the argument. A constructor of this kind uses less memory, cache disk space and
+    compilation time than an ``@overload`` constructor when one jitted function creates many instances, as the
+    docstring of ``ll_make_work`` says for ``Work`` nodes.
     """
     attributes_ = [
         ("x", x_ty)

@@ -1,3 +1,10 @@
+"""Tests for ``numbox.utils.clock``, the monotonic clock in nanoseconds for jitted code.
+
+The tests check that ``monotonic_ns`` returns a positive value and does not decrease between two calls. Two tests
+check that the clock measures the work between its calls. The measured time of a loop doubles when the number of
+iterations doubles, and the sum of the measured intervals stays within the wall-clock time of the call that contains
+them.
+"""
 import math
 import time
 
@@ -27,21 +34,11 @@ def test_monotonically_non_decreasing():
 
 
 def test_linear_scaling():
-    """Validate the n-dependency property from numbox#7.
+    """The measured time of a loop doubles, within a ratio of 1.5 to 3.0, when the loop runs twice as many iterations.
 
-    clock_gettime (Linux) and QueryPerformanceCounter (Windows) are external
-    C functions that carry no LLVM optimization attributes.  Every call is a
-    full compiler barrier: LLVM cannot reorder, hoist, eliminate, or merge
-    clock calls across the barrier.  Therefore the accumulated time must grow
-    linearly with the number of iterations, because each iteration forces a
-    real pair of clock reads around a math.sin() operation that itself cannot
-    be eliminated (its result is accumulated and returned).
-
-    We measure time(2n) / time(n) averaged over multiple runs and assert
-    it falls in [1.5, 3.0] (expected value 2.0).  Averaging reduces noise
-    from CI VMs enough to use tight bounds while still catching gross
-    mis-behaviour (e.g. the loop being compiled away entirely, which would
-    produce a ratio near 1.0 regardless of n).
+    Each iteration reads the clock before and after a ``math.sin`` call whose result the loop returns. The clock calls
+    an external C function declared without attributes, which LLVM must assume to read and write memory, so LLVM cannot
+    remove the calls, merge them or move them out of the loop.
     """
     @njit
     def timed_loop(n):
@@ -54,9 +51,10 @@ def test_linear_scaling():
             total_ns += t1 - t0
         return total_ns, sink
 
-    # Warm up JIT compilation.
+    # This call compiles timed_loop, so the measured calls below do not include the compilation.
     timed_loop(100)
 
+    # The ratio is averaged over five runs, which reduces the noise of CI virtual machines enough for these bounds.
     n_small = 10_000
     n_large = 20_000
     runs = 5
@@ -76,21 +74,10 @@ def test_linear_scaling():
 
 
 def test_wall_clock_consistency():
-    """Validate sum-of-parts consistency from numbox#7.
+    """The sum of the clock's intervals in a loop is between 0.1 and 1.0 times the wall-clock time of the call.
 
-    If the JIT clock were being optimized away or silently reordered, the
-    accumulated JIT total would diverge from the Python wall-clock time that
-    wraps the same call.  We use time.perf_counter_ns() for the wall clock
-    because it uses QueryPerformanceCounter on all CPython versions.
-    On CPython 3.10-3.12, time.monotonic_ns() uses GetTickCount64
-    (~15 ms resolution) and can return zero for fast loops; CPython 3.13+
-    switched to QPC, but perf_counter_ns() works consistently across
-    all versions.
-
-    We assert jit_total / wall_total is in [0.1, 1.0].  The JIT total
-    cannot exceed the wall total since the wall clock wraps the entire
-    call.  A ratio near 0 would indicate the JIT clock is being optimized
-    away.
+    The sum cannot exceed the wall-clock time, which measures the whole call. A ratio near 0 would mean that LLVM had
+    removed the clock calls or moved them next to each other.
     """
     @njit
     def timed_loop(n):
@@ -103,9 +90,12 @@ def test_wall_clock_consistency():
             total_ns += t1 - t0
         return total_ns, sink
 
-    # Warm up JIT compilation.
+    # This call compiles timed_loop, so the measured call below does not include the compilation.
     timed_loop(100)
 
+    # The wall clock is time.perf_counter_ns, which uses QueryPerformanceCounter on Windows in every CPython version.
+    # Before CPython 3.13, time.monotonic_ns uses GetTickCount64 there, whose resolution of about 15 ms can give zero
+    # for a fast loop.
     n = 50_000
     wall_start = time.perf_counter_ns()
     jit_total, _ = timed_loop(n)

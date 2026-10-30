@@ -1,3 +1,10 @@
+"""Tests for ``numbox.utils.cstrings``, the NUL-terminated UTF-8 C strings that ``c_string`` creates.
+
+The tests read each string back through its address, for ASCII text, for non-ASCII text and for an empty string. They
+check the NUL terminator, that two strings open at once have different addresses, and that ``c_string`` raises
+``ValueError`` for a string that holds a NUL character. One test checks that numba refuses ``c_string`` as a context
+manager in jitted code.
+"""
 from contextlib import ExitStack
 from ctypes import c_char
 
@@ -19,7 +26,7 @@ def test_utf8_round_trip():
     s = "café — 你好 — 🚀"
     with c_string(s) as p:
         assert p != 0
-        # Read back the UTF-8 bytes through to NUL
+        # str_from_p_as_int reads the bytes up to the NUL and decodes them as UTF-8.
         roundtrip = str_from_p_as_int(p)
         assert roundtrip == s
 
@@ -34,14 +41,14 @@ def test_empty_string_returns_pointer_to_nul():
 def test_nul_terminator_present():
     s = "abc"
     with c_string(s) as p:
-        # Index 3 is the position after "abc" — must be NUL
+        # The byte after the three bytes of "abc" must be the NUL terminator.
         assert c_char.from_address(p + len(s.encode("utf-8"))).value == b"\x00"
 
 
 def test_embedded_nul_rejected():
-    """Embedded NUL bytes would silently truncate the C string at the
-    first NUL — would mask bugs in callers passing untrusted input.
-    Reject up front instead.
+    """``c_string`` raises ``ValueError`` for a string that holds a NUL character.
+
+    The C string would end at that character, so a C function would receive a shorter string without any error.
     """
     with pytest.raises(ValueError, match="embedded NUL"):
         with c_string("foo\x00bar"):
@@ -58,14 +65,10 @@ def test_distinct_strings_get_distinct_pointers():
 
 
 def test_context_manager_in_njit_raises():
-    """Numba doesn't support arbitrary context managers — guard against
-    a future numba version silently accepting and miscompiling. If this
-    test breaks because numba started supporting it, revisit the
-    cstrings module docstring's JIT caveat.
+    """numba raises ``UnsupportedBytecodeError`` for a jitted function that uses ``c_string`` as its context manager.
 
-    The test's intent is to assert that compilation fails with numba's
-    ``UnsupportedBytecodeError``. The regression it would catch, numba
-    silently accepting and miscompiling, would not raise at all.
+    The docstrings of ``numbox.utils.cstrings`` say that ``c_string`` works only in Python. If a numba release compiles
+    the function, the test fails, and those docstrings need a review.
     """
     @njit
     def kernel():

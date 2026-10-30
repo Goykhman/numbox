@@ -1,3 +1,11 @@
+"""Tests for ``numbox.utils.digest``, the hash of 16 hexadecimal digits that names generated code.
+
+The tests check that the digest has 16 digits and is the same for the same inputs. They check that it changes with
+the subject, with a literal in a function's body and with numbox's default jit options. It also changes with the
+options of a dispatcher or a ``@vectorize`` function. A callable without code is hashed as a cloudpickle that holds
+its state. A function that reads a value without a fingerprint is hashed with the best-effort fingerprint, which still
+folds closure values. All the digests are compared within one process.
+"""
 import functools
 
 from numba import njit, vectorize
@@ -25,8 +33,8 @@ def test_digest_varies_with_subject():
 
 
 def test_digest_varies_with_function_literal():
-    # co_consts-sensitive: bodies differing only by a numeric literal must produce
-    # different digests (cloudpickle of __code__, not bare co_code which is identical here).
+    # The two bodies differ only in co_consts on Python 3.10 to 3.13, where their bytecode is the same. The fingerprint
+    # folds co_consts.
     def cb_one(x):
         return x + 1
 
@@ -47,14 +55,14 @@ def test_digest_varies_with_jit_options(monkeypatch):
 
 
 def test_digest_accepts_codeless_callable():
-    # a callable with no __code__ (builtin, functools.partial, callable object)
-    # must hash via cloudpickle of the object itself instead of raising.
+    # A callable without code, such as a builtin, a functools.partial or a callable object, is hashed as a cloudpickle
+    # of the object, and digest does not raise for it.
     assert len(digest("StateType", (functools.partial(len),))) == 16
 
 
 def test_digest_codeless_callable_captures_state():
-    # object-fallback hashes the whole object, so differing partial args (state)
-    # yield different digests -- which __call__.__code__ alone would miss.
+    # The cloudpickle holds the object's state, so two partials with different arguments have different digests. A
+    # hash of code alone would give them one digest.
     one = digest("StateType", (functools.partial(len, "a"),))
     two = digest("StateType", (functools.partial(len, "ab"),))
     assert one != two
@@ -66,27 +74,23 @@ def test_digest_empty_inputs_deterministic():
 
 
 def test_digest_unfingerprintable_function_captures_closure():
-    # When the strict walker aborts on an un-canonicalizable referenced value, the
-    # fallback must still capture closure state: two functions with identical
-    # source but different closure values yield different digests. The old
-    # fallback cloudpickled the bare __code__, dropping exactly that state.
-    class Opaque:  # not a canonicalizable type -> forces the strict walker to abort
+    # cb reads marker, which has no fingerprint, so digest hashes cb with the best-effort fingerprint. That fingerprint
+    # still folds closure values, so two functions with the same source and different values of k differ.
+    class Opaque:  # an instance of this class has no fingerprint
         pass
     marker = Opaque()
 
     def make(k):
         def cb(x):
-            return (marker, k, x)  # references the opaque global; k lives in the closure
+            return (marker, k, x)  # marker and k are both closure values of cb
         return cb
 
     assert digest("StateType", (make(1),)) != digest("StateType", (make(2),))
 
 
 def test_digest_folds_dispatcher_jit_flags():
-    # A Dispatcher's py_func is only half its identity: numba compiles a
-    # different library per jit-flag set, so two dispatchers over one body must
-    # key distinctly. The py_func shortcut saw only the Python body and collided
-    # all of these onto a single digest.
+    # numba compiles different code for each set of jit options, so dispatchers of one body with different options must
+    # have different digests. digest folds the options that each dispatcher compiles under with its Python function.
     def cb(x):
         return x + 1
 
@@ -113,11 +117,10 @@ def test_digest_of_dispatcher_is_deterministic_and_body_sensitive():
 
 
 def test_digest_folds_dufunc_jit_flags():
-    # @vectorize freezes its scalar body at compile time, so its targetoptions
-    # belong in the key too. Note this holds on the cloudpickle path as well, so
-    # unlike the Dispatcher case above it does not by itself pin the _canon_value
-    # routing -- what routing buys DUFuncs is escaping cloudpickle's documented
-    # nondeterminism for __main__ objects.
+    # numba compiles a @vectorize function's scalar body under the function's options, so the options must change the
+    # digest. A cloudpickle of the function holds the options too, so this test also passes if digest pickles a DUFunc,
+    # unlike the dispatcher test above. digest folds a DUFunc through _canon_value instead, because a cloudpickle can
+    # differ in every process for an object from the script that runs.
     def cb(x):
         return x + 1
 

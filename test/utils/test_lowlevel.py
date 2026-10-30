@@ -1,3 +1,12 @@
+"""Tests for ``numbox.utils.lowlevel``, the helpers for raw memory in jitted code.
+
+The tests check ``cast``, ``deref_payload``, ``populate_structref``, ``tuple_of_struct_ptrs_as_int`` and
+``uniformize_tuple_of_structs`` against the MemInfo addresses and reference counts that ``numbox.utils.meminfo`` reads.
+They read the three addresses of a ``cres`` value with ``get_func_tuple``, and they check the string helpers on ASCII
+text, on bytes above 0x7F and on an empty string. Other tests check ``load_at`` and ``store_at``, including the type
+check on the address, the conversion of an address to a pointer and back, and ``array_data_p`` from Python and from
+jitted code. ``test/core/test_load_unaligned.py`` tests the unaligned loads and stores.
+"""
 import numba
 import numpy
 import pytest
@@ -19,8 +28,10 @@ from test.common_structrefs import ll_make_s4, S1, S1Type, S12, S12Type, S2
 
 
 def test_1():
-    """ `cast` does not create a new `MemInfo`. Consistently with that, ref-count
-     increments when a cast structure points at the same `MemInfo` """
+    """``cast`` returns a structref over the same MemInfo, and the result holds a reference of its own.
+
+    The reference count rises from 1 to 2 with the cast and returns to 1 when the original is deleted.
+    """
     x1 = 23
     s1 = S1(x1, 567, 1.23)
     assert s1.x1 == x1
@@ -37,7 +48,7 @@ def test_1():
 
 
 def test_2():
-    """ Round-trip for `deref` returns the original object """
+    """``deref_payload`` reads the array in a structref's first field as an array over the same data."""
     a = numpy.array([[34], [56]], dtype=numpy.int64)
     s2 = S2(a)
     a1 = deref_payload(s2, numba.types.npytypes.Array(numba.int64, 2, 'C'))
@@ -47,16 +58,18 @@ def test_2():
 
 
 def test_3():
-    """ `deref` does not create a new `MemInfo`. It returns the original
-     payload of the structref and therefore does not increment its ref-count.
-     It's different from `cast` that creates an additional owner of the same payload.
-     Instead, `deref` simply returns the original owner. """
+    """``deref_payload`` returns the array stored in a structref with the array's own MemInfo, and takes a reference.
+
+    The array's reference count is 1 after the array is created, 2 once the structref holds it and 3 after the call.
+    """
 
     arr_ty = numba.types.npytypes.Array(numba.int64, 2, 'C')
 
     @numba.njit
     def aux():
-        """ This is jitted because we want `a` to get wrapped in a `MemInfo`, which requires NRT """
+        """Return the arrays, the MemInfo addresses and the reference counts that the test checks."""
+        # numba gives an array that Python passes to jitted code a MemInfo for that call alone, so the array is created
+        # here, where its MemInfo is the one that holds it.
         a = numpy.array([[34], [56]], dtype=numpy.int64)
         a_meminfo_p = structref_meminfo(a)[0]
         a_ref_ct_1_ = deref_int64_intp(a_meminfo_p)
@@ -65,7 +78,8 @@ def test_3():
         a_ref_ct_2_ = deref_int64_intp(a_meminfo_p)
 
         s2_data_p = structref_meminfo(s2)[1]
-        # `a` is wrapped in `MemInfo` pointed at by `s2`'s `MemInfo`'s data member
+        # The array is s2's first field, and an array's data model starts with its MemInfo pointer, so the first eight
+        # bytes of s2's data are the address of the array's MemInfo.
         a_wrap_meminfo_p_ = deref_int64_intp(s2_data_p)
 
         a1 = deref_payload(s2, arr_ty)
@@ -152,9 +166,7 @@ def test_get_unicode_data_p():
 
 
 def test_get_unicode_data_p_in_jit():
-    """ UnicodeType string created in JIT context does not
-     (necessarily) get MemInfo. Test that data payload
-     pointer is still working. """
+    """``get_unicode_data_p`` returns a valid address for a string created in jitted code, which may have no MemInfo."""
     @njit
     def aux():
         s1_ = "a random string"
@@ -175,9 +187,10 @@ def test_get_str_from_p_as_int():
 
 
 def test_get_str_from_p_as_int_high_bytes():
-    """Bytes 0x80-0xFF must read back as their unsigned codepoint, not crash.
-    Decode contract is per-byte Latin-1 (one codepoint per byte), so a UTF-8
-    payload comes back byte-for-byte rather than decoded."""
+    """``get_str_from_p_as_int`` returns each byte from 0x80 to 0xFF as the character of the same code.
+
+    That is Latin-1 decoding, so the UTF-8 bytes of a non-ASCII text come back as one character per byte, undecoded.
+    """
     raw = "é".encode("utf-8") + b"A"  # b'\xc3\xa9A'
     buf = c_char_p(raw)
     p = c_void_p.from_buffer(buf).value
@@ -200,7 +213,8 @@ def test_get_str_from_p_as_int_empty():
 def test_populate_structref():
     @numba.njit
     def make_s4():
-        """ In a jitted context `a` gets its own meminfo """
+        """Return the array, the structref and the array's reference counts before and after ``ll_make_s4``."""
+        # The array is created in jitted code, where its MemInfo is the one that holds it, as in test_3.
         a_ = numpy.array([2.17, 3.14], dtype=numpy.float64)
         a_meminfo_p = structref_meminfo(a_)[0]
         a_ref_ct_1_ = deref_int64_intp(a_meminfo_p)
@@ -280,7 +294,7 @@ def test_array_data_p_njit():
 
 
 def test_load_at_store_at_int32_roundtrip():
-    """Positive path: store an int32 at an intp pointer, load it back."""
+    """An ``int32`` that ``store_at`` writes at an ``intp`` address reads back through ``load_at``."""
     import numpy
     from numba import int32, njit
     from numbox.utils.lowlevel import array_data_p
@@ -296,9 +310,10 @@ def test_load_at_store_at_int32_roundtrip():
 
 
 def test_load_at_rejects_non_intp_pointer():
-    """The pointer is contract-carried as ``intp`` — accepting any integer
-    width would silently truncate addresses on inttoptr (an int32 pointer
-    captures only the low 32 bits of the real address)."""
+    """``load_at`` raises ``TypingError`` for an address typed ``int32``.
+
+    An ``int32`` holds only the low 32 bits of a 64-bit address, so a load through it would read the wrong memory.
+    """
     from numba import int32, njit
     from numba.core.errors import TypingError
     with pytest.raises(TypingError, match="intp"):
@@ -308,7 +323,7 @@ def test_load_at_rejects_non_intp_pointer():
 
 
 def test_store_at_rejects_non_intp_pointer():
-    """Parallel guard for ``store_at``."""
+    """``store_at`` raises ``TypingError`` for an address typed ``int32``, as ``load_at`` does."""
     from numba import int32, njit, void
     from numba.core.errors import TypingError
     with pytest.raises(TypingError, match="intp"):
@@ -318,12 +333,11 @@ def test_store_at_rejects_non_intp_pointer():
 
 
 def test_load_at_accepts_integer_literal_pointer():
-    """Integer literals in ``@njit`` are typed as ``IntegerLiteral``, not
-    ``intp``. The guard uses ``unliteral()`` so callers can pass literal
-    pointers (e.g. compile-time-known addresses) without hitting a
-    spurious TypingError. We only compile — calling a literal-zero
-    pointer would segfault, but compilation is enough to exercise the
-    typing-time guard."""
+    """``load_at`` accepts an integer literal as the address, which numba types as ``IntegerLiteral``, not as ``intp``.
+
+    The type check applies ``unliteral`` to the address type first. The test only compiles the function, because a
+    load from address 0 would end the process with a segmentation fault.
+    """
     from numba import int32, njit
 
     @njit("int32()")
@@ -333,7 +347,7 @@ def test_load_at_accepts_integer_literal_pointer():
 
 
 def test_store_at_accepts_integer_literal_pointer():
-    """Parallel literal-acceptance for ``store_at``."""
+    """``store_at`` accepts an integer literal as the address, as ``load_at`` does, and the test only compiles it."""
     from numba import int32, njit
 
     @njit("void()")

@@ -1,3 +1,11 @@
+"""Tests for ``numbox.utils.highlevel`` and for two anchor helpers of ``numbox.utils.preprocessing``.
+
+The tests compare the code that ``make_structref_code_txt`` generates with expected text, and they build structs whose
+fields are given by name or by type, with methods and without fields, which Python and cached jitted functions then
+call. They check ``cres`` against ``njit``, ``cres_if_available`` for a symbol that the C library has and for one that
+it lacks, and the process-stable identities of numba types, signatures and struct methods. Two tests check how
+``_materialize_anchor`` writes an anchor and which temporary files ``_orphan_anchor_sweep`` deletes.
+"""
 import os
 import re
 import time
@@ -176,11 +184,10 @@ def test_make_structref_3():
         return self.y * 3 + aux()
     m1 = {"calculate_1": calculate_1, "calculate_2": calculate_impl}
     code_txt = make_structref_code_txt("S3", ("x", "y"), S3TypeClass, struct_methods=m1)[0]
-    # The method-name suffix is a fingerprint that folds code.co_code, so it moves
-    # with every CPython bytecode change and can only ever match one interpreter.
-    # Pin what is portable -- the generated structure, that each call site names
-    # the method it defines, and that distinct methods get distinct suffixes --
-    # and normalise the suffix itself out of the comparison.
+    # A helper's name ends in the hash of its method's identity, which folds the method's code.co_code, so the hash
+    # differs between CPython versions. The test checks that each method calls its helper under the name that the
+    # helper is defined with, that the two methods have different hashes, and that the code matches the expected text
+    # with the hashes replaced.
     digests = _method_digest_re.findall(code_txt)
     assert len(digests) == 4, digests
     assert digests[0] == digests[1], digests
@@ -198,10 +205,12 @@ def test_make_structref_3():
 
 
 def test_make_structref_method_param_edge_cases():
-    """COR-4 / task 8: make_structref must accept method signatures whose source
-    spelling differs from repr() of the default (1_000, 0x10, quote style), drops
-    annotations, or contains a nested ')'. The old regex cross-check assert in
-    make_structref_code_txt rejected these. Codegen-only (no numba needed)."""
+    """``make_structref_code_txt`` generates code for methods whose parameter list differs from the text numbox writes.
+
+    numbox writes each default as its ``repr`` and drops annotations. The methods' defaults are written as ``1_000``, as
+    ``0x10``, as a string in double quotes that holds a comma, and as a call. One parameter has an annotation. The test
+    generates the code and compiles nothing.
+    """
     def m_underscore(self, n=1_000):
         return self.x + n
 
@@ -322,6 +331,8 @@ def test_cres_if_available_present_symbol_returns_real_wrapper():
     if lib is None:
         pytest.skip("No suitable math/C runtime library discoverable")
 
+    # _call_lib_func takes the result type from the signatures table, so the test sets the entry for cos and restores
+    # the earlier entry afterwards.
     prior = signatures.get("cos")
     try:
         signatures["cos"] = float64(float64)
@@ -362,11 +373,10 @@ def test_cres_if_available_missing_symbol_returns_stub():
 
 
 def test_orphan_anchor_sweep_spares_fresh_tmp_files():
-    """Concurrent-import race protection: ``_orphan_anchor_sweep`` must not
-    unlink ``.tmp-*`` files that another process just created via
-    ``_materialize_anchor``'s ``mkstemp`` and is about to ``replace`` into
-    place. The age filter (``_ORPHAN_AGE_SECONDS``) ensures only stale
-    files get unlinked.
+    """``_orphan_anchor_sweep`` deletes a temporary anchor file older than ``_ORPHAN_AGE_SECONDS``, not a newer one.
+
+    A newer file can belong to a ``_materialize_anchor`` call in another process, between its ``mkstemp`` and its
+    ``replace``, and deleting the file would make the ``replace`` raise.
     """
     root = _anchor_root("numbox-structref")
     root.mkdir(parents=True, exist_ok=True)
@@ -386,11 +396,10 @@ def test_orphan_anchor_sweep_spares_fresh_tmp_files():
 
 
 def test_materialize_anchor_writes_utf8_bytes(tmp_path):
-    """Anchor file must be written as utf-8 to match ``_anchor_path``'s
-    sha256(content.encode('utf-8')) addressing. On Windows the default
-    encoding from ``os.fdopen`` can be cp1252; explicit utf-8 ensures
-    round-trip integrity for non-ASCII source AND keeps the bytes-on-disk
-    consistent with the path hash.
+    """``_materialize_anchor`` writes the code as UTF-8, the encoding in which ``_anchor_path`` hashes it for a name.
+
+    On Windows, ``os.fdopen`` defaults to the locale's encoding, such as cp1252, which writes other bytes for non-ASCII
+    source.
     """
     content = "# café — non-ASCII sentinel\nx = 1\n"
     anchor = tmp_path / "anchor.py"
@@ -406,12 +415,10 @@ def test_type_identity_plain_type_is_cacheable():
 
 
 def test_type_identity_dispatcher_is_uncacheable_and_content_sensitive():
-    """Both bodies are un-cacheable for the one reason that they are Dispatchers.
+    """A dispatcher type is not cacheable, and two dispatchers with different bodies have different digests.
 
-    They differ only in which fingerprint branch supplies the hash: ``intrinsic_ref``
-    reaches an ``@intrinsic``, which has no canonical form, so the strict walker raises
-    and the best-effort one runs. That branch must still discriminate two bodies -- a
-    changed body has to re-key the in-process name.
+    ``intrinsic_ref`` calls ``_call_lib_func``, an ``@intrinsic`` without a fingerprint, so its digest comes from the
+    best-effort fingerprint, which must still distinguish the two bodies.
     """
     @njit
     def plain(x):
@@ -423,50 +430,50 @@ def test_type_identity_dispatcher_is_uncacheable_and_content_sensitive():
 
     h_plain, ok_plain = _type_identity(typeof(plain))
     h_intr, ok_intr = _type_identity(typeof(intrinsic_ref))
-    assert ok_plain is False and ok_intr is False   # Dispatcher-ness alone decides this
+    assert ok_plain is False and ok_intr is False   # a dispatcher type is never cacheable
     assert len(h_plain) == 64 and len(h_intr) == 64
-    assert h_plain != h_intr                   # distinct bodies -> distinct hashes
+    assert h_plain != h_intr                   # the bodies differ, so the digests differ
 
 
 def test_type_identity_cres_is_cacheable():
-    """A compiled function is not itself the problem -- a ``cres`` renders as
-    ``DeriveFunctionType[<sig>]``, which carries neither an address nor a creation-order id
-    and which numba can cross-process-cache. Only the Dispatcher spelling is dropped."""
+    """The type of a ``cres`` value is cacheable, because its ``str`` holds the signature and no address or counter.
+
+    numba can cache code typed with it across processes, unlike code typed with a dispatcher type.
+    """
     @cres(float64(float64))
     def compiled(x):
         return x + 1.0
 
     ty = typeof(compiled)
-    # `cres` mints the numbox-owned type, which is structural, the property this test
-    # is about; that it is minted is pinned by
-    # `test/utils/test_derive_wap.py::test_cres_mints_a_derive_wap`.
+    # test_cres_mints_a_derive_wap in test/utils/test_derive_wap.py checks that cres returns a DeriveWAP. This test
+    # checks that the str of the value's type holds only the signature.
     assert str(ty) == "DeriveFunctionType[float64(float64)]"
     h, ok = _type_identity(ty)
     assert ok is True and len(h) == 64
 
 
 def test_type_identity_nested_dispatcher_is_uncacheable():
-    """A Dispatcher nested in a heterogeneous container escapes the top-level
-    ``isinstance`` check but must still be un-cacheable -- numba cannot
-    cross-process-cache a Dispatcher-carrying signature at any depth."""
+    """A tuple type that holds a dispatcher type is not cacheable, although the tuple type is not a dispatcher type.
+
+    A dispatcher type holds an address that differs between processes, so a signature that holds one at any depth
+    misses numba's cache in every process.
+    """
     @njit
     def helper(x):
         return x + 1.0
 
     het = typeof((1.0, helper))                # Tuple(float64, Dispatcher)
-    assert "CPUDispatcher(" in str(het)        # the substring the guard keys on
+    assert "CPUDispatcher(" in str(het)        # the substring that _type_identity looks for
     _h, ok = _type_identity(het)
     assert ok is False
 
 
 def test_type_identity_record_is_hashed_structurally_not_mangled():
-    """A Record must take the structural branch, not numba's mangle.
+    """A Record type is hashed by its ``str``, which describes its fields, not by numba's mangled name for it.
 
-    The mangle folds a creation-order ``_code``, so it differs between a cold process
-    and a warm one; hashing ``str(ty)`` instead is what makes a Record-typed node
-    process-stable. Asserting the hash simply *differs* from the mangled one pins that
-    the branch was taken -- deleting it makes this fail -- while the layout check pins
-    that going structural did not erase the field layout.
+    numba's mangled name for a Record holds a counter of the order in which the process creates types, so it differs
+    between processes. The digest must differ from the hash of the mangled name, and two records with swapped field
+    types must have different digests.
     """
     import hashlib
     import numpy as np
@@ -478,7 +485,7 @@ def test_type_identity_record_is_hashed_structurally_not_mangled():
     h, ok = _type_identity(rec)
     assert ok is True and len(h) == 64
     assert h != hashlib.sha256(mangle_type_or_value(rec).encode("utf-8")).hexdigest()
-    assert _type_identity(swapped)[0] != h     # field layout still discriminates
+    assert _type_identity(swapped)[0] != h     # the swapped field types give another digest
 
 
 def test_signature_identity_folds_component_cacheability():
@@ -493,23 +500,21 @@ def test_signature_identity_folds_component_cacheability():
     text_plain, ok_plain = _signature_identity(float64(float64, float64))
     assert ok_plain is True and isinstance(text_plain, str)
 
-    # A function-typed component is not automatically fatal: a cres stays cacheable.
+    # The type of a cres value in a signature leaves the signature cacheable.
     text_cres, ok_cres = _signature_identity(float64(float64, typeof(compiled)))
     assert ok_cres is True and isinstance(text_cres, str)
 
     text_disp, ok_disp = _signature_identity(float64(float64, typeof(helper)))
-    assert ok_disp is False                    # a Dispatcher component makes the sig un-cacheable
+    assert ok_disp is False                    # a dispatcher type makes the signature uncacheable
     assert isinstance(text_disp, str)
 
 
 def test_method_identity_folds_ns_values_read_as_globals_only():
-    """An `ns` value is folded when the method reads it as a global, and not
-    when the method merely names it as an attribute.
+    """An ``ns`` value enters a method's identity if the method reads it as a global, not if an attribute has its name.
 
-    Deciding this off `co_names` cannot tell `LOAD_GLOBAL knob` from
-    `LOAD_ATTR knob`, so a method doing `self.knob` against an `ns` carrying an
-    unrelated `knob` folded a value it never reads -- and, when that value has no
-    canonical form, dropped the struct's on-disk cache for nothing.
+    ``co_names`` holds global and attribute names alike, so ``_method_identity`` reads the opcodes instead. Folding a
+    value that the method never reads would change the identity of a method whose behavior is the same, and a value
+    without a fingerprint would turn off the struct's cache.
     """
     class Opaque:
         pass
@@ -518,7 +523,7 @@ def test_method_identity_folds_ns_values_read_as_globals_only():
         return self.knob
 
     def reads_global(self):
-        return knob                            # noqa: F821 - resolved from the exec'd ns
+        return knob                            # noqa: F821 - in a struct, ns provides knob
 
     ident_attr, cacheable_attr = _method_identity(reads_attribute, {"knob": Opaque()})
     assert cacheable_attr is True, (
@@ -528,11 +533,11 @@ def test_method_identity_folds_ns_values_read_as_globals_only():
     assert "ns:knob" not in ident_attr
 
     ident_global, cacheable_global = _method_identity(reads_global, {"knob": Opaque()})
-    assert cacheable_global is False           # genuinely read, and opaque -> uncacheable
+    assert cacheable_global is False           # read as a global, and without a fingerprint
     assert "ns:knob" in ident_global
 
-    # A genuinely-read global that *does* canonicalize stays cacheable, and its value
-    # (not merely its name) is folded, so changing it re-keys the struct.
+    # A global that the method reads and that has a fingerprint keeps the struct cacheable. Its value is folded, not
+    # only its name, so a new value changes the identity.
     ident_five, cacheable_five = _method_identity(reads_global, {"knob": 5})
     assert cacheable_five is True
     assert "ns:knob" in ident_five
