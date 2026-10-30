@@ -20,7 +20,8 @@ from test.auxiliary_utils import collect_and_run_tests, _deref_int64_intp
 def test_create_uniform_inputs():
     """``create_uniform_inputs`` casts the nodes of a tuple to ``NodeBaseType`` and takes a reference to each.
 
-    Each new node has one reference, and it has three once the cast tuple is built and its elements are read back.
+    Each new node has one reference after its creation and three references after the cast tuple is built and its
+    elements are read back.
     Each element read back points at the payload of the original node. The first MemInfo of the cast tuple is that of
     ``w1``, which has three references as well.
     """

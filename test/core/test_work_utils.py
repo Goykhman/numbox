@@ -1,7 +1,7 @@
 """Tests of ``make_work_helper`` and ``make_init_data``, which build ``Work`` nodes from Python with plain derives.
 
 The nodes hold scalars, NumPy arrays, a typed dictionary, a typed list, a ``StructRef`` and a structured array. The
-tests check the calculated values, the refusal of a derive whose parameters do not match the sources, the drawing of a
+tests check the calculated values, the error for a derive whose parameters do not match the sources, the drawing of a
 graph, and the graph queries ``depends_on``, ``all_inputs_names``, ``all_end_nodes`` and ``as_node``.
 """
 import numpy
@@ -84,7 +84,7 @@ def test_simple_time_2():
 
 
 def test_simple_time_3():
-    """``make_work_helper`` builds a graph of scalar and array nodes, which one ``calculate`` of ``y2`` computes.
+    """``make_work_helper`` builds a graph of scalar and array nodes, and one call of ``y2.calculate()`` computes it.
 
     The test also checks the drawing, ``depends_on`` with a name and with a node, ``all_inputs_names``,
     ``all_end_nodes`` and ``as_node``. ``all_end_nodes`` counts ``x0``, a node with a derive but no sources, as an end
@@ -218,7 +218,7 @@ def test_structref_data_2():
 def test_struct_array_data():
     """A node's data can be a zero-dimensional structured array, and a derive reads its fields."""
     w1_data_ty = numpy.dtype([("name", "|S16"), ("x", numpy.int32), ("y", numpy.float64)])
-    # numpy.array of one tuple returns a zero-dimensional structured array, not a numpy.void scalar.
+    # numpy.array called with one tuple returns a zero-dimensional structured array, not a numpy.void scalar.
     w1_data = numpy.array(("fine_euler", 137, 2.17), dtype=w1_data_ty)
     w1 = make_work_helper("w1", init_data=w1_data)
 

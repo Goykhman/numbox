@@ -12,7 +12,7 @@ from test.core.random_image_ref import random_image_ref
 
 
 def test_make_node_graph():
-    """``make_image`` draws a graph of ``Node`` objects as the print_tree section of the work page shows it."""
+    """``make_image`` draws a graph of ``Node`` objects as shown in the print_tree section of the work page."""
     n1 = make_node("first")
     n2 = make_node("second")
     n3 = make_node("third", inputs=(n1, n2))
@@ -29,7 +29,7 @@ fifth--third---first
 
 
 def test_node_graph_random():
-    """``make_image`` draws the tree of ``random_graph(50)`` from the seed 137 as ``random_image_ref`` holds it.
+    """The drawing of the tree of ``random_graph(50)`` from the seed 137 equals the text in ``random_image_ref``.
 
     ``all_inputs_names`` lists the nodes that one node of the tree depends on, depth first.
     """

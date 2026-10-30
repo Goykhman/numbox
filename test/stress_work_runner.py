@@ -7,8 +7,8 @@ the drawing and logs its duration. Its call at the end of the script is commente
 drawing below were taken with the call enabled.
 
 The measurements below were taken on an Apple M1 Pro with 16 GB of memory. A tree of 1,000 end nodes has about 2,000
-nodes in all, and a tree of 5,000 end nodes has about 10,000. A first run started from an empty cache, and a second run
-loaded the compiled code from the cache.
+nodes in total, and a tree of 5,000 end nodes has about 10,000. A first run started from an empty cache, and a second
+run loaded the compiled code from the cache.
 
 Single run, 1,000 end nodes
 ---------------------------
@@ -25,8 +25,8 @@ The second run with the drawing logged::
     Execution of do_make_image took 0.593s
     Execution of do_calculate took 0.148s
 
-The first run without the drawing used about 0.6 GB of memory. Its cache took about 380 MB on disk, 25 MB of it for
-``create_nodes`` and the rest for the calculation of the ``Work`` nodes. It logged::
+The first run without the drawing used about 0.6 GB of memory. Its cache occupied about 380 MB on disk, of which
+``create_nodes`` used 25 MB and the compiled calculation of the ``Work`` nodes used the rest. It logged::
 
     Execution of do_create_nodes took 23.089s
     Execution of do_calculate took 18.254s
@@ -51,8 +51,8 @@ The second run with the drawing logged::
     Execution of do_make_image took 2.671s
     Execution of do_calculate took 0.874s
 
-The first run without the drawing used about 5.75 GB of memory. Its cache took about 3.05 GB on disk, 25 MB of it for
-``create_nodes`` and the rest for the calculation of the ``Work`` nodes. It logged::
+The first run without the drawing used about 5.75 GB of memory. Its cache occupied about 3.05 GB on disk, of which
+``create_nodes`` used 25 MB and the compiled calculation of the ``Work`` nodes used the rest. It logged::
 
     Execution of do_create_nodes took 820.860s
     Execution of do_calculate took 156.426s
@@ -70,7 +70,7 @@ The first run used about 1.7 GB of memory and about 560 MB of cache on disk, and
     Execution of do_create_nodes took 23.113s
     Execution of run took 69.796s
 
-The second run used about 0.7 GB of memory, about as much as with 1,000 entities, and it logged::
+The second run used about 0.7 GB of memory, about as much as a run with 1,000 entities used, and it logged::
 
     Execution of do_create_nodes took 0.159s
     Execution of run took 3.779s

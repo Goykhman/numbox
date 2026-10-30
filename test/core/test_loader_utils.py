@@ -2,7 +2,8 @@
 
 The function runs in jitted code and fills a typed dictionary keyed by field name. The array has an int16, a float64
 and a 10-byte string field, with random values from a fixed seed. The second test loads each row into the end nodes of
-a graph that ``ll_make_work`` creates, calculates the graph in jitted code, and compares the totals with NumPy's.
+a graph that ``ll_make_work`` creates, calculates the graph in jitted code, and compares the totals with those that
+NumPy computes.
 """
 import numpy
 from numba import njit, typeof
@@ -79,7 +80,7 @@ state_ty = np_struct_member_type(data_ty, "state")
 
 @njit(**jit_options)
 def make_graph(derive_total_):
-    """Create the graph of this file in jitted code: an end node for each field of a row and the node ``total``."""
+    """Create the test graph in jitted code, with an end node for each field of a row and the node ``total``."""
     quantity = ll_make_work("quantity", int16(0), (), None)
     value = ll_make_work("value", 0.0, (), None)
     state = ll_make_work("state", b"", (), None, data_ty_ref=state_ty)

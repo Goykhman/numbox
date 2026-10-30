@@ -41,7 +41,7 @@ def test_2():
 
 
 def test_3():
-    """A tuple of specs gives the dictionary that the docstring of ``infer_sources_dependencies`` shows."""
+    """For a tuple of specs, ``infer_sources_dependencies`` returns the dictionary that its docstring shows."""
     m5 = End(name="m5", init_value=0.0)
     m3 = Derived(name="m3", init_value=0.0, sources=(m5,), derive=lambda x: x)
     m2 = Derived(name="m2", init_value=0.0, sources=(m3,), derive=lambda x: x)

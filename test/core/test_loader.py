@@ -27,7 +27,7 @@ def test_loader_1():
 def test_loader_2():
     """Loading a source of a calculated node clears the node's ``derived`` flag but leaves its value unchanged.
 
-    The next ``calculate`` computes the node from the new value of the source.
+    The next call of ``calculate`` computes the node from the new value of the source.
     """
     w1 = make_work_helper("w1", 1.41)
     w2 = make_work_helper("w2", 1.72)
@@ -54,9 +54,10 @@ def test_loader_2():
 
 
 def test_loader_3():
-    """Loading two of three sources, one of them a string, clears their flags and the flag of the node that uses them.
+    """Loading two of three sources, one of which holds a string, clears their flags and the flag of the node that uses
+    them.
 
-    The source that is not loaded keeps its flag, and the next ``calculate`` uses the new values.
+    The source that is not loaded keeps its flag, and the next call of ``calculate`` uses the new values.
     """
     w0 = make_work_helper("w0", 1.72)
     w1 = make_work_helper("w1", 1.41)

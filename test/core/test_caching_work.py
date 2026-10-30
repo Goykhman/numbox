@@ -1,8 +1,8 @@
 """Tests of cached jitted functions that calculate ``Work`` nodes.
 
-A node created from Python can be passed to such a function, and a ``cres`` derive passed as an argument leaves the
-function cacheable. A function that reads its ``cres`` derive from the module's globals cannot be cached, and numba
-warns about it.
+A node created from Python can be passed to such a function, and numba can cache the function when it receives its
+``cres`` derive as an argument. A function that reads its ``cres`` derive from the module's globals cannot be cached,
+and numba warns about it.
 """
 from numba import float64, njit
 from numbox.core.configurations import jit_options

@@ -42,7 +42,7 @@ def random_graph(max_size):
     """Return a random tree of ``Node`` objects and a dictionary of its nodes by name.
 
     ``max_size`` is the budget of nodes that ``random_node`` describes. The tree depends on NumPy's global random state,
-    which ``test_print_tree`` seeds with 137 to get a fixed tree.
+    which ``test_print_tree`` seeds with 137 for a fixed tree.
     """
     all_nodes = {}
     _, tree_ = random_node(all_nodes, max_size)

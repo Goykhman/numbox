@@ -291,11 +291,11 @@ def test_zero_capacity_rejected():
 
 
 def test_cache_survives_across_processes(tmp_path):
-    """A second process that uses the same cache directory creates a vector and reads its size, as the first did.
+    """A second process with the same cache directory creates a vector and reads its size, as the first process did.
 
     The accessors of ``Vector`` compile with numbox's jit options, which enable caching, so the second process loads
-    the accessor that the first compiled. ``VectorTypeClass`` is defined once, at module level, so the vector type of
-    the second process matches the type in the cache index. The test checks that both processes exit normally.
+    the accessor that the first process compiled. ``VectorTypeClass`` is defined once, at module level, so the vector
+    type of the second process matches the type in the cache index. The test checks that both processes exit normally.
     """
     probe = textwrap.dedent("""
         from numba import types as nb_types

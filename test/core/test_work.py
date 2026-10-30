@@ -1,11 +1,11 @@
 """Tests of ``make_work`` and of the methods of ``Work`` nodes created without the builder.
 
 The tests create nodes from Python and from jitted code, calculate graphs of scalars and arrays, and read the names of a
-node's sources. They check the refusals: a derive whose signature does not match the node's types, a bare type in place
-of a signature for ``cres``, an ``@njit`` dispatcher as a derive, and a negative input index. They also check the
-placeholder that ``explain`` shows for a derive that ``make_graph`` did not compile, the ``py_func`` attribute of
+node's sources. They check the errors raised for a derive whose signature does not match the node's types, a bare type
+in place of a signature for ``cres``, an ``@njit`` dispatcher as a derive, and a negative input index. They also check
+the placeholder that ``explain`` shows for a derive that ``make_graph`` did not compile, the ``py_func`` attribute of
 ``make_work`` and the generation of the source getters. ``test_builder`` covers graphs built from specs,
-``test_lowlevel_work_utils`` covers ``ll_make_work``, and ``test_derive_wap`` covers the exceptions of derives.
+``test_lowlevel_work_utils`` covers ``ll_make_work``, and ``test_derive_wap`` covers the exceptions that derives raise.
 """
 import numpy
 import pytest
@@ -205,7 +205,7 @@ def run_test_work_calculate(derive_w1_, derive_w2_, derive_w3_, derive_w4_, deri
 
 
 def test_work_calculate():
-    """One ``calculate`` of ``w5`` calculates every node that ``w5`` depends on, each from its own sources.
+    """One call of ``w5.calculate()`` calculates every node that ``w5`` depends on, each from its own sources.
 
     ``w1``, ``w2`` and ``w4`` have derives but no sources. Every node holds 0 until the call.
     """
@@ -226,7 +226,7 @@ def test_work_calculate():
 
 
 def test_work_calculate_jitted():
-    """``make_work`` and ``calculate`` called from cached jitted code give the values of ``test_work_calculate``."""
+    """Called from cached jitted code, ``make_work`` and ``calculate`` compute the values of ``test_work_calculate``."""
     (
         w1_init_data, w2_init_data, w3_init_data, w4_init_data, w5_init_data,
         w1, w2, w3, w4, w5

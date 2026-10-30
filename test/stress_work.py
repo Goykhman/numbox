@@ -152,7 +152,7 @@ def single_run(num_of_inputs):
 def prepare_input_data(num_of_sources=NUM_OF_PURE_INPUTS_DEFAULT, num_of_entities=NUM_OF_ENTITIES_DEFAULT):
     """Return a structured array with a row for each entity and a float64 field ``w_<i>`` for each end node.
 
-    The values are random, from 0 up to 10.
+    The values are random, at least 0 and below 10.
     """
     data_ty = numpy.dtype([(f"w_{i}", numpy.float64) for i in range(num_of_sources)], align=True)
     data_ = numpy.empty((num_of_entities,), dtype=data_ty)
