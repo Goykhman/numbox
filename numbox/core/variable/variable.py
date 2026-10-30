@@ -1,3 +1,12 @@
+"""Build a graph of calculations from variable specifications, and evaluate it in Python.
+
+A :class:`Graph` holds the variables in namespaces: a :class:`Variables` namespace for the variables that formulas
+calculate, and an :class:`External` namespace for each external source of data. :meth:`Graph.compile` orders the
+variables that a request needs into a :class:`CompiledGraph`, whose :meth:`~CompiledGraph.execute` and
+:meth:`~CompiledGraph.recompute` call the formulas from Python and write the values into a :class:`Values` instance.
+The module imports nothing from numba; :mod:`numbox.core.variable.compile_kernel` compiles the same graph into one
+numba function.
+"""
 import sys
 import warnings
 
@@ -10,26 +19,31 @@ from typing import (
 
 
 class Namespace(ABC):
+    """A collection of variables keyed by name, the base class of :class:`Variables` and :class:`External`.
+
+    A variable's qualified name joins the namespace's `name` and the variable's name with a dot. Iterating over a
+    namespace yields the names of its variables.
+    """
     name: str
     _variables: dict[str, 'Variable']
 
     def keys(self):
+        """Return the names of the variables that the namespace holds."""
         return self._variables.keys()
 
     def update(self, key: str, var: 'Variable') -> None:
-        """
-        Post-initialization update for dynamically generated
-        `Variable` instances.
+        """Store `var` under the name `key`, replacing any variable stored under that name.
+
+        :meth:`External.declare` uses it to add a variable created after the namespace. A request that the graph has
+        already compiled keeps the variable it found then.
         """
         self._variables[key] = var
 
     def __contains__(self, key: str) -> bool:
-        """
-        :param key: un-qualified name of the `Variable`
-        searched for in this namespace.
-        If `in` thereby returns True, it means that the
-        found `Variable` is qualified with `self.name`,
-        the name of this `Namespace` namespace.
+        """Return True if the namespace holds a variable named `key`, an unqualified name.
+
+        A variable found there has this namespace's name as its source, so its qualified name starts with that name.
+        Unlike a lookup with ``[]`` in an :class:`External` namespace, ``in`` never creates the variable.
         """
         return key in self._variables
 
@@ -42,38 +56,47 @@ class Namespace(ABC):
 
 
 class Storage(Protocol):
+    """The storage that a :class:`CompiledGraph` calculates into: a :class:`Value` for each variable.
+
+    :class:`Values` implements it, and so does any class with the same methods.
+    """
     _values: dict['Variable', 'Value']
 
     def get(self, variable: 'Variable') -> 'Value':
-        """
-        Principal access point to the requested variable.
-        Instantiates the corresponding value when first
-        invoked for the given variable.
-        """
+        """Return the :class:`Value` of `variable`, and create it, holding ``_null``, on the first request for it."""
 
     def __iter__(self) -> Iterator['Variable']:
         pass
 
 
 class VarSpecBase(TypedDict):
+    """The required key of a variable specification: ``name``, the name of the variable."""
     name: str
 
 
 @dataclass(frozen=True)
 class Params:
-    """Optional per-`Variable` declaration driving static jitability in
-    `compile_kernel`. `jitable=False` declares a deliberately plain-Python
-    node; `type` is the variable's numba `Type`
-    (None means undeclared).
+    """The declaration of a variable for compile_kernel: whether numba compiles its formula, and its type.
 
-    Like `formula`, `params` must be attached to a node before the first
-    `compile()` of any required set containing that node: a `Graph` caches its
-    compiled result, so a `params` attached afterward is not picked up."""
+    ``jitable=False`` declares a formula that runs in Python. `type` is the numba type of the variable's value, and
+    None leaves it undeclared. :func:`~numbox.core.variable.compile_kernel.compile_kernel` uses the declarations only
+    when every calculated variable in the requested part of the graph is declared with its type, and every external
+    variable that a formula reads has a declared type; otherwise it ignores them all.
+
+    A graph caches what it compiles, so a declaration must be in place before the first :meth:`Graph.compile` or
+    compile_kernel of a request that involves the variable, as a formula must. A declaration added later has no
+    effect on that request.
+    """
     jitable: bool = True
     type: Any = None
 
 
 class VarSpec(VarSpecBase, total=False):
+    """A variable specification, the dictionary from which a :class:`Variables` namespace creates a :class:`Variable`.
+
+    Besides ``name``, it may hold ``inputs``, ``formula``, ``metadata`` and ``params``, which have the meanings of the
+    parameters of :class:`Variable`. The namespace sets the variable's ``source``.
+    """
     inputs: dict[str, str]
     formula: Callable
     metadata: str
@@ -84,7 +107,7 @@ VarValue: TypeAlias = Any
 
 
 class _Null:
-    """ Value of `Variable` that has not been calculated. """
+    """The class of ``_null``, the marker that stands for the value of a variable not yet calculated."""
     pass
 
 
@@ -95,39 +118,26 @@ QUAL_SEP = "."
 
 
 def make_qual_name(namespace_name: str, var_name: str) -> str:
-    """ Each `Variable` instance is best initialized in
-    and owned by a `Namespace` object (such as, instances
-    of `External` and `Variables`), with the given
-    `namespace_name`.
-
-    This function thereby returns qualified name of the
-    `Variable` instance. """
+    """Return the qualified name of a variable: `namespace_name` and `var_name` joined by a dot."""
     return f"{namespace_name}{QUAL_SEP}{var_name}"
 
 
 class External(Namespace):
-    """
-    An 'external' namespace that facilitates discovery
-    of requested names.
+    """A namespace for the variables of one external source of data, whose values the caller supplies.
 
-    When requesting a `Variable` with the given name via a
-    typical `__getitem__` call, if the `Variable` is not
-    found, it will be created and added to this dictionary.
-    This way the graph will be able to infer which variables
-    are required from the external source abstracted by this
-    namespace.
+    A lookup of a name that the namespace does not hold creates a variable of that name, without inputs or formula,
+    and stores it. The graph finds the external variables that a calculation needs through these lookups, so a
+    misspelled name becomes one more external variable instead of an error.
     """
     def __init__(self, name: str):
         self.name = name
         self._variables: dict[str, 'Variable'] = {}
 
     def __getitem__(self, name) -> 'Variable':
-        """
-        :param name: un-qualified name of the `Variable`.
-        Instances of `Variable` that are 'external' should
-        be put in `External` namespace indirectly, through
-        a call to this method. These `Variable`s will be
-        qualified with the name `self.name` of this namespace.
+        """Return the variable named `name`, an unqualified name, and create it if the namespace does not hold it.
+
+        The variable's source is this namespace's name. External variables are best created through this lookup, or
+        through :meth:`declare` when they need a declared type.
         """
         variable = self._variables.get(name)
         if variable is None:
@@ -139,9 +149,12 @@ class External(Namespace):
         return variable
 
     def declare(self, name: str, params: Params) -> 'Variable':
-        """Pre-seed a typed external before compile (the only supported route
-        to attach params to an external, which is otherwise auto-created
-        untyped on lookup)."""
+        """Create the variable `name` with the declaration `params`, store it, and return it.
+
+        A lookup creates an external variable without a declaration, so this method is the supported way to declare
+        the type of one. It replaces a variable already stored under `name`. Declare before the first compile of a
+        request that involves the variable, because the graph keeps what it compiled.
+        """
         variable = Variable(name=name, source=self.name, params=params)
         self.update(name, variable)
         return variable
@@ -149,33 +162,23 @@ class External(Namespace):
 
 @dataclass(frozen=True)
 class Variable:
-    """
-    An instance of `Variable` is anything that can be calculated
-    from the values of the given `inputs` dependencies using the
-    provided `formula` (i.e., a Python function).
+    """A node of the graph: a value that the caller supplies, or that a formula calculates from the values of inputs.
 
-    Calculated value can be `None`, that is why a non-calculated
-    value is designated with `_null`.
+    A variable is best created by its namespace: a :class:`Variables` namespace creates one for each specification
+    passed to it, and an :class:`External` namespace creates one when a name is first looked up in it. Two variables
+    are equal, and have the same hash, when their names and sources are equal. A calculated value can be None, so the
+    marker ``_null`` stands for a value not yet calculated.
 
-    An instance of `Variable` is best created within the given
-    `Namespace`. For example, when the `Variables` subtype of
-    the `Namespace` is instantiated, it gets populated with
-    the freshly created `Variable` instances per the `VarSpec`
-    specifications passed to it. Or, when the `External` subtype
-    of the `Namespace` is queried for the given variable name,
-    if a `Variable` with such a name is not already present in
-    that external namespace, it will be created and stored there.
-
-    :param name: name of the `Variable` instance.
-    :param source: name of the `Namespace` instance  which is
-        the namespace / source of this `Variable`.
-    :param inputs: (optional) map from names of the `Variable`
-        inputs (which are names of other `Variable` instances) to
-        names of their `Namespace` instances.
-    :param formula: (optional) function that calculates the
-        value of this `Variable` from its inputs.
-    :param metadata: any possible metadata associated with
-        this variable.
+    :param name: the variable's name, unique within its namespace. It must not contain `QUAL_SEP`, a dot.
+    :param source: the name of the namespace that holds the variable.
+    :param inputs: maps the name of each input variable to the name of the namespace that holds it. The formula
+        receives the values of the inputs as positional arguments, in this order.
+    :param formula: the function that calculates the variable's value from the values of its inputs, or None, as for
+        an external variable.
+    :param metadata: text that describes the variable. :meth:`Graph.explain` includes it, and a compiled graph in debug
+        mode prints it.
+    :param params: the declaration of the variable for compile_kernel, a :class:`Params`.
+    :raises ValueError: if `name` contains `QUAL_SEP`.
     """
     name: str
     source: str = field(default="")
@@ -185,10 +188,8 @@ class Variable:
     params: Params | None = field(default=None)
 
     def __post_init__(self):
-        # Only the variable name is restricted: qualified names compose as
-        # source.name and decode via rsplit(QUAL_SEP, 1), which binds only the
-        # final separator -- so a dotted source/namespace round-trips, while a
-        # dotted name would be ambiguous.
+        # The check restricts only the variable name. numbox splits a qualified name with rsplit(QUAL_SEP, 1), at its
+        # last separator, so a namespace name with a dot splits correctly, while a variable name with a dot would not.
         if QUAL_SEP in self.name:
             raise ValueError(
                 f"Variable name {self.name!r} contains the reserved qualified-name "
@@ -203,35 +204,30 @@ class Variable:
         return isinstance(other, Variable) and self.name == other.name and self.source == other.source
 
     def qual_name(self) -> str:
-        """
-        Qualified name of `Variable` incorporates both the name
-        of the `Variable` and the name of its source / namespace.
-        """
+        """Return the qualified name: the name of the variable's namespace and its own name, joined by a dot."""
         return make_qual_name(self.source, self.name)
 
 
 class Variables(Namespace):
+    """A namespace of calculated variables, created from variable specifications.
+
+    :param name: the namespace's name, which becomes the source of each of its variables.
+    :param variables: the specifications, a :class:`VarSpec` dictionary for each variable. A later specification
+        with the same name replaces an earlier one.
+    :raises TypeError: if a specification has a key that :class:`Variable` does not take, ``source`` included.
+    """
     def __init__(
         self,
         name: str,
         variables: list[VarSpec],
     ):
-        """
-        Namespace of `Variable` instances.
-
-        :param name: name of the `Variables` instance namespace.
-        :param variables: initializer list of `VarSpec` specs
-        used to create instances of `Variable` to be stored in
-        this namespace.
-        """
         self.name = name
         self._variables = {variable["name"]: Variable(source=self.name, **variable) for variable in variables}
 
     def __getitem__(self, variable_name: str) -> Variable:
-        """
-        :param variable_name: name of the `Variable` to retrieve.
-        This is un-qualified name, as it is already looked up in
-        this namespace.
+        """Return the variable named `variable_name`, an unqualified name.
+
+        Raises ``KeyError`` if the namespace does not hold it.
         """
         try:
             return self._variables[variable_name]
@@ -241,22 +237,24 @@ class Variables(Namespace):
 
 @dataclass
 class Value:
-    """
-    Value of the corresponding `Variable`.
-    Best used when created indirectly by the
-    `Values` storage.
+    """The value of one variable in one :class:`Values` instance, ``_null`` until a calculation sets it.
+
+    It is best created through :meth:`Values.get`.
     """
     variable: Variable
     value: VarValue | _Null = field(default=_null)
 
 
 class Values:
-    """ Values of all `Variable` instances, computed and external,
-    will be held here. """
+    """The values of one calculation: a :class:`Value` for each variable, external or calculated.
+
+    The instance starts empty and implements :class:`Storage`.
+    """
     def __init__(self):
         self._values: dict[Variable, Value] = {}
 
     def get(self, variable: Variable) -> Value:
+        """Return the :class:`Value` of `variable`, and create it, holding ``_null``, on the first request for it."""
         if variable not in self._values:
             self._values[variable] = Value(variable=variable)
         return self._values[variable]
@@ -267,6 +265,10 @@ class Values:
 
 @dataclass(frozen=True)
 class CompiledNode:
+    """A variable of a :class:`CompiledGraph`, with its inputs: the variables whose values its formula takes, in order.
+
+    Two nodes are equal, and have the same hash, when their variables have the same name and source.
+    """
     variable: Variable
     inputs: list[Variable]
 
@@ -283,6 +285,14 @@ class CompiledNode:
 
 @dataclass(frozen=True)
 class CompiledGraph:
+    """The variables that a request needs, each after its inputs, ready to be calculated from Python.
+
+    :meth:`Graph.compile` creates it. `ordered_nodes` holds a :class:`CompiledNode` for each variable, the external
+    ones included, and `required_external_variables` maps each external source to the variables that it must supply,
+    as ``{source: {name: variable}}``. If `debug` is True, the instance prints each node and its metadata to stderr
+    before the node's formula runs. The instance fills `dependents`, which maps each variable to the nodes that read
+    it, when it is created, and it fills `affected_cache` as :meth:`recompute` runs.
+    """
     ordered_nodes: list[CompiledNode]
     required_external_variables: dict[str, dict[str, Variable]]
     debug: bool = False
@@ -299,17 +309,17 @@ class CompiledGraph:
         external_values: dict[str, dict[str, VarValue]],
         values: Storage,
     ):
-        """
-        Main entry point to calculate values of nodes of the compiled
-        graph. Calculation requires the following inputs:
+        """Calculate every variable of the compiled graph, and write the values into `values`.
 
-        :param external_values: actual values of all required external
-            variables, this can be a superset of what is really needed for
-            the calculation. The map is first from the name of the external
-            namespace and then from the name of the variable within that
-            source to the variable's actual value.
-        :param values: runtime storage of all values, e.g., an instance
-            of `Values`.
+        :param external_values: the values of the required external variables, as ``{source: {name: value}}``. It may
+            hold more values than the calculation needs.
+        :param values: the storage to write into, such as a :class:`Values` instance.
+        :raises KeyError: if `external_values` lacks a required source or variable.
+        :raises RuntimeError: if an input of a formula holds ``_null``, as a variable without a formula does unless
+            `values` already holds a value for it.
+
+        The method writes the external values first. Then each formula runs after the formulas of its inputs. A
+        variable without a formula keeps the value that `values` holds for it.
         """
         self._assign_external_values(external_values, values)
         self._calculate(self.ordered_nodes, values)
@@ -319,15 +329,11 @@ class CompiledGraph:
         external_values: dict[str, dict[str, VarValue]],
         values: Storage
     ):
-        """
-        For the external variables required for this calculation,
-        populate their values into the `Values` storage.
+        """Write the value of each required external variable into `values`.
 
-        :param external_values: mapping from names of external sources
-        to dictionary from names of external `Variable`s to their values
-        that are needed for the given calculation.
-        :param values: an instance of `Values` storage of all calculated
-        and external values.
+        :param external_values: the external values, as ``{source: {name: value}}``.
+        :param values: the storage of the calculation, such as a :class:`Values` instance.
+        :raises KeyError: if a required source or variable is missing from `external_values`.
         """
         for source_name, variables in self.required_external_variables.items():
             provided = external_values.get(source_name)
@@ -342,10 +348,10 @@ class CompiledGraph:
                 values.get(variable).value = var_value
 
     def _collect_affected(self, changed_vars: set[Variable]) -> list[CompiledNode]:
-        """
-        Return subset of `self.ordered_nodes` consisting of nodes
-        affected by `changed_vars`, in the same order as in the
-        `self.ordered_nodes`.
+        """Return the nodes that depend on `changed_vars`, directly or indirectly, in the order of `ordered_nodes`.
+
+        A changed variable is among them only if it depends on another changed variable. The compiled graph caches the
+        result for each set of changed variables.
         """
         key = frozenset(changed_vars)
         cached = self.affected_cache.get(key)
@@ -364,16 +370,11 @@ class CompiledGraph:
         return affected_list
 
     def _calculate(self, nodes: list[CompiledNode], values: Storage):
-        """
-        Calculate values of the `Variable`s using their own `formula`
-        by evaluating them as functions of the values of the specified
-        inputs.
+        """Calculate the variable of each node in `nodes` from the values of its inputs, and write it into `values`.
 
-        All inputs need to be calculated first (i.e., to be non-`_null`)
-        before the value of the given `Variable` can be `_calculate`d.
-        This is possible because the `Variable`s in the list `nodes` are
-        supplied as a topologically ordered list `self.ordered_nodes`,
-        or as an ordered sub-set thereof (see, e.g., `recompute`).
+        Every input must hold a value other than ``_null`` before a formula reads it, so `nodes` must be in
+        topological order: `ordered_nodes`, or an ordered subset of it such as the one that :meth:`recompute` passes.
+        The method skips a node without a formula. Raises ``RuntimeError`` if an input holds ``_null``.
         """
         for node in nodes:
             if node.variable.formula is None:
@@ -390,15 +391,16 @@ class CompiledGraph:
             values.get(node.variable).value = result
 
     def recompute(self, changed: dict[str, dict[str, VarValue]], values: Storage):
-        """
-        :param changed: dict of sources to names to new values of changed
-            `Variable` instances coming from either `External` or `Variables` source.
-        :param values: storage of all `Variable` values.
+        """Write the changed values into `values`, and calculate again the variables that depend on them.
 
-        Recompute takes priority: each node in the affected downstream cone is reset and
-        recomputed from its formula, so the graph structure decides the final values. A
-        supplied value persists only for a node not downstream of any other change; a
-        co-changed downstream value is recomputed, not held.
+        :param changed: the new values, as ``{source: {name: value}}``. A name may belong to an :class:`External` or
+            to a :class:`Variables` namespace.
+        :param values: the storage that holds the values of an earlier calculation.
+
+        Each variable that depends on a changed variable is reset and calculated again from its formula, so the graph
+        decides the final values. A given value of a calculated variable is therefore kept only if the variable does
+        not depend on another variable changed in the same call; otherwise its formula replaces the value. A name that
+        the compiled graph does not hold changes nothing, and a warning says that it is not in the calculation path.
         """
         changed_vars = set()
         for src, vals in changed.items():
@@ -420,19 +422,22 @@ class CompiledGraph:
 
 
 class Graph:
+    """A graph of variables, built from variable specifications, that orders the variables of each request.
+
+    :param variables_lists: maps the name of each :class:`Variables` namespace to the specifications of its variables,
+        :class:`VarSpec` dictionaries.
+    :param external_source_names: the names of the external sources whose variables the formulas may read. Each becomes
+        an :class:`External` namespace.
+    :raises ValueError: if an external source has the name of a :class:`Variables` namespace.
+
+    `registry` maps the name of each namespace to the namespace, and `external` maps the name of each external source
+    to its namespace. `compiled_graphs` caches the result of :meth:`compile` for each set of requested names.
+    """
     def __init__(
         self,
         variables_lists: dict[str, list[VarSpec]],
         external_source_names: list[str]
     ):
-        """
-        :param variables_lists: mapping of names of `Variables`
-        namespaces to the lists of specifications of `Variable`
-        instances to be added to these namespaces.
-        :param external_source_names: list of names of possible
-        `External` sources from which `Variable` inputs might
-        be coming from.
-        """
         self.external_source_names: list[str] = external_source_names
         self.registry: dict[str, Namespace] = {}
         self.external: dict[str, External] = {
@@ -452,8 +457,19 @@ class Graph:
         self.reverse_dependencies = None
 
     def compile(self, required: list[str] | str, debug: bool = False) -> CompiledGraph:
-        """
-        :required: list of qualified variables names that need to be calculated.
+        """Return a :class:`CompiledGraph` of the variables that `required` needs, each after its inputs.
+
+        :param required: the qualified name of a variable to calculate, or a list of them.
+        :param debug: if True, the compiled graph prints each node and its metadata to stderr before its formula runs.
+        :raises ValueError: if a name is not qualified.
+        :raises KeyError: if a name, or an input of a needed variable, lies in an unknown namespace or is missing from
+            its :class:`Variables` namespace. An :class:`External` namespace creates any name looked up in it.
+        :raises RuntimeError: if the needed variables form a cycle.
+        :raises RecursionError: if a chain of dependencies is deeper than Python's recursion limit.
+
+        The graph caches the result for each set of names, in any order, and returns the cached compiled graph for a
+        later request of the same names, whatever `debug` that request passes. A variable or a declaration added
+        afterwards therefore has no effect on that request.
         """
         if isinstance(required, str):
             required = [required]
@@ -478,9 +494,9 @@ class Graph:
         return compiled
 
     def _get_source(self, source_name: str) -> Namespace:
-        """
-        :param source_name: name of the source (either an instance
-        of `Variables` or an `External` source) that is requested.
+        """Return the namespace named `source_name`, a :class:`Variables` or an :class:`External` namespace.
+
+        Raises ``KeyError`` if the graph has no namespace of that name.
         """
         variables_source = self.registry.get(source_name)
         if variables_source is not None:
@@ -488,9 +504,12 @@ class Graph:
         raise KeyError(f"Unknown source {source_name}")
 
     def _topological_order(self, required: list[str]) -> tuple[list[Variable], set[Variable]]:
-        """
-        :param required: qualified name(s) of `Variable` instance(s)
-        for which a topological ordering of a DAG is to be determined.
+        """Return the variables that `required` needs, each after its inputs, and the set of the external ones.
+
+        :param required: a qualified name, or a list of them.
+
+        The walk is depth first and recursive, so a chain of dependencies deeper than Python's recursion limit raises
+        ``RecursionError``. A cycle raises ``RuntimeError``.
         """
         if isinstance(required, str):
             required = [required]
@@ -502,7 +521,7 @@ class Graph:
         used_external_vars: set[Variable] = set()
 
         def visit(qual_name: str):
-            """ DFS traversal of graph nodes. """
+            """Append the variable `qual_name` after its inputs, depth first, unless it is already in the order."""
             if qual_name in visited:
                 return
             if qual_name in visiting:
@@ -525,10 +544,7 @@ class Graph:
 
     @staticmethod
     def _required_external_variables(used_external_vars: set[Variable]) -> dict[str, dict[str, Variable]]:
-        """
-        For requested `External` sources, return the list of required
-        external `Variable` instances.
-        """
+        """Return the external variables grouped by source, as ``{source: {name: variable}}``."""
         required_external_variables = {}
         for variable in used_external_vars:
             variable_name = variable.name
@@ -537,9 +553,10 @@ class Graph:
         return required_external_variables
 
     def _build_reverse_dependencies(self) -> dict[str, set[str]]:
-        """
-        Utility to calculate set of qualified names of variables
-        impacted by each of the encountered inputs.
+        """Return a map from the qualified name of each input to the qualified names of the variables that read it.
+
+        The graph builds the map from the registry on the first call and caches it, so a variable added or replaced
+        afterwards is not in it.
         """
         if self.reverse_dependencies is not None:
             return self.reverse_dependencies
@@ -555,9 +572,13 @@ class Graph:
         return reverse
 
     def dependents_of(self, qual_names: list[str] | set[str] | str) -> set[str]:
-        """
-        Return qualified names of `Variable`s that directly or indirectly
-        depend on any of `qual_names`.
+        """Return the qualified names of the variables that depend on any of `qual_names`, and `qual_names` themselves.
+
+        :param qual_names: a qualified name, or a list or set of them.
+
+        A dependency may be direct or pass through other variables. The search covers every namespace of the graph,
+        not only a compiled request. The graph builds the map of dependents on the first call and keeps it, so a
+        variable added or replaced afterwards is not seen.
         """
         if isinstance(qual_names, str):
             qual_names = {qual_names}
@@ -575,21 +596,20 @@ class Graph:
         return result
 
     def explain(self, qual_name: str, right_to_left: bool = True) -> str:
-        """
-        Follow the dependencies chain to explain how the given
-        variable is derived.
+        """Return a text that explains how the variable `qual_name` is derived from its dependencies.
 
-        Uses `metadata` of the `Variable` instances.
+        :param qual_name: the qualified name of the variable.
+        :param right_to_left: if True, the default, the text starts with `qual_name` and moves toward the end nodes of
+            the graph; if False, it starts with the end nodes.
 
-        :param qual_name: qualified name of the `Variable`.
-        :param right_to_left: when `True` (default), begin explanation
-            with `qual_name`. That is, move towards the ends of the
-            graph.
+        The text has one entry for `qual_name` and one for each variable that it depends on. The entry of an external
+        variable names its source; the entry of any other variable names its inputs and gives its metadata.
         """
         derived = set()
         derivation = []
 
         def collect(qual_name_: str):
+            """Add the entries of the dependencies of `qual_name_`, then its own, each variable once."""
             if qual_name_ in derived:
                 return
             derived.add(qual_name_)
