@@ -53,13 +53,14 @@ def _body_fingerprint(func, opaque=None):
     values of the globals that the body reads. The docstring is one of the constants, so an edit to the docstring
     alone changes the fingerprint. A value that has no form stable across processes enters as a placeholder for its
     type. If ``opaque`` is a list, each such value is appended to it. :func:`_publish_cfunc_alias` compares those
-    values to tell a second body from the same body registered twice.
+    values to distinguish a second body from the same body registered twice.
     """
-    # The strict walker raises on the first value that has no canonical form. A binding's body usually reaches one,
-    # the @intrinsic _call_lib_func. The best-effort walker then folds every value it can and a placeholder for the
-    # rest. Two bodies that differ only in a captured value therefore still get two fingerprints: closures that a
-    # factory makes over different C symbol names, or a redefinition that changes only a literal. Unlike the strict
-    # walker, the best-effort walker does not fold the module attributes that the body reads, such as cfg.SCALE.
+    # The strict walker raises on the first value that has no canonical form. The body of a binding usually calls one
+    # such value, the @intrinsic _call_lib_func. The best-effort walker then folds every value that it can
+    # canonicalize, and it folds a placeholder for each other value. Two bodies that differ only in a captured value
+    # therefore still have different fingerprints: closures that a factory makes over different C symbol names, or a
+    # redefinition that changes only a literal. Unlike the strict walker, the best-effort walker does not fold the
+    # module attributes that the body reads, such as cfg.SCALE.
     try:
         return _fingerprint_function(func, set())
     except (_Unfingerprintable, RecursionError):
@@ -77,21 +78,21 @@ def _stable_cfunc_alias(func, main_sig, jit_options=None, opaque=None):
     binding would have. ``opaque`` is passed on to :func:`_body_fingerprint`.
     """
     # numba names the body's C entry point with a tag from a per-process counter, the "v<N>" of
-    # FunctionIdentity.unique_id. numba's cache key leaves the tag out, so two processes give one function two names. If
-    # the cached wrapper and the cached callers that inline it held numba's name, a cache that two processes built could
-    # pair a body that defines one name with a caller that refers to the other. The load would then abort with "LLVM
-    # ERROR: Symbol not found". Callers therefore refer to this alias, which each process registers for its own compiled
-    # body with llvmlite.binding.add_symbol.
+    # FunctionIdentity.unique_id. numba's cache key leaves the tag out, so one function can have a different name in
+    # each process. If the cached wrapper and the cached callers that inline it held numba's name, a cache that two
+    # processes built could pair a body that defines one name with a caller that refers to the other. The load would
+    # then abort with "LLVM ERROR: Symbol not found". Callers therefore refer to this alias, which each process
+    # registers for its own compiled body with llvmlite.binding.add_symbol.
     #
     # The fingerprint separates bodies that share a module, a qualified name and a signature: closures that a factory
     # makes under one qualified name, a redefinition in one process, or processes related by fork() that share a cache.
-    # If such bodies shared an alias, add_symbol, under which the last registration wins, would send every caller to the
-    # body registered last.
+    # If such bodies shared an alias, every caller would call the body registered last, because add_symbol replaces an
+    # earlier registration of the same name.
     #
     # The jit options are hashed because they change the machine code. Without them, two decorations of one body that
-    # differ only in error_model, fastmath or boundscheck would share an alias, and every caller would reach the body
-    # compiled last. A caller of the binding compiled under the numpy error model could then run the one compiled under
-    # the python model. Under the python model, a division by zero raises, so the C entry point would discard the
+    # differ only in error_model, fastmath or boundscheck would share an alias, and every caller would call the body
+    # compiled last. A caller of the binding compiled under the numpy error model could then call the body compiled
+    # under the python model. Under the python model, a division by zero raises, so the C entry point would discard the
     # exception and return 0.0 instead of inf.
     raw = (
         f"{func.__module__ or ''}.{func.__qualname__}.{main_sig}."
@@ -115,9 +116,9 @@ def _call_proxied_alias(context, builder, main_sig, alias_name, args):
     return builder.call(f, args)
 
 
-# Each trap cfunc below stays referenced here for the life of the process. numba keeps compiled code loaded after the
-# CFunc object is collected, so the address that add_symbol publishes stays valid without this reference. The list is
-# a precaution against a numba release that would unload such code.
+# This list holds a reference to each trap cfunc below for the life of the process. numba does not unload compiled code
+# when a CFunc object is collected, so the address that add_symbol publishes remains valid without the reference. The
+# list is a precaution against a numba release that would unload such code.
 _PROXY_TRAP_KEEPALIVE = []
 
 # _ABSENT_ALIASES, imported above from numbox.utils.fingerprint, holds the aliases that no longer identify one body.
@@ -130,7 +131,7 @@ _PROXY_TRAP_KEEPALIVE = []
 
 # _PUBLISHED_ALIASES maps each alias that this process published to the address published under it and to a witness,
 # the values that the body's fingerprint could not canonicalize. With the witness, _publish_cfunc_alias distinguishes
-# a second body that reaches the same alias from the same body registered again. A second body would otherwise rebind
+# a second body that computes the same alias from the same body registered again. A second body would otherwise rebind
 # every caller compiled against the first. A trap is recorded with the witness None, which no body matches.
 _PUBLISHED_ALIASES = {}
 
@@ -138,13 +139,13 @@ _PUBLISHED_ALIASES = {}
 # _ALIAS_LOCK makes two read-modify-write sequences on _PUBLISHED_ALIASES and _ABSENT_ALIASES atomic. Both run in plain
 # Python at decoration, after numba has released its compiler lock, so nothing else serializes them.
 # _publish_cfunc_alias names a colliding body after the number of published aliases and then publishes that name.
-# Without the lock, two threads that both counted before either published would give two bodies one name.
+# Without the lock, two threads that both counted before either published would assign the same name to two bodies.
 # _register_absent_alias_trap decides on a read of _PUBLISHED_ALIASES and writes the trap's alias several statements
-# later. Without the lock, a body published in between would be overwritten by the trap.
+# later. Without the lock, a body published between that read and the write would be overwritten by the trap.
 #
 # The trap's cfunc compiles between that decision and the write. The trap therefore reads the registry again under the
-# lock instead of holding the lock during the compile. Only the read that decides and the writes that act on it need to
-# be atomic, and the compile does not.
+# lock instead of holding the lock during the compile. Only the read that decides and the writes that depend on it need
+# to be atomic. The compile does not need to be atomic.
 _ALIAS_LOCK = threading.Lock()
 
 
@@ -157,12 +158,12 @@ def _a_body_answers(alias):
 class AliasCollisionWarning(RuntimeWarning):
     """Warning that two different proxied functions computed the same alias, so that the alias identifies neither.
 
-    numbox gives the second function a name of its own, used only in this process, and treats both names as stale in
-    cache entries. Cached callers of either function therefore compile again in every process. The usual cause is a
-    captured value that differs between processes, such as a ctypes function built from a raw address, which numbox
-    leaves out of the alias. Reach the C function as an attribute of the loaded library instead. The warning also
-    reports a :func:`proxy_if_available` binding that is absent in one decoration and present in another in the same
-    process; the message says which body callers reach.
+    numbox publishes the second function under a name of its own, used only in this process, and treats both names as
+    stale in cache entries. Cached callers of either function therefore compile again in every process. The usual cause
+    is a captured value that differs between processes, such as a ctypes function built from a raw address, which
+    numbox leaves out of the alias. Access the C function as an attribute of the loaded library instead. The warning
+    also reports a :func:`proxy_if_available` binding that is absent in one decoration and present in another in the
+    same process. In that case, the message says which body a call through the alias runs.
     """
 
 
@@ -170,52 +171,54 @@ def _publish_cfunc_alias(alias, address, opaque):
     """Publish ``address`` under ``alias``, and return the name that callers must refer to.
 
     If nothing is published under ``alias`` in this process, or the body published under it has the same ``opaque``
-    values, the function publishes ``address`` under ``alias`` and returns ``alias``. If another body or a trap holds
-    it, the function publishes ``address`` under a new name used only in this process and returns that name. It also
-    adds both names to ``_ABSENT_ALIASES`` and warns with :class:`AliasCollisionWarning`.
+    values, the function publishes ``address`` under ``alias`` and returns ``alias``. If another body or a trap is
+    published under it, the function publishes ``address`` under a new name used only in this process and returns that
+    name. It also adds both names to ``_ABSENT_ALIASES`` and warns with :class:`AliasCollisionWarning`.
     """
     with _ALIAS_LOCK:
         published, witness = _PUBLISHED_ALIASES.get(alias, (None, None))
-        # llvmlite.binding.add_symbol replaces a symbol for the whole process without a warning, and the last
-        # registration wins. A second body published under an alias that the first holds would therefore rebind every
-        # caller compiled against the first, and those callers would return wrong results without any message. The
-        # same body is often registered again, after a module reload or when a factory is called twice with equal
-        # arguments, and replacing the address is then correct. Two bodies with equal fingerprints can differ only in
-        # their opaque values, so equal opaque values mean one body compiled twice.
+        # llvmlite.binding.add_symbol replaces the address of a symbol for the whole process without a warning, so the
+        # last registration of a name takes effect. A second body published under the alias of the first would
+        # therefore rebind every caller compiled against the first. Those callers would then return wrong results
+        # without any message. The same body is often registered again, after a module reload or when a factory is
+        # called twice with equal arguments, and replacing the address is then correct. Two bodies with equal
+        # fingerprints can differ only in their opaque values, so equal opaque values mean one body compiled twice.
         if published is None or (witness is not None and _opaque_values_match(witness, opaque)):
             _PUBLISHED_ALIASES[alias] = (address, tuple(opaque))
             ll.add_symbol(alias, address)
             return alias
         # The two bodies differ only in values that have no form stable across processes, such as a ctypes function
-        # built from a raw address (see _ctypes_func_key). The newcomer is published under a name of its own, so both
-        # bodies stay callable in this process. The shared alias no longer identifies a body, because another process
+        # built from a raw address (see _ctypes_func_key). The second body is published under a name of its own, so both
+        # bodies remain callable in this process. The shared alias no longer identifies a body, because another process
         # may build the two bodies in the other order. It is therefore retired: the cache check discards a cached
-        # caller of either body instead of loading it against whichever body holds the alias. Both bodies lose
-        # cross-process caching as a result.
+        # caller of either body instead of loading it against whichever body is published under the alias. Both bodies
+        # lose cross-process caching as a result.
         #
-        # The newcomer's name is retired too. It is made from the number of aliases that this process has published, so
-        # it does not identify the body either. The same body gets another name in a process that published a different
-        # number of aliases first, and a process that builds the pair in the other order gives this name to the other
-        # body. No name derived from the content can separate the two bodies, because their fingerprints are equal. The
-        # name is therefore valid only for callers compiled in this process, and the cache check discards a cached
-        # caller that refers to it.
+        # The name of the second body is retired too. It is made from the number of aliases that this process has
+        # published, so it does not identify the body either. The same body receives another name in a process that
+        # published a different number of aliases first. A process that builds the pair in the other order assigns
+        # this name to the other body. No name derived from the content can separate the two bodies, because their
+        # fingerprints are equal. The name is therefore valid only for callers compiled in this process, and the cache
+        # check discards a cached caller that refers to it.
         #
         # A retirement lasts for the life of the process, because its cause is a property of the two bodies, not of the
-        # order in which this process built them. If either body registers again, the body that holds the alias points
-        # it at the new address, and the other body takes another new name. Another process may still build the two in
-        # the other order. The branch above therefore leaves _ABSENT_ALIASES alone, and no code removes an alias from
-        # the set. A first publication needs no removal, because every alias in the set already has an entry in
-        # _PUBLISHED_ALIASES.
+        # order in which this process built them. If the body published under the alias registers again, the alias is
+        # published again with the new address. If the other body registers again, it receives another new name.
+        # Another process may still build the two in the other order. The branch above therefore leaves _ABSENT_ALIASES
+        # alone, and no code removes an alias from the set. A first publication needs no removal, because every alias
+        # in the set already has an entry in _PUBLISHED_ALIASES.
         #
-        # A trap is the other possible holder. It is recorded with a witness that no body matches, so a body that
-        # reaches a trap's alias takes a name of its own, and the alias stays retired. A cached caller of that alias
-        # was compiled against the binding that is absent here, and it must reach the trap's error, not this body.
+        # A trap can also be published under the alias, with a witness that no body matches. A body that computes a
+        # trap's alias therefore receives a name of its own, and the alias stays retired. A cached caller of that alias
+        # was compiled against the binding that is absent here, so a call through the alias must run the trap, not this
+        # body.
         _ABSENT_ALIASES.add(alias)
         distinct = f"{alias}_c{len(_PUBLISHED_ALIASES)}"
         _ABSENT_ALIASES.add(distinct)
         _PUBLISHED_ALIASES[distinct] = (address, tuple(opaque))
         ll.add_symbol(distinct, address)
-    # When a trap holds the alias, the message names the trap instead of reporting a second body that does not exist.
+    # When a trap is published under the alias, the message names the trap instead of reporting a second body that
+    # does not exist.
     if witness is None:
         reason = (
             f"an absent-binding trap already answers to the alias {alias}, so this body is "
@@ -236,30 +239,32 @@ def _publish_cfunc_alias(alias, address, opaque):
 
 
 def _register_absent_alias_trap(func, main_sig, jit_options=None):
-    """Register a trap under the alias that :func:`proxy` would give ``func``, for a binding whose C symbol is absent.
+    """Register a trap under the alias that :func:`proxy` computes for ``func``, whose C symbol is absent.
 
-    The trap is a ``@cfunc`` of ``main_sig`` that raises a ``RuntimeError`` naming the binding. A caller cached where
-    the symbol was present refers to this alias, because numba's cache key does not cover the callees. The cache check
-    discards such a caller before numba loads it, because the alias is in ``_ABSENT_ALIASES``. A caller reaches the
-    trap only if the check did not inspect its entry. Without the trap, the entry would refer to an unregistered
-    symbol, and the process would crash without a message. With the trap, the call prints the error to stderr and
-    returns zero.
+    The trap is a ``@cfunc`` of ``main_sig`` that raises a ``RuntimeError`` naming the binding. A caller cached in a
+    process where the symbol was present refers to this alias, because numba's cache key does not cover the callees.
+    The cache check discards such a caller before numba loads it, because the alias is in ``_ABSENT_ALIASES``. A caller
+    calls the trap only if the check did not inspect its entry. Without the trap, the entry would refer to an
+    unregistered symbol, and the process would crash without a message. With the trap, the call prints the error to
+    stderr and returns zero.
 
-    If a proxied body already holds the alias in this process, the function registers no trap and warns with
-    :class:`AliasCollisionWarning`.
+    If a proxied body is already published under the alias in this process, the function registers no trap and warns
+    with :class:`AliasCollisionWarning`.
     """
     alias = _stable_cfunc_alias(func, main_sig, jit_options)
-    # A body that holds this alias in this process keeps it. The trap raises inside a cfunc wrapper, which discards the
-    # exception and returns zero. A trap installed over a working body would therefore turn a right answer into a wrong
-    # one without any message, the failure that _PUBLISHED_ALIASES exists to prevent. A caller that reaches the alias in
-    # this process calls a binding that is present. A process where the binding is absent finds the alias free and
-    # registers the trap.
+    # If a body is already published under this alias in this process, no trap replaces it. The trap raises inside a
+    # cfunc wrapper, which discards the exception and returns zero. A trap registered under the alias of a working body
+    # would therefore make every call through the alias return zero, without any message. _PUBLISHED_ALIASES exists to
+    # prevent that failure. A call through the alias in this process then runs the body of a binding that is present.
+    # If the binding is absent in a process, no body is published under its alias there. The function then registers
+    # the trap.
     #
-    # The registry is read twice, and the second read decides. The trap's compile takes long enough that a body that
-    # another thread publishes routinely completes during it, not rarely, and the first read happened before the
-    # compile. The trap is therefore compiled first, and the registry is read again under _ALIAS_LOCK, together with the
-    # writes that act on that read. A trap whose alias a body took during the compile is dropped. The first read only
-    # spares the common case a compile that would be discarded.
+    # The registry is read twice, and the second read decides whether the trap is registered. Another thread routinely
+    # publishes a body while the trap compiles, because the compile takes long enough. The first read happened before
+    # the compile began. The trap is therefore compiled first. The registry is then read again under _ALIAS_LOCK,
+    # together with the writes that depend on that read. A trap is dropped if a body was published under its alias
+    # during the compile. The first read only lets the function skip the compile if a body is already published under
+    # the alias, because the second read would then discard the trap.
     yielded_to_body = _a_body_answers(alias)
     if not yielded_to_body:
         msg = (
@@ -267,8 +272,8 @@ def _register_absent_alias_trap(func, main_sig, jit_options=None):
             f"(C symbol missing), but a cache=True caller compiled when it was present is "
             f"calling it -- clear the numba cache (NUMBA_CACHE_DIR) and rebuild."
         )
-        # The trap takes plain positional parameters, one for each argument of main_sig, because the cfunc wrapper that
-        # a caller calls is positional, also for a binding with Omitted signatures.
+        # The trap takes plain positional parameters, one for each argument of main_sig, because a caller passes
+        # positional arguments to the cfunc wrapper, even for a binding with Omitted signatures.
         trap_params = ", ".join(f"_a{i}" for i in range(len(main_sig.args)))
         trap_ns = {"cfunc": cfunc, "main_sig": main_sig, "_trap_msg": msg}
         exec(  # nosec B102 - internal codegen of a fixed-shape trap body
@@ -283,8 +288,8 @@ def _register_absent_alias_trap(func, main_sig, jit_options=None):
                 _PROXY_TRAP_KEEPALIVE.append(trap_ns["_trap_cfunc"])
                 _ABSENT_ALIASES.add(alias)
                 ll.add_symbol(alias, trap_ns["_trap_cfunc"].address)
-                # The witness None matches no body, so a body that reaches this alias later is detected instead of
-                # taking over the trap's alias without a warning.
+                # The witness None matches no body. A body that computes this alias later is therefore detected, instead
+                # of being published under the trap's alias without a warning.
                 _PUBLISHED_ALIASES[alias] = (trap_ns["_trap_cfunc"].address, None)
     if yielded_to_body:
         warnings.warn(
@@ -307,12 +312,12 @@ def proxy(sig, jit_options: Optional[dict] = None):
     function is cached only if ``jit_options`` enables caching, as ``{"cache": True}`` and
     ``numbox.core.configurations.jit_options`` do.
 
-    The decorator returns the dispatcher of the wrapper, named ``__`` followed by the function's name, with the
-    function's docstring. A call through the dispatcher, from Python or from jitted code, reaches the compiled function
-    through its C entry point, under an alias that numbox registers in every process. If the function raises, such a
-    call does not propagate the exception: Python prints it to stderr, and the call returns a zero of the return type.
-    The wrapper takes every parameter as positional-or-keyword, so a keyword-only parameter can also be passed by
-    position.
+    The decorator returns the dispatcher of the wrapper. The dispatcher's name is ``__`` followed by the function's
+    name, and its docstring is the function's docstring. A call through the dispatcher, from Python or from jitted
+    code, enters the compiled function through its C entry point, under an alias that numbox registers in every
+    process. If the function raises, such a call does not propagate the exception: Python prints it to stderr, and the
+    call returns a zero of the return type. The wrapper takes every parameter as positional-or-keyword, so a
+    keyword-only parameter can also be passed by position.
 
     The dispatcher's ``.as_func`` is the compiled function as a first-class function value, a
     :class:`~numbox.utils.derive_wap.DeriveWAP`. It has only the main signature, so a call through it passes every
@@ -325,8 +330,8 @@ def proxy(sig, jit_options: Optional[dict] = None):
     caller that refers to the old alias, and numba compiles the caller again. numbox warns once for each discarded entry
     with :class:`StaleProxyCacheWarning`, or raises :class:`StaleProxyCacheError` in the strict mode that
     ``NUMBOX_PROXY_CACHE_STRICT`` enables. A jitted caller that reads ``.as_func`` from a module-level variable embeds a
-    copy of the function instead, and the check cannot see that copy. After an edit, such a cached caller can keep
-    running the old code without a warning, so delete its cache files after every edit. If the C symbol of a
+    copy of the function instead, and the check cannot see that copy. After an edit, such a cached caller can continue
+    to run the old code without a warning, so delete its cache files after every edit. If the C symbol of a
     :func:`proxy_if_available` binding is missing, such a caller can return the missing binding's result or crash with
     a segmentation fault.
 
@@ -341,21 +346,21 @@ def proxy(sig, jit_options: Optional[dict] = None):
     main_sig = isinstance(sig, Signature) and sig or isinstance(sig, (List, Tuple)) and sig[0]
     jit_options = isinstance(jit_options, dict) and jit_options or {}
     jit_opts = jit_options.copy()
-    # The wrapper takes the function's jit options and inline="always", so numba inlines the wrapper into each jitted
-    # caller.
+    # The wrapper is compiled with the function's jit options and inline="always", so numba inlines the wrapper into
+    # each jitted caller.
     jit_opts.update(jit_opts, inline='always')
 
     def wrap(func):
         assert isinstance(func, PyFunctionType)
-        # The function belongs to the caller's module, not to numbox, so it is marked for numbox to key its cache (see
-        # numbox.core.cache_key).
+        # The function belongs to the caller's module, not to numbox. It is therefore marked, so that numbox keys its
+        # cache (see numbox.core.cache_key).
         with _keyed(func):
             func_jit = njit(sig, **jit_options)(func)
         # Under NUMBA_DISABLE_JIT=1, njit returns the Python function itself, which has no get_compile_result, so the
         # decoration fails here with an AttributeError.
         cres = func_jit.get_compile_result(main_sig)
-        # Callers reach the body through an alias that is the same in every process, not through numba's name for the
-        # body's C entry point, which holds a per-process counter (see _stable_cfunc_alias).
+        # Callers call the body through an alias that is the same in every process, not through numba's name for the
+        # body's C entry point. That name contains a tag from a per-process counter (see _stable_cfunc_alias).
         opaque = []
         cfunc_alias = _publish_cfunc_alias(
             _stable_cfunc_alias(func, main_sig, jit_options, opaque),
@@ -385,7 +390,7 @@ def {func_proxy_name}({func_args_str}):
     return _{func_proxy_name}({func_names_args_str})
 """
         # In this namespace, the template's njit is numbox_njit, so numbox keys the wrapper's cache as it keys the
-        # body's. The template keeps the text "@njit(", which the anchor below looks for.
+        # body's. The template still contains the text "@njit(", which the anchor code below searches for.
         ns = {
             **inspect.getmodule(func).__dict__,
             **{
@@ -418,9 +423,10 @@ def {func_proxy_name}({func_args_str}):
         code = compile(prefixed, inspect.getfile(func), mode='exec')
         exec(code, ns)  # nosec B102 - JIT codegen of internal source
         dispatcher = ns[func_proxy_name]
-        # When numba builds a dispatcher, functools.update_wrapper copies the docstring of its py_func, here the
-        # wrapper's None. Both get the function's docstring afterwards, so that help() and autodoc show it, and numba
-        # copies it again if it rebuilds the dispatcher from py_func. The wrapper's code objects stay as they are.
+        # When numba builds a dispatcher, functools.update_wrapper copies the docstring of its py_func, which for the
+        # wrapper is None. Both are then assigned the function's docstring, so that help() and autodoc show it. numba
+        # copies the docstring again if it rebuilds the dispatcher from py_func. The wrapper's code objects remain
+        # unchanged.
         dispatcher.py_func.__doc__ = func.__doc__
         dispatcher.__doc__ = func.__doc__
         dispatcher.as_func = DeriveWAP(cres)
@@ -444,19 +450,19 @@ def proxy_if_available(lib, sig, jit_options: Optional[dict] = None):
     The decorated function must have the C symbol's name, because the check is ``hasattr(lib, name)``. This suits a
     binding to a symbol that only newer versions of a library provide. If the symbol is present, the result is what
     :func:`proxy` returns, ``.as_func`` included. If it is absent, the result is a stub with the name that
-    :func:`make_proxy_name` gives, and with the function's qualified name and docstring. A call to the stub from Python
-    raises ``NotImplementedError``. A jitted caller of the stub fails to compile with a ``TypingError`` that names the
-    binding and says that its C symbol is missing. :func:`~numbox.utils.highlevel.cres_if_available` makes the same
-    check for :func:`~numbox.utils.highlevel.cres`.
+    :func:`make_proxy_name` returns, and with the function's qualified name and docstring. A call to the stub from
+    Python raises ``NotImplementedError``. A jitted caller of the stub fails to compile with a ``TypingError`` that
+    names the binding and says that its C symbol is missing. :func:`~numbox.utils.highlevel.cres_if_available` makes
+    the same check for :func:`~numbox.utils.highlevel.cres`.
 
     The stub has no ``.as_func``, so code that passes the function as a value checks for the attribute first::
 
         if hasattr(my_binding, "as_func"):
             use(my_binding.as_func)
 
-    A caller cached where the symbol was present refers to the binding's alias. Where the symbol is absent, numbox
-    discards that cache entry with a :class:`StaleProxyCacheWarning`, and the recompilation fails with the same
-    ``TypingError``.
+    A caller cached in a process where the symbol was present refers to the binding's alias. Where the symbol is
+    absent, numbox discards that cache entry with a :class:`StaleProxyCacheWarning`, and the recompilation fails with
+    the same ``TypingError``.
     """
     def _(func):
         if hasattr(lib, func.__name__):
@@ -464,14 +470,14 @@ def proxy_if_available(lib, sig, jit_options: Optional[dict] = None):
 
         name = func.__name__
         main_sig = sig if isinstance(sig, Signature) else sig[0]
-        # A caller cached where the binding was present refers to its alias. The cache check discards such a caller. If
-        # the check could not inspect the entry, the call reaches this trap, which prints a named error, instead of
-        # crashing the process on an unregistered symbol (see _register_absent_alias_trap).
+        # A caller cached in a process where the binding was present refers to its alias. The cache check discards such
+        # a caller. If the check could not inspect the entry, the call runs this trap, which prints a named error.
+        # Without the trap, the process would crash on an unregistered symbol (see _register_absent_alias_trap).
         _register_absent_alias_trap(func, main_sig, jit_options)
 
         # If proxy compiled a body whose C symbol is missing, LLVM would abort the process at decoration with "LLVM
-        # ERROR: Symbol not found", so an absent symbol gets this stub instead. The stub has no .as_func, because a
-        # function value needs a compiled body.
+        # ERROR: Symbol not found". The decorator therefore returns this stub for an absent symbol. The stub has no
+        # .as_func, because a function value needs a compiled body.
         def stub(*args, **_kwargs):
             raise NotImplementedError(f"{name} is not available")
         stub.__name__ = make_proxy_name(name)
@@ -479,8 +485,8 @@ def proxy_if_available(lib, sig, jit_options: Optional[dict] = None):
         stub.__doc__ = func.__doc__
 
         # numba cannot type the stub, a plain Python function, so a jitted call to it would fail with an untyped-global
-        # error that names the binding but not the reason. The @overload below raises a TypingError that names the
-        # missing C symbol instead.
+        # error that names the binding but does not state the reason. The @overload below raises a TypingError that
+        # names the missing C symbol instead.
         @overload(stub)
         def _unavailable(*args, **kwargs):
             raise TypingError(
@@ -530,8 +536,8 @@ class UnvalidatedProxyCacheError(RuntimeError):
     ``NUMBOX_PROXY_CACHE_STRICT`` enables strict mode. Strict mode refuses to load an entry that numbox could not check,
     so that a gap in the check becomes visible. The cause can be a numba release that changed the layout of cache
     entries, or a damaged object. An entry that numbox reads without error, and in which it finds no stale alias, loads
-    normally in strict mode too. Such a result could also come from a reader that missed the entry's imports, but
-    numbox cannot tell it from a valid entry that holds the alias prefix only in a string constant.
+    normally in strict mode too. A reader that missed the entry's imports could produce the same result, but numbox
+    cannot distinguish that case from a valid entry that holds the alias prefix only in a string constant.
     """
 
 
@@ -545,8 +551,8 @@ _unvalidated_reported = False
 def _elf_undefined_symbols(obj):
     """Return the names of the undefined symbols of a 64-bit little-endian ELF relocatable object.
 
-    A 32-bit or big-endian ELF object yields an empty set, the result that :func:`_undefined_symbols` gives for any
-    format it cannot read.
+    A 32-bit or big-endian ELF object yields an empty set, the result that :func:`_undefined_symbols` returns for any
+    format that it cannot read.
     """
     und = set()
     if len(obj) < 0x40 or obj[4] != 2 or obj[5] != 1:
@@ -574,8 +580,8 @@ def _elf_undefined_symbols(obj):
 def _macho_undefined_symbols(obj):
     """Return the names of the undefined external symbols of a 64-bit little-endian Mach-O relocatable object.
 
-    Mach-O puts an underscore before every C symbol, and the names come back without it, as numbox registered them.
-    Other widths, other byte orders and the universal container yield an empty set, as in
+    Mach-O prefixes every C symbol with an underscore. The function returns the names without that underscore, as
+    numbox registered them. Other widths, other byte orders and the universal container yield an empty set, as in
     :func:`_elf_undefined_symbols`.
     """
     und = set()
@@ -588,7 +594,8 @@ def _macho_undefined_symbols(obj):
             break
         cmd, cmdsize = struct.unpack_from("<II", obj, off)
         # These bounds matter only for a corrupt or foreign object. cmdsize advances the walk, so a zero would loop
-        # forever, and this reader runs on every cache load. The caller's handler stops an exception but not a hang.
+        # forever, and this reader runs on every cache load. The caller's exception handler catches an exception, but it
+        # cannot interrupt an endless loop.
         if cmdsize < 8 or off + cmdsize > len(obj):
             break
         if cmd == 0x2:  # LC_SYMTAB
@@ -624,7 +631,7 @@ def _undefined_symbols(object_code):
     """Return the names of the undefined symbols of one relocatable object, read according to its container format.
 
     A format that this module cannot read yields an empty set. The caller then finds no stale alias and loads the
-    object as it would without the check, instead of reaching a wrong verdict.
+    object as it would without the check. An object in an unreadable format therefore never causes a discard.
     """
     if object_code[:4] == _ELF_MAGIC:
         return _elf_undefined_symbols(object_code)
@@ -640,7 +647,8 @@ def _stale_proxy_aliases(payload, libdata_of_payload):
     A non-empty result means that numba must not load the payload. The result holds every stale alias that the object
     imports, so the warning names them all. An alias is stale if this process has not registered it, or if it is in
     ``_ABSENT_ALIASES``. ``libdata_of_payload`` extracts the library data from the payload. Only entries that numba
-    loads reach this function: an entry that numba compiles again because its own source changed draws no warning.
+    loads are passed to this function. An entry that numba compiles again because its own source changed produces no
+    warning.
 
     If reading the payload raises, the result is empty, and numbox warns once per process with
     :class:`UnvalidatedProxyCacheWarning`. In strict mode, numbox raises :class:`UnvalidatedProxyCacheError` instead.
@@ -658,16 +666,17 @@ def _stale_proxy_aliases(payload, libdata_of_payload):
             return []  # fast path: the alias string appears nowhere in the object
         # The aliases exist only in llvmlite's table of symbols registered with add_symbol, and an alias encodes the
         # body, the signature and the jit options. An alias that resolves therefore normally names the right body. The
-        # exception is an alias in _ABSENT_ALIASES. An absent binding's alias resolves to a trap, which raises inside a
-        # @cfunc, where numba discards the error and returns zero, so the caller would compute with a wrong value. A
-        # name that a collision retired resolves to a body that other processes may not agree on. Discarding the entry
-        # gives the caller of an absent binding the TypingError that an empty cache gives.
+        # exception is an alias in _ABSENT_ALIASES. An absent binding's alias resolves to a trap. The trap raises inside
+        # a @cfunc, where numba discards the error and returns zero, so the call would return zero instead of a result.
+        # A name that a collision retired resolves to a body, but another process may resolve the same name to a
+        # different body. If the entry is discarded, the caller of an absent binding is compiled again and fails with
+        # the TypingError that an empty cache produces.
         #
-        # Strict mode does not raise when the object parses and imports no stale alias. A valid object that holds the
-        # prefix only in a string constant looks the same as a stale object would to a reader that failed to see its
-        # imports, so raising for one would abort the other.
-        # test_the_reader_recognises_the_objects_numba_actually_caches checks instead that the reader parses the
-        # objects numba emits on each platform.
+        # Strict mode does not raise when the object parses and imports no stale alias. If a reader failed to see the
+        # imports of a stale object, the stale object would be indistinguishable from a valid object that holds the
+        # prefix only in a string constant. An error raised for the one would therefore also abort the load of the
+        # other. test_the_reader_recognises_the_objects_numba_actually_caches checks instead that the reader parses
+        # the objects numba emits on each platform.
         return sorted(
             s for s in _undefined_symbols(object_code)
             if s.startswith(_ALIAS_PREFIX) and (s in _ABSENT_ALIASES or not ll.address_of_symbol(s))
@@ -675,14 +684,15 @@ def _stale_proxy_aliases(payload, libdata_of_payload):
     except Exception as exc:
         # This handler runs on every cache load of the two wrapped cache implementations. An unexpected error, from a
         # numba release that changed the payload's shape or from a malformed object, therefore leaves the entry
-        # unchecked instead of breaking unrelated caching. Strict mode asks for the opposite and raises.
+        # unchecked instead of breaking unrelated caching. In strict mode, the handler raises an error.
         if strict:
             raise UnvalidatedProxyCacheError(
                 f"numbox: could not check a numba cache payload for stale @proxy aliases ({exc!r}); "
                 f"{_PROXY_CACHE_STRICT_ENV} is set, so the load was aborted rather than proceeding unchecked"
             ) from exc
-        # The warning says once that the check was skipped. A skip without a warning would look like a passed check,
-        # and it would let a stale entry crash the process, which the check exists to prevent.
+        # numbox reports the skipped check once per process with this warning. A skip without a warning would be
+        # indistinguishable from a passed check. It would also allow a stale entry to crash the process, which the
+        # check exists to prevent.
         global _unvalidated_reported
         if not _unvalidated_reported:
             _unvalidated_reported = True
@@ -744,8 +754,8 @@ def _install_cache_alias_guard():
     # A second call, after a reload of this module, returns here, so the methods are not wrapped twice.
     if getattr(caching, "_numbox_proxy_alias_guard", False):
         return
-    # Every attribute is looked up before the first assignment, so a numba that lacks one of the classes gets no check
-    # rather than half of one.
+    # Every attribute is looked up before the first assignment. If numba lacks one of the classes, the lookup raises
+    # before any assignment, so the check is never installed on one class alone.
     wrapped = [
         (caching.CompileResultCacheImpl, _guarded_rebuild(caching.CompileResultCacheImpl.rebuild,
                                                           lambda payload: payload[0])),
@@ -760,7 +770,7 @@ def _install_cache_alias_guard():
 try:
     _install_cache_alias_guard()
 except Exception:
-    # The install fails open, as the check does on an entry it cannot read: if it fails, the module still imports,
-    # without the check and without a warning. Without the check, a stale cache entry can crash the process. An
-    # exception here would instead make numbox fail to import.
+    # If the installation fails, the module still imports, without the check and without a warning. The installation
+    # thus fails open, as the check does on an entry that it cannot read. Without the check, a stale cache entry can
+    # crash the process. An exception here would instead make numbox fail to import.
     pass
