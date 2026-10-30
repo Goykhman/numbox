@@ -1,3 +1,12 @@
+"""Tests of the libc bindings in numbox.core.bindings.libc and of library loading in numbox.core.bindings.utils.
+
+The tests call the bindings for random numbers, strings, memory, files and the environment, from Python and from
+cached jitted functions, and check the results against known values. The loading tests open a library by its path
+and by its short name. Two tests check the Windows rules of ``_resolve_lib_path`` on any host, with the platform
+patched, and the last test checks in a subprocess that importing libm does not import the SQLite, stdio or fmtio
+modules. The other binding modules have test files of their own, such as ``test_math.py``, ``test_fmtio.py`` and
+``test_abi.py``.
+"""
 import errno
 import json
 import subprocess
@@ -19,6 +28,10 @@ from test.auxiliary_utils import collect_and_run_tests
 
 @njit(cache=True)
 def _write_and_read(path_str, mode_w, mode_r, payload_arr, read_back):
+    """Write payload_arr to the file path_str, read the file back into read_back, and return the two counts.
+
+    A count of -1 marks the step whose ``fopen`` failed.
+    """
     wpath = get_unicode_data_p(path_str)
     wmode = get_unicode_data_p(mode_w)
     rmode = get_unicode_data_p(mode_r)
@@ -38,6 +51,10 @@ def _write_and_read(path_str, mode_w, mode_r, payload_arr, read_back):
 
 
 def test_c():
+    """Check srand, rand and strlen called from Python, not from jitted code.
+
+    rand returns positive values after srand(2), and strlen counts the bytes of a C string.
+    """
     srand(2)
     r1 = rand()
     r2 = rand()
@@ -51,13 +68,13 @@ def test_c():
 
 
 def test_load_lib_path_returns_handle_with_known_symbol():
-    """``load_lib_path`` takes a path, so this needs one on every platform.
+    """Check that ``load_lib_path`` opens a library from its path and returns a handle that exports a known symbol.
 
-    Windows has no path to the C runtime: it stopped being loadable by name with
-    VS2015 and ``find_msvcrt()`` returns None for every build since, so asking for one
-    skipped the test and left the ``winmode=0`` branch of ``load_lib_path`` unexecuted
-    there. The bundled ``sqlite3.dll`` is a path that does exist, and a hard
-    prerequisite of every working Python on Windows because ``_sqlite3.pyd`` links it.
+    On Linux and macOS, the test passes the result of ``find_library("m")``, a soname such as ``libm.so.6`` on Linux,
+    and looks for ``cos``. On Windows, ``find_msvcrt()`` returns None on every CPython built with Visual Studio 2015
+    or later, so the C runtime has no path to pass. The test passes the ``sqlite3.dll`` bundled with Python instead
+    and looks for ``sqlite3_libversion``. Every Windows Python whose ``sqlite3`` module works has that DLL, because
+    ``_sqlite3.pyd`` links to it, so the test runs the ``winmode=0`` branch of ``load_lib_path`` there.
     """
     from numbox.core.bindings.utils import _windows_bundled_dll_path, load_lib_path
 
@@ -76,13 +93,14 @@ def test_load_lib_returns_queryable_handle():
     from numbox.core.bindings.utils import load_lib
     handle = load_lib("c")
     assert handle is not None
-    # strlen is in libc on every supported platform
+    # Every supported C library exports strlen.
     assert hasattr(handle, "strlen")
-    # A symbol that doesn't exist returns False
+    # hasattr is False for a name that the library does not export.
     assert not hasattr(handle, "definitely_not_a_real_symbol_xyzzy")
 
 
 def test_c_stdio(tmp_path):
+    """Check that fopen, fwrite, fread and fclose write 18 bytes, a NUL among them, and read the same bytes back."""
     path = tmp_path / "rt.bin"
     payload = b"hello-from-njit\x00\x01\x02"
     payload_arr = np.frombuffer(payload, dtype=np.uint8).copy()
@@ -100,7 +118,7 @@ def _strings_compare_search():
     c = get_unicode_data_p("world")
     eq = strcmp(a, b)
     ne = strcmp(a, c)
-    # Bounded comparison: "hello" vs "help!" first matches 3 chars, differs at 4
+    # strncmp compares at most n bytes: "hello" and "help!" share their first 3 bytes and differ in the fourth.
     d_hello = get_unicode_data_p("hello")
     d_help = get_unicode_data_p("help!")
     n_match = strncmp(d_hello, d_help, 3)
@@ -125,14 +143,16 @@ def test_c_strings():
     eq, ne, n_match, n_differ, off_first, off_last, off_sub = _strings_compare_search()
     assert eq == 0
     assert ne != 0
-    # strncmp("hello", "help!", 3) == 0: first 3 bytes "hel" match
+    # strncmp("hello", "help!", 3) is 0, because the first 3 bytes, "hel", are equal.
     assert n_match == 0, n_match
-    # strncmp("hello", "help!", 4) != 0: differs at byte 3 ('l' vs 'p')
+    # strncmp("hello", "help!", 4) is not 0, because byte 3 is 'l' in one string and 'p' in the other.
     assert n_differ != 0, n_differ
     assert off_first == 2
     assert off_last == 9
     assert off_sub == 6
 
+    # strncpy writes no NUL when the source is n bytes long, so the zeroed buffer supplies the NUL at which
+    # get_str_from_p_as_int stops.
     dst = np.zeros(8, dtype=np.uint8)
     dst_p = _strings_copy(dst)
     assert bytes(dst[:6]) == b"abcdef"
@@ -208,19 +228,13 @@ def _env_lookup(name):
 
 @pytest.fixture
 def _getenv_test_var(monkeypatch):
-    """Set a unique env var that numbox's getenv binding can read, and
-    clean it up on teardown.
+    """Set an environment variable that the ``getenv`` binding can read, and remove it at teardown.
 
-    Plain ``monkeypatch.setenv`` is sufficient on POSIX. On Windows it
-    isn't: ``numbox.core.bindings.utils.load_lib("c")`` resolves to
-    ``msvcrt.dll`` (the legacy CRT compatibility shim — what
-    ``ctypes.cdll.msvcrt`` returns), while Python 3.10+ uses UCRT for
-    ``os.environ`` / ``monkeypatch.setenv``. MSVCRT and UCRT have
-    separate ``environ`` tables, so a var set via the Python-side path
-    is invisible to the binding's getenv call. To make the test
-    deterministic on Windows, set the var via the same MSVCRT instance
-    the binding uses (``msvcrt._putenv_s``); the env-table the binding
-    reads is then the one that contains the var.
+    On Linux and macOS, ``monkeypatch.setenv`` is enough. On Windows, ``load_lib("c")`` loads ``msvcrt.dll``, the
+    legacy C runtime that ``ctypes.cdll.msvcrt`` returns, while CPython links the Universal C Runtime (UCRT) and sets
+    ``os.environ`` through it. Each C runtime keeps an environment table of its own, so the binding does not see a
+    variable that Python sets. The fixture therefore sets the variable with ``_putenv_s`` of the same ``msvcrt.dll``
+    that the binding calls.
     """
     var_name = "NUMBOX_TEST_GETENV_VAR_7d4f1c"
     var_value = "numbox-getenv-roundtrip-sentinel"
@@ -231,7 +245,7 @@ def _getenv_test_var(monkeypatch):
         try:
             yield var_name, var_value
         finally:
-            # _putenv_s with empty value removes the var (MSDN docs).
+            # _putenv_s removes the variable when the value is empty, as Microsoft documents.
             msvcrt._putenv_s(var_name.encode(), b"")
     else:
         monkeypatch.setenv(var_name, var_value)
@@ -239,15 +253,11 @@ def _getenv_test_var(monkeypatch):
 
 
 def test_c_env(_getenv_test_var):
-    """getenv contract: returns a pointer to the environ-table string for set
-    variables and 0 for unset variables. Verify both the presence/absence
-    distinction AND that the returned pointer dereferences to the correct
-    value — a stale or wrong-variable pointer would slip past an address-only
-    check.
+    """Check that ``getenv`` returns the address of a set variable's value, and 0 for a variable that is not set.
 
-    Uses a dedicated test-controlled env var rather than the ambient
-    ``PATH`` (hermetic CI runners can clear ``PATH``); see the
-    ``_getenv_test_var`` fixture for the platform-aware setup.
+    The test reads the string at the returned address and compares it with the value, because a wrong address that
+    is not 0 would pass a check of the address alone. It sets a variable of its own through the ``_getenv_test_var``
+    fixture, instead of reading ``PATH``, which a CI runner can clear.
     """
     var_name, var_value = _getenv_test_var
     found_p = _env_lookup(var_name)
@@ -265,15 +275,19 @@ def test_c_env(_getenv_test_var):
 
 
 def test_resolve_lib_path_windows_sqlite3_never_falls_back(monkeypatch):
-    # On Windows sqlite3 MUST resolve to the CPython-bundled DLL and NEVER fall
-    # back to find_library: a PATH-resident third-party sqlite3.dll (AWS CLI v2)
-    # writes to NULL inside sqlite3_open from a foreign process. Pure logic, so
-    # it runs on any host by monkeypatching the platform + candidate check.
+    """Check that ``_resolve_lib_path("sqlite3")`` on Windows returns only the DLL bundled with Python.
+
+    The function never calls ``find_library`` for ``"sqlite3"``, so it returns None when no bundled DLL exists. A
+    ``sqlite3.dll`` on the ``PATH`` can belong to another tool: AWS CLI v2 installs one that writes through a null
+    pointer inside ``sqlite3_open`` when a process other than ``aws.exe`` calls it. The test patches the platform,
+    ``find_library`` and the lookup of the bundled DLL, so it runs on any host.
+    """
     import ctypes.util as _ctypes_util
     from numbox.core.bindings import utils
 
     monkeypatch.setattr(utils, "platform_", "Windows")
-    # find_msvcrt is Windows-only; inject it so the Windows branch imports on any host
+    # ctypes.util defines find_msvcrt only on Windows. The test adds it, so that the Windows branch of
+    # _resolve_lib_path can import it on any host.
     monkeypatch.setattr(_ctypes_util, "find_msvcrt", lambda: "C:\\msvcrt.dll", raising=False)
     find_library_calls = []
     monkeypatch.setattr(
@@ -290,8 +304,11 @@ def test_resolve_lib_path_windows_sqlite3_never_falls_back(monkeypatch):
 
 
 def test_resolve_lib_path_windows_nonsqlite_prefers_bundled(monkeypatch):
-    # For a non-sqlite3 name the bundled DLL is preferred over find_library when
-    # both exist; find_library is the last resort only when no bundled DLL.
+    """Check that ``_resolve_lib_path`` on Windows prefers the DLL bundled with Python for a name other than sqlite3.
+
+    The function returns the bundled DLL when one exists, and the result of ``find_library`` only when none does. The
+    test patches the platform, ``find_library`` and the lookup of the bundled DLL, so it runs on any host.
+    """
     import ctypes.util as _ctypes_util
     from numbox.core.bindings import utils
 
@@ -307,12 +324,13 @@ def test_resolve_lib_path_windows_nonsqlite_prefers_bundled(monkeypatch):
 
 
 def test_import_one_binding_stays_lazy(tmp_path):
-    # The reason bindings/__init__.py is empty: importing one binding must not
-    # eagerly compile the rest of the subsystem (a plain libm import used to
-    # drag in all of sqlite — ~71% of the ~12.8s cold cost). A re-export
-    # sneaked back into __init__.py, or a stray top-level import in
-    # call.py/utils.py, would silently restore that cost with no test failing.
-    # Run in a fresh process: pytest has already imported every binding here.
+    """Check that importing ``numbox.core.bindings.libm`` imports neither the SQLite subpackage nor stdio or fmtio.
+
+    ``numbox/core/bindings/__init__.py`` imports none of its modules, so numbox never compiles a binding module that a
+    program does not import. If ``__init__.py`` re-exported the bindings, or ``call.py`` or ``utils.py`` imported a
+    binding module at its top, importing libm would compile the SQLite bindings as well, and no other test would fail.
+    The test imports libm in a subprocess, because pytest has already imported every binding in its own process.
+    """
     probe = tmp_path / "lazy_probe.py"
     probe.write_text(textwrap.dedent('''
         import json

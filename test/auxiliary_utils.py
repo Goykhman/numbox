@@ -1,3 +1,12 @@
+"""Helpers that the test modules share.
+
+``collect_and_run_tests`` runs the tests of a test module that is run as a script, without pytest. ``open_libm`` opens
+the C math library for the tests that need a ``ctypes`` handle. ``deref_int64_intp``, with its intrinsic
+``_deref_int64_intp``, reads an ``int64`` at an address, and ``str_from_p_as_int`` reads a NUL-terminated string.
+``assert_njit_cache_survives_subprocess_roundtrip`` checks that ``cache=True`` functions load from numba's cache in a
+second process. pytest does not collect this file in a plain run, because its name does not match pytest's default
+``python_files`` patterns; its two tests run when the file is named on the command line.
+"""
 from inspect import isclass, isfunction
 import logging
 import os
@@ -13,7 +22,7 @@ from numba.core import types
 from numba.extending import intrinsic
 
 
-# https://stackoverflow.com/a/14693789
+# The pattern matches an ANSI escape sequence; it comes from https://stackoverflow.com/a/14693789.
 ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 
@@ -22,6 +31,12 @@ logging.basicConfig(level=logging.INFO)
 
 
 def collect_and_run_tests(module_name):
+    """Run the tests of the module named ``module_name``, for a test module that is run as a script.
+
+    The function calls the module-level functions named ``test_*`` and the static methods named ``test_*`` of the
+    classes named ``Test*``, in definition order, and it logs each name. It calls each test without arguments, so a
+    test that takes a pytest fixture raises ``TypeError``. The first test that raises stops the run.
+    """
     module = sys.modules[module_name]
     for name, item in module.__dict__.items():
         if isfunction(item) and name.startswith("test_"):
@@ -35,27 +50,13 @@ def collect_and_run_tests(module_name):
 
 
 def open_libm():
-    """Open the platform's math library and return a fresh handle, or ``None``.
+    """Return a new handle of the platform's C math library, or None if no library here exports ceil, cos and floor.
 
-    The handle answers to ``ceil``, ``cos`` and ``floor``, every symbol a caller needs
-    to be present, or the result is ``None`` and there is nothing on this machine to run
-    those tests against. Returning ``None`` rather than raising is the point: a platform
-    with no usable C runtime should skip, the way one where ``find_library`` comes up
-    empty already does, not turn into a failure that reads like a defect in the code
-    under test. Gating on a subset gives that away, because a library holding only the
-    subset is admitted and the callers reaching past it fail instead of skipping.
-
-    ``find_library("m")`` resolves it on Linux (a soname) and on macOS (a path into
-    the dyld shared cache). On Windows the C runtime is not loadable by name --
-    ``find_msvcrt()`` returns ``None`` for every VS2015+ build -- so try ``msvcrt``,
-    the legacy CRT shim :func:`numbox.core.bindings.utils.load_lib` already falls back
-    to, and then ``ucrtbase``, the CRT the interpreter itself links. All three are C89,
-    so the shim carries them on any image that has the shim at all; ``ucrtbase`` is
-    there for an image that does not. Falling through rather than giving up on the
-    first candidate keeps the coverage a skip would give away.
-
-    Each call opens its own handle rather than sharing a cached one, so a caller
-    comparing two handles is comparing two.
+    The callers bind ``ceil``, ``cos`` and ``floor``, and they skip their tests when the function returns None, so a
+    platform without a usable C runtime skips those tests instead of failing them. The function checks all three
+    symbols. A check of fewer would admit a library that lacks one, and a caller that binds the missing symbol would
+    then fail instead of skipping. Each call opens a new handle, so attributes such as ``floor`` taken from two
+    handles are two distinct objects.
     """
     import ctypes
     from ctypes.util import find_library
@@ -66,6 +67,12 @@ def open_libm():
         return lib if all(hasattr(lib, name) for name in ("ceil", "cos", "floor")) else None
 
     if platform_ == "Windows":
+        # find_msvcrt() returns None on every CPython built with Visual Studio 2015 or later, so the function tries
+        # two names in turn. msvcrt is the legacy C runtime that numbox.core.bindings.utils.load_lib also falls back
+        # to, and ucrtbase is the Universal C Runtime that CPython itself links. ceil, cos and floor are C89
+        # functions, so msvcrt.dll exports them wherever it exists, and ucrtbase covers a Windows image without
+        # msvcrt.dll. The loop moves to the second name when the first cannot be loaded or lacks a symbol, so that the
+        # tests skip only when neither runtime has the symbols.
         for name in ("msvcrt", "ucrtbase"):
             try:
                 lib = ctypes.CDLL(name)
@@ -74,12 +81,15 @@ def open_libm():
             if _with_the_symbols(lib) is not None:
                 return lib
         return None
+    # find_library("m") returns a soname, such as libm.so.6, on Linux and a path into the dyld shared cache on macOS;
+    # load_lib_path opens either.
     path = find_library("m")
     return _with_the_symbols(load_lib_path(path)) if path is not None else None
 
 
 @intrinsic
 def _deref_int64_intp(typingctx, p_int_ty):
+    """Return the ``int64`` at the address that the ``intp`` argument holds, in jitted code."""
     sig = types.int64(types.intp)
 
     def codegen(context, builder, signature, args):
@@ -91,6 +101,7 @@ def _deref_int64_intp(typingctx, p_int_ty):
 
 @njit
 def deref_int64_intp(p_int):
+    """Return the ``int64`` at the address ``p_int``, from Python or from jitted code."""
     return _deref_int64_intp(p_int)
 
 
@@ -101,6 +112,11 @@ def test_deref_int64_intp():
 
 
 def str_from_p_as_int(p_as_int):
+    """Return the NUL-terminated string at the address ``p_as_int``, decoded as UTF-8.
+
+    The function reads the bytes one at a time with ``ctypes``, without numba. The caller keeps the memory alive
+    during the call.
+    """
     b = BytesIO()
     while True:
         c = c_char.from_address(p_as_int).value
@@ -122,57 +138,34 @@ def test_str_from_p_as_int():
 def assert_njit_cache_survives_subprocess_roundtrip(
         tmp_path, probe_source, expected_stdout_lines,
 ):
-    """Verify ``@njit(cache=True)`` callers in *probe_source* survive a
-    process restart (the load-bearing property of ``@proxy``-wrapped
-    bindings and of the fmtio variadic-intrinsic dispatch).
+    """Assert that the ``cache=True`` functions of ``probe_source`` load from numba's cache in a second process.
 
-    Mechanics:
+    The function writes ``probe_source``, dedented, to ``probe.py`` under ``tmp_path`` and runs it twice in a
+    subprocess, with ``NUMBA_CACHE_DIR`` set to ``tmp_path/numba-cache``. The first run compiles the functions and
+    writes the cache, and the second run must load it. The function asserts that each run exits with status 0 and
+    prints ``expected_stdout_lines``, and that the first run writes at least one ``.nbc`` file. It also asserts that
+    the second run leaves the set of ``.nbc`` and ``.nbi`` files and their modification times unchanged, so a second
+    run that compiled again fails the check.
 
-    - Writes *probe_source* to a fresh ``.py`` file under ``tmp_path``.
-      (``@njit(cache=True)`` refuses to cache functions whose
-      ``co_filename`` is ``<string>``, so the probe has to live in a real
-      file rather than be passed via ``python -c``.)
-    - Runs the probe twice in subprocess, sharing
-      ``NUMBA_CACHE_DIR = tmp_path/numba-cache``. The cold run populates
-      the cache; the warm run must reuse it.
-    - Asserts each run's stdout splits to *expected_stdout_lines*.
-    - Asserts the cache state is byte-identical between the two runs:
-      * the set of ``*.nbc`` + ``*.nbi`` file paths is unchanged
-        (catches added / removed files — e.g. a new specialization or
-        a sweep that deleted something)
-      * each file's mtime is unchanged (catches in-place rewrites,
-        which would happen on a cache miss that recompiles to the
-        same signature)
-
-    Globbing both ``.nbc`` and ``.nbi`` is strictly tighter than
-    ``.nbc`` alone: empirical inspection on the current numba shows
-    neither is touched on cache hit, but checking both pins against a
-    future numba release that might write ``.nbi`` metadata on hit.
-
-    *probe_source* is passed through ``textwrap.dedent`` so callers can
-    use triple-quoted strings with leading indentation. The probe must
-    import its own dependencies and ``print()`` whatever it wants
-    asserted; no other communication channel.
-
-    *expected_stdout_lines* is compared via ``splitlines()`` so platform
-    line-endings (``\\n`` vs ``\\r\\n``) don't matter.
+    The probe imports what it uses and prints each value that the caller asserts, because the function reads only
+    the probe's standard output. The comparison splits the output into lines, so ``\\n`` and ``\\r\\n`` line endings
+    compare equal. A cached caller of numbox's proxied bindings or of its formatted I/O functions keeps working when a
+    later process loads it, and the tests check that property with this helper.
     """
-    import pathlib  # local — avoid a top-level import in the test utils
+    import pathlib
+    # The probe is a file because numba refuses to cache a function whose source file is "<string>", as for code
+    # run with python -c: it raises "RuntimeError: cannot cache function ...: no locator available".
     probe = pathlib.Path(tmp_path) / "probe.py"
-    # Write the probe explicitly as UTF-8. Without encoding= Path.write_text
-    # uses locale.getpreferredencoding() which is cp1252 on Windows runners
-    # and would raise UnicodeEncodeError on any non-Latin-1 char in the
-    # probe source (arrows, em-dashes, accented chars in test data, ...).
+    # Without encoding=, Path.write_text uses the locale's preferred encoding, which is cp1252 on Windows runners
+    # and raises UnicodeEncodeError for a character of the probe that cp1252 lacks, such as the arrow U+2192.
     probe.write_text(textwrap.dedent(probe_source), encoding="utf-8")
     cache_dir = pathlib.Path(tmp_path) / "numba-cache"
     env = {**os.environ, "NUMBA_CACHE_DIR": str(cache_dir)}
 
     def _run(label):
-        # Force UTF-8 decoding on both ends: PYTHONIOENCODING so the
-        # subprocess uses UTF-8 for stdout/stderr (overrides Windows
-        # cp1252 default), and encoding="utf-8" so capture_output decodes
-        # the captured bytes as UTF-8 (otherwise text=True would use the
-        # parent's locale, which is cp1252 on Windows runners).
+        # PYTHONIOENCODING makes the subprocess write its stdout and stderr in UTF-8 instead of Windows' cp1252, and
+        # encoding="utf-8" makes subprocess.run decode the captured bytes as UTF-8 instead of in the locale of the
+        # parent process, which is cp1252 on Windows runners.
         r = subprocess.run(
             [sys.executable, str(probe)],
             env={**env, "PYTHONIOENCODING": "utf-8"},
@@ -193,6 +186,8 @@ def assert_njit_cache_survives_subprocess_roundtrip(
 
     _run("cold")
 
+    # The check covers numba's index files (.nbi) as well as its data files (.nbc). numba writes neither on a cache
+    # hit, so a numba release that rewrote the index on a hit would also fail the check.
     cache_after_cold = sorted(cache_dir.rglob("*.nb[ci]"))
     assert any(p.suffix == ".nbc" for p in cache_after_cold), (
         f"cold run did not write any .nbc cache file under {cache_dir}"
@@ -201,6 +196,9 @@ def assert_njit_cache_survives_subprocess_roundtrip(
 
     _run("warm")
 
+    # The set of paths catches a file that the second run added or removed, such as one for a new specialization.
+    # The modification times catch a file that it rewrote in place, as numba does when a cache miss compiles the same
+    # signature again.
     cache_after_warm = sorted(cache_dir.rglob("*.nb[ci]"))
     assert cache_after_warm == cache_after_cold, (
         f"warm run added or removed cache files; "

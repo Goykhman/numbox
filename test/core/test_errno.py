@@ -1,3 +1,9 @@
+"""Tests of errno_get and errno_set in numbox.core.bindings.errno, called from jitted code.
+
+The tests cover a set followed by a get in one function, two threads that each set and read their own value, and a
+set and a get in each iteration of a ``prange`` loop. The subprocess tests in ``test_proxy.py`` and ``test_fmtio.py``
+call the two functions from a cached caller in a second process.
+"""
 import threading
 import numpy as np
 from numba import njit, prange
@@ -16,6 +22,7 @@ def _errno_get():
 
 
 def test_errno_set_get_roundtrip():
+    """Check that errno_get returns the value that errno_set stored, for several values, in one jitted function."""
     @njit(cache=True)
     def rt(v):
         errno_set(v)
@@ -25,24 +32,18 @@ def test_errno_set_get_roundtrip():
 
 
 def test_errno_per_thread_isolation():
-    """Two threads concurrently set distinct errno sentinels and read after a
-    pure-compute busy loop. Each thread MUST observe its own sentinel.
+    """Check that two threads that set ``errno`` to different values each read back their own value.
 
-    Why a busy loop instead of a sync primitive: any Python-side
-    ``threading.Barrier.wait`` / ``Event.wait`` / lock acquire goes through
-    futex(2), which sets errno (typically ``EAGAIN``) in the calling
-    thread before returning to user code. That syscall would clobber the
-    sentinel the thread just stored, so a sync-based probe sees the
-    syscall errno instead of the sentinel — and would (falsely) pass
-    *even with thread-isolated errno*, defeating the test's purpose.
+    Each thread calls ``set_busy_get`` 200 times with its own sentinel. ``set_busy_get`` sets ``errno`` and then reads
+    it, with the GIL released and with no system call between the two calls. The C library keeps ``errno`` per
+    thread, so each read returns the thread's own sentinel. A process-wide ``errno`` would return the other sentinel
+    whenever the other thread set it between the two calls. The source places a loop between the set and the get, but
+    LLVM removes it, as the comment in ``set_busy_get`` explains. The two calls therefore run back to back, and the
+    test detects a shared ``errno`` only if the other thread sets it in that short interval.
 
-    The pure-compute spin runs entirely in ``@njit(nogil=True)`` code with
-    no syscall between set and get. The only way one thread's set could
-    influence another thread's read is if errno is process-global. With
-    TLS errno (the documented invariant of ``__errno_location`` etc.),
-    each thread reads its own slot and always sees its own sentinel
-    regardless of scheduling. The test runs many trials to ensure the
-    two threads overlap in wall time.
+    The test puts no lock, barrier or event between the set and the get, because a wait on one can change ``errno``.
+    On Linux, a timed wait on a ``threading.Event`` or a ``threading.Lock`` leaves ``errno`` at ``ETIMEDOUT``, so a
+    read after it would return that value instead of the sentinel.
     """
     SENTINEL_A = 0xABCD
     SENTINEL_B = 0xBEEF
@@ -55,7 +56,8 @@ def test_errno_per_thread_isolation():
         s = np.int64(0)
         for i in range(busy):
             s += (i * 7) & 0xff
-        # Use s in the return so LLVM cannot DCE the busy loop.
+        # LLVM folds s & 0 to 0, so nothing uses the result of the loop, and LLVM removes the loop as dead code. The
+        # compiled function calls errno_set and errno_get back to back, whatever the value of busy.
         return errno_get() + (s & 0)
 
     bad = {"A": 0, "B": 0, "first_bad_A": None, "first_bad_B": None}
@@ -88,16 +90,14 @@ def test_errno_per_thread_isolation():
 
 
 def test_errno_set_get_observable_in_parallel_iterations():
-    """Within a @njit(parallel=True) loop, errno_set in iteration i is
-    observable by errno_get in the same iteration.
+    """Check that each iteration of a ``prange`` loop reads back the ``errno`` value that it set.
 
-    This guards against the codegen accidentally caching/hoisting the
-    errno-accessor call (e.g. via a stray ``readnone`` attribute on
-    ``__errno_location``). It is NOT a thread-isolation probe: numba's
-    prange chunks iterations contiguously per thread, so set-then-read
-    within one iteration runs on the same thread regardless of whether
-    errno is TLS or process-global. See
-    ``test_errno_per_thread_isolation`` for the actual TLS probe.
+    The bindings page tells a caller to read ``errno`` in the iteration that made the C call, and this test checks
+    that a read there returns the value set there. The loop calls the proxied ``errno_set`` and ``errno_get`` by name,
+    so the compiled loop holds no call of ``__errno_location`` that LLVM could move out of an iteration. The test does
+    not show that ``errno`` is per thread: an iteration runs its set and its get on one thread, and a process-wide
+    ``errno`` would differ only if another thread set it between them. ``test_errno_per_thread_isolation`` checks
+    the isolation.
     """
     @njit(parallel=True, cache=True)
     def f(n):
