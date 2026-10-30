@@ -1,4 +1,8 @@
-"""query_to_array: collect SELECT results into a numpy structured array."""
+"""Collect the rows of a SQL query into a NumPy structured array.
+
+:func:`query_to_array` runs one query on a connection and returns its rows, one field of the dtype for each result
+column. The jitted helpers that it calls step the statement and write the bytes of each cell into the array.
+"""
 import ctypes
 
 import numpy as np
@@ -33,14 +37,15 @@ def _copy_bytes(dst, off, src, nbytes):
 
 @njit(**jit_options)
 def _put_unicode(buf, off, scratch8, src_p, nbytes, width_cp):
-    """Decode UTF-8 at ``src_p`` into up to ``width_cp`` UTF-32 code points and
-    write them into ``buf`` at ``off`` in the platform's NATIVE byte order (via a
-    uint32 view of ``scratch8``, matching numpy's 'U' dtype). Decodes with the
-    same ``_typemap._utf8_decode_one`` as ``utf8_to_utf32`` but writes natively
-    into ``buf`` (a tracked uint8 array view) instead of a raw pointer -- raw-
-    pointer stores get dead-code-eliminated by the macOS-arm64 optimizer.
-    Malformed input -> U+FFFD."""
+    """Decode the ``nbytes`` UTF-8 bytes at ``src_p`` into at most ``width_cp`` code points in ``buf`` at ``off``.
+
+    Each code point is written as a 4-byte unsigned integer in the machine's byte order, as NumPy's ``'U'`` dtype
+    stores it. Malformed input decodes to U+FFFD.
+    """
     inp = carray(_cast_int_to_void_p(src_p), (nbytes,), dtype=np.uint8)
+    # The decoder is _typemap._utf8_decode_one, as in utf8_to_utf32, but each code point goes into buf through the
+    # uint32 view of scratch8 and _copy_bytes, writes to arrays that numba tracks. utf8_to_utf32 stores through a raw
+    # pointer instead, and the optimizer for macOS on arm64 has removed such stores as dead code.
     cps = scratch8.view(np.uint32)
     i = 0
     k = 0
@@ -53,13 +58,17 @@ def _put_unicode(buf, off, scratch8, src_p, nbytes, width_cp):
 
 @njit(**jit_options)
 def _store_cell(buf, off, tag, width, stmt, j, scratch8):
-    """Write column ``j`` of the current row into the uint8 array view ``buf`` at
-    byte offset ``off``. Scalars are serialised through ``scratch8`` (a tracked
-    8-byte uint8 array) via a typed view, so the bytes land in the platform's
-    NATIVE order, then copied into ``buf`` -- all numba-tracked array writes, so
-    the optimizer cannot drop them on macOS-arm64. The row is pre-zeroed by the
-    caller (np.zeros): a SQL NULL leaves an integer cell 0 / text-blob empty; only
-    float cells get NaN. The text/blob accessor is read before column_bytes."""
+    """Write column ``j`` of the current row of ``stmt`` into the field at byte ``off`` of the ``uint8`` array ``buf``.
+
+    ``tag`` and ``width`` describe the field. ``scratch8`` is an 8-byte ``uint8`` array for the conversion of one
+    value. The caller has zeroed the row, so a SQL NULL leaves 0 in an integer or ``bool`` field and an empty value in
+    a string field; only a float field receives NaN for NULL.
+    """
+    # Each scalar is written through a typed view of scratch8, so that its bytes are in the machine's byte order, and
+    # _copy_bytes then copies them into buf. Every write goes to an array that numba tracks, so the optimizer for
+    # macOS on arm64 cannot remove it as it removes a store through a raw pointer. An integer keeps the low bits that
+    # fit its field. The text or BLOB accessor runs before sqlite3_column_bytes, as SQLite advises, because the
+    # accessor can convert the value and change its length.
     ctype = sqlite3_column_type(stmt, j)
     if ctype == SQLITE_NULL:
         if tag == _TAG_F32:
@@ -108,12 +117,12 @@ def _store_cell(buf, off, tag, width, stmt, j, scratch8):
 
 @njit(**jit_options)
 def _query_core(stmt, ncols, offsets, tags, widths, itemsize):
-    """Step ``stmt`` to exhaustion, materialising rows into a flat uint8 numpy
-    array that grows geometrically, then trim to the exact length. Returns
-    ``(buf, rc)`` where ``buf`` is ``n * itemsize`` native-order bytes (the
-    caller views it back to the structured dtype) and ``rc`` is the terminal
-    step return code (SQLITE_DONE on success).
+    """Step ``stmt`` to its end, and return its rows as bytes and the last code of ``sqlite3_step``.
+
+    The rows are ``n * itemsize`` bytes in the machine's byte order, which the caller views as the structured dtype.
+    The code is ``SQLITE_DONE`` when every step succeeded.
     """
+    # The buffer starts with room for 16 rows and doubles whenever it is full.
     cap = 16
     out_u8 = np.zeros(cap * itemsize, np.uint8)
     scratch8 = np.empty(8, np.uint8)
@@ -130,10 +139,9 @@ def _query_core(stmt, ncols, offsets, tags, widths, itemsize):
             _store_cell(out_u8, row_off + offsets[j], tags[j], widths[j], stmt, j, scratch8)
         n += 1
         rc = sqlite3_step(stmt)
-    # The bare slice is lifetime-safe (it shares the parent's NRT meminfo via
-    # make_view/impl_ret_borrowed); .copy() only trims the growth slack, whose
-    # absolute size is under one doubling: less than n rows' worth (n * itemsize
-    # bytes) for n > 16, at most 16 rows' worth when n <= 16 (cap floors at 16).
+    # The slice alone would keep the memory alive, because it shares the parent's NRT meminfo (make_view and
+    # impl_ret_borrowed). The copy only drops the unused rows, fewer than one doubling: fewer than n rows when n > 16,
+    # and at most 16 rows when n <= 16, because the capacity starts at 16.
     return out_u8[:n * itemsize].copy(), rc
 
 
@@ -146,11 +154,23 @@ def _raise_rc(db, rc):
 
 
 def query_to_array(db, sql_p, dtype):
-    """Run the NUL-terminated SQL text at pointer ``sql_p`` on ``db`` and return
-    its rows as a 1-D numpy structured array of ``dtype`` (one field per result
-    column, by position). ``sql_p`` is a char* pointer (e.g. from
-    ``numbox.utils.cstrings.c_string`` or ``get_unicode_data_p``), not a Python
-    str. NULL -> NaN (float) / 0 (int) / empty (text/blob)."""
+    """Run the SQL query at ``sql_p`` on ``db`` and return its rows as a 1-D NumPy structured array of ``dtype``.
+
+    ``db`` is the connection's ``sqlite3 *`` handle. ``sql_p`` is the address of NUL-terminated UTF-8 SQL text, not a
+    Python ``str``: :func:`~numbox.utils.cstrings.c_string` makes one from any text, and
+    :func:`~numbox.utils.lowlevel.get_unicode_data_p` gives one for ASCII text. Only the first statement of the text
+    runs. The fields of ``dtype`` take the result columns in order, one field for each column.
+
+    A SQL NULL becomes NaN in a float field, 0 in an integer or ``bool`` field, and an empty value in an ``'S'`` or
+    ``'U'`` field. An integer field keeps the low bits of a value too wide for it, and a ``bool`` field is true for any
+    nonzero value. A string longer than its field is cut to the field's width, and the text for a ``'U'`` field is
+    decoded from UTF-8, with U+FFFD for malformed bytes.
+
+    Raises ``TypeError`` for a ``dtype`` without fields or with a field type that has no SQLite counterpart, such as
+    a complex number. Raises ``ValueError`` when the number of fields differs from the number of result columns, and
+    ``RuntimeError``, with SQLite's message, when the query fails to prepare or to run. Once the statement is
+    prepared, the function finalizes it on every path.
+    """
     if dtype.fields is None or dtype.names is None:
         raise TypeError("dtype must be a structured numpy dtype, got %r" % (dtype,))
     names = list(dtype.names)
