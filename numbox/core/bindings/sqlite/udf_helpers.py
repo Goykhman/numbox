@@ -200,7 +200,7 @@ def _compile_callbacks(stem, srcs, state_type, fns):
     # repr(state_type) holds only the class's qualified name and the fields, so two StructRef classes of one qualified
     # name in different modules would share a digest. The subject of the digest therefore adds the defining module and
     # the qualified name. The digest does not cover an @overload_method attached to the type, and that includes a
-    # method that make_structref attaches. make_structref puts a method's hash only into the struct's own generated
+    # method that make_structref attaches. make_structref writes a method's hash only into the struct's own generated
     # code, so an edit to the body of such a method does not change this digest.
     state_id = "%s.%s;%r" % (type(state_type).__module__, type(state_type).__qualname__, state_type)
     # The digest covers that subject, numba's and numbox's versions, numbox's jit options and the fingerprint of each

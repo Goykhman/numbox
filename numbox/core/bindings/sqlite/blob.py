@@ -2,7 +2,7 @@
 
 The module binds ``sqlite3_blob_open``, ``sqlite3_blob_close``, ``sqlite3_blob_bytes``, ``sqlite3_blob_read``,
 ``sqlite3_blob_write`` and ``sqlite3_blob_reopen``. Each of them exists in SQLite from version 3.4.0, released in
-2007, except ``sqlite3_blob_reopen``, which SQLite added in version 3.7.4, released in 2010. Both versions are far
+2007, except ``sqlite3_blob_reopen``, which SQLite added in version 3.7.4, released in 2010. Both versions are
 older than 3.34, the oldest SQLite in numbox's test matrix, so every binding of the module is present.
 """
 from numbox.core.bindings.call import _call_lib_func

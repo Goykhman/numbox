@@ -187,7 +187,7 @@ def _derive_anchor_cres(derive_sig, sig_canon, derive, derive_fp, jit_options):
         # its directory is no longer writable and numba has no other location.
         return None
     # The wrapper calls the derive through a dispatcher compiled without a cache. numba links the derive's code into
-    # the wrapper's cached code, and a cache entry of the derive's own would be keyed on neither its flags nor what it
+    # the wrapper's cached code, and the derive's own cache entry would be keyed on neither its flags nor what it
     # reads.
     ns = {
         "_cres": cres,
@@ -353,10 +353,10 @@ def make_graph(
     if jit_options is None:
         jit_options = {}
     jit_options = {**jit_options_, **jit_options}
-    # numba caches the graph maker as a function defined in this file. A caller's cache option overrides the answer
-    # that numbox's own jit options hold for this location, so _cached_at_or_uncached asks numba again, and it turns
-    # caching off with a warning where numba has no cache location. The derives cache under anchors of their own and
-    # take the options as given.
+    # numba caches the graph maker as a function defined in this file. A caller's cache option overrides the cache
+    # setting that numbox's own jit options carry for this location, so _cached_at_or_uncached asks numba again, and
+    # it turns caching off with a warning where numba has no cache location. The derives are cached under their own
+    # anchors and use the options unchanged.
     kernel_options = _cached_at_or_uncached(getfile(_file_anchor), jit_options)
     ns = {
         **getmodule(_file_anchor).__dict__,

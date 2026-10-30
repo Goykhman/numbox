@@ -67,7 +67,7 @@ _orphan_anchor_sweep(_ANCHOR_SUBDIR)
 
 
 # _TVF_DESC_DTYPE describes the descriptor of a registration, whose address SQLite passes to xConnect as the module's
-# client data. xConnect, xBestIndex, xOpen and xColumn read it field by name through
+# client data. xConnect, xBestIndex, xOpen and xColumn read its fields by name through
 # carray(ptr, (1,), dtype=_TVF_DESC_DTYPE). The schema
 # declares the visible columns of out_dtype first and the n_hidden argument columns after them. col_tags has an entry
 # for every column of the schema, the hidden ones included; col_offsets and col_widths cover only the visible ones.

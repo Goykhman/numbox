@@ -34,8 +34,8 @@ def sqlite3_column_int(stmt_p, idx):
 
     C reference: `sqlite3_column_int <https://sqlite.org/c3ref/column_blob.html>`_.
 
-    SQLite converts a value of another type, and the binding returns 0 for NULL. A value outside the int32 range loses
-    its high bits; :func:`sqlite3_column_int64` reads all 64 bits.
+    SQLite converts a value of another type, and the binding returns 0 for NULL. A value outside the int32 range is
+    truncated to its low 32 bits; :func:`sqlite3_column_int64` reads all 64 bits.
     """
     return _call_lib_func("sqlite3_column_int", (stmt_p, idx))
 

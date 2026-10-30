@@ -194,7 +194,7 @@ def _anchored_or_uncached(path: Path, code_txt: str, jit_options: dict) -> dict:
 
     numba reads the anchor to cache the code, and it quotes the code from the anchor in its messages, such as a typing
     error. The anchor is therefore written whether or not caching is enabled. With caching disabled, a failed write is
-    ignored, and the code still compiles under ``path`` as its file name; ``jit_options`` is returned as it is. With
+    ignored, and the code still compiles under ``path`` as its file name; ``jit_options`` is returned unchanged. With
     caching enabled, :func:`_anchor_or_error` writes the anchor and checks the location. If it reports an error, the
     function warns once with a ``RuntimeWarning`` that names the remedy, and it returns the options with ``cache`` set
     to False. The code then compiles without a cache instead of failing at the write or at the first decorated
@@ -246,7 +246,7 @@ def _anchored_or_uncached(path: Path, code_txt: str, jit_options: dict) -> dict:
 def _cached_at_or_uncached(py_file: str, jit_options: dict) -> dict:
     """Return the jit options to compile code under that numbox compiles as part of the module file ``py_file``.
 
-    ``jit_options`` is returned as it is if caching is disabled or if numba can cache a function of ``py_file``.
+    ``jit_options`` is returned unchanged if caching is disabled or if numba can cache a function of ``py_file``.
     Otherwise the function warns once, with the remedy that :func:`~numbox.core.configurations.cache_remedy` returns
     for the file, and returns the options with ``cache`` set to False. ``make_graph`` compiles its kernel as part of
     ``builder.py``, and numba caches the kernel beside that file. Options that a caller passes are passed to numba

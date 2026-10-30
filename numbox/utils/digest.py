@@ -75,7 +75,7 @@ def digest(subject, fns):
                 # A value without a fingerprint makes _fingerprint_function raise. The best-effort fingerprint still
                 # folds the constants, closure values, defaults and globals that have one, and it sorts the elements
                 # of sets, so the result does not depend on PYTHONHASHSEED. It puts the name of the type in place of
-                # each value without a fingerprint, and it leaves out the module attributes that the function reads.
+                # each value without a fingerprint, and it omits the module attributes that the function reads.
                 # An edit to such a value, or to such an attribute, therefore leaves the digest unchanged, and a
                 # SQLite registration named after the digest loads the code compiled before the edit.
                 h.update(_fingerprint_function_best_effort(py).encode("utf-8"))

@@ -193,7 +193,7 @@ def lower_constant_derive_function_type(context, builder, typ, pyval):
     The lowered value holds the numba entry point as a symbol, so an exception raised in the body propagates, and numba
     can cache a caller that only calls the value. The cache entry of such a caller holds its own copy of the body's
     compiled code. The cached caller may continue to run the old body after an edit to the body in another module, and
-    neither numba nor numbox gives a warning; deleting the caller's cache files is the only remedy. A caller that calls
+    neither numba nor numbox issues a warning; deleting the caller's cache files is the only remedy. A caller that calls
     a proxied function through its dispatcher is not affected, because the cache guard of ``@proxy`` discards its stale
     cache entry when it loads. The function has no fallback to a fixed address. A value of this type is always called
     through its numba entry point, so an entry point that does not resolve fails the compilation.
@@ -229,10 +229,10 @@ def lower_constant_derive_function_type(context, builder, typ, pyval):
 def rewrap_derive(derive):
     """Upgrade ``derive`` to a :class:`DeriveWAP` if it is a ``CompileResultWAP``, so that its exceptions propagate.
 
-    A value that :func:`~numbox.utils.highlevel.cres` compiled is already a ``DeriveWAP`` and is returned as it is. Any
-    other value, including ``None``, is also returned as it is, so a caller can apply the function to every derive. A
+    A value that :func:`~numbox.utils.highlevel.cres` compiled is already a ``DeriveWAP`` and is returned unchanged. Any
+    other value, including ``None``, is also returned unchanged, so a caller can apply the function to every derive. A
     ``CompileResultWAP`` built with numba directly would keep only the C entry point, and the compile result that it
-    carries is all that the upgrade needs.
+    carries suffices for the upgrade.
 
     The upgraded wrapper is stored on the original object, and a second call returns the same wrapper. The storage is
     required, not an optimization. ``py_addr`` holds the wrapper's address without a reference, so a new wrapper for

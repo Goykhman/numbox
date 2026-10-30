@@ -107,8 +107,8 @@ SQLITE_INNOCUOUS = 0x200000
 # SQLITE_SUBTYPE (SQLite 3.30.0 and later) registers a function that reads its arguments' subtypes with
 # sqlite3_value_subtype. If the flag is missing, that call may return 0 for an argument that has a subtype.
 # SQLITE_RESULT_SUBTYPE (3.45.0 and later) registers a function that sets its result's subtype with
-# sqlite3_result_subtype. A SQLite built with -DSQLITE_STRICT_SUBTYPE=1, such as the conda-forge build, makes that
-# call fail the function when this flag is missing. The strict build checks only SQLITE_RESULT_SUBTYPE, in
+# sqlite3_result_subtype. A SQLite built with -DSQLITE_STRICT_SUBTYPE=1, such as the conda-forge build, makes the
+# function fail at that call when this flag is missing. The strict build checks only SQLITE_RESULT_SUBTYPE, in
 # sqlite3_result_subtype (SQLite's src/vdbeapi.c); sqlite3_value_subtype checks no flag. Older versions ignore both.
 SQLITE_SUBTYPE = 0x100000
 SQLITE_RESULT_SUBTYPE = 0x1000000

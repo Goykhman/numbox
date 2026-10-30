@@ -451,12 +451,12 @@ def _compile(
     anchor = _anchor_root(_ANCHOR_SUBDIR) / f"_kernel_{digest}.py"
     if opts["cache"]:
         # numbox writes an anchor file only for a cached kernel. The structref and the SQLite registrations write
-        # theirs whether cached or not, so that numba's messages can quote their source.
+        # their anchors whether cached or not, so that numba's messages can quote their source.
         opts = _anchored_or_uncached(anchor, final_src, opts)
     code = compile(final_src, str(anchor), "exec")
     # The namespace's __name__ must name an importable module: numba rebuilds the environment of a cached function in
     # another process with importlib.import_module, and that call fails if __name__ is None. make_graph and
-    # make_structref set it the same way.
+    # make_structref set __name__ the same way.
     ns = {**bindings, "njit": njit, "_kernel_jit_options": opts, "__name__": __name__}
     exec(code, ns)  # nosec B102 - JIT codegen of internal source
     return ns.pop(name)
@@ -637,8 +637,8 @@ class CompiledKernel:
                 result = self._discover_and_run(args)
                 self._last_args = args
                 return result
-            # The mode changes before the call runs. If the call raises, _last_args remains None. Every later call goes
-            # to the dispatcher directly, which never sets it, so every later recompute on this kernel raises
+            # The mode changes before the call runs. If the call raises, _last_args remains None. Every later call runs
+            # the dispatcher directly, which never sets it, so every later recompute on this kernel raises
             # RuntimeError.
             self._mode = "fused"
             self.partition = self._fused_report()
@@ -656,8 +656,8 @@ class CompiledKernel:
             # The handler catches every NumbaError intentionally: a segment that fails to compile for new argument types
             # starts a new search. If a Python formula raised the NumbaError, the search runs the same formula on the
             # same values and raises it again, so no error is hidden. A kernel built from declared types does not
-            # search again, because a search would replace the demoted set that the declarations define; it raises
-            # instead.
+            # search again, because a search would replace the demoted set that the declarations define; the kernel
+            # raises instead.
             if self.is_declared:
                 raise
             result = self._discover_and_run(args)

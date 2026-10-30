@@ -70,9 +70,9 @@ def utf32_to_utf8(src, n_codepoints, dst):
     return k
 
 
-# numba inlines the helpers that run once per element, here and in vtable.py, in its own IR. Without that, LLVM's
-# inliner leaves the larger ones, _utf8_decode_one and _emit_cell, out of line, and a call for each code point or each
-# cell measurably slows their loops.
+# numba inlines the helpers that run once per element, here and in vtable.py, in its own IR. Without that inlining,
+# LLVM's inliner leaves the larger ones, _utf8_decode_one and _emit_cell, out of line, and a call for each code point
+# or each cell measurably slows their loops.
 _INLINE_JIT_OPTIONS = {**jit_options, "inline": "always"}
 
 

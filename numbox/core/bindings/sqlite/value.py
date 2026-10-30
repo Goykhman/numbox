@@ -31,8 +31,8 @@ def sqlite3_value_int(value_p):
 
     C reference: `sqlite3_value_int <https://sqlite.org/c3ref/value_blob.html>`_.
 
-    SQLite converts a value of another type, and the binding returns 0 for NULL. A value outside the int32 range loses
-    its high bits; :func:`sqlite3_value_int64` reads all 64 bits.
+    SQLite converts a value of another type, and the binding returns 0 for NULL. A value outside the int32 range is
+    truncated to its low 32 bits; :func:`sqlite3_value_int64` reads all 64 bits.
     """
     return _call_lib_func("sqlite3_value_int", (value_p,))
 
@@ -131,7 +131,7 @@ def sqlite3_value_nochange(value_p):
     return _call_lib_func("sqlite3_value_nochange", (value_p,))
 
 
-# SQLite has sqlite3_value_frombind from version 3.28. proxy_if_available makes the binding a stub where the loaded
+# SQLite added sqlite3_value_frombind in version 3.28. proxy_if_available makes the binding a stub where the loaded
 # library lacks it.
 @proxy_if_available(_sqlite3_lib, signatures.get("sqlite3_value_frombind"), jit_options=jit_options)
 def sqlite3_value_frombind(value_p):
@@ -139,7 +139,7 @@ def sqlite3_value_frombind(value_p):
 
     C reference: `sqlite3_value_frombind <https://sqlite.org/c3ref/value_blob.html>`_.
 
-    The binding returns 0 for a value from a SQL literal, a table column or an expression. SQLite has the function from
+    The binding returns 0 for a value from a SQL literal, a table column or an expression. SQLite added the function in
     version 3.28. If the loaded library is older, this binding is a stub: a call from Python raises
     ``NotImplementedError``, and a jitted call fails to compile with a ``TypingError``.
     """

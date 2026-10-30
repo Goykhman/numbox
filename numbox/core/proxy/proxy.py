@@ -204,9 +204,9 @@ def _publish_cfunc_alias(alias, address, opaque):
         # A retirement lasts for the life of the process, because its cause is a property of the two bodies, not of the
         # order in which this process built them. If the body published under the alias registers again, the alias is
         # published again with the new address. If the other body registers again, it receives another new name.
-        # Another process may still build the two in the other order. The branch above therefore leaves _ABSENT_ALIASES
-        # alone, and no code removes an alias from the set. A first publication needs no removal, because every alias
-        # in the set already has an entry in _PUBLISHED_ALIASES.
+        # Another process may still build the two in the other order. The branch above therefore does not change
+        # _ABSENT_ALIASES, and no code removes an alias from the set. A first publication needs no removal, because
+        # every alias in the set already has an entry in _PUBLISHED_ALIASES.
         #
         # A trap can also be published under the alias, with a witness that no body matches. A body that computes a
         # trap's alias therefore receives a name of its own, and the alias stays retired. A cached caller of that alias
@@ -259,8 +259,8 @@ def _register_absent_alias_trap(func, main_sig, jit_options=None):
     # If the binding is absent in a process, no body is published under its alias there. The function then registers
     # the trap.
     #
-    # The registry is read twice, and the second read decides whether the trap is registered. Another thread routinely
-    # publishes a body while the trap compiles, because the compile takes long enough. The first read happened before
+    # The registry is read twice, and the second read decides whether the trap is registered. A compile is slow enough
+    # that another thread routinely publishes a body while the trap compiles. The first read happened before
     # the compile began. The trap is therefore compiled first. The registry is then read again under _ALIAS_LOCK,
     # together with the writes that depend on that read. A trap is dropped if a body was published under its alias
     # during the compile. The first read only lets the function skip the compile if a body is already published under
@@ -770,7 +770,7 @@ def _install_cache_alias_guard():
 try:
     _install_cache_alias_guard()
 except Exception:
-    # If the installation fails, the module still imports, without the check and without a warning. The installation
-    # thus fails open, as the check does on an entry that it cannot read. Without the check, a stale cache entry can
+    # If the installation fails, the module still imports, without the check and without a warning. A failure thus
+    # leaves caching on, as the check keeps an entry that it cannot read. Without the check, a stale cache entry can
     # crash the process. An exception here would instead make numbox fail to import.
     pass

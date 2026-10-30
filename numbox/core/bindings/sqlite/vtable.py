@@ -372,7 +372,7 @@ def _xbestindex(vtab, idx_info):
 
         nrows = d[0].nrows
         # The estimate is a heuristic, because the table keeps no column statistics: each bound constraint is assumed
-        # to divide the remaining rows, which favors plans that bind more constraints. The + 1 makes the estimate at
+        # to divide the remaining rows, which favors plans that bind more constraints. Adding 1 keeps the estimate at
         # least 1.
         ii[0].estimatedRows = nrows if nbound == 0 else nrows // (nbound + 1) + 1
         ii[0].estimatedCost = float64(nrows)
@@ -811,8 +811,8 @@ def register_table(db, name, data, columns=None, *, text_as_blob=False):
 
     - A ``uint64`` value of 2**63 or more becomes SQLite's signed INTEGER, so it wraps to a negative value.
     - A float becomes a REAL, infinities included, except NaN: SQLite converts a NaN REAL to SQL NULL, so a query
-      returns NULL for a NaN cell. NumPy has no missing value, so every other cell is non-NULL. Masked arrays are not
-      supported, and the table ignores the mask.
+      returns NULL for a NaN cell. A NumPy array has no missing values, so every other cell is non-NULL. Masked arrays
+      are not supported, and the table ignores the mask.
 
     String columns:
 

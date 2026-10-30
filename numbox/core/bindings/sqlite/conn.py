@@ -216,7 +216,7 @@ def sqlite3_changes64(db_p):
 
     C reference: `sqlite3_changes64 <https://sqlite.org/c3ref/changes.html>`_.
 
-    SQLite has the function from version 3.37. If the loaded library is older, this binding is a stub: a call from
+    SQLite added the function in version 3.37. If the loaded library is older, this binding is a stub: a call from
     Python raises ``NotImplementedError``, and a jitted call fails to compile with a ``TypingError``. A stub has no
     ``as_func``, so ``hasattr(sqlite3_changes64, "as_func")`` is true only when the binding is present.
     """
@@ -229,7 +229,7 @@ def sqlite3_total_changes64(db_p):
 
     C reference: `sqlite3_total_changes64 <https://sqlite.org/c3ref/total_changes.html>`_.
 
-    SQLite has the function from version 3.37. If the loaded library is older, this binding is a stub, as
+    SQLite added the function in version 3.37. If the loaded library is older, this binding is a stub, as
     :func:`sqlite3_changes64` describes.
     """
     return _call_lib_func("sqlite3_total_changes64", (db_p,))

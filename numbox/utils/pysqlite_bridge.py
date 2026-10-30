@@ -100,7 +100,7 @@ def libraries_coordinated():
 
     The function compares the version that :func:`~numbox.core.bindings.sqlite.conn.sqlite3_libversion` returns
     through numbox's bindings with ``sqlite3.sqlite_version``, the version of the library that Python's module uses.
-    Different versions mean different copies of SQLite, as is the case on macOS without the workaround in the module
+    Different versions mean different copies of SQLite, as on macOS without the workaround in the module
     docstring.
     :func:`extract_connection_ptr` then raises instead of passing a handle from one copy to the other. Two copies of
     the same version count as coordinated.

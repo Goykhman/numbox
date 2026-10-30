@@ -78,7 +78,7 @@ def _promote_for_varargs(builder, arg_ty, arg_val):
     C promotes a narrow integer only to ``int``, so the widening to 64 bits goes beyond C's rule. It lets ``%lld`` read
     an ``int32`` correctly; without it, C would read 8 bytes from a 4-byte argument, and the high 4 bytes would hold
     indeterminate data. It also matches the Python path, which prints each value at its full width. The cost is one LLVM
-    ``sext``, ``zext`` or ``fpext`` instruction per argument, which is free at run time.
+    ``sext``, ``zext`` or ``fpext`` instruction per argument, which costs nothing at run time.
     """
     i64_ll = llir.IntType(64)
     if isinstance(arg_ty, Float):
@@ -94,8 +94,8 @@ def _promote_for_varargs(builder, arg_ty, arg_val):
             return builder.zext(arg_val, i64_ll)
         return arg_val
     # The overloads reject any other argument type when numba types the call (_validate_writer_arg_type), so this
-    # raise is a second guard. It stops the code generation, instead of passing such a value to C, if a change in numba,
-    # such as in the way numba flattens tuples, admits another type.
+    # raise statement is a second guard. It stops the code generation, instead of passing such a value to C, if a
+    # change in numba, such as in the way numba flattens tuples, admits another type.
     raise TypingError(
         f"variadic arg of type {arg_ty!r} is not supported by printf-family "
         f"bindings; allowed: Float, Integer, Boolean, or intp pointer"

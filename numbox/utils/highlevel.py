@@ -216,7 +216,7 @@ class {class_name}(StructRefProxy):
 """)
     # The getter of a field with a long name is defined under the field's bounded name, then assigned to the field's
     # own name and deleted. If an earlier field had the bounded name as its own name, the getter's definition would
-    # replace that field's property. The del would then remove that name from the class. numbox adds a leading
+    # replace that field's property. The del statement would then remove that name from the class. numbox adds a leading
     # underscore until the bounded name differs from every field name and method name.
     taken = set(struct_fields) | set(struct_methods or ())
     for field in struct_fields:
@@ -336,7 +336,7 @@ def make_structref(
     registered with numba's ``@register``, and each struct needs one of its own. If code that uses the struct is to be
     cached, define the type class in a module that the program imports, not in the script that runs. numba pickles the
     struct's type into its cache, and a class from the running script does not match the cached copy in the next run.
-    A StructRef written out by hand has the same requirement. For the same reason, ``make_structref`` cannot define the
+    A StructRef written by hand has the same requirement. For the same reason, ``make_structref`` cannot define the
     type class in the code that it generates.
 
     ``struct_methods`` maps method names to functions. Each function becomes a method that Python code and jitted code
@@ -344,7 +344,7 @@ def make_structref(
     numbox renames every ``def`` in the method's source. numba may inline a method into a jitted caller regardless of
     what ``jit_options`` specifies about inlining, and a cached caller holds the method's compiled code in either case.
     After an edit to a method, a cached caller in another file can therefore continue to run the old code, as it would
-    with a StructRef written out by hand.
+    with a StructRef written by hand.
 
     ``ns`` maps names to the globals that the methods read, such as a module or a jitted helper, because the methods run
     in a namespace of their own. numbox overrides an entry of ``ns`` whose name is also a global of this module or one

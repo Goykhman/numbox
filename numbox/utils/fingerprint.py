@@ -359,8 +359,8 @@ def _opaque_values_match(old: Sequence[Any], new: Sequence[Any]) -> bool:
         # together with its call shape. The address alone does not identify the body: one symbol reached through two
         # prototypes describes two calls that numba types and lowers differently. If the two pointers were taken as one
         # value, the second body would receive the alias of the first body, and no collision would be reported.
-        # _ctypes_call_shape is also what the fingerprint folds for a pointer that it can name, so both paths agree on
-        # what makes two pointers two calls.
+        # _ctypes_call_shape is also what the fingerprint folds for a pointer that it can name, so both paths separate
+        # two pointers by the same rule.
         if isinstance(a, ctypes._CFuncPtr) and isinstance(b, ctypes._CFuncPtr):
             if (ctypes.cast(a, ctypes.c_void_p).value == ctypes.cast(b, ctypes.c_void_p).value
                     and _ctypes_call_shape(a) == _ctypes_call_shape(b)):
@@ -382,8 +382,8 @@ def _fingerprint_function_best_effort(func: FunctionType, opaque: Optional[list]
     global, such as an ``@intrinsic``, has no fingerprint. This function substitutes ``<opaque:TypeName>`` for each
     such value. Bodies that differ in a constant, a closure value, a default or a global that has a fingerprint
     therefore still have different fingerprints. Every placeholder comes from a type name, never from an address, so
-    the result is the same in every process. Unlike ``_fingerprint_function``, it leaves out the module attributes that
-    the function reads, so a change to one leaves the result unchanged.
+    the result is the same in every process. Unlike ``_fingerprint_function``, it omits the module attributes that
+    the function reads, so a change to one does not change the result.
 
     ``@proxy`` names a body without a fingerprint with this function, and ``digest`` hashes such a function with it.
     ``make_structref`` and the work builder use it too, but they compile such code without a cache. Two different
