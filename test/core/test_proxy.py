@@ -62,6 +62,22 @@ def test_2():
     assert abs(aux_2(2.2, 1.4) - (3.14 * 2.2 + 1.4)) < 1e-15
 
 
+def test_proxy_dispatcher_carries_the_functions_docstring():
+    """The dispatcher that ``@proxy`` returns carries the decorated function's docstring, and so does its ``py_func``,
+    so that ``help()`` and the rendered API show it. A libc binding carries the docstring of its body."""
+
+    @proxy(float64(float64))
+    def documented(x):
+        """Return twice ``x``."""
+        return 2.0 * x
+
+    assert documented.__doc__ == "Return twice ``x``."
+    assert documented.py_func.__doc__ == "Return twice ``x``."
+    assert documented(1.5) == 3.0
+    body = getenv.as_func._numbox_dispatcher.py_func
+    assert body.__doc__ and getenv.__doc__ == body.__doc__
+
+
 def _sole_compile_result(dispatcher):
     """Return the single compiled result on a numba dispatcher."""
     sigs = dispatcher.nopython_signatures
