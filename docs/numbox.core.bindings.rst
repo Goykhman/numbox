@@ -424,7 +424,7 @@ that names the problem when:
 
 - the format has more or fewer conversions than there are arguments; a ``*`` width or precision counts as one more
   integer argument;
-- a conversion gets an argument of another kind than the one it takes;
+- a conversion gets an argument of another kind than the one it takes, apart from the two cases described below;
 - an argument has a type that no conversion takes, such as an array, a complex number or a tuple; pass the element or
   the field you mean, such as ``a[0]`` or ``z.real``;
 - the format holds ``%n``, which would make C write the number of characters printed so far through a pointer;
@@ -435,9 +435,11 @@ read the message that names the mismatch. A literal percent sign followed by ``n
 ``%n`` and the ``'`` flag raise ``ValueError``.
 
 The check cannot distinguish a pointer from an integer, because numba represents a pointer as an ``intp``, which is an
-``int64``. A ``%s`` given an ``int64`` value compiles, and C then reads memory at that address, which usually ends the
-process with a segmentation fault. Pass ``%s`` a ``str``, or the address of a NUL-terminated buffer. ``%p`` only prints
-its argument as an address, so an ``int64`` argument for ``%p`` is harmless.
+``int64``. It also sees a ``str`` as the address of its characters, because numbox substitutes that address before the
+check runs. A ``%s`` given an ``int64`` value compiles, and C then reads memory at that address, which usually ends
+the process with a segmentation fault. A ``%d`` given a ``str`` compiles as well, and C prints the address. Pass
+``%s`` a ``str`` or the address of a NUL-terminated buffer, and pass an integer conversion an integer. ``%p`` only
+prints its argument as an address, so an ``int64`` argument for ``%p`` is harmless.
 
 For ``%s``, numbox passes a ``str`` as the address of its characters, so the ASCII limit from the section
 `Pointers and memory`_ applies: ``"caf\xe9"`` prints its last character as the single byte ``0xE9``, not as UTF-8. Pass
