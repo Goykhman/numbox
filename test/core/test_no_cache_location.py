@@ -787,7 +787,7 @@ def test_a_location_too_close_to_the_path_limit_for_numbas_files_compiles_uncach
     # The check creates a file with a name of LONGEST_CACHE_FILE_NAME bytes, which does not fit either. The first module
     # that the check asks about is configurations.py. Its location is the name of its directory and a hash of the
     # directory's path, under NUMBA_CACHE_DIR, so the test sets the length of NUMBA_CACHE_DIR from the length of that
-    # name, whatever the checkout's path.
+    # name, regardless of the checkout's path.
     from numba.core.caching import _CacheLocator
     location = _CacheLocator.get_suitable_cache_subpath(str(REPO / "numbox" / "core" / "configurations.py"))
     cache_dir = _directory_of_length(tmp_path, 4096 - 20 - 1 - len(location))
@@ -1065,8 +1065,8 @@ def test_an_error_that_names_no_file_under_one_locator_is_told_its_one_location(
 
 # Each case gives the directory that NUMBA_CACHE_DIR names, or None if the variable is unset, and the value of
 # NUMBA_CACHE_LOCATOR_CLASSES. Each case also gives the location that the error names and the alternative that the
-# remedy offers after it asks for free space or write access. The location "none" is none of numba's, and "unnamed"
-# stands for an error that names no file.
+# remedy offers after it asks for free space or write access. The location "none" is not one of numba's locations, and
+# "unnamed" stands for an error that names no file.
 UNWRITABLE_CASES = {
     "NUMBA_CACHE_DIR's": ("cache", "", "NUMBA_CACHE_DIR", ", or NUMBA_CACHE_DIR set to another writable directory"),
     "beside the source, NUMBA_CACHE_DIR unset": (None, "", "beside", ", or NUMBA_CACHE_DIR set to a writable directory"),
@@ -4607,7 +4607,7 @@ def test_a_zip_member_in_an_ipykernel_directory_compiled_to_pyc_alone_raises_ins
         tmp_path, monkeypatch, name, ipython):
     """The check raises inspect's ``OSError`` for a member in an ``ipykernel_`` directory shipped as ``.pyc`` alone, as
     numba raises it at decoration, and the remedy is the archive remedy, which asks for the source files. numba's
-    IPython locator reads the source through the module's loader, and zipimport gives none for such a member."""
+    IPython locator reads the source through the module's loader, and zipimport returns no source for such a member."""
     import linecache
     import tempfile
     import types
