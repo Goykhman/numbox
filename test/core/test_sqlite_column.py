@@ -1,4 +1,10 @@
-"""Column accessor tests for the SQLite buildout."""
+"""Tests of the bindings of :mod:`~numbox.core.bindings.sqlite.column`, which read the current row of a statement.
+
+The tests read each kind of value, the type codes, the column count, and a column's name and declared type. They also
+read the database, table and origin names of a column, which only a SQLite compiled with
+``SQLITE_ENABLE_COLUMN_METADATA`` provides. Each test of those three names skips when the loaded SQLite lacks the
+option, because the binding is then a stub.
+"""
 from ctypes import addressof, c_int64, c_ubyte
 
 import pytest
@@ -20,8 +26,11 @@ from test.auxiliary_utils import collect_and_run_tests, str_from_p_as_int
 
 @pytest.fixture
 def populated_table(tmp_path):
-    """File db with t(i INT, big BIGINT, d REAL, s TEXT, b BLOB, n FLOAT)
-    containing one row of known values."""
+    """Yield a connection to a database file whose table ``t`` holds one row of known values.
+
+    The row holds 42 in ``i INT``, 2**40 in ``big BIGINT``, 3.14 in ``d REAL``, ``'hello'`` in ``s TEXT``, four bytes
+    in ``b BLOB`` and NULL in ``n FLOAT``. Python's ``sqlite3`` module writes the row.
+    """
     import sqlite3 as stdlib_sqlite3
     db_file = tmp_path / "cols.sqlite"
     conn = stdlib_sqlite3.connect(str(db_file))
@@ -39,6 +48,7 @@ def populated_table(tmp_path):
 
 
 def _prepare_and_step(db_p, sql):
+    """Prepare ``sql`` on ``db_p``, step it to its first row, and return the statement's handle."""
     stmt_p = c_int64(0)
     tail_p = c_int64(0)
     with c_string(sql) as sql_p:
@@ -69,7 +79,7 @@ def test_column_blob_matches_inserted(populated_table):
     blob_p = sqlite3_column_blob(stmt_p, 0)
     n = sqlite3_column_bytes(stmt_p, 0)
     assert n == 4
-    # c_ubyte (not np.uint8) — np.uint8 is a numpy scalar dtype, not a ctypes type.
+    # ctypes builds an array type from a ctypes type, such as c_ubyte, and not from a NumPy type such as np.uint8.
     buf = bytes((c_ubyte * n).from_address(blob_p))
     assert buf == bytes([1, 2, 3, 4])
     sqlite3_finalize(stmt_p)
@@ -101,7 +111,7 @@ def test_column_name_returns_label(populated_table):
 def test_column_decltype_returns_declared(populated_table):
     stmt_p = _prepare_and_step(populated_table, "SELECT i FROM t")
     dt_p = sqlite3_column_decltype(stmt_p, 0)
-    # The declared type from CREATE TABLE was "INT"
+    # CREATE TABLE declares the column i as INT.
     assert str_from_p_as_int(dt_p).upper() == "INT"
     sqlite3_finalize(stmt_p)
 

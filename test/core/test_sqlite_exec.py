@@ -1,4 +1,10 @@
-"""sqlite3_exec + sqlite3_free tests."""
+"""Tests of the bindings of :mod:`~numbox.core.bindings.sqlite.exec`.
+
+The tests run SQL through ``sqlite3_exec`` without a row callback, with a callback that counts the rows and with a
+callback that stops the run. For invalid SQL, ``sqlite3_exec`` writes an error message, which the test frees with
+``sqlite3_free``. ``sqlite3_malloc`` has no test here; numbox's virtual tables call it in ``xConnect`` and ``xOpen``,
+which test_sqlite_vtable.py and test_sqlite_tvf.py run.
+"""
 from ctypes import addressof, c_int64
 
 import numpy as np
@@ -12,11 +18,13 @@ from numbox.utils.lowlevel import get_str_from_p_as_int
 from test.auxiliary_utils import collect_and_run_tests
 
 
-# Module-level cfuncs — must outlive exec for the hooks/exec tests.
+# The row callbacks are cfuncs at module level. sqlite3_exec calls a callback only while it runs. numba also keeps a
+# cfunc's compiled code after the cfunc object is collected, so the module-level reference is a precaution, as the
+# docstring of numbox.core.bindings.sqlite.hooks describes.
 
 @cfunc(types.int32(types.voidptr, types.int32, types.intp, types.intp))
 def _count_rows_cb(ctx, n, values_pp, names_pp):
-    """Increment ctx[0] (numpy int64) per row."""
+    """Add 1 to the int64 at ``ctx`` for each row, and return 0, so that ``sqlite3_exec`` continues."""
     arr = carray(ctx, 1, dtype=np.int64)
     arr[0] += 1
     return 0
@@ -24,10 +32,12 @@ def _count_rows_cb(ctx, n, values_pp, names_pp):
 
 @cfunc(types.int32(types.voidptr, types.int32, types.intp, types.intp))
 def _abort_cb(ctx, n, values_pp, names_pp):
+    """Return 1, which makes ``sqlite3_exec`` stop and return ``SQLITE_ABORT``."""
     return 1
 
 
 def test_exec_create_insert_null_callback(memory_db):
+    """With a ``cb_p`` of 0, ``sqlite3_exec`` runs both statements of the text, and the INSERT changes one row."""
     with c_string("CREATE TABLE t(a INTEGER); INSERT INTO t VALUES (1);") as sql_p:
         assert sqlite3_exec(memory_db, sql_p, 0, 0, 0) == SQLITE_OK
     assert sqlite3_changes(memory_db) == 1
@@ -62,7 +72,7 @@ def test_exec_invalid_sql_writes_errmsg(memory_db):
     assert errmsg_p.value != 0
     msg = get_str_from_p_as_int(errmsg_p.value)
     assert "syntax" in msg.lower() or "error" in msg.lower(), msg
-    sqlite3_free(errmsg_p.value)  # no return value; just exercise the path
+    sqlite3_free(errmsg_p.value)  # The caller of sqlite3_exec frees the message. sqlite3_free returns nothing.
 
 
 if __name__ == "__main__":

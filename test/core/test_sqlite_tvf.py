@@ -1,3 +1,11 @@
+"""Tests of :func:`~numbox.core.bindings.sqlite.tvf.register_tvf`, which registers a table-valued function.
+
+The tests register a function ``fn`` with ``register_tvf`` and query it with integer and float arguments, up to 64 of
+them, and with one or two calls in a statement. ``fn`` returns full, sliced, strided or empty arrays. The tests also
+check the hidden argument columns, the error of a query whose ``fn`` raises, and every column type of the output. Other
+tests check that SQLite copies text cells, which plans xBestIndex accepts or rejects, and that the outer xFilter writes
+no cache entry. test_sqlite_vtable.py tests the release of a registration when its connection closes.
+"""
 import os
 import pickle
 from ctypes import addressof, c_char_p, c_int32, c_int64, cast, string_at
@@ -66,6 +74,7 @@ def _open():
 
 
 def _select_int(db, sql, ncol=1):
+    """Run ``sql``; return the result code of ``sqlite3_prepare_v2`` and the rows as tuples of ``ncol`` int64."""
     stmt = c_int64(0)
     with c_string(sql) as p:
         rc = sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0)
@@ -104,6 +113,7 @@ def test_tvf_two_calls_same_process():
 
 
 def test_tvf_two_calls_one_query_plan():
+    """Two calls of one function in one statement have cursors of their own, so each call returns its own rows."""
     db = _open()
     h = register_tvf(db.value, "series", (np.int64, np.int64), _OUT, _series)
     stmt = c_int64(0)
@@ -135,8 +145,11 @@ def test_tvf_multi_column_and_float_arg():
 
 
 def test_tvf_hidden_columns_read_back_their_arguments():
-    # The arguments are HIDDEN columns of the schema, so a query may name them;
-    # SQLite's own table-valued functions answer such a column with its argument.
+    """A query can select the hidden columns ``arg0``, ``arg1`` and ``arg2``, which return the arguments of the call.
+
+    xColumn returns the value that fn received, an INTEGER for an integer argument and a REAL for a float one, as
+    SQLite's own table-valued functions do.
+    """
     db = _open()
     h = register_tvf(db.value, "scaled", (np.int64, np.int64, np.float64), _OUT2, _scaled)
     stmt = c_int64(0)
@@ -155,8 +168,9 @@ def test_tvf_hidden_columns_read_back_their_arguments():
 
 
 def test_tvf_where_on_an_argument_column_is_checked_against_the_argument():
-    # The call already binds arg0 and arg1, so an '=' on either in WHERE is a
-    # second EQ on that arg, which SQLite checks against the hidden column.
+    """SQLite checks a WHERE constraint on an argument column, such as ``arg0 = 2``, against the call's argument."""
+    # The call binds arg0 and arg1, so an EQ constraint on either one in WHERE is a second EQ on that argument.
+    # xBestIndex binds the first usable EQ of each argument, and SQLite checks the other one against the hidden column.
     db = _open()
     h = register_tvf(db.value, "series", (np.int64, np.int64), _OUT, _series)
     assert _select_int(db, "SELECT n FROM series(2, 5) WHERE arg0 = 2") == (SQLITE_OK, [(2,), (3,), (4,)])
@@ -167,8 +181,10 @@ def test_tvf_where_on_an_argument_column_is_checked_against_the_argument():
 
 
 def test_tvf_column_tag_without_a_branch_fails_the_query():
-    # The tvf xColumn hands visible cells to the vtable's _emit_cell, so a tag
-    # with no branch there must fail the query here as well.
+    """A column tag without a branch in ``_emit_cell`` fails a query of the function with ``SQLITE_ERROR``."""
+    # _tvf_xcolumn passes each visible cell to _emit_cell of vtable.py, so a tag without a branch there fails this query
+    # as it fails a query of register_table. The test writes the tag 99 over the first entry of the descriptor's
+    # col_tags buffer.
     from numbox.core.bindings.sqlite import vtable as v
     db = _open()
     keys0 = set(v._DATA_ANCHOR)
@@ -182,6 +198,10 @@ def test_tvf_column_tag_without_a_branch_fails_the_query():
 
 
 def test_tvf_missing_hidden_arg():
+    """A query that leaves the arguments unbound returns no rows.
+
+    SQLite fails to prepare it with "no query solution", because xBestIndex rejects every plan with an unbound argument.
+    """
     db = _open()
     h = register_tvf(db.value, "series", (np.int64, np.int64), _OUT, _series)
     stmt = c_int64(0)
@@ -198,6 +218,7 @@ def test_tvf_missing_hidden_arg():
 
 
 def test_tvf_no_meminfo_leak():
+    """Queries release every array that fn returns: after one query, ten more allocate as many MemInfos as they free."""
     from numba.core.runtime import nrt
     _nrt = nrt._nrt
     if not hasattr(_nrt, "memsys_enable_stats"):
@@ -219,7 +240,7 @@ def test_tvf_no_meminfo_leak():
 
 @njit
 def _series_sliced(start, stop):
-    # returns an offset slice: logical start != allocation base
+    # The function returns a slice whose data starts one row after the start of its allocation.
     out = np.empty((stop - start) + 1, _OUT)
     for i in range((stop - start) + 1):
         out[i].n = (start - 1) + i
@@ -228,7 +249,7 @@ def _series_sliced(start, stop):
 
 @njit
 def _series_strided(start, stop):
-    # returns a strided view: row stride = 2 * itemsize
+    # The function returns a view whose row stride is twice the itemsize.
     out = np.empty(2 * (stop - start), _OUT)
     for i in range(2 * (stop - start)):
         out[i].n = -1
@@ -278,8 +299,8 @@ def test_tvf_non_numeric_arg_type_raises():
 
 @njit
 def _raises(start, stop):
-    # raise explicitly: numba's default boundscheck is off, so an OOB index would
-    # corrupt rather than raise.
+    # The function raises with a raise statement, because numba checks no bounds by default, and an index out of bounds
+    # would read or write past the array instead of raising.
     out = np.empty(stop - start, _OUT)
     if start < stop:
         raise ValueError("boom")
@@ -287,7 +308,7 @@ def _raises(start, stop):
 
 
 def _step_rc(db, sql):
-    """Prepare `sql`, step once, return that step's result code (after finalize)."""
+    """Prepare ``sql``, step it once and finalize it, and return the result code of the step."""
     stmt = c_int64(0)
     with c_string(sql) as p:
         assert sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0) == SQLITE_OK
@@ -298,8 +319,7 @@ def _step_rc(db, sql):
 
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
 def test_tvf_user_fn_raises_yields_error():
-    # a raising user fn must surface as a query error (xFilter returns
-    # SQLITE_ERROR), not a silently-empty but successful result.
+    """An exception in fn fails the query with ``SQLITE_ERROR`` instead of a successful query with no rows."""
     db = _open()
     h = register_tvf(db.value, "boom", (np.int64, np.int64), _OUT, _raises)
     assert _step_rc(db, "SELECT n FROM boom(2, 5)") == SQLITE_ERROR
@@ -308,8 +328,7 @@ def test_tvf_user_fn_raises_yields_error():
 
 
 def test_tvf_empty_return_is_success_not_error():
-    # a legitimately-empty TVF must still complete successfully (DONE), so the
-    # error path above does not turn empty results into spurious failures.
+    """An empty array from fn completes the query with ``SQLITE_DONE``; the error path of xFilter does not fail it."""
     db = _open()
     h = register_tvf(db.value, "series", (np.int64, np.int64), _OUT, _series_empty)
     assert _step_rc(db, "SELECT n FROM series(5, 5)") == SQLITE_DONE
@@ -318,6 +337,7 @@ def test_tvf_empty_return_is_success_not_error():
 
 
 def test_tvf_two_distinct_registrations_same_process():
+    """Two functions with different dtypes, registered on one connection, return their own rows."""
     db = _open()
     h1 = register_tvf(db.value, "series", (np.int64, np.int64), _OUT, _series)
     h2 = register_tvf(db.value, "scaled", (np.int64, np.int64, np.float64), _OUT2, _scaled)
@@ -336,10 +356,11 @@ def test_tvf_two_distinct_registrations_same_process():
 
 
 def _call_xbestindex(ncols, n_hidden, constraints):
-    """Drive _make_xbestindex()'s cfunc against a hand-built sqlite3_index_info.
-    ``constraints`` is a list of (iColumn, op, usable). Returns (rc, usage_array).
-    The numpy buffers stay referenced for the whole call so their data pointers
-    remain valid. Hidden args occupy table columns ncols .. ncols+n_hidden-1."""
+    """Call the xBestIndex callback of ``_make_xbestindex`` on a ``sqlite3_index_info`` built from ``constraints``.
+
+    ``constraints`` holds ``(iColumn, op, usable)`` triples, and the hidden arguments are the columns ``ncols`` to
+    ``ncols + n_hidden - 1``. Returns the result code and the usage array.
+    """
     desc = np.zeros(1, _TVF_DESC_DTYPE)
     desc[0]["ncols"] = ncols
     desc[0]["n_hidden"] = n_hidden
@@ -356,26 +377,31 @@ def _call_xbestindex(ncols, n_hidden, constraints):
     ii[0]["nConstraint"] = n
     ii[0]["aConstraint"] = cons.ctypes.data
     ii[0]["aConstraintUsage"] = usage.ctypes.data
+    # The NumPy arrays stay referenced until the call returns, so the addresses that the structs hold stay valid.
     rc = _make_xbestindex().ctypes(vtab.ctypes.data, ii.ctypes.data)
     return rc, usage
 
 
 def test_tvf_xbestindex_rejects_unbound_arg_despite_duplicate_eq():
-    # 2 visible cols, 3 hidden (cols 2,3,4). Duplicate usable EQ on arg0 (col 2)
-    # plus a usable EQ on arg2 (col 4), with arg1 (col 3) left unbound. A naive
-    # usable-EQ count reaches 3 == n_hidden and wrongly accepts the plan even
-    # though one hidden arg is unbound. SQL sends duplicates whenever a query
-    # filters an argument the call binds, as in f(1) WHERE arg0 = 1.
+    """xBestIndex rejects a plan that leaves an argument unbound, although it has as many EQ constraints as arguments.
+
+    The table has 2 visible columns and 3 hidden ones, the columns 2, 3 and 4. ``arg0`` has two usable EQ constraints,
+    ``arg2`` has one, and ``arg1`` has none. A count of usable EQ constraints would reach 3, the number of arguments,
+    and accept the plan. SQLite passes such a duplicate when a query filters an argument that the call binds, as in
+    ``f(1) WHERE arg0 = 1``.
+    """
     EQ = SQLITE_INDEX_CONSTRAINT_EQ
     rc, _ = _call_xbestindex(2, 3, [(2, EQ, 1), (2, EQ, 1), (4, EQ, 1)])
     assert rc == SQLITE_CONSTRAINT, rc
 
 
 def test_tvf_xbestindex_accepts_all_args_bound_with_duplicate_eq():
-    # Every hidden arg (cols 2,3,4) has a usable EQ, with a redundant duplicate on
-    # arg0: the plan must still be accepted. SQLite refuses a plan in which two
-    # constraints share an argvIndex, so the duplicate gets none and is not
-    # omitted, which leaves it for SQLite to check.
+    """xBestIndex accepts a plan that binds every argument, a duplicate EQ on one argument included.
+
+    Every hidden argument, the columns 2, 3 and 4, has a usable EQ constraint, and ``arg0`` has a second one. SQLite
+    refuses a plan in which two constraints share an argvIndex. The duplicate therefore receives no argvIndex and is not
+    omitted, so SQLite checks it against the hidden column.
+    """
     EQ = SQLITE_INDEX_CONSTRAINT_EQ
     rc, usage = _call_xbestindex(2, 3, [(2, EQ, 1), (2, EQ, 1), (3, EQ, 1), (4, EQ, 1)])
     assert rc == SQLITE_OK, rc
@@ -383,9 +409,11 @@ def test_tvf_xbestindex_accepts_all_args_bound_with_duplicate_eq():
 
 
 def test_tvf_xbestindex_checks_every_arg_past_64():
-    # 1 visible col, then n hidden. The all-bound check must not be capped at a
-    # machine word: with 64 or more args every one must still be bound, and one
-    # left unbound, at either end, must still reject the plan.
+    """xBestIndex binds each of 64 or 65 arguments, and it rejects the plan when the first or the last is unbound.
+
+    The table has 1 visible column and n hidden ones. xBestIndex checks each argument separately, so the limit of a
+    64-bit mask of bound arguments does not apply.
+    """
     EQ = SQLITE_INDEX_CONSTRAINT_EQ
     for n in (64, 65):
         rc, usage = _call_xbestindex(1, n, [(1 + h, EQ, 1) for h in range(n)])
@@ -397,6 +425,7 @@ def test_tvf_xbestindex_checks_every_arg_past_64():
 
 
 def test_tvf_with_64_args_returns_its_row():
+    """A function of 64 integer arguments returns one row, the sum of its arguments 0 to 63."""
     db = _open()
     h = register_tvf(db.value, "sum64", (np.int64,) * 64, _OUT, _sum_args)
     sql = "SELECT n FROM sum64(%s)" % ", ".join(str(i) for i in range(64))
@@ -406,8 +435,10 @@ def test_tvf_with_64_args_returns_its_row():
 
 
 def _fetchall_text(db, sql):
-    """Step `sql`, decoding INTEGER and TEXT columns (text via the NUL-terminated
-    C string from sqlite3_column_text)."""
+    """Run ``sql`` and return its rows as tuples: an int for INTEGER, a str for TEXT and None for any other value.
+
+    The text is read as the C string that ``sqlite3_column_text`` returns, so it ends at its first NUL.
+    """
     stmt = c_int64(0)
     with c_string(sql) as p:
         assert sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0) == SQLITE_OK
@@ -428,9 +459,8 @@ def _fetchall_text(db, sql):
 
 
 _STR_OUT = np.dtype([("n", "i8"), ("u", "U6"), ("s", "S4")])
-# A TVF fn can't assign U/S structured-array fields inside @njit (numba can't
-# cast a unicode literal to a fixed-width unichr field), so it returns a slice of
-# a Python-built array -- enough to drive the column-emit path.
+# numba cannot assign a str to a 'U' field of a record in jitted code, because it fails to cast the str literal to the
+# fixed-width field. fn therefore returns a slice of an array that Python builds.
 _STR_ROWS = np.array([(0, "héllo", b"ab"), (1, "\U0001F600", b"cd")], dtype=_STR_OUT)
 
 
@@ -440,11 +470,10 @@ def _str_series(start, stop):
 
 
 def test_tvf_string_and_unicode_output_columns():
-    # Exercises _tvf_xcolumn's string branches that the int/float-only tests
-    # never reach: _TAG_U decodes a 'U' column into the per-cursor scratch via
-    # utf32_to_utf8 (here a multibyte 'héllo' and an astral emoji), and _TAG_S
-    # emits an 'S' column as TEXT. register_tvf has no text_as_blob parameter, so
-    # 'S' is always TEXT and the _TAG_BLOB branch is unreachable from this API.
+    """A query reads a ``'U'`` and an ``'S'`` column of fn's array as TEXT, ``'U'`` values outside ASCII included."""
+    # _emit_cell converts a 'U' cell to UTF-8 with utf32_to_utf8, in the cursor's scratch buffer. The 'U' values of the
+    # test need 2-byte and 4-byte UTF-8 forms. _emit_cell passes an 'S' cell as TEXT. register_tvf has no text_as_blob
+    # parameter, so an 'S' column is always TEXT, and the BLOB branch of _emit_cell is unreachable through register_tvf.
     db = _open()
     h = register_tvf(db.value, "strs", (np.int64, np.int64), _STR_OUT, _str_series)
     rows = _fetchall_text(db, "SELECT n, u, s FROM strs(0, 2)")
@@ -454,9 +483,11 @@ def test_tvf_string_and_unicode_output_columns():
 
 
 def test_tvf_two_unicode_columns_share_cursor_scratch():
-    # Both 'U' columns of a row decode into the SAME per-cursor scratch buffer,
-    # so the _TAG_U result must be TRANSIENT (SQLite copies before the next
-    # xColumn overwrites the scratch). A STATIC choice would corrupt the first.
+    """Two ``'U'`` columns of one row keep their own values, although _emit_cell converts both in one scratch buffer.
+
+    _emit_cell passes a ``'U'`` result as ``SQLITE_TRANSIENT``, so SQLite copies it before the next xColumn call
+    overwrites the buffer. A result passed as ``SQLITE_STATIC`` would point into the overwritten buffer.
+    """
     db = _open()
     h = register_tvf(db.value, "twou", (np.int64, np.int64), _TWO_U_OUT, _two_u_series)
     rows = _fetchall_text(db, "SELECT a, b FROM twou(0, 2)")
@@ -480,9 +511,9 @@ def _num_series(start, stop):
 
 
 def test_tvf_every_numeric_and_bool_output_column():
-    # Drives every integer, float and bool tag through _tvf_xcolumn. SQLite
-    # holds integers as int64, so uint64 max comes back wrapped to -1, and bool
-    # is INTEGER 0/1. The storage class is checked too: -128.0 == -128 in Python.
+    """A query reads each integer, float and bool column of fn's array with the right value and storage class."""
+    # SQLite stores an integer as an int64, so the largest uint64 reads back as -1, and a bool reads back as the INTEGER
+    # 0 or 1. The test compares the type codes as well, because -128.0 == -128 is true in Python.
     db = _open()
     h = register_tvf(db.value, "nums", (np.int64, np.int64), _NUM_OUT, _num_series)
     stmt = c_int64(0)
@@ -521,7 +552,7 @@ _ADDR_S_ROWS = np.array([(0, b"ab"), (0, b"cd")], dtype=_ADDR_S_OUT)
 
 @njit
 def _addr_s_series(start, stop):
-    # A fresh array per call, as a real fn returns; each row carries its address.
+    # The function returns a new array for each call, as a typical fn does, and each row holds the array's address.
     out = _ADDR_S_ROWS[start:stop].copy()
     for i in range(out.shape[0]):
         out[i].addr = array_data_p(out)
@@ -529,10 +560,12 @@ def _addr_s_series(start, stop):
 
 
 def test_tvf_text_result_is_copied_by_sqlite():
-    # The array behind a tvf result is released on the next xFilter, so an 'S'
-    # cell must reach SQLite as SQLITE_TRANSIENT, which makes SQLite copy it.
-    # sqlite3_column_blob returns the stored pointer as is, so a cell handed
-    # over without a copy would point back into the array fn returned.
+    """SQLite copies an ``'S'`` cell of a table-valued function, so the cell's address lies outside fn's array.
+
+    The next xFilter releases the array that fn returned, so _tvf_xcolumn passes an ``'S'`` cell as
+    ``SQLITE_TRANSIENT``, and SQLite copies it. ``sqlite3_column_blob`` returns the address of the stored value, so a
+    cell passed without a copy would have an address inside fn's array.
+    """
     db = _open()
     h = register_tvf(db.value, "addrs", (np.int64, np.int64), _ADDR_S_OUT, _addr_s_series)
     stmt = c_int64(0)
@@ -552,8 +585,10 @@ def test_tvf_text_result_is_copied_by_sqlite():
 
 
 def _outer_xfilter_overloads():
-    """Cached overloads recorded for the outer, per-registration ``_tvf_xfilter``
-    cfunc, summed over every cache root numba may be writing to."""
+    """Return the number of overloads that numba's index files record for ``_tvf_xfilter``, a registration's cfunc.
+
+    The count sums the index files under the directory of tvf.py and under numba's ``CACHE_DIR``, if it is set.
+    """
     roots = [os.path.dirname(tvf.__file__)]
     if config.CACHE_DIR:
         roots.append(config.CACHE_DIR)
@@ -565,6 +600,7 @@ def _outer_xfilter_overloads():
                     continue
                 if not fn.endswith(".nbi"):
                     continue
+                # An index file holds a pickle of numba's version, then a pickle of the source stamp and the overloads.
                 with open(os.path.join(dirpath, fn), "rb") as f:
                     pickle.load(f)
                     data = f.read()
@@ -577,10 +613,12 @@ def _outer_xfilter_overloads():
 
 
 def test_tvf_outer_xfilter_does_not_grow_the_numba_cache():
-    # The outer xfilter closes over xfilter_impl, a dispatcher minted per
-    # registration, so its cache key never repeats and a written entry could
-    # never be read back. Registering must therefore write none: with cache
-    # enabled this count grows by one per registration, forever.
+    """A registration adds no entry for ``_tvf_xfilter`` to numba's cache index.
+
+    The cfunc closes over xfilter_impl, a dispatcher made for each registration, so its cache key never repeats, and an
+    entry written for it would never be read. If the cfunc were cached, each registration would add one overload to the
+    index.
+    """
     before = _outer_xfilter_overloads()
     db = _open()
     h = register_tvf(db.value, "nocache", (np.int64, np.int64), _OUT, _series)

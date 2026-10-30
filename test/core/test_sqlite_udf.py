@@ -1,7 +1,9 @@
-"""UDF registration and integration tests for the SQLite buildout.
+"""Tests of the bindings of :mod:`~numbox.core.bindings.sqlite.udf`, with callbacks written by hand.
 
-Covers scalar UDFs, aggregate UDFs (structref-backed), window UDFs,
-and context helper round-trips (sqlite3_user_data, sqlite3_context_db_handle).
+The tests register a scalar function, an aggregate whose state is a structref and a window function whose state is a
+NumPy array, and they read back the user data pointer and the connection handle in a callback. A test compares numba's
+counts of MemInfo allocations and frees, to check that the aggregate and the window function release their states. The
+helpers of udf_helpers, which generate such callbacks, have their tests in test_sqlite_udf_helpers.py.
 """
 from ctypes import addressof, c_int64
 
@@ -33,7 +35,7 @@ def _open_memory():
 
 
 # ---------------------------------------------------------------------------
-# Structref for aggregate/window state
+# The structref type of the aggregate's state, with one int64 field, total
 # ---------------------------------------------------------------------------
 
 @structref.register
@@ -51,7 +53,7 @@ sum_state_type = SumStateType([("total", nb_types.int64)])
 
 
 # ---------------------------------------------------------------------------
-# Scalar UDF callbacks
+# Callbacks of the scalar functions
 # ---------------------------------------------------------------------------
 
 @njit
@@ -83,7 +85,7 @@ _null_check_cb = cfunc(
 
 
 # ---------------------------------------------------------------------------
-# Capture probe: scalar UDF that writes its first arg into user_data
+# The probe, a scalar function that writes its first argument into the int64 at its user data
 # ---------------------------------------------------------------------------
 
 @njit
@@ -99,13 +101,13 @@ _capture_cb = cfunc(types.void(types.intp, types.int32, types.intp))(_capture_im
 
 
 # ---------------------------------------------------------------------------
-# Aggregate UDF callbacks (structref-backed)
+# Callbacks of the aggregate, whose state is a structref
 # ---------------------------------------------------------------------------
 
 @njit
 def _sum_step_impl(ctx, argc, argv_pp):
     agg_ptr = sqlite3_aggregate_context(ctx, 8)
-    if agg_ptr == 0:  # NULL on OOM; carray on a NULL pointer would segfault
+    if agg_ptr == 0:  # A result of 0 means a failed allocation; a carray at address 0 would crash the process.
         return
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
     val = sqlite3_value_int64(args[0])
@@ -141,26 +143,26 @@ _sum_final_cb = cfunc(types.void(types.intp))(_sum_final_impl)
 
 
 # ---------------------------------------------------------------------------
-# Window UDF callbacks (array-backed state)
+# Callbacks of the window function, whose state is a NumPy array
 #
-# Alternative to the structref-backed aggregate above: the aggregate_context
-# slot is 16 bytes holding two intp values -- [meminfo_p, data_p] -- instead
-# of a single structref meminfo pointer. The payload is a 1-element int64
-# array (the running total) allocated with np.zeros inside the step callback.
-# Because np.zeros emits an NRT_MemInfo_alloc in that body, removerefctpass is
-# disabled there, so the manual _incref_meminfo (the @intrinsic, which inlines)
-# survives and pins the buffer past the callback; release_meminfo in xFinal
-# frees it. Subsequent callbacks reach the payload through data_p via carray --
-# no structref reconstruction. Same pattern as numbduck's array UDAF.
+# The window function keeps its state in a NumPy array instead of the structref of the aggregate above. The state is a
+# 1-element int64 array, the running total, which the step callback allocates with np.zeros. The aggregate context holds
+# 16 bytes, two intp slots: the address of the array's MemInfo and the address of its data. The step callback takes a
+# reference with _incref_meminfo, so that the array stays alive after the callback returns, and xFinal releases it with
+# release_meminfo. The other callbacks read the total through a carray at the data address and build no structref. numba
+# 0.65 and earlier run a pass that removes the reference count changes of a function that seems not to need them. The
+# pass does not run on the step callback, because the callback calls np.zeros, which returns an array, and because
+# _incref_meminfo marks the function, as its docstring explains. numba 0.66 removed the pass. numbduck's tests keep the
+# state of a DuckDB aggregate in the same form.
 # ---------------------------------------------------------------------------
 
-_WSUM_SLOTS = 2  # aggregate_context layout: slot[0]=meminfo_p, slot[1]=data_p
+_WSUM_SLOTS = 2  # slot[0] holds the MemInfo address, and slot[1] holds the data address.
 
 
 @njit
 def _wsum_step_impl(ctx, argc, argv_pp):
     agg_ptr = sqlite3_aggregate_context(ctx, 16)
-    if agg_ptr == 0:  # NULL on OOM; carray on a NULL pointer would segfault
+    if agg_ptr == 0:  # A result of 0 means a failed allocation; a carray at address 0 would crash the process.
         return
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
     val = sqlite3_value_int64(args[0])
@@ -183,7 +185,7 @@ _wsum_step_cb = cfunc(
 @njit
 def _wsum_inverse_impl(ctx, argc, argv_pp):
     agg_ptr = sqlite3_aggregate_context(ctx, 16)
-    if agg_ptr == 0:  # NULL on OOM; carray on a NULL pointer would segfault
+    if agg_ptr == 0:  # A result of 0 means a failed allocation; a carray at address 0 would crash the process.
         return
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
     val = sqlite3_value_int64(args[0])
@@ -233,7 +235,7 @@ _wsum_final_cb = cfunc(types.void(types.intp))(_wsum_final_impl)
 
 
 # ---------------------------------------------------------------------------
-# Context helper callbacks
+# Callbacks that read the user data and the connection handle of their context
 # ---------------------------------------------------------------------------
 
 @njit
@@ -264,7 +266,7 @@ _db_handle_probe_cb = cfunc(
 
 
 # ---------------------------------------------------------------------------
-# Scalar UDF tests
+# Tests of the scalar functions
 # ---------------------------------------------------------------------------
 
 def test_scalar_udf_double_value():
@@ -283,6 +285,10 @@ def test_scalar_udf_double_value():
 
 
 def test_scalar_udf_null_handling():
+    """A scalar function that returns NULL for a NULL argument runs without an error.
+
+    The test checks the result code of ``sqlite3_exec`` and does not read the NULL back.
+    """
     db_p = _open_memory()
     with c_string("my_null") as name_p:
         rc = sqlite3_create_function_v2(
@@ -296,7 +302,7 @@ def test_scalar_udf_null_handling():
 
 
 # ---------------------------------------------------------------------------
-# Aggregate UDF tests
+# Tests of the aggregate
 # ---------------------------------------------------------------------------
 
 def test_udaf_sum_structref():
@@ -329,6 +335,10 @@ def test_udaf_sum_structref():
 
 
 def test_udaf_empty_group():
+    """An aggregate over an empty table returns 0.
+
+    SQLite calls xFinal without an xStep, so ``sqlite3_aggregate_context`` returns 0, and xFinal sets the result 0.
+    """
     db_p = _open_memory()
 
     with c_string("CREATE TABLE te(v INTEGER)") as sql_p:
@@ -356,7 +366,7 @@ def test_udaf_empty_group():
 
 
 # ---------------------------------------------------------------------------
-# Window UDF test
+# Tests of the window function
 # ---------------------------------------------------------------------------
 
 def test_window_running_sum():
@@ -375,12 +385,8 @@ def test_window_running_sum():
             _wsum_value_cb.address, _wsum_inverse_cb.address, 0)
     assert rc == SQLITE_OK
 
-    # Window: ROWS BETWEEN 1 PRECEDING AND CURRENT ROW
-    # Row 1: sum(1)     = 1
-    # Row 2: sum(1,2)   = 3
-    # Row 3: sum(2,3)   = 5
-    # Row 4: sum(3,4)   = 7
-    # Row 5: sum(4,5)   = 9
+    # The frame ROWS BETWEEN 1 PRECEDING AND CURRENT ROW holds each row and the row before it. my_wsum therefore
+    # returns 1, 1 + 2, 2 + 3, 3 + 4 and 4 + 5.
     expected = [1, 3, 5, 7, 9]
 
     @njit
@@ -418,16 +424,13 @@ def test_window_running_sum():
 
 
 def test_udaf_no_meminfo_leak():
-    """Regression guard for the aggregate/window state lifecycle.
+    """The aggregate and the window function above release every state that they create.
 
-    Exercises both bridge idioms: the structref-backed aggregate
-    (``test_udaf_sum_structref``) and the array-backed window function
-    (``test_window_running_sum``). Each keeps its state alive across callbacks
-    with a +1 incref -- ``export_meminfo`` for the structref, the inlined
-    ``_incref_meminfo`` for the array -- and frees it with a single
-    ``release_meminfo`` in xFinal. A dropped incref frees the state early
-    (use-after-free); a dropped release leaks. Either shows up as an imbalance
-    between meminfo allocations and frees.
+    After a first run of their tests, ten more runs allocate as many MemInfos as they free. The aggregate keeps its
+    state alive with the reference that ``export_meminfo`` takes. The window function keeps its state alive with the
+    reference that ``_incref_meminfo`` takes. In both, xFinal releases the reference once with ``release_meminfo``. A
+    missing release leaks the state and makes the counts differ, and a missing reference frees the state while SQLite
+    still uses it.
     """
     from numba.core.runtime import nrt
     _nrt = nrt._nrt
@@ -435,7 +438,7 @@ def test_udaf_no_meminfo_leak():
         import pytest
         pytest.skip("NRT allocation stats unavailable")
     _nrt.memsys_enable_stats()
-    # warm up JIT / one-time allocations before measuring steady state
+    # A first run of each test comes before the measurement, so one-time allocations do not count.
     test_udaf_sum_structref()
     test_window_running_sum()
     test_udaf_empty_group()
@@ -452,10 +455,11 @@ def test_udaf_no_meminfo_leak():
 
 
 # ---------------------------------------------------------------------------
-# Context helper tests
+# Tests of sqlite3_user_data and sqlite3_context_db_handle
 # ---------------------------------------------------------------------------
 
 def test_user_data_round_trip():
+    """``sqlite3_user_data`` returns the ``p_app`` of the registration, which the probe compares with its argument."""
     db_p = _open_memory()
     ctx_arr = np.array([12345], dtype=np.int64)
     papp = ctx_arr.ctypes.data
@@ -482,6 +486,7 @@ def test_user_data_round_trip():
 
 
 def test_context_db_handle():
+    """``sqlite3_context_db_handle`` returns the handle of the connection that runs the function."""
     db_p = _open_memory()
     out = np.zeros(1, dtype=np.intp)
 

@@ -1,4 +1,11 @@
-"""Parameter-binding tests for the SQLite buildout."""
+"""Tests of the bindings of :mod:`~numbox.core.bindings.sqlite.bind`.
+
+``sqlite3_bind_int``, ``sqlite3_bind_int64``, ``sqlite3_bind_double``, ``sqlite3_bind_text``, ``sqlite3_bind_blob``
+and ``sqlite3_bind_null`` each return ``SQLITE_OK`` for a parameter of ``SELECT ?1, ?2, ?3``. ``sqlite3_bind_int``
+returns ``SQLITE_RANGE`` for an index past the last parameter, and ``sqlite3_bind_parameter_count`` counts the three
+parameters. ``sqlite3_bind_parameter_index`` and ``sqlite3_bind_parameter_name`` convert between a named parameter and
+its index. No test steps a statement, so no test reads back the value that a parameter receives.
+"""
 from ctypes import addressof, c_int64
 
 import numpy as np
@@ -18,8 +25,10 @@ from test.auxiliary_utils import collect_and_run_tests, str_from_p_as_int
 
 @pytest.fixture
 def stmt_three_params():
-    """Open :memory: db, prepare 'SELECT ?1, ?2, ?3', yield (db_p, stmt_p),
-    teardown finalizes + closes."""
+    """Yield the handles of a new in-memory connection and of the statement ``SELECT ?1, ?2, ?3`` prepared on it.
+
+    After the test, the fixture finalizes the statement and closes the connection.
+    """
     db_p = c_int64(0)
     with c_string(":memory:") as name_p:
         assert sqlite3_open(name_p, addressof(db_p)) == SQLITE_OK
@@ -91,7 +100,7 @@ def test_bind_parameter_index_by_name():
         with c_string(":foo") as foo_p, c_string(":bar") as bar_p:
             assert sqlite3_bind_parameter_index(stmt_p.value, foo_p) == 1
             assert sqlite3_bind_parameter_index(stmt_p.value, bar_p) == 2
-        # name lookup round trip (output points into SQLite-owned memory)
+        # sqlite3_bind_parameter_name returns the address of a name that the statement owns.
         name_back_p = sqlite3_bind_parameter_name(stmt_p.value, 1)
         assert str_from_p_as_int(name_back_p) == ":foo"
         sqlite3_finalize(stmt_p.value)

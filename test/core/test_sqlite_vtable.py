@@ -1,3 +1,12 @@
+"""Tests of :func:`~numbox.core.bindings.sqlite.vtable.register_table` and of the helpers of vtable.py.
+
+The helpers convert UTF-32 to UTF-8, measure the length of a value without its trailing NULs and build a table's
+descriptor. The tests register 2-D, structured and columnar data of every supported dtype, with strided, reversed and
+Fortran-ordered layouts, and query it with joins, aggregates and constraints. The tests whose names contain pushdown
+check the constraints that xBestIndex claims, against a full scan or against Python's ``sqlite3`` module. Other tests
+check the release of a registration when its connection closes or its name is registered again, and the reuse of numba's
+cache in a second process.
+"""
 import gc
 import os
 import subprocess
@@ -24,6 +33,7 @@ from numbox.utils.lowlevel import array_data_p
 
 
 def test_imports():
+    """The bindings that vtable defines or imports are proxies, each with a ``py_func``."""
     from numbox.core.bindings.sqlite import vtable as v
     assert hasattr(v.sqlite3_create_module_v2, "py_func")
     assert hasattr(v.sqlite3_declare_vtab, "py_func")
@@ -31,6 +41,7 @@ def test_imports():
 
 
 def _encode(s, width):
+    """Encode ``s``, padded with zero code points to ``width``, with ``utf32_to_utf8``, and return the UTF-8 bytes."""
     src = np.zeros(width, dtype=np.uint32)
     for i, ch in enumerate(s):
         src[i] = ord(ch)
@@ -52,15 +63,17 @@ def test_utf32_emoji_4byte():
 
 
 def test_utf32_stops_at_nul():
+    """``utf32_to_utf8`` leaves out the zero code points that pad a value to its width."""
     assert _encode("hi", 6) == b"hi"
 
 
 def test_utf32_keeps_interior_nul():
-    # trailing NUL pad is trimmed; an interior NUL code point is preserved
+    # utf32_to_utf8 drops the zero padding at the end and encodes the zero code point between a and b.
     assert _encode("a\x00b", 6) == b"a\x00b"
 
 
 def test_utf32_invalid_codepoint_replacement():
+    """A surrogate and a value above U+10FFFF encode as U+FFFD, the bytes EF BF BD."""
     src = np.array([0x41, 0xD800, 0x110000, 0], dtype=np.uint32)
     dst = np.zeros(64, dtype=np.uint8)
     n = utf32_to_utf8(array_data_p(src), 4, array_data_p(dst))
@@ -118,6 +131,11 @@ def test_descriptor_structured_mixed():
 
 
 def test_descriptor_rejects_bad_shapes():
+    """``_build_descriptor`` rejects data that no table can hold.
+
+    The cases are a 3-D array, a 1-D array without fields, a ``columns`` list of the wrong length, an object dtype and
+    an array without columns.
+    """
     with pytest.raises((TypeError, ValueError)):
         _build_descriptor(np.zeros((2, 2, 2), dtype=np.int64), ["a", "b"], False)
     with pytest.raises((TypeError, ValueError)):
@@ -131,10 +149,12 @@ def test_descriptor_rejects_bad_shapes():
 
 
 def test_widest_unicode_width_accepted():
-    # The per-cursor scratch buffer is its own int32-sized sqlite3_malloc, and
-    # numpy caps 'U' itemsize below 2**31, so even the widest constructible
-    # unicode column yields a scratch size that fits int32 -- no
-    # registration-time guard.
+    """The widest ``'U'`` dtype that NumPy accepts needs a scratch buffer whose size fits an int32.
+
+    Each cursor allocates the buffer with ``sqlite3_malloc``, which takes an int32 size. NumPy refuses a ``'U'`` dtype
+    of more than 536870911 code points, so the buffer is at most 2**31 - 3 bytes, and ``register_table`` needs no check
+    of the width.
+    """
     dt = np.dtype([("u", "U536870911")])
     built = _build_descriptor(np.zeros(0, dtype=dt), None, False)
     assert built.scratch_bytes == 4 * 536870911 + 1
@@ -147,6 +167,7 @@ def test_descriptor_dtype_itemsize():
 
 
 def test_index_info_offsets_match_c_abi():
+    """``_IDX_INFO_DTYPE`` places ``estimatedCost`` and ``estimatedRows`` where the C struct places them."""
     import ctypes
     from numbox.core.bindings.sqlite.vtable import _IDX_INFO_DTYPE
 
@@ -169,6 +190,7 @@ def test_index_info_offsets_match_c_abi():
 
 
 def test_xbestindex_sets_cardinality():
+    """Without constraints, xBestIndex reports the row count of the table as ``estimatedRows`` and ``estimatedCost``."""
     from numbox.core.bindings.sqlite.vtable import (
         _xbestindex, _build_descriptor, _VTAB_DTYPE, _VTAB_SIZE, _IDX_INFO_DTYPE,
     )
@@ -185,8 +207,11 @@ def test_xbestindex_sets_cardinality():
 
 
 def test_xbestindex_estimates_bound_branch():
-    # With nbound usable EQ constraints on numeric columns, estimatedRows is the
-    # heuristic nrows // (nbound + 1) + 1 and estimatedCost is float(nrows).
+    """xBestIndex claims two usable EQ constraints on integer columns and lowers its estimate of the rows.
+
+    The estimate is ``nrows // (nbound + 1) + 1`` rows at a cost of ``nrows``, where ``nbound`` is the number of claimed
+    constraints.
+    """
     from numbox.core.bindings.sqlite.vtable import (
         _xbestindex, _build_descriptor, _VTAB_DTYPE, _VTAB_SIZE, _IDX_INFO_DTYPE,
         _CONSTRAINT_DTYPE, _USAGE_DTYPE,
@@ -217,8 +242,8 @@ def test_xbestindex_estimates_bound_branch():
     assert usage["argvIndex"].tolist() == [1, 2]
     assert int(view["estimatedRows"]) == nrows // (nbound + 1) + 1
     assert float(view["estimatedCost"]) == float(nrows)
-    # xBestIndex handed the serialised (col, op) idxStr to SQLite; free it here
-    # since no real connection owns it in this direct-call harness.
+    # xBestIndex sets needToFreeIdxStr, which asks SQLite to free idxStr. The test calls xBestIndex directly, without
+    # SQLite, so it frees the buffer itself.
     if int(view["needToFreeIdxStr"]):
         sqlite3_free(int(view["idxStr"]))
 
@@ -236,6 +261,10 @@ def _open_memory():
 
 
 def _fetchall(db, sql):
+    """Run ``sql`` on ``db`` and return its rows as tuples of int, float, str, bytes or None, one for each column.
+
+    TEXT is read as the C string that ``sqlite3_column_text`` returns, so it ends at its first NUL.
+    """
     stmt_p = c_int64(0)
     with c_string(sql) as sql_p:
         rc = sqlite3_prepare_v2(db, sql_p, -1, addressof(stmt_p), 0)
@@ -301,7 +330,7 @@ def test_uint64_roundtrip_and_signed_wrap():
     db = _open_memory()
     a = np.array([[1], [2 ** 63], [2 ** 64 - 1]], dtype=np.uint64)
     h = register_table(db, "t", a, columns=["a"])  # noqa: F841
-    # SQLite INTEGER is a signed int64; uint64 values >= 2**63 reinterpret as negative.
+    # SQLite stores an INTEGER as a signed int64, so a uint64 of 2**63 or more reads back as a negative value.
     assert _fetchall(db, "SELECT a FROM t") == [(1,), (-(2 ** 63),), (-1,)]
     sqlite3_close(db)
 
@@ -320,7 +349,7 @@ def test_float_nan_becomes_null_inf_passes_through(dt):
     a = np.array([[np.nan], [np.inf], [-np.inf], [1.5]], dtype=dt)
     h = register_table(db, "t", a, columns=["x"])  # noqa: F841
     rows = _fetchall(db, "SELECT x FROM t")
-    assert rows[0] == (None,)  # SQLite coerces a NaN REAL to SQL NULL
+    assert rows[0] == (None,)  # SQLite converts a NaN REAL to SQL NULL.
     assert rows[1] == (float("inf"),)
     assert rows[2] == (float("-inf"),)
     assert rows[3] == (1.5,)
@@ -354,10 +383,12 @@ def test_columns_rename_rejects_non_string():
 
 
 def test_two_unicode_columns_single_cursor():
-    # Both U columns of a row are decoded into the SAME per-cursor scratch
-    # buffer, so SQLite must copy the first result before the second xColumn
-    # overwrites the scratch -- guards the TRANSIENT choice on the U branch
-    # (S/BLOB results are STATIC; flipping U to match corrupts exactly this).
+    """Two ``'U'`` columns of one row keep their own values, although _emit_cell converts both in one scratch buffer.
+
+    _emit_cell passes a ``'U'`` result as ``SQLITE_TRANSIENT``, so SQLite copies it before the next xColumn call
+    overwrites the buffer. ``'S'`` and BLOB results are ``SQLITE_STATIC``, and a ``'U'`` result passed the same way
+    would point into the overwritten buffer.
+    """
     db = _open_memory()
     dt = np.dtype([("u1", "U4"), ("u2", "U4")])
     a = np.array([("abcd", "wxyz"), ("hi", "yo")], dtype=dt)
@@ -379,7 +410,7 @@ def test_text_as_blob():
 def test_blob_preserves_interior_nul():
     db = _open_memory()
     dt = np.dtype([("s", "S5")])
-    a = np.array([(b"a\x00b",)], dtype=dt)  # numpy stores b"a\x00b\x00\x00"
+    a = np.array([(b"a\x00b",)], dtype=dt)  # NumPy stores the value as b"a\x00b\x00\x00".
     h = register_table(db, "t", a, text_as_blob=True)  # noqa: F841
     assert _fetchall(db, "SELECT s FROM t") == [(b"a\x00b",)]
     sqlite3_close(db)
@@ -387,9 +418,12 @@ def test_blob_preserves_interior_nul():
 
 @pytest.mark.parametrize("text_as_blob", [False, True])
 def test_text_and_blob_cells_point_into_the_registered_array(text_as_blob):
-    # The registered array outlives every query, so 'S' cells reach SQLite as
-    # SQLITE_STATIC, without a copy. sqlite3_column_blob returns the stored
-    # pointer as is, so each cell points at its own bytes in the array.
+    """``register_table`` passes each ``'S'`` cell to SQLite as ``SQLITE_STATIC``, so its address lies in the array.
+
+    The registered array stays alive and unchanged while the table is registered, so SQLite reads the cells without a
+    copy. ``sqlite3_column_blob`` returns the address of the stored value, which is the address of the cell's bytes in
+    the array.
+    """
     db = _open_memory()
     a = np.array([(b"xy",), (b"zw",)], dtype=np.dtype([("s", "S3")]))
     h = register_table(db, "t", a, text_as_blob=text_as_blob)  # noqa: F841
@@ -406,9 +440,11 @@ def test_text_and_blob_cells_point_into_the_registered_array(text_as_blob):
 
 @pytest.mark.parametrize("tag", [99, -1])
 def test_a_column_tag_without_a_branch_fails_the_query(tag):
-    # Every tag _col_tag produces has a branch in _emit_cell. If one ever does
-    # not, above that range or below it, the query must fail rather than read the
-    # cell back as a silent NULL or as some other type.
+    """A column tag without a branch in ``_emit_cell`` fails the query with the message ``_UNSUPPORTED_TAG_MSG``.
+
+    Without that error, the cell would read back as NULL or as a value of another type. Every tag that ``_col_tag``
+    returns has a branch, so the test writes a tag above that range and one below it into the descriptor.
+    """
     from numbox.core.bindings.sqlite import vtable as v
     from numbox.core.bindings.sqlite.conn import sqlite3_errmsg
     from numbox.core.bindings.sqlite.constants import SQLITE_ERROR
@@ -491,10 +527,11 @@ def test_join_two_tables():
 
 
 def test_join_refilters_inner_cursor_per_outer_row():
-    # A nested-loop join re-invokes xFilter on the inner vtable cursor once per
-    # outer row, each time with a DIFFERENT bound value on the join key. This
-    # exercises the per-xFilter free+realloc of pred_p and the rowid reset; a
-    # correct joined result across multiple distinct outer keys demonstrates it.
+    """A nested-loop join, which runs xFilter again for each outer row, returns the rows that a Python loop finds.
+
+    Each call of xFilter on the inner cursor receives another value of the join key, frees and allocates the cursor's
+    predicates and resets its rowid.
+    """
     db = _open_memory()
     outer = np.array([[1], [2], [3], [2]], dtype=np.int64)
     inner = np.array([[1, 10], [2, 20], [2, 21], [3, 30]], dtype=np.int64)
@@ -511,17 +548,18 @@ def test_self_join_unicode_two_cursors():
     dt = np.dtype([("k", "i8"), ("u", "U4")])
     a = np.array([(1, "wörd"), (2, "café"), (3, "ab")], dtype=dt)
     h = register_table(db, "t", a)  # noqa: F841
-    # a self-join keeps two cursors open on the same vtable at once, so each
-    # decodes its 'U' column into its own per-cursor scratch buffer
+    # The self-join keeps two cursors open on the table at once, and each cursor converts its 'U' cells in a scratch
+    # buffer of its own.
     got = _fetchall(db, "SELECT a.u, b.u FROM t a JOIN t b ON a.k = b.k ORDER BY a.k")
     assert got == [("wörd", "wörd"), ("café", "café"), ("ab", "ab")]
     sqlite3_close(db)
 
 
 def test_registration_survives_gc():
-    # register_table returns None; the keep-alive is the module-level
-    # _DATA_ANCHOR, so the registration must survive gc.collect() with no
-    # user-held handle.
+    """A table stays queryable after a garbage collection, although ``register_table`` returns None.
+
+    ``_DATA_ANCHOR``, a dict at module level, keeps the registration's data alive.
+    """
     db = _open_memory()
     a = np.array([[5, 6]], dtype=np.int64)
     assert register_table(db, "t", a, columns=["a", "b"]) is None
@@ -540,9 +578,8 @@ def test_duplicate_name_replaces():
     sqlite3_close(db)
 
 
-# A self-contained driver: imports register_table, opens :memory:, registers a
-# 2-D int64 table, runs a SELECT, and prints the rows. Run twice in fresh
-# subprocesses to assert cold/warm cfunc cache reuse (no growth on the warm run).
+# The driver script registers a 2-D int64 table on a new in-memory database, runs a SELECT and prints the rows.
+# test_xprocess_cache_no_growth runs it twice, in new processes that share one cache directory.
 _DRIVER = textwrap.dedent('''
     from ctypes import addressof, c_int64
     import numpy as np
@@ -573,6 +610,7 @@ _DRIVER = textwrap.dedent('''
 
 
 def _run_vtable_driver(tmp_path, cache_dir):
+    """Run the driver with ``cache_dir`` as NUMBA_CACHE_DIR in a new process, and return its RESULT line."""
     script = tmp_path / "vtable_drv.py"
     script.write_text(_DRIVER)
     env = dict(os.environ, NUMBA_CACHE_DIR=str(cache_dir))
@@ -584,27 +622,31 @@ def _run_vtable_driver(tmp_path, cache_dir):
 
 
 def _count_vtable_nbc(cache_dir):
-    # Scope to the vtable cfunc/njit caches only, so the no-growth assertion is
-    # immune to unrelated bindings whose compile timing differs across runs.
-    # numba names cache files by source stem, so anchoring at the start (no
-    # leading *) matches vtable.py's products exactly and nothing else — the
-    # vtable_drv.py driver's own caches (stem "vtable_drv") don't match.
+    """Return the number of numba data files of vtable.py's functions under ``cache_dir``."""
+    # numba names a cache file after the stem of its source file, so the pattern vtable.*.nbc matches the files of
+    # vtable.py and not those of the driver, whose stem is vtable_drv. Counting only these files keeps the test
+    # independent of the cache files of other modules.
     return sum(1 for _ in cache_dir.rglob("vtable.*.nbc"))
 
 
 def test_xprocess_cache_no_growth(tmp_path):
+    """A second process loads vtable.py's callbacks from numba's cache and adds no data file to it."""
     cache = tmp_path / "nbcache"
     cache.mkdir()
-    line1 = _run_vtable_driver(tmp_path, cache)  # cold: compiles + writes cache
+    line1 = _run_vtable_driver(tmp_path, cache)  # The first run compiles the callbacks and caches them.
     assert line1 == "RESULT [(1, 10), (2, 20), (3, 30)]"
     n_cold = _count_vtable_nbc(cache)
     assert n_cold > 0
-    line2 = _run_vtable_driver(tmp_path, cache)  # warm: must reuse, not append
+    line2 = _run_vtable_driver(tmp_path, cache)  # The second run loads them from the cache.
     assert line2 == "RESULT [(1, 10), (2, 20), (3, 30)]"
     assert _count_vtable_nbc(cache) == n_cold, "warm run grew the cache (cache reuse failed)"
 
 
 def test_pushdown_element_dtype_itemsizes():
+    """The element dtypes of the arrays of ``sqlite3_index_info`` have the sizes of their C structs.
+
+    ``_SPEC_DTYPE``, the (col, op) pair that xBestIndex writes into idxStr, takes 8 bytes, with col first.
+    """
     from numbox.core.bindings.sqlite.vtable import (
         _CONSTRAINT_DTYPE, _USAGE_DTYPE, _ORDERBY_DTYPE,
     )
@@ -619,7 +661,7 @@ def test_pushdown_element_dtype_itemsizes():
 
 
 def _select_col0(db, sql):
-    """Collect column 0 of every result row as Python ints."""
+    """Run ``sql`` on ``db`` and return the first column of every row."""
     return [r[0] for r in _fetchall(db, sql)]
 
 
@@ -686,6 +728,7 @@ def test_pushdown_no_constraint_full_scan():
 
 
 def test_xdestroy_pops_anchor_on_close():
+    """Closing the connection makes SQLite call the destructor, which removes the registration from ``_DATA_ANCHOR``."""
     from numbox.core.bindings.sqlite import vtable as v
     db = c_int64(0)
     with c_string(":memory:") as p:
@@ -699,6 +742,7 @@ def test_xdestroy_pops_anchor_on_close():
 
 
 def test_xdestroy_two_tables():
+    """Closing the connection removes the entries of both of its tables from ``_DATA_ANCHOR``."""
     from numbox.core.bindings.sqlite import vtable as v
     db = c_int64(0)
     with c_string(":memory:") as p:
@@ -712,6 +756,7 @@ def test_xdestroy_two_tables():
 
 
 def test_xdestroy_three_tables():
+    """Closing the connection removes the entries of all three of its tables from ``_DATA_ANCHOR``."""
     from numbox.core.bindings.sqlite import vtable as v
     db = c_int64(0)
     with c_string(":memory:") as p:
@@ -726,6 +771,7 @@ def test_xdestroy_three_tables():
 
 
 def test_xdestroy_reregister_drops_first():
+    """Registering a name again removes the first entry at once, and closing the connection removes the second."""
     from numbox.core.bindings.sqlite import vtable as v
     db = c_int64(0)
     with c_string(":memory:") as p:
@@ -734,9 +780,9 @@ def test_xdestroy_reregister_drops_first():
     b = np.array([[2]], np.int64)
     keys0 = set(v._DATA_ANCHOR)
     register_table(db.value, "t", a, ["c"])
-    (key1,) = set(v._DATA_ANCHOR) - keys0  # the first descriptor pointer = its anchor key
+    (key1,) = set(v._DATA_ANCHOR) - keys0  # The key is the address of the first registration's descriptor.
     register_table(db.value, "t", b, ["c"])
-    # re-registration fires the FIRST descriptor's xDestroy synchronously
+    # SQLite calls the destructor of the first registration before sqlite3_create_module_v2 returns.
     assert key1 not in v._DATA_ANCHOR, "first entry not dropped on re-register"
     (key2,) = set(v._DATA_ANCHOR) - keys0
     assert key2 != key1
@@ -748,6 +794,7 @@ def test_xdestroy_reregister_drops_first():
 
 
 def test_xdestroy_no_c_free_of_descriptor():
+    """The destructor frees no memory: after the close, the array and the descriptor that the test holds are intact."""
     from numbox.core.bindings.sqlite import vtable as v
     db = c_int64(0)
     with c_string(":memory:") as p:
@@ -756,19 +803,19 @@ def test_xdestroy_no_c_free_of_descriptor():
     keys0 = set(v._DATA_ANCHOR)
     register_table(db.value, "t", arr, ["c"])
     (key,) = set(v._DATA_ANCHOR) - keys0
-    anchor = v._DATA_ANCHOR[key]  # hold the handle past xDestroy
+    anchor = v._DATA_ANCHOR[key]  # The test keeps the handle after SQLite calls the destructor.
     assert _select_col0(db.value, "SELECT c FROM t") == [11, 22, 33]
     n_before = len(v._DATA_ANCHOR)
     sqlite3_close(db.value)
     assert len(v._DATA_ANCHOR) == n_before - 1
-    # xDestroy must NOT have C-freed the numpy-owned descriptor/array: the test
-    # still holds arr and the anchored handle, so reading both must not
-    # segfault and both must be unchanged.
+    # The destructor only removes the handle from _DATA_ANCHOR. The array and the handle that the test still holds are
+    # therefore readable and unchanged.
     assert arr.tolist() == [[11], [22], [33]]
     assert anchor._keep[0].c["nrows"][0] == 3
 
 
 def test_xdestroy_tvf_pops_anchor_on_close():
+    """Closing the connection removes the entry of a table-valued function from ``_DATA_ANCHOR`` as well."""
     from numbox.core.bindings.sqlite import vtable as v
     from numbox.core.bindings.sqlite.tvf import register_tvf
     from numba import njit
@@ -800,10 +847,11 @@ def test_xdestroy_tvf_pops_anchor_on_close():
 
 
 def test_pushdown_explain_uses_index():
-    # SQLite reports the chosen vtable plan as "VIRTUAL TABLE INDEX <idxNum>:".
-    # A full scan claims nothing, so idxNum stays 0; a claimed constraint sets a
-    # non-zero idxNum. Assert the constrained query picks a non-zero idxNum and
-    # the unconstrained query does not.
+    """EXPLAIN QUERY PLAN shows idxNum 1 for a query with a claimed constraint and idxNum 0 for a full scan.
+
+    SQLite reports the plan of a virtual table as ``VIRTUAL TABLE INDEX`` followed by the idxNum, which is the number of
+    claimed constraints.
+    """
     db = _open_memory()
     a = np.array([[3], [5], [7]], dtype=np.int64)
     h = register_table(db, "t", a, columns=["c"])  # noqa: F841
@@ -817,9 +865,10 @@ def test_pushdown_explain_uses_index():
 
 
 def test_text_column_where_not_pushed_down():
-    # String/text columns are non-numeric, so xBestIndex never claims a WHERE on
-    # them: the plan stays at idxNum 0 (full scan) and the omit=0 re-check filters
-    # the surfaced rows -- the full-scan fallback must still return correct rows.
+    """xBestIndex claims no constraint on a text column, and the query still returns the matching rows.
+
+    The plan is a full scan, with idxNum 0, and SQLite checks the constraint on every row that the cursor returns.
+    """
     db = _open_memory()
     dt = np.dtype([("name", "U4"), ("a", "i8")])
     a = np.array([("foo", 1), ("bar", 2), ("foo", 3)], dtype=dt)
@@ -832,9 +881,11 @@ def test_text_column_where_not_pushed_down():
 
 
 def test_rowid_constraint_not_pushed_down():
-    # The 0 <= col < ncols guard in xBestIndex excludes the iColumn == -1 rowid
-    # sentinel, so a rowid constraint is never claimed (idxNum stays 0). rowid is
-    # the 0-based scan position; the full-scan fallback must still be correct.
+    """xBestIndex claims no constraint on the rowid, and the query still returns the matching rows.
+
+    SQLite gives a rowid constraint the column index -1, which the check ``0 <= col < ncols`` excludes. The rowid is the
+    position of the row in the scan, from 0.
+    """
     db = _open_memory()
     a = np.array([[10], [20], [30]], dtype=np.int64)
     h = register_table(db, "t", a, columns=["a"])  # noqa: F841
@@ -848,8 +899,7 @@ def test_rowid_constraint_not_pushed_down():
 
 @pytest.mark.parametrize("dt", [np.int32, np.uint16, np.float32])
 def test_pushdown_smaller_dtypes_match_fullscan(dt):
-    # EQ + a range op pushed down on the smaller numeric dtypes, cross-checked
-    # against a full-scan (stdlib-equivalent) expectation.
+    """An EQ and a range constraint on an int32, uint16 or float32 column return the rows that Python selects."""
     db = _open_memory()
     vals = [3, 5, 7, 5, 9, 1, 5]
     a = np.array([[v] for v in vals], dtype=dt)
@@ -861,8 +911,7 @@ def test_pushdown_smaller_dtypes_match_fullscan(dt):
 
 
 def test_pushdown_bool_column():
-    # A bool column maps to SQLite INTEGER and the cursor reads/compares it, so
-    # an eq constraint must be pushed down (non-zero idxNum), not full-scanned.
+    """xBestIndex claims an EQ constraint on a bool column, an INTEGER column for SQL, as idxNum 1 in the plan shows."""
     db = _open_memory()
     a = np.array([[True], [False], [True], [False], [True]], dtype=np.bool_)
     h = register_table(db, "t", a, columns=["c"])  # noqa: F841
@@ -875,10 +924,12 @@ def test_pushdown_bool_column():
 
 
 def test_pushdown_bool_range_ops_match_stdlib():
-    # Bool pushdown goes through the FLOAT comparison domain (_is_int_tag
-    # excludes bool): an int64-truncated RHS would turn c > -0.5 into c > 0
-    # and drop rows the omit=0 re-check never sees. Cross-check every range op
-    # and a fractional/negative RHS against stdlib sqlite3 on INTEGER 0/1.
+    """Range constraints on a bool column return the rows that Python's ``sqlite3`` module returns for 0 and 1.
+
+    The values of the constraints include fractions and a negative value. xFilter compares a bool cell as a float64,
+    because ``_is_int_tag`` excludes the bool tag. A value truncated to int64 would turn ``c > -0.5`` into ``c > 0`` and
+    skip the rows of 0, and SQLite checks the constraint only on the rows that the cursor returns.
+    """
     import sqlite3 as pysqlite
     rows = [True, False, True, False, True]
     ref = pysqlite.connect(":memory:")
@@ -892,8 +943,8 @@ def test_pushdown_bool_range_ops_match_stdlib():
             sql = "SELECT c FROM t WHERE c %s %s" % (op, rhs)
             exp = sorted(r[0] for r in ref.execute(sql))
             assert sorted(_select_col0(db, sql)) == exp, sql
-    # prove the fractional-RHS range predicate is actually claimed (pushed to
-    # xFilter), not just caught by SQLite's omit=0 re-check of surfaced rows
+    # idxNum 1 shows that xBestIndex claims the constraint, so the comparison in xFilter decides which rows the cursor
+    # returns, and SQLite then checks only those rows.
     plan = _fetchall(db, "EXPLAIN QUERY PLAN SELECT c FROM t WHERE c > -0.5")
     text = " ".join(str(field) for row in plan for field in row).upper()
     assert "VIRTUAL TABLE INDEX 1:" in text, text
@@ -902,6 +953,7 @@ def test_pushdown_bool_range_ops_match_stdlib():
 
 
 def test_pushdown_int64_above_2_53_range():
+    """Range constraints with an integer value above 2**53 compare exactly, in int64, on an int64 column."""
     db = _open_memory()
     base = 1 << 53
     vals = [base, base + 1, base + 2, base + 3]
@@ -918,16 +970,18 @@ def test_pushdown_int64_above_2_53_range():
         got = sorted(_select_col0(db, "SELECT c FROM t WHERE c %s %d" % (op, threshold)))
         exp = sorted(v for v in vals if pred(v))
         assert got == exp, (op, got, exp)
-    # the exact row at 2**53+1 that float64 collapse used to drop under "> base":
+    # float64 rounds 2**53 + 1 to 2**53, so a comparison in float64 would leave the row 2**53 + 1 out of c > 2**53.
     assert sorted(_select_col0(db, "SELECT c FROM t WHERE c > %d" % base)) == sorted(vals[1:])
     sqlite3_close(db)
 
 
 def test_pushdown_int_column_fractional_rhs_match_stdlib():
-    # Int columns constrained by a fractional REAL literal must compare in the
-    # float domain: sqlite3_value_int64 would truncate the threshold toward zero
-    # (4.5 -> 4, -4.5 -> -4) and drop rows the omit=0 re-check never resurfaces.
-    # Cross-check signed int dtypes against stdlib sqlite3 on identical data.
+    """Range constraints with a fractional REAL value on a signed integer column match Python's ``sqlite3`` module.
+
+    xFilter compares an integer cell with a REAL value exactly, in its mode 2. ``sqlite3_value_int64`` would truncate
+    the value toward zero, 4.5 to 4 and -4.5 to -4, and the scan would skip rows that match. SQLite checks the
+    constraint only on the rows that the cursor returns, so it cannot restore them.
+    """
     import sqlite3 as pysqlite
     cases = [
         (np.int8, [3, 4, 5]),
@@ -949,8 +1003,8 @@ def test_pushdown_int_column_fractional_rhs_match_stdlib():
                 sql = "SELECT c FROM t WHERE c %s %s" % (op, rhs)
                 exp = sorted(r[0] for r in ref.execute(sql))
                 assert sorted(_select_col0(db, sql)) == exp, (dtype, sql)
-        # prove the fractional predicate is actually pushed to xFilter, not just
-        # caught by SQLite's omit=0 re-check of surfaced rows
+        # idxNum 1 shows that xBestIndex claims the constraint, so the comparison in xFilter decides which rows the
+        # cursor returns, and SQLite then checks only those rows.
         plan = _fetchall(db, "EXPLAIN QUERY PLAN SELECT c FROM t WHERE c < 4.5")
         text = " ".join(str(field) for row in plan for field in row).upper()
         assert "VIRTUAL TABLE INDEX 1:" in text, text
@@ -959,9 +1013,11 @@ def test_pushdown_int_column_fractional_rhs_match_stdlib():
 
 
 def test_pushdown_int64_out_of_range_real_rhs_match_stdlib():
-    # An out-of-int64-range REAL literal (~1e23) must compare in the float
-    # domain: sqlite3_value_int64 clamps it to INT64_MAX, turning "c < clamp"
-    # into "c < INT64_MAX" which wrongly drops the INT64_MAX row.
+    """A constraint with a REAL value above the int64 range keeps the row of INT64_MAX in an int64 column.
+
+    The rows of ``c < 99999999999999999999999`` match those of Python's ``sqlite3`` module. ``sqlite3_value_int64``
+    would clamp the value to INT64_MAX and turn the constraint into ``c < INT64_MAX``.
+    """
     import sqlite3 as pysqlite
     INT64_MAX = (1 << 63) - 1
     vals = [-5, 0, 5, INT64_MAX]
@@ -979,11 +1035,11 @@ def test_pushdown_int64_out_of_range_real_rhs_match_stdlib():
 
 
 def test_pushdown_int64_integer_valued_real_rhs_match_stdlib():
-    # An int column constrained by an INTEGER-VALUED REAL literal at high
-    # magnitude must compare EXACTLY: widening the int64 cell to f64 (the old
-    # float-domain path) is lossy above 2**53, so (2**53+1) collapses to 2**53
-    # and "c > 2**53.0" wrongly drops the 2**53+1 row. Cross-check against stdlib
-    # sqlite3 on identical data, both above +2**53 and below -2**53.
+    """Constraints with an integer-valued REAL beyond 2**53 on an int64 column return the rows of Python's ``sqlite3``.
+
+    xFilter compares the int64 cell with the REAL value exactly. In float64, 2**53 + 1 would round to 2**53, and
+    ``c > 9007199254740992.0`` would leave out the row 2**53 + 1. The cases cover values above 2**53 and below -2**53.
+    """
     import sqlite3 as pysqlite
     base = 1 << 53
     cases = [
@@ -1002,8 +1058,8 @@ def test_pushdown_int64_integer_valued_real_rhs_match_stdlib():
         sql = "SELECT c FROM t WHERE c %s %s" % (op, rhs)
         exp = sorted(r[0] for r in ref.execute(sql))
         assert sorted(_select_col0(db, sql)) == exp, (sql, exp)
-        # prove the REAL-RHS predicate is actually pushed to xFilter, not just
-        # caught by SQLite's omit=0 re-check of surfaced rows
+        # idxNum 1 shows that xBestIndex claims the constraint, so the comparison in xFilter decides which rows the
+        # cursor returns, and SQLite then checks only those rows.
         plan = _fetchall(db, "EXPLAIN QUERY PLAN " + sql)
         text = " ".join(str(field) for row in plan for field in row).upper()
         assert "VIRTUAL TABLE INDEX 1:" in text, text
@@ -1016,8 +1072,8 @@ def test_pushdown_uint64_high_magnitude_consistent():
     vals = [(1 << 63), (1 << 63) + 5, (1 << 63) + 1]
     a = np.array([[v] for v in vals], dtype=np.uint64)
     h = register_table(db, "t", a, columns=["c"])  # noqa: F841
-    # xColumn surfaces uint64 as a wrapped int64; the cursor must agree, so a
-    # pushdown query returns exactly what a full scan + SQLite re-check returns.
+    # xColumn returns each uint64 as the wrapped int64, and xFilter compares the same wrapped value. The constrained
+    # query therefore returns the rows that a full scan, filtered in Python, returns.
     pushed = sorted(_select_col0(db, "SELECT c FROM t WHERE c > %d" % ((1 << 63) + 0)))
     allrows = sorted(_select_col0(db, "SELECT c FROM t"))
     full = sorted(v for v in allrows if v > ((1 << 63) + 0))
@@ -1026,6 +1082,10 @@ def test_pushdown_uint64_high_magnitude_consistent():
 
 
 def test_xdestroy_deferred_while_statement_open():
+    """``sqlite3_close`` fails while a statement is open, and the registration stays in ``_DATA_ANCHOR``.
+
+    After the statement is finalized, the close succeeds and removes the registration.
+    """
     from numbox.core.bindings.sqlite import vtable as v
     from numbox.core.bindings.sqlite.tvf import register_tvf
     from numba import njit
@@ -1045,18 +1105,18 @@ def test_xdestroy_deferred_while_statement_open():
     stmt = c_int64(0)
     with c_string("SELECT n FROM series(2, 5)") as p:
         sqlite3_prepare_v2(db.value, p, -1, addressof(stmt), 0)
-    sqlite3_step(stmt.value)  # leave the statement open (not finalized)
+    sqlite3_step(stmt.value)  # The statement stays open, because the test does not finalize it yet.
     n_before = len(v._DATA_ANCHOR)
-    rc = sqlite3_close(db.value)  # sqlite3_close (v1) returns SQLITE_BUSY with an open stmt
-    assert rc != 0  # BUSY: close refused, xDestroy NOT fired
-    assert len(v._DATA_ANCHOR) == n_before  # anchor entry still present
+    rc = sqlite3_close(db.value)  # sqlite3_close returns SQLITE_BUSY while a statement is open.
+    assert rc != 0  # The connection stays open, and SQLite has not called the destructor.
+    assert len(v._DATA_ANCHOR) == n_before
     sqlite3_finalize(stmt.value)
-    assert sqlite3_close(db.value) == 0  # now it closes and fires xDestroy
+    assert sqlite3_close(db.value) == 0  # The close succeeds and calls the destructor.
     assert len(v._DATA_ANCHOR) == n_before - 1
     del h
 
 
-# ---- columnar (mapping) overload ----
+# ---- Tables registered from a mapping of column names to 1-D arrays ----
 
 def test_columnar_int64_roundtrip():
     db = _open_memory()
@@ -1136,7 +1196,7 @@ def test_columnar_join_two_tables():
 def test_columnar_strided_column():
     db = _open_memory()
     backing = np.array([1, 99, 2, 99, 3, 99], dtype=np.int64)
-    strided = backing[::2]            # values 1,2,3; stride 16 bytes; non-contiguous
+    strided = backing[::2]            # The view holds 1, 2 and 3 with a stride of 16 bytes.
     assert not strided.flags["C_CONTIGUOUS"]
     cols = {"a": strided, "b": np.array([10, 20, 30], dtype=np.int64)}
     register_table(db, "t", cols)
@@ -1147,7 +1207,7 @@ def test_columnar_strided_column():
 def test_columnar_strided_string_column():
     db = _open_memory()
     backing = np.array(["aa", "zz", "bb", "zz", "cc", "zz"], dtype="U6")
-    strided = backing[::2]            # "aa","bb","cc"; non-contiguous (stride 2*itemsize)
+    strided = backing[::2]            # The view holds "aa", "bb" and "cc" with a stride of twice the itemsize.
     assert not strided.flags["C_CONTIGUOUS"]
     cols = {"s": strided, "n": np.array([1, 2, 3], dtype=np.int64)}
     register_table(db, "t", cols)
@@ -1157,7 +1217,7 @@ def test_columnar_strided_string_column():
 
 def test_columnar_negative_stride_column():
     backing = np.array([10, 20, 30, 40], dtype=np.int64)
-    rev = backing[::-1]            # negative stride; rev.ctypes.data is the physical-last element
+    rev = backing[::-1]            # The stride is negative, and rev.ctypes.data is the address of the last element.
     assert rev.strides[0] < 0
     db = _open_memory()
     register_table(db, "t", {"a": rev})
@@ -1212,6 +1272,10 @@ def test_columnar_zero_rows():
 
 
 def test_columnar_on_stdlib_connection():
+    """Python's ``sqlite3`` module can query a table registered on the handle of its ``Connection``.
+
+    The test skips when numbox's bindings and Python's ``sqlite3`` module report different SQLite versions.
+    """
     if not libraries_coordinated():
         pytest.skip("uncoordinated libsqlite3 (see numbox.utils.pysqlite_bridge)")
     conn = sqlite3.connect(":memory:")

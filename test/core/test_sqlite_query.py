@@ -1,3 +1,11 @@
+"""Tests of :func:`~numbox.core.bindings.sqlite.query.query_to_array` and of the UTF-8 conversions of ``_typemap``.
+
+The tests run query_to_array on integer, float, text and BLOB columns and on NULL and empty values. Other runs use a
+packed dtype, more rows than the first buffer of query_to_array holds, and statements that fail to prepare or to step.
+The tests decode valid and malformed UTF-8 with ``utf8_to_utf32``, encode code points with ``utf32_to_utf8``, and check
+that a ``'U'`` field of query_to_array decodes every case as ``utf8_to_utf32`` does. A last test runs a query and a
+table-valued function in two processes that share numba's cache.
+"""
 from ctypes import addressof, c_int64
 
 import pytest
@@ -11,6 +19,7 @@ from numbox.utils.lowlevel import array_data_p
 
 
 def _decode(s_bytes, width_cp):
+    """Decode ``s_bytes`` with ``utf8_to_utf32`` into ``width_cp`` slots; return the count written and the slots."""
     src = np.frombuffer(s_bytes, dtype=np.uint8).copy()
     dst = np.zeros(width_cp, dtype=np.uint32)
     n = utf8_to_utf32(array_data_p(src), len(src), array_data_p(dst), width_cp)
@@ -74,6 +83,7 @@ def test_query_numeric_roundtrip():
 
 
 def test_query_null_coercion():
+    """A NULL reads as 0 in an integer field and as NaN in a float field."""
     db = _open_mem()
     _exec(db, "CREATE TABLE t(i INTEGER, x REAL)")
     _exec(db, "INSERT INTO t VALUES (NULL, NULL)")
@@ -85,6 +95,7 @@ def test_query_null_coercion():
 
 
 def test_query_growth_boundary():
+    """query_to_array returns all 5000 rows in order, although its buffer starts with room for 16 rows and doubles."""
     db = _open_mem()
     _exec(db, "CREATE TABLE t(i INTEGER)")
     _exec(db, "WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c WHERE n<5000) INSERT INTO t SELECT n FROM c")
@@ -126,6 +137,10 @@ def test_query_bad_sql_raises():
 
 
 def test_query_two_dtypes_no_stale_cache():
+    """Two calls with different dtypes return arrays of their own layouts, although both run the same compiled code.
+
+    The compiled code receives the layout as arrays of offsets, tags and widths, not as a type.
+    """
     db = _open_mem()
     _exec(db, "CREATE TABLE t(a INTEGER, b INTEGER)")
     _exec(db, "INSERT INTO t VALUES (1, 2)")
@@ -147,10 +162,9 @@ def test_query_empty_result():
 
 
 def test_query_step_error_raises():
-    # A step-time error after >=1 row must raise, not return a truncated array.
-    # CASE returns plain ints for the first rows, then abs(INT64_MIN) overflows
-    # at the last step (verified against the venv sqlite: prepare succeeds, rows
-    # emit, then sqlite3_step returns SQLITE_ERROR "integer overflow").
+    """query_to_array raises ``RuntimeError`` when a step fails after two rows, instead of returning the two rows."""
+    # abs(-9223372036854775808) overflows int64, so SQLite returns the rows of 1 and 2 and then fails the third step
+    # with SQLITE_ERROR and the message "integer overflow".
     db = _open_mem()
     _exec(db, "CREATE TABLE t(i INTEGER)")
     _exec(db, "INSERT INTO t VALUES (1), (2), (3)")
@@ -163,10 +177,11 @@ def test_query_step_error_raises():
 
 
 def test_query_packed_misaligned_dtype():
+    """query_to_array writes the fields of a packed dtype at their unaligned offsets."""
     db = _open_mem()
     _exec(db, "CREATE TABLE t(flag INTEGER, x REAL, s TEXT)")
     _exec(db, "INSERT INTO t VALUES (1, 2.5, 'ok'), (0, -3.25, 'hi')")
-    dt = np.dtype([("flag", "i1"), ("x", "f8"), ("s", "U4")])  # x at offset 1, s at offset 9
+    dt = np.dtype([("flag", "i1"), ("x", "f8"), ("s", "U4")])  # The dtype puts x at offset 1 and s at offset 9.
     assert not dt.isalignedstruct
     with c_string("SELECT flag, x, s FROM t") as sql:
         out = query_to_array(db, sql, dt)
@@ -177,38 +192,40 @@ def test_query_packed_misaligned_dtype():
 
 
 def test_query_blob_into_S_field():
+    """A BLOB read into an ``'S'`` field keeps its bytes, a NUL byte included."""
     db = _open_mem()
     _exec(db, "CREATE TABLE t(b BLOB)")
     _exec(db, "INSERT INTO t VALUES (x'00ff10'), (x'4142')")
     with c_string("SELECT b FROM t") as sql:
         out = query_to_array(db, sql, np.dtype([("b", "S3")]))
-    # interior bytes preserved up to field width; trailing NUL pad trimmed on read
+    # query_to_array reads an 'S' field with sqlite3_column_text, which returns the BLOB's bytes unchanged. NumPy drops
+    # the trailing NUL padding when it reads an 'S' value, so the 2-byte BLOB reads back as b"AB".
     assert out["b"][0] == b"\x00\xff\x10"
     assert out["b"][1] == b"AB"
     sqlite3_close(db)
 
 
 def test_utf8_to_utf32_bad_continuation_is_replacement():
-    # 0xE0 starts a 3-byte sequence but the next byte 0x20 is not a continuation
+    # 0xE0 starts a 3-byte form, but the next byte, 0x20, is not a continuation byte.
     n, dst = _decode(b"\xe0\x20\x41", 4)
     assert int(dst[0]) == 0xFFFD
 
 
 def test_utf8_to_utf32_surrogate_is_replacement():
-    # CESU-8-style encoding of a high surrogate U+D800 (0xED 0xA0 0x80) is illegal
+    # The bytes 0xED 0xA0 0x80 encode the surrogate U+D800, which UTF-8 does not allow.
     n, dst = _decode(b"\xed\xa0\x80", 4)
     assert int(dst[0]) == 0xFFFD
 
 
 def test_utf8_to_utf32_overlong_is_replacement():
-    # overlong 2-byte encoding of '/' (0xC0 0xAF) is illegal
+    # The bytes 0xC0 0xAF are an overlong 2-byte encoding of '/', which UTF-8 does not allow.
     n, dst = _decode(b"\xc0\xaf", 4)
     assert int(dst[0]) == 0xFFFD
 
 
-# (UTF-8 bytes, decoded code points). A malformed multi-byte form that parses
-# (overlong, surrogate, above U+10FFFF) is replaced whole; a byte that starts no
-# complete form is replaced alone and decoding resumes at the next byte.
+# Each case pairs UTF-8 bytes with the code points that the decoder returns for them. A malformed form that still
+# parses, such as an overlong encoding, a surrogate or a value above U+10FFFF, decodes to one U+FFFD. A byte that starts
+# no complete form decodes to U+FFFD alone, and the decoder resumes at the next byte.
 _UTF8_CASES = [
     (b"\xe2\x82\xac\xf0\x9f\x98\x80", [0x20AC, 0x1F600]),
     (b"\xe0\x20\x41", [0xFFFD, 0x20, 0x41]),
@@ -225,6 +242,7 @@ _UTF8_CASES = [
 
 @pytest.mark.parametrize("raw, cps", _UTF8_CASES)
 def test_utf8_to_utf32_decodes_whole_sequence(raw, cps):
+    """``utf8_to_utf32`` decodes each case to its code points and sets the remaining slots to 0."""
     n, dst = _decode(raw, 8)
     assert n == len(cps)
     assert [int(x) for x in dst[:n]] == cps
@@ -233,8 +251,12 @@ def test_utf8_to_utf32_decodes_whole_sequence(raw, cps):
 
 @pytest.mark.parametrize("raw, cps", _UTF8_CASES)
 def test_query_unicode_field_decodes_like_utf8_to_utf32(raw, cps):
-    # query_to_array decodes TEXT into a 'U' field with its own emit step; the
-    # CAST hands SQLite's raw bytes through unvalidated, so it sees them as is.
+    """A ``'U'`` field of query_to_array decodes each case as ``utf8_to_utf32`` does.
+
+    Both call ``_utf8_decode_one``, but query_to_array writes each code point through arrays that numba tracks, and
+    ``utf8_to_utf32`` writes through a raw pointer.
+    """
+    # CAST of a BLOB to TEXT keeps the bytes without a UTF-8 check, so query_to_array receives the malformed bytes.
     db = _open_mem()
     with c_string("SELECT CAST(x'%s' AS TEXT)" % raw.hex()) as sql:
         out = query_to_array(db, sql, np.dtype([("u", "U8")]))
@@ -243,6 +265,7 @@ def test_query_unicode_field_decodes_like_utf8_to_utf32(raw, cps):
 
 
 def test_query_xprocess_cache(tmp_path):
+    """A query and a table-valued function return the same rows in a second process that loads the cached code."""
     import os
     import subprocess
     import sys
@@ -297,7 +320,7 @@ def test_query_xprocess_cache(tmp_path):
     script = tmp_path / "query_drv.py"
     script.write_text(driver)
     env = dict(os.environ, NUMBA_CACHE_DIR=str(tmp_path / "nbcache"))
-    for _ in range(2):  # cold then warm: cross-process cache reuse must not crash
+    for _ in range(2):  # The first process compiles and caches the code, and the second loads it from the cache.
         out = subprocess.run([sys.executable, str(script)], env=env,
                              capture_output=True, text=True, timeout=600)
         assert out.returncode == 0, out.stderr
@@ -305,9 +328,8 @@ def test_query_xprocess_cache(tmp_path):
 
 
 def test_query_empty_text_and_blob():
-    # Empty TEXT '' and zero-length BLOB x'' -> SQLite returns a NULL/zero-length
-    # pointer with nbytes==0, so _store_cell builds carray(ptr, (0,)) and copies 0
-    # bytes. This exercises that path and must yield empty cells without crashing.
+    """An empty TEXT value and a zero-length BLOB give empty ``'S'`` and ``'U'`` cells."""
+    # sqlite3_column_bytes returns 0 for each value, so _store_cell builds a carray of length 0 and copies no bytes.
     db = _open_mem()
     _exec(db, "CREATE TABLE t(s TEXT, b BLOB, u TEXT)")
     _exec(db, "INSERT INTO t VALUES ('', x'', '')")
