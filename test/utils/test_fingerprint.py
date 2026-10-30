@@ -295,8 +295,8 @@ def test_two_python_callbacks_sharing_a_name_are_not_canonicalized_alike():
     """``_canon_value`` raises ``_Unfingerprintable`` for a ctypes callback built from a Python function.
 
     For such a callback, ``_objects["0"]`` holds a ``CThunkObject``, which has no ``_name``, instead of a library. A
-    text that folded the missing name would be the same for two callbacks with one ``__name__``, as a decorator that
-    copies the name gives them.
+    text that folded the missing name would be the same for two callbacks with one ``__name__``, such as two callbacks
+    to which a decorator copies the same name.
     """
     import ctypes
 
@@ -335,7 +335,7 @@ def test_unset_and_empty_argtypes_are_canonicalized_apart():
 
 
 def test_two_prototypes_over_one_address_are_not_read_as_one_value():
-    """``_opaque_values_match`` takes two ctypes pointers over one address for one value only if their prototypes match.
+    """``_opaque_values_match`` treats two ctypes pointers over one address as one value only if their prototypes match.
 
     numba types and lowers a call from the pointer's ``restype``, ``argtypes`` and calling convention, so two prototypes
     over one symbol describe two calls. If the two pointers counted as one value, the second body would receive the

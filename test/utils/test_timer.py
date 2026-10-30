@@ -26,8 +26,8 @@ def test_timer_records_duration_and_returns_result():
 class _Records(logging.Handler):
     """A logging handler that keeps every record it receives in ``records``.
 
-    The test uses it instead of pytest's ``caplog`` fixture, so the file also runs through its ``collect_and_run_tests``
-    block, which calls each test without arguments.
+    The test uses it instead of pytest's ``caplog`` fixture, so that the file can also run as a script through its
+    ``collect_and_run_tests`` block, which calls each test without arguments.
     """
 
     def __init__(self):
@@ -60,8 +60,8 @@ def test_timer_logs_at_info():
 
 
 def test_import_leaves_root_logger_unconfigured():
-    # A new interpreter runs the import, so the handlers that pytest adds to the root logger in this process do not
-    # count.
+    # A new interpreter runs the import, so the count does not include the handlers that pytest adds to the root logger
+    # in this process.
     code = (
         "import logging\n"
         "import numbox.utils.timer\n"

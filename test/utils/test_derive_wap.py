@@ -311,8 +311,8 @@ def test_a_plain_function_type_derive_propagates_through_the_runtime_branch():
     def succeeding(a):
         return a + 1.0
 
-    # The node is built in jitted code, so its derive keeps the declared plain FunctionType. numba sets jit_addr when it
-    # unboxes an @njit function passed as that type.
+    # The node is built in jitted code, so the type of its derive is the declared plain FunctionType. numba sets
+    # jit_addr when it unboxes an @njit function passed as that type.
     @njit(float64(FunctionType(float64(float64))))
     def build_and_calculate(f):
         source = make_work("source", 5.0)
@@ -372,7 +372,8 @@ def test_a_container_of_two_derives_still_unifies():
 def test_a_cres_derive_is_accepted_where_a_plain_function_type_is_declared():
     """A ``cres`` value passed from Python to a parameter declared as the plain ``FunctionType`` is accepted and called.
 
-    ``typeof`` gives the value ``DeriveFunctionType``, so the call relies on ``DeriveFunctionType.can_convert_to``.
+    ``typeof`` returns ``DeriveFunctionType`` for the value, so the call relies on
+    ``DeriveFunctionType.can_convert_to``.
     """
     @cres(float64(float64))
     def derive(x):
@@ -451,10 +452,10 @@ def test_the_unbox_helper_releases_both_temporaries():
     finally:
         derive_wap_module._get_derive_jit_address = original
 
-    # The unboxing passes the same memoized Signature object on every call, as identical records. numba's own
-    # lower_get_wrapper_address, which numbox calls for c_addr, takes a reference to that object and never releases it,
-    # so the object's count grows by one per call. A missing release in numbox would add a second reference per call,
-    # which the bound of one per call detects.
+    # The unboxing passes the same memoized Signature object on every call, as the list identical records. numba's
+    # own lower_get_wrapper_address, which numbox calls for c_addr, takes a reference to that object and never releases
+    # it, so the object's count grows by one per call. A missing release in numbox would add a second reference per
+    # call and exceed the bound of one reference per call that the last assertion checks.
     assert identical and all(identical), (
         "numba handed a fresh Signature per call, so the refcount probe below "
         "measures nothing"
@@ -517,7 +518,8 @@ def test_a_cached_caller_of_a_derive_caches_and_still_propagates(tmp_path):
         print(f"{value} {dynamic} {hits} {propagated}")
     '''), encoding="utf-8")
 
-    # The cache directory starts empty, and the subprocesses import numbox from the paths of this process.
+    # The cache directory starts empty. PYTHONPATH holds the sys.path of this process, so the subprocesses import the
+    # same numbox.
     env = dict(os.environ)
     env["NUMBA_CACHE_DIR"] = str(tmp_path / "nbcache")
     env["PYTHONPATH"] = os.pathsep.join(sys.path)

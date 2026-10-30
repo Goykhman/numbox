@@ -208,8 +208,8 @@ def test_make_structref_method_param_edge_cases():
     """``make_structref_code_txt`` generates code for methods whose parameter list differs from the text numbox writes.
 
     numbox writes each default as its ``repr`` and drops annotations. The methods' defaults are written as ``1_000``, as
-    ``0x10``, as a string in double quotes that holds a comma, and as a call. One parameter has an annotation. The test
-    generates the code and compiles nothing.
+    ``0x10``, as a string in double quotes that contains a comma, and as a call. One parameter has an annotation. The
+    test generates the code and compiles nothing.
     """
     def m_underscore(self, n=1_000):
         return self.x + n
@@ -398,8 +398,8 @@ def test_orphan_anchor_sweep_spares_fresh_tmp_files():
 def test_materialize_anchor_writes_utf8_bytes(tmp_path):
     """``_materialize_anchor`` writes the code as UTF-8, the encoding in which ``_anchor_path`` hashes it for a name.
 
-    On Windows, ``os.fdopen`` defaults to the locale's encoding, such as cp1252, which writes other bytes for non-ASCII
-    source.
+    On Windows, ``os.fdopen`` defaults to the locale's encoding, such as cp1252, whose bytes for non-ASCII source differ
+    from those of UTF-8.
     """
     content = "# café — non-ASCII sentinel\nx = 1\n"
     anchor = tmp_path / "anchor.py"
@@ -510,11 +510,12 @@ def test_signature_identity_folds_component_cacheability():
 
 
 def test_method_identity_folds_ns_values_read_as_globals_only():
-    """An ``ns`` value enters a method's identity if the method reads it as a global, not if an attribute has its name.
+    """An ``ns`` value enters a method's identity only if the method reads it as a global.
 
-    ``co_names`` holds global and attribute names alike, so ``_method_identity`` reads the opcodes instead. Folding a
-    value that the method never reads would change the identity of a method whose behavior is the same, and a value
-    without a fingerprint would turn off the struct's cache.
+    If the method only reads an attribute of the same name, such as ``self.knob``, the ``ns`` value is not folded into
+    the identity. ``co_names`` holds global and attribute names alike, so ``_method_identity`` reads the opcodes
+    instead. Folding a value that the method never reads would change the identity of a method whose behavior is the
+    same, and a value without a fingerprint would disable the struct's cache.
     """
     class Opaque:
         pass

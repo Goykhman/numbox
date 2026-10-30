@@ -62,7 +62,7 @@ def test_digest_accepts_codeless_callable():
 
 def test_digest_codeless_callable_captures_state():
     # The cloudpickle holds the object's state, so two partials with different arguments have different digests. A
-    # hash of code alone would give them one digest.
+    # hash of the code alone would produce one digest for both.
     one = digest("StateType", (functools.partial(len, "a"),))
     two = digest("StateType", (functools.partial(len, "ab"),))
     assert one != two
@@ -90,7 +90,8 @@ def test_digest_unfingerprintable_function_captures_closure():
 
 def test_digest_folds_dispatcher_jit_flags():
     # numba compiles different code for each set of jit options, so dispatchers of one body with different options must
-    # have different digests. digest folds the options that each dispatcher compiles under with its Python function.
+    # have different digests. digest folds each dispatcher's Python function together with the options that the
+    # dispatcher compiles under.
     def cb(x):
         return x + 1
 

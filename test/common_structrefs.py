@@ -2,8 +2,8 @@
 
 ``S1``, ``S12``, ``S2`` and ``S3`` follow numba's pattern for a StructRef: a type class registered with
 ``structref.register``, a proxy class with its boxing, an ``@overload`` constructor and a jitted constructor for one
-signature. The one field of ``S12`` has the type of the first field of ``S1``, so ``cast`` can read an ``S1`` as an
-``S12``. ``S2`` holds a two-dimensional array, and ``S3`` holds an ``S1``. Python code cannot create an ``S4``, and
+signature. The one field of ``S12`` has the type of the first field of ``S1``, so ``cast`` can reinterpret an ``S1`` as
+an ``S12``. ``S2`` holds a two-dimensional array, and ``S3`` holds an ``S1``. Python code cannot create an ``S4``, and
 jitted code creates one with ``ll_make_s4``.
 """
 from numba import njit, float64, int16, int64

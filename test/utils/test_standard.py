@@ -52,8 +52,8 @@ def test_make_params_strings_flattens_keyword_only():
 def test_make_params_strings_flattens_positional_only():
     """``make_params_strings`` drops the positional-only marker ``/``, as it drops ``*``.
 
-    Dropping a marker lets a caller pass a parameter in one more way, and it does not change what the generated code
-    computes.
+    Without the marker, a caller can pass such a parameter both by position and by name, and the generated code computes
+    the same result.
     """
     def f(a, b, /, c):
         pass
@@ -70,7 +70,8 @@ def test_make_params_strings_rejects_combined_var_args_and_kwargs():
 def test_make_params_strings_string_default_uses_repr():
     """A string default is written as its ``repr``, so the generated ``def`` returns the same string.
 
-    The string's ``str`` has no quotes, so the generated code would read it as a name and raise ``NameError``.
+    The string's ``str`` has no quotes, so Python would parse it in the generated code as a name and raise
+    ``NameError``.
     """
     def f(x="hello"):
         pass
@@ -97,9 +98,9 @@ def test_make_params_strings_none_default_round_trips():
 def test_make_params_strings_nan_inf_floats_documented_no_roundtrip(bad_float):
     """The defaults ``nan``, ``inf`` and ``-inf`` give a ``def`` that raises ``NameError`` when it runs.
 
-    Their ``repr`` refers to the name ``nan`` or ``inf``, which the generated code does not define, as the docstring of
-    ``make_params_strings`` states. The test fails if the function writes these defaults in another way, so that the
-    docstring changes with the function.
+    Their ``repr`` is the name ``nan`` or ``inf``, with a minus sign for ``-inf``, and the generated code does not
+    define these names, as the docstring of ``make_params_strings`` states. The test fails if the function writes these
+    defaults in another way, so that the docstring changes with the function.
     """
     def f(x=bad_float):
         pass

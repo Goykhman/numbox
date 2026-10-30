@@ -2,7 +2,7 @@
 
 The tests read each string back through its address, for ASCII text, for non-ASCII text and for an empty string. They
 check the NUL terminator, that two strings open at once have different addresses, and that ``c_string`` raises
-``ValueError`` for a string that holds a NUL character. One test checks that numba refuses ``c_string`` as a context
+``ValueError`` for a string that contains a NUL character. One test checks that numba refuses ``c_string`` as a context
 manager in jitted code.
 """
 from contextlib import ExitStack
@@ -46,7 +46,7 @@ def test_nul_terminator_present():
 
 
 def test_embedded_nul_rejected():
-    """``c_string`` raises ``ValueError`` for a string that holds a NUL character.
+    """``c_string`` raises ``ValueError`` for a string that contains a NUL character.
 
     The C string would end at that character, so a C function would receive a shorter string without any error.
     """

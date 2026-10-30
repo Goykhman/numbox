@@ -68,8 +68,8 @@ def test_3():
     @numba.njit
     def aux():
         """Return the arrays, the MemInfo addresses and the reference counts that the test checks."""
-        # numba gives an array that Python passes to jitted code a MemInfo for that call alone, so the array is created
-        # here, where its MemInfo is the one that holds it.
+        # numba creates a MemInfo for the call alone when Python passes an array to jitted code. The array is therefore
+        # created here, in jitted code, so that the MemInfo that the test reads is the array's own.
         a = numpy.array([[34], [56]], dtype=numpy.int64)
         a_meminfo_p = structref_meminfo(a)[0]
         a_ref_ct_1_ = deref_int64_intp(a_meminfo_p)
@@ -189,7 +189,8 @@ def test_get_str_from_p_as_int():
 def test_get_str_from_p_as_int_high_bytes():
     """``get_str_from_p_as_int`` returns each byte from 0x80 to 0xFF as the character of the same code.
 
-    That is Latin-1 decoding, so the UTF-8 bytes of a non-ASCII text come back as one character per byte, undecoded.
+    That is Latin-1 decoding, so the function returns the UTF-8 bytes of a non-ASCII text as one character per byte,
+    undecoded.
     """
     raw = "é".encode("utf-8") + b"A"  # b'\xc3\xa9A'
     buf = c_char_p(raw)
@@ -214,7 +215,7 @@ def test_populate_structref():
     @numba.njit
     def make_s4():
         """Return the array, the structref and the array's reference counts before and after ``ll_make_s4``."""
-        # The array is created in jitted code, where its MemInfo is the one that holds it, as in test_3.
+        # The array is created in jitted code, so that the MemInfo that the test reads is the array's own, as in test_3.
         a_ = numpy.array([2.17, 3.14], dtype=numpy.float64)
         a_meminfo_p = structref_meminfo(a_)[0]
         a_ref_ct_1_ = deref_int64_intp(a_meminfo_p)
@@ -312,7 +313,7 @@ def test_load_at_store_at_int32_roundtrip():
 def test_load_at_rejects_non_intp_pointer():
     """``load_at`` raises ``TypingError`` for an address typed ``int32``.
 
-    An ``int32`` holds only the low 32 bits of a 64-bit address, so a load through it would read the wrong memory.
+    An ``int32`` holds only the low 32 bits of a 64-bit address, so a load through it would read from a wrong address.
     """
     from numba import int32, njit
     from numba.core.errors import TypingError

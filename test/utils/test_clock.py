@@ -54,7 +54,8 @@ def test_linear_scaling():
     # This call compiles timed_loop, so the measured calls below do not include the compilation.
     timed_loop(100)
 
-    # The ratio is averaged over five runs, which reduces the noise of CI virtual machines enough for these bounds.
+    # The ratio is averaged over five runs, which reduces the noise of CI virtual machines enough for the test to use
+    # these bounds.
     n_small = 10_000
     n_large = 20_000
     runs = 5
@@ -94,8 +95,8 @@ def test_wall_clock_consistency():
     timed_loop(100)
 
     # The wall clock is time.perf_counter_ns, which uses QueryPerformanceCounter on Windows in every CPython version.
-    # Before CPython 3.13, time.monotonic_ns uses GetTickCount64 there, whose resolution of about 15 ms can give zero
-    # for a fast loop.
+    # Before CPython 3.13, time.monotonic_ns uses GetTickCount64 there, whose resolution of about 15 ms can make the
+    # measured time of a fast loop zero.
     n = 50_000
     wall_start = time.perf_counter_ns()
     jit_total, _ = timed_loop(n)
