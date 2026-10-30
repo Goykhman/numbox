@@ -1,10 +1,17 @@
-"""Importing numbox where numba can write no cache for it.
+"""Tests of the check that disables caching where numba cannot cache numbox, and of the remedy that its warning names.
 
-numba sets a cached function up when it is decorated and raises there when no
-cache location can be written, so ``import numbox`` died at its first module
-under an archive import or a read-only install. Every check here runs in a
-subprocess with its own tree and cache directory, so the placement under test
-is the one the subprocess sees and nothing else.
+numba sets up a function's cache when it decorates the function, and it raises if it finds no location that it can
+write in. :mod:`numbox.core.configurations` asks numba about numbox's own files when it is first imported, so that
+numbox then compiles without a cache after one warning. The tests that import numbox do so in a child process with a
+copy of the tree and cache directories of its own. They cover read-only installs, ``.zip``, ``.egg`` and ``.whl``
+archives, ``.pyc`` files without their source, symbolic links, frozen applications and paths at Linux's length limit.
+The tests of :func:`~numbox.core.configurations.cache_remedy` run in this process and replace numba's settings, the
+platform and IPython through ``monkeypatch``. They cover each of numba's locators under ``NUMBA_CACHE_DIR`` and
+``NUMBA_CACHE_LOCATOR_CLASSES``, notebook cells, names too long for the file system and paths that are not UTF-8. Some
+cases depend on numba 0.68, which reads a ``.zip`` member's source. A test that needs a read-only directory skips on
+Windows and for root. The last tests cover the code that numbox generates at run time. numbox writes that code to an
+anchor file, and the code compiles without a cache where numba cannot cache the anchor. ``test_jit_options.py`` tests
+how numbox reads ``NUMBOX_JIT_OPTIONS``.
 """
 import ast
 import compileall
@@ -27,12 +34,15 @@ from numbox.core.configurations import LONGEST_CACHE_FILE_NAME, numba_version
 
 REPO = Path(__file__).resolve().parent.parent.parent
 
-# chmod takes write access from a directory neither on Windows nor from root.
+# On Windows, chmod does not stop a process from writing in a directory, and root writes in a directory whatever its
+# mode. A test that needs a directory that it cannot write in is skipped in both cases.
 needs_a_directory_it_cannot_write = pytest.mark.skipif(
     os.name == "nt" or os.geteuid() == 0, reason="needs a directory this user cannot write to")
 
-# A lazily compiled helper, an eagerly compiled one and a proxied binding, each
-# decorated at import under the package's options, then used.
+# The child imports numbox and calls three of its functions. numbox compiles the libm binding cos and
+# get_str_from_p_as_int under jit_options when it imports their modules. array_data_p is a plain njit function, which
+# numba compiles at its first call and does not cache. The child prints the file that it imported configurations
+# from, so that a test can compare that file with the place that PYTHONPATH names.
 IMPORT_AND_USE = (
     "import math\n"
     "import numpy as np\n"
@@ -46,6 +56,8 @@ IMPORT_AND_USE = (
 )
 
 
+# ARCHIVE_REMEDY is the remedy for a module whose source is not a file on disk, such as a member of an .egg, while
+# NUMBA_CACHE_LOCATOR_CLASSES is unset.
 ARCHIVE_REMEDY = (
     "NUMBA_CACHE_DIR has no effect here, because the source is not a file on disk: to cache, install numbox with its "
     "source files on disk, unpacked from any archive, or import it from a .zip holding its source files, which numba "
@@ -54,10 +66,12 @@ ARCHIVE_REMEDY = (
 
 
 def _archive(path, bytecode_naming_the_archive=()):
-    """numbox's modules zipped into ``path``, which goes on PYTHONPATH as it is.
+    """Write numbox's modules into a zip archive at ``path``, and return ``path``, which the caller puts on PYTHONPATH.
 
-    A directory, or a file, named in ``bytecode_naming_the_archive`` goes in as ``.pyc`` alone, each compiled to
-    name its path inside the archive, as ``compileall -d`` and ``py_compile``'s ``dfile`` do.
+    ``bytecode_naming_the_archive`` holds paths relative to the repository, with forward slashes, such as
+    ``numbox/core/bindings``. A module named there, or a module directly in a directory named there, goes into the
+    archive as a ``.pyc`` alone. Each such ``.pyc`` is compiled to name its own path inside the archive, as the ``-d``
+    option of ``compileall`` and the ``dfile`` argument of ``py_compile`` do.
     """
     with zipfile.ZipFile(path, "w") as zipped:
         for source in sorted((REPO / "numbox").rglob("*.py")):
@@ -75,21 +89,24 @@ def _archive(path, bytecode_naming_the_archive=()):
 
 
 def _run(env, cwd, warnings="always"):
-    # From a neutral cwd the child imports the placement PYTHONPATH names,
-    # not the tree the test runs from.
+    """Return the result of a child Python that runs ``IMPORT_AND_USE`` under ``env`` and the filter ``warnings``."""
+    # Python puts the child's working directory, cwd, first on its path. The callers pass a directory outside the
+    # checkout, so that the child imports numbox from the place that PYTHONPATH names.
     return subprocess.run([sys.executable, "-W", warnings, "-c", IMPORT_AND_USE],
                           capture_output=True, text=True, env=env, cwd=str(cwd))
 
 
 def _index_files(cache_dir):
+    """Return the sorted names of the index files, ending in ``.nbi``, that numba wrote under ``cache_dir``."""
     return sorted(path.name for path in Path(cache_dir).rglob("*.nbi"))
 
 
 def _directory_of_length(root, length):
-    """A directory made under ``root`` whose path is ``length`` bytes, whatever ``root``'s length.
+    """Return a new directory under ``root`` whose path is ``length`` characters long, whatever ``root``'s length.
 
-    Components of 200 while one more leaves room for a last, then the last of the length that lands there, so
-    the directory itself can always be made.
+    The path takes components of 200 characters while one more such component leaves room for a last one. The last
+    component takes the length that remains, at most 201 characters, so that no component is too long for the file
+    system and the directory can be created.
     """
     deep = root
     while len(str(deep)) + 201 < length - 1:
@@ -104,16 +121,12 @@ def _directory_of_length(root, length):
     "numbox-0.0.0-py3.12.egg", "numbox-0.0.0-py3-none-any.whl", "my.zip.dir/numbox-0.0.0-py3.12.egg",
 ])
 def test_an_import_from_an_archive_compiles_uncached_with_one_warning_naming_the_remedy(tmp_path, name):
-    # numba's cache locators need the source file on disk, so an import from
-    # an .egg, .whl or .pyz archive, which Spark's --py-files ships, raised
-    # RuntimeError at the first decorated function, naming neither the way to
-    # a cache nor the option that turns caching off. The package answers the
-    # question once, so there is one warning, not one per function.
-    # NUMBA_CACHE_DIR is no way to a cache here: it is set and writable, the
-    # warning fires all the same and nothing is written there, so the warning
-    # says so instead of offering it. Under a directory whose name holds .zip
-    # numba's .zip locator takes the file by that substring and raises
-    # ValueError finding no .zip in it; that is the cache's error too.
+    """An import of numbox from an ``.egg`` or a ``.whl`` succeeds with one warning, and the remedy says that
+    ``NUMBA_CACHE_DIR`` has no effect. numba caches no module of such an archive, so without the check the import
+    would fail at the first decorated function. Spark ships ``.egg`` archives to its executors with ``--py-files``."""
+    # NUMBA_CACHE_DIR names a writable directory, and the test asserts that numba writes nothing there. Under
+    # my.zip.dir, numba's .zip locator accepts the file because its path contains ".zip". The locator then raises
+    # ValueError, because no part of the path ends in .zip, and is_a_cache_error counts that error as a cache error.
     (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
     archive = _archive(tmp_path / name)
     env = dict(os.environ, PYTHONPATH=str(archive), NUMBA_CACHE_DIR=str(tmp_path / "cache"))
@@ -123,15 +136,15 @@ def test_an_import_from_an_archive_compiles_uncached_with_one_warning_naming_the
     assert run.stderr.count("compiles without a cache") == 1, run.stderr
     assert "NUMBA_CACHE_DIR has no effect here" in run.stderr and "Set NUMBA_CACHE_DIR" not in run.stderr
     assert _index_files(tmp_path / "cache") == []
+    # With caching disabled, the check does not run, and the import gives no warning for -W error to raise.
     quiet = _run(dict(env, NUMBOX_JIT_OPTIONS='{"cache": false}'), tmp_path, warnings="error")
     assert quiet.returncode == 0, quiet.stderr
 
 
 def test_options_without_a_cache_key_are_asked_for_the_sites_that_cache_under_them(tmp_path):
-    # NUMBOX_JIT_OPTIONS without "cache" leaves njit's default, off, but the
-    # sqlite virtual-table and table-valued-function callbacks cache unless it
-    # says no, and a check that read the missing key as off let the first
-    # callback die at numba's set-up from an archive.
+    """Options without a ``"cache"`` key still run the check, so the SQLite virtual-table module imports from an
+    ``.egg`` with one warning. numbox caches its SQLite callbacks unless the options set ``"cache"`` to ``false``, and
+    numba would otherwise raise at the first callback that numbox compiles."""
     archive = _archive(tmp_path / "numbox-0.0.0-py3.12.egg")
     env = dict(os.environ, PYTHONPATH=str(archive), NUMBA_CACHE_DIR=str(tmp_path / "cache"),
                NUMBOX_JIT_OPTIONS='{"boundscheck": false}')
@@ -145,28 +158,29 @@ def test_options_without_a_cache_key_are_asked_for_the_sites_that_cache_under_th
 windows_path_sep_bug = "numba 0.68.0 reads a .zip member's source by a name built with Windows's separator"
 
 
-# numba 0.68.0 on Windows reads a .zip member's source by a name built with
-# Windows's separator and raises KeyError before any location is tried, numba
-# issue 10889, fixed for 0.68.1: a check of a member there meets the bug, not
-# the case under test, where the fork's matrix runs Windows on 0.67.0 and
-# upstream's on the latest numba.
+# windows_path_sep_bug begins the remedy for numba issue 10889 (https://github.com/numba/numba/issues/10889), which
+# numba 0.68.1 fixes. On Windows, numba 0.68.0 builds the name of a .zip member with backslashes and reads the member's
+# source by that name. zipfile then raises KeyError before numba tries any location. A test of a member on that
+# platform and release would test the bug instead of its own case, so on_windows_under_numba_0_68_0 skips it.
 on_windows_under_numba_0_68_0 = pytest.mark.skipif(
     os.name == "nt" and version("numba") == "0.68.0", reason=windows_path_sep_bug)
 
 
 def _skip_for_windows_separator_bug(stderr):
-    """Skip a test whose import met numba issue 10889, which numba 0.68.0 has on Windows alone: the remedy's text for
-    it in ``stderr`` on any other platform is a regression, which the skip hid wherever it keyed on the text alone."""
+    """Skip the test if ``stderr`` holds the remedy for numba issue 10889, a bug of numba 0.68.0 on Windows alone.
+
+    On any other platform, that remedy would mean a fault in ``cache_remedy``, so the helper fails the test there
+    instead of skipping it.
+    """
     if windows_path_sep_bug in stderr:
         assert os.name == "nt", f"the Windows separator remedy on {os.name}: {stderr}"
         pytest.skip(windows_path_sep_bug)
 
 
 def test_a_zip_import_is_cached_by_numba(tmp_path):
-    # The warning sends an archive's user to a .zip, which numba caches
-    # in the user's cache directory whatever NUMBA_CACHE_DIR says.
-    # Before that a .zip is one more archive. This pins the remedy the warning
-    # names, numba's behaviour, not the fallback, which has nothing to do here.
+    """An import from a ``.zip`` gives no warning, and numba caches numbox's functions in the user's cache directory,
+    not under ``NUMBA_CACHE_DIR``. The remedy for other archives offers a ``.zip``, and this test shows that numba
+    caches one."""
     archive = _archive(tmp_path / "numbox.zip")
     home = tmp_path / "home"
     env = dict(os.environ, PYTHONPATH=str(archive), HOME=str(home), XDG_CACHE_HOME=str(home / "cache"),
@@ -178,15 +192,15 @@ def test_a_zip_import_is_cached_by_numba(tmp_path):
     assert "compiles without a cache" not in run.stderr, run.stderr
     assert _index_files(tmp_path / "cache") == []
     if os.name != "nt":
-        # On Windows numba asks the system for the user's cache directory, and no variable set here moves it.
+        # On Windows, numba asks the system for the user's cache directory, so HOME and XDG_CACHE_HOME do not change it.
         assert _index_files(home)
 
 
 @needs_a_directory_it_cannot_write
 def test_one_read_only_directory_among_writable_ones_takes_the_fallback(tmp_path):
-    # numba's in-tree cache is a __pycache__ beside each source, so the
-    # package's directories answer separately. A check on configurations.py's
-    # directory alone passed here, and the import died at libm's first binding.
+    """If one directory of numbox is read-only and the user's cache directory cannot be written, the import warns once
+    and offers ``NUMBA_CACHE_DIR``, and with the variable set it caches without a warning. numba caches in the
+    ``__pycache__`` beside each source, so the check asks numba about each directory of numbox separately."""
     site = tmp_path / "site"
     shutil.copytree(REPO / "numbox", site / "numbox", ignore=shutil.ignore_patterns("__pycache__"))
     home = tmp_path / "home"
@@ -210,14 +224,15 @@ def test_one_read_only_directory_among_writable_ones_takes_the_fallback(tmp_path
             path.chmod(0o755)
 
 
+# Each child imports one module of numbox, which compiles that module's functions, and prints the module's file.
 IMPORT_SQLITE_TYPEMAP = "import numbox.core.bindings.sqlite._typemap as m; print(m.__file__)"
 IMPORT_LIBM = "import numbox.core.bindings.libm as m; print(m.__file__)"
 
 
 def test_a_module_that_survives_as_pyc_alone_beside_sourced_ones_takes_the_fallback(tmp_path):
-    # numba finds a location by each module's own source, so one module without
-    # its .py fails where its neighbours, __init__.py among them, pass. A walk
-    # that asked one module per directory passed here, and libm died.
+    """A module present as ``.pyc`` alone, beside modules with their source, makes the import warn once with the remedy
+    for a source that is not a file on disk. numba looks up the source file that a module's code names, so the check
+    asks numba about such a module by itself and not only about its directory."""
     site = tmp_path / "site"
     shutil.copytree(REPO / "numbox", site / "numbox", ignore=shutil.ignore_patterns("__pycache__"))
     libm = site / "numbox" / "core" / "bindings" / "libm.py"
@@ -233,11 +248,9 @@ def test_a_module_that_survives_as_pyc_alone_beside_sourced_ones_takes_the_fallb
 
 
 def test_a_pyc_alone_compiled_from_a_tree_still_on_disk_caches_by_that_tree(tmp_path):
-    # The sourceless loader keeps the file a .pyc was compiled from on its code,
-    # and numba looks that up: here a tree elsewhere, still on disk, so libm's
-    # functions cache under NUMBA_CACHE_DIR by it. A probe that asked by the .py
-    # beside the .pyc, gone, turned caching off for the package and said the
-    # source is not on disk.
+    """A ``.pyc`` alone, compiled from a tree that is still on disk elsewhere, imports without a warning, and numba
+    caches its functions under ``NUMBA_CACHE_DIR``. The module's code records the path of the file that the ``.pyc`` was
+    compiled from, and numba looks up that file, not the missing ``.py`` beside the ``.pyc``."""
     built = tmp_path / "build" / "numbox" / "core" / "bindings" / "libm.py"
     built.parent.mkdir(parents=True)
     shutil.copy(REPO / "numbox" / "core" / "bindings" / "libm.py", built)
@@ -256,11 +269,9 @@ def test_a_pyc_alone_compiled_from_a_tree_still_on_disk_caches_by_that_tree(tmp_
 
 
 def test_a_directory_whose_modules_survive_as_pyc_alone_takes_the_fallback(tmp_path):
-    # The rest of the package keeps its sources, so its directories pass; the
-    # one directory numba cannot cache from has no .py to name, and a walk that
-    # named directories by their .py files skipped it. The remedy is the one
-    # for a source that is not on disk, not NUMBA_CACHE_DIR, which numba reads
-    # for a source on disk only.
+    """A directory whose modules are all present as ``.pyc`` alone makes the import warn once with the remedy for a
+    source that is not a file on disk. The check finds that directory through its ``.pyc`` files, and the remedy does
+    not offer ``NUMBA_CACHE_DIR``, which numba reads only for a source file on disk."""
     site = tmp_path / "site"
     shutil.copytree(REPO / "numbox", site / "numbox", ignore=shutil.ignore_patterns("__pycache__"))
     sqlite = site / "numbox" / "core" / "bindings" / "sqlite"
@@ -277,10 +288,9 @@ def test_a_directory_whose_modules_survive_as_pyc_alone_takes_the_fallback(tmp_p
 
 
 def test_a_sourceless_install_is_told_the_source_is_not_on_disk(tmp_path):
-    # A .pyc-only install: numba looks the source up by the code's co_filename,
-    # which names the .py that was removed, and finds no locator. The module's
-    # __file__ is the .pyc, on disk, and a check on it offered NUMBA_CACHE_DIR,
-    # which numba ignores without the source.
+    """An install of ``.pyc`` files alone warns once with the remedy for a source that is not a file on disk, and
+    numba writes nothing under ``NUMBA_CACHE_DIR``. A module's ``__file__`` names its ``.pyc``, but numba looks up
+    the removed ``.py`` that the module's code names, so the check asks numba about the ``.py``."""
     site = tmp_path / "site"
     shutil.copytree(REPO / "numbox", site / "numbox", ignore=shutil.ignore_patterns("__pycache__"))
     assert compileall.compile_dir(str(site), quiet=1, legacy=True)
@@ -297,13 +307,12 @@ def test_a_sourceless_install_is_told_the_source_is_not_on_disk(tmp_path):
 
 @pytest.mark.parametrize("tree", ["site", "numbox.zip.tree"])
 def test_a_pyc_in_a_zip_asks_by_the_file_it_was_compiled_from(tmp_path, tree):
-    # zipimport takes a .pyc before the .py beside it and keeps the file it was
-    # compiled from on its code, which is what numba looks up for the module's
-    # functions; here that file is gone. A listing of the archive's .py members
-    # said every directory caches and libm's first binding died at numba's set-up.
-    # A tree named after the archive, beside it, passed a test by string prefix
-    # for the archive's own files, and its .pyc went unasked: numba, seeing ".zip"
-    # in the file's path and no part named so, died with its ValueError.
+    """A ``.pyc`` member of a ``.zip``, compiled in a tree that no longer exists, makes the import warn once with the
+    archive remedy. zipimport runs the ``.pyc``, whose code records the path that it was compiled from, and numba looks
+    up that path, so the check asks numba about it."""
+    # The second tree, numbox.zip.tree, lies beside the archive, and its path begins with the archive's path. numba's
+    # .zip locator accepts the compiled-from path for its ".zip" and raises ValueError, because no part of the path
+    # ends in .zip. The check compares whole parts of the path, so it does not mistake the tree for the archive.
     site = tmp_path / tree
     shutil.copytree(REPO / "numbox", site / "numbox", ignore=shutil.ignore_patterns("__pycache__"))
     libm = site / "numbox" / "core" / "bindings" / "libm.py"
@@ -329,13 +338,12 @@ def test_a_pyc_in_a_zip_asks_by_the_file_it_was_compiled_from(tmp_path, tree):
 
 
 def test_a_stale_pyc_beside_its_source_in_a_zip_is_passed_over_as_zipimport_passes_it(tmp_path):
-    # zipimport runs the .py where the .pyc beside it is stale against it, by
-    # size or time, so the module's functions are cached from the archive like
-    # the rest; a probe that asked by the stale .pyc's compile-time file, gone
-    # here, turned caching off for the package and offered a .zip holding the
-    # sources, which this is. This pins the outcome; that a .pyc zipimport
-    # would run is asked at all is pinned by the sourceless case above, since
-    # passing every .pyc over gives this outcome too.
+    """A stale ``.pyc`` beside its ``.py`` in a ``.zip`` gives no warning, and numba caches the module's functions from
+    the archive. zipimport runs the ``.py`` when the ``.pyc`` beside it is stale by size or time, so the check does not
+    ask numba about the path that the stale ``.pyc`` names."""
+    # This test asserts the outcome alone, which a check that skipped every .pyc would also give. The test
+    # test_a_pyc_in_a_zip_asks_by_the_file_it_was_compiled_from asserts that the check asks about a .pyc that
+    # zipimport runs.
     site = tmp_path / "site"
     shutil.copytree(REPO / "numbox", site / "numbox", ignore=shutil.ignore_patterns("__pycache__"))
     libm = site / "numbox" / "core" / "bindings" / "libm.py"
@@ -358,15 +366,14 @@ def test_a_stale_pyc_beside_its_source_in_a_zip_is_passed_over_as_zipimport_pass
     assert run.returncode == 0 and run.stdout.strip().endswith("libm.py"), run.stderr
     assert "compiles without a cache" not in run.stderr, run.stderr
     if os.name != "nt":
-        # On Windows numba's user cache directory is the shell's known folder,
-        # which no variable moves under the home.
+        # On Windows, numba asks the system for the user's cache directory, so HOME and XDG_CACHE_HOME do not change it.
         assert _index_files(home), "libm's functions were not cached from the archive"
 
 
 def test_a_stale_pyc_whose_source_in_the_zip_does_not_compile_is_passed_over(tmp_path):
-    # zipimport, passing the stale .pyc over, compiles the .py beside it, and a
-    # syntax error there, uncaught, killed the import of configurations where
-    # nothing imports the module; its own import would die on it, as it should.
+    """A module of the ``.zip`` that nothing imports, with a stale ``.pyc`` and a ``.py`` that does not compile, neither
+    fails the import of numbox nor makes it warn. zipimport would compile that ``.py`` and raise ``SyntaxError``, and
+    the check skips a module that zipimport cannot run."""
     archive = _archive(tmp_path / "numbox.zip")
     stray = tmp_path / "stray.py"
     stray.write_text("compiled = True\n")
@@ -387,11 +394,10 @@ def test_a_stale_pyc_whose_source_in_the_zip_does_not_compile_is_passed_over(tmp
 
 @pytest.mark.parametrize("damage", ["truncated", "lzma"])
 def test_a_stray_pyc_in_a_zip_that_nothing_imports_is_passed_over(tmp_path, damage):
-    # A .pyc member of this interpreter's magic that zipimport could not run,
-    # truncated, or stored with a compression zipimport does not read, and that
-    # no import reaches: the probe's unmarshal of the first died with EOFError
-    # at the import of configurations, where main imported, and zipimport's
-    # own read of the second with zlib.error, past the exceptions then caught.
+    """A ``.pyc`` member that zipimport cannot run, and that no import reaches, neither fails the import of numbox nor
+    makes it warn. The check skips a module whose code zipimport cannot read."""
+    # Both members carry this interpreter's magic number. The truncated one fails to unmarshal, and zipimport cannot
+    # decompress a member stored with LZMA compression.
     archive = _archive(tmp_path / "numbox.zip")
     with zipfile.ZipFile(archive, "a") as zipped:
         if damage == "truncated":
@@ -412,11 +418,9 @@ def test_a_stray_pyc_in_a_zip_that_nothing_imports_is_passed_over(tmp_path, dama
 
 @needs_a_directory_it_cannot_write
 def test_a_zip_import_with_no_writable_user_cache_directory_compiles_uncached_with_a_warning(tmp_path):
-    # numba takes the user's cache directory for a .zip without checking that
-    # it can be written, so where it cannot, an executor with a read-only
-    # home, the first save raised PermissionError and the import died on it.
-    # The remedy is that directory made writable, not the .zip the archive
-    # warning offers, which is what the user already has.
+    """An import from a ``.zip`` under a read-only home warns once, and the remedy asks for room in the location or
+    for write access to it. numba's ``.zip`` locator does not test that it can write in its location, so without the
+    check numba's first save would raise ``PermissionError`` and fail the import."""
     archive = _archive(tmp_path / "numbox.zip")
     home = tmp_path / "home"
     home.mkdir()
@@ -430,6 +434,7 @@ def test_a_zip_import_with_no_writable_user_cache_directory_compiles_uncached_wi
         assert run.stderr.count("compiles without a cache") == 1, run.stderr
         assert "NUMBA_CACHE_DIR has no effect here" in run.stderr
         assert "so make room there, or make it writable" in run.stderr, run.stderr
+        # The archive remedy would offer a .zip, which the user already imports from.
         assert "import it from a .zip" not in run.stderr
     finally:
         home.chmod(0o755)
@@ -437,11 +442,9 @@ def test_a_zip_import_with_no_writable_user_cache_directory_compiles_uncached_wi
 
 @needs_a_directory_it_cannot_write
 def test_a_zip_whose_configurations_runs_from_a_pyc_compiled_from_a_tree_still_on_disk(tmp_path):
-    # configurations.pyc in the archive, current, compiled from a tree that is
-    # still on disk: zipimport runs it with that tree's file on its code, and a
-    # probe that took the package's place from its own code's file walked the
-    # tree, found it cacheable, and never asked the archive, whose first
-    # function died at numba's first save with the home read-only.
+    """A ``.zip`` whose current ``configurations.pyc`` was compiled from a tree still on disk warns once when the home
+    is read-only. The code of that ``.pyc`` names the tree, which numba could cache, so the check finds the archive
+    through the module's ``__file__`` and asks numba about the archive's directories."""
     site = tmp_path / "site"
     shutil.copytree(REPO / "numbox", site / "numbox", ignore=shutil.ignore_patterns("__pycache__"))
     configurations = site / "numbox" / "core" / "configurations.py"
@@ -468,12 +471,11 @@ def test_a_zip_whose_configurations_runs_from_a_pyc_compiled_from_a_tree_still_o
 
 @pytest.mark.skipif(os.name == "nt", reason="numba's user cache directory on Windows is not under HOME")
 def test_a_zip_import_whose_user_cache_directory_is_too_long_is_told_so(tmp_path):
-    # numba's location for a .zip is under the user's cache directory, and
-    # with a component of that too long for the file system the location
-    # cannot be made: the warning said to make it writable, which cannot help;
-    # the path is the thing, through XDG_CACHE_HOME or HOME. The home itself
-    # carries the component, since macOS keeps the directory under
-    # ~/Library/Caches and reads no XDG_CACHE_HOME.
+    """An import from a ``.zip`` whose user cache directory has a component too long for the file system warns once,
+    and the remedy asks for that directory at a shorter path. Write access would not let numba create the location,
+    so the remedy does not ask for room or for write access."""
+    # HOME itself holds the long component, because numba puts the user's cache directory under HOME on macOS and
+    # reads XDG_CACHE_HOME only on other systems.
     archive = _archive(tmp_path / "numbox.zip")
     env = dict(os.environ, PYTHONPATH=str(archive), HOME=str(tmp_path / ("c" * 300)),
                NUMBA_CACHE_DIR=str(tmp_path / "cache"))
@@ -487,10 +489,9 @@ def test_a_zip_import_whose_user_cache_directory_is_too_long_is_told_so(tmp_path
 
 
 def test_a_moved_zip_whose_pyc_members_name_its_old_path_compiles_uncached_and_is_told_why(tmp_path):
-    # numba reads the source's stamp at decoration, the archive's for a .zip,
-    # by the path the module's code names: .pyc members compiled to name the
-    # archive, then the archive moved, name a path that is not there, and the
-    # import died there with FileNotFoundError past a check that read no stamp.
+    """A ``.zip`` moved after its ``.pyc`` members were compiled to name its old path warns once, and the remedy names
+    that path as missing. numba reads the archive's stamp at decoration, by the path that a member's code names, so
+    the check reads the stamp too."""
     (tmp_path / "build").mkdir()
     archive = _archive(tmp_path / "build" / "numbox.zip", ("numbox/core/bindings",))
     moved = tmp_path / "numbox.zip"
@@ -510,11 +511,10 @@ def test_a_moved_zip_whose_pyc_members_name_its_old_path_compiles_uncached_and_i
 
 @pytest.mark.skipif(os.name == "nt", reason="a symlink needs a privilege on Windows; the cache directory is not under HOME")
 def test_a_zip_import_whose_user_cache_directory_hangs_off_a_dangling_link_is_told_to_make_it(tmp_path):
-    # numba's location cannot be made under a link to nowhere, ENOENT, which is
-    # the error a moved archive's stamp gives too: the warning blamed the
-    # archive's .pyc members, of which this archive has none. The moved archive
-    # is the one whose path the module's code lies under. The home is the link,
-    # for macOS's ~/Library/Caches as for Linux's ~/.cache.
+    """A ``.zip`` import whose user cache directory lies under a dangling symbolic link warns once, and the remedy asks
+    for the location to be made writable. The error is ``ENOENT``, as for a moved archive, but it names no path above
+    the module, so the remedy does not mention ``.pyc`` members, of which this archive has none."""
+    # HOME is the dangling link, so that the user's cache directory lies under it on macOS and on Linux alike.
     archive = _archive(tmp_path / "numbox.zip")
     (tmp_path / "dangling").symlink_to(tmp_path / "nowhere", target_is_directory=True)
     env = dict(os.environ, PYTHONPATH=str(archive), HOME=str(tmp_path / "dangling"),
@@ -530,11 +530,9 @@ def test_a_zip_import_whose_user_cache_directory_hangs_off_a_dangling_link_is_to
 
 @needs_a_directory_it_cannot_write
 def test_a_zip_import_whose_cache_directory_stopped_being_writable_compiles_uncached(tmp_path):
-    # Every entry is in the user's cache directory from an earlier import, and
-    # the directory can no longer be written. A probe that only loaded its own
-    # entry would have said the cache works and left the import to die at
-    # numba's first write for anything not there; the writability check numba
-    # runs for every other placement is run here for the .zip too.
+    """A ``.zip`` import whose user cache directory holds every entry but can no longer be written warns once. The
+    check tests that the location can be written in, as numba tests every other kind of location, so that no function
+    fails later at its first save there."""
     archive = _archive(tmp_path / "numbox.zip")
     home = tmp_path / "home"
     home.mkdir()
@@ -561,17 +559,14 @@ def test_a_zip_import_whose_cache_directory_stopped_being_writable_compiles_unca
                          ids=["sources", "under a directory named .zip", "bindings as .pyc naming the archive"])
 def test_a_zip_import_whose_location_for_one_directory_stopped_being_writable_takes_the_fallback(
         tmp_path, parent, bytecode):
-    # numba caches a .zip per directory of it, each in a location of its own
-    # under the user's cache directory, so the directories answer separately
-    # there too; a check on configurations.py's location alone passed here,
-    # and libm died at its first save. The archive's directories are listed,
-    # the archive being the first part of the path named .zip that is one: a
-    # listing that took a directory so named above it listed nothing. A
-    # directory of .pyc members compiled to name the archive, as compileall -d
-    # does, stands in the listing like one of .py members: a listing that let
-    # only .py members stand never asked for it. From numba 0.68 the archive
-    # is opened for each member's source, and the directory so named above
-    # it, or a directory of .pyc members, takes the fallback instead, told so.
+    """When the location of one directory of a ``.zip`` stops being writable, the import warns once and names that
+    location. numba caches each directory of a ``.zip`` in a location of its own under the user's cache directory, so
+    the check asks numba about each directory of the archive."""
+    # The check takes the archive to be the first part of the path that ends in .zip and is a zip archive. It therefore
+    # lists the archive's directories under container.zip too. A directory of .pyc members, compiled to name their own
+    # paths in the archive as compileall -d compiles them, counts as a directory of the archive. numba 0.68 and later
+    # read each member's source from the archive. They open container.zip as the archive in the second case and find
+    # no source in the third, so in those cases the first import warns, and the test checks that remedy.
     (tmp_path / parent).mkdir(exist_ok=True)
     archive = _archive(tmp_path / parent / "numbox.zip", bytecode)
     home = tmp_path / "home"
@@ -595,7 +590,8 @@ def test_a_zip_import_whose_location_for_one_directory_stopped_being_writable_ta
                 "files, which numba caches in the user's cache directory; or NUMBOX_JIT_OPTIONS"
                 ) in warm.stderr, warm.stderr
         return
-    # Under XDG_CACHE_HOME on Linux, under Library/Caches on macOS.
+    # numba's user cache directory is under XDG_CACHE_HOME on Linux and under Library/Caches in the home on macOS, so
+    # the test searches the whole home for the location of the bindings directory.
     locations = [path for path in home.rglob("bindings_*") if path.is_dir()]
     assert len(locations) == 1, sorted(str(path.relative_to(home)) for path in home.rglob("*") if path.is_dir())
     locations[0].chmod(0o555)
@@ -603,8 +599,7 @@ def test_a_zip_import_whose_location_for_one_directory_stopped_being_writable_ta
         run = _run(env, tmp_path)
         assert run.returncode == 0 and str(archive) in run.stdout, run.stderr
         assert run.stderr.count("compiles without a cache") == 1, run.stderr
-        # The directory to make writable is the location that lost it, not the
-        # user's cache directory above it, which the warning named.
+        # The remedy names the location that lost write access, not the user's cache directory above it.
         assert (f"no file can be written in that directory, {locations[0]} (Permission denied), so make room there, "
                 "or make it writable") in run.stderr, run.stderr
     finally:
@@ -612,10 +607,9 @@ def test_a_zip_import_whose_location_for_one_directory_stopped_being_writable_ta
 
 
 def test_a_pyc_member_alone_beside_sourced_ones_in_a_zip_is_asked_for_itself(tmp_path):
-    # numba 0.68 and later read each member's source from the archive by the
-    # name its code gives, so a module shipped as .pyc alone fails where the
-    # .py members beside it pass: a listing that let one member stand for the
-    # directory never asked for it, and libm died at its first binding.
+    """A ``.zip`` member shipped as ``.pyc`` alone, beside members with their source, makes the import warn once from
+    numba 0.68, and the import gives no warning under earlier releases. numba 0.68 and later read each member's source
+    from the archive, so the check asks numba about such a member by itself and not only about its directory."""
     archive = _archive(tmp_path / "numbox.zip", ("numbox/core/bindings/libm.py",))
     home = tmp_path / "home"
     home.mkdir()
@@ -635,13 +629,11 @@ def test_a_pyc_member_alone_beside_sourced_ones_in_a_zip_is_asked_for_itself(tmp
 
 
 def test_a_pyc_beside_its_source_in_a_zip_compiled_to_name_another_path_in_it_is_asked_for_itself(tmp_path):
-    # zipimport runs a .pyc before the .py beside it, a hash-based one it
-    # does not check whatever the .py's age, and numba reads the member's
-    # source by the name the .pyc's code gives, from numba 0.68 the source
-    # too; compiled to name another path in the archive, compileall's -d
-    # with a path the archive does not hold, that name is of no member. The
-    # listing took a .pyc naming the archive for one standing for its
-    # directory, like its .py, and never asked: libm died at decoration.
+    """A ``.pyc`` beside its ``.py`` in a ``.zip``, compiled to name a path that the archive does not hold, makes the
+    import warn once from numba 0.68. The remedy asks for the ``.pyc`` to be compiled to name its own path or to be
+    left out, because numba 0.68 and later read the member's source by the name that the ``.pyc`` records."""
+    # zipimport runs a .pyc before the .py beside it. An unchecked hash-based .pyc is never compared with the .py, so
+    # zipimport runs it whatever the age of the .py.
     archive = tmp_path / "numbox.zip"
     libm = REPO / "numbox" / "core" / "bindings" / "libm.py"
     compiled = py_compile.compile(str(libm), cfile=str(tmp_path / "libm.pyc"),
@@ -662,6 +654,7 @@ def test_a_pyc_beside_its_source_in_a_zip_compiled_to_name_another_path_in_it_is
     assert run.returncode == 0 and str(archive) in run.stdout, run.stderr
     if numba_version >= 68:
         assert run.stderr.count("compiles without a cache") == 1, run.stderr
+        # The archive holds the module's source, so the remedy must not call the module a .pyc shipped alone.
         assert ("holds none under src/numbox/core/bindings/libm.py" not in run.stderr
                 or "shipped as .pyc alone" not in run.stderr), run.stderr
         assert ("by the name the module's code gives, src/numbox/core/bindings/libm.py, which "
@@ -674,10 +667,9 @@ def test_a_pyc_beside_its_source_in_a_zip_compiled_to_name_another_path_in_it_is
 
 @pytest.mark.skipif(os.name == "nt", reason="a symlink needs a privilege on Windows")
 def test_symlinks_that_cycle_inside_the_package_are_walked_once(tmp_path):
-    # Two links pointing up the package, followed with no memory of where the
-    # walk had been, gave an exponential number of paths before the file
-    # system's link limit, and the import did not finish; the base imported at
-    # once. Each real directory is walked once.
+    """The import finishes without a warning when two symbolic links inside numbox point up the package. The check
+    follows links but walks each real directory once, because the paths through two such links grow in number
+    exponentially, up to the system's limit on links."""
     site = tmp_path / "site"
     shutil.copytree(REPO / "numbox", site / "numbox", ignore=shutil.ignore_patterns("__pycache__"))
     (site / "numbox" / "core" / "up").symlink_to("..", target_is_directory=True)
@@ -691,9 +683,9 @@ def test_symlinks_that_cycle_inside_the_package_are_walked_once(tmp_path):
 
 @needs_a_directory_it_cannot_write
 def test_a_symlinked_directory_of_the_package_answers_too(tmp_path):
-    # A directory of the package reached through a symlink was not walked, so a
-    # read-only one behind the link, with no user cache, passed the check and
-    # died at libm's first binding.
+    """A read-only directory of numbox reached through a symbolic link makes the import warn once and offer
+    ``NUMBA_CACHE_DIR`` when the user's cache directory cannot be written either. The check follows symbolic links,
+    because a linked directory can lie in a read-only tree."""
     site = tmp_path / "site"
     shutil.copytree(REPO / "numbox", site / "numbox", ignore=shutil.ignore_patterns("__pycache__"))
     elsewhere = tmp_path / "elsewhere"
@@ -719,10 +711,11 @@ def test_a_symlinked_directory_of_the_package_answers_too(tmp_path):
 
 @needs_a_directory_it_cannot_write
 def test_a_frozen_application_is_told_its_user_cache_directory(tmp_path):
-    # With sys.frozen set numba caches a source that is not on disk in the
-    # user's cache directory, as a .zip; where that directory cannot be written
-    # the remedy is to make it so, not the sources or a .zip the archive text
-    # offered.
+    """A frozen application whose user cache directory can no longer be written warns once, and the remedy names that
+    directory as one that numba could not use. numba caches a frozen application's modules in the user's cache
+    directory, so the remedy does not offer the source files or a ``.zip``."""
+    # The child sets sys.frozen, as PyInstaller does, so that numba treats the sourceless install as a frozen
+    # application.
     site = tmp_path / "site"
     shutil.copytree(REPO / "numbox", site / "numbox", ignore=shutil.ignore_patterns("__pycache__"))
     assert compileall.compile_dir(str(site), quiet=1, legacy=True)
@@ -746,9 +739,8 @@ def test_a_frozen_application_is_told_its_user_cache_directory(tmp_path):
         assert run.returncode == 0 and str(site) in run.stdout, run.stderr
         assert run.stderr.count("compiles without a cache") == 1, run.stderr
         assert "frozen application" in run.stderr, run.stderr
-        # The frozen error is the no-locator one, which names no directory
-        # and gives no reason, so the warning names numba's, the user cache
-        # directory under the home, as one numba could not use.
+        # For a frozen application, numba raises its error that no locator accepts the file. That error names no
+        # directory and gives no reason, so the remedy names the user's cache directory, which lies under the home here.
         named = re.search(r"numba could not use that directory, (.+?): make it writable", run.stderr)
         assert named and Path(named.group(1)).is_relative_to(home), run.stderr
         assert "install numbox with its source files" not in run.stderr
@@ -759,10 +751,9 @@ def test_a_frozen_application_is_told_its_user_cache_directory(tmp_path):
 
 @needs_a_directory_it_cannot_write
 def test_a_read_only_install_warns_naming_numba_cache_dir_and_setting_it_caches(tmp_path):
-    # The other way to have no cache location: the source is on disk, and
-    # neither its directory nor the user's cache directory can be written.
-    # NUMBA_CACHE_DIR is the remedy there, and nothing showed that the warning
-    # names it or that setting it works.
+    """A read-only install under a read-only home warns once and offers ``NUMBA_CACHE_DIR``, and with the variable set
+    the import caches numbox without a warning. Here the source is on disk, and numba can write neither beside it nor
+    in the user's cache directory."""
     site = tmp_path / "site"
     shutil.copytree(REPO / "numbox", site / "numbox", ignore=shutil.ignore_patterns("__pycache__"))
     home = tmp_path / "home"
@@ -788,14 +779,14 @@ def test_a_read_only_install_warns_naming_numba_cache_dir_and_setting_it_caches(
 
 @pytest.mark.skipif(sys.platform != "linux", reason="a path of 4096 bytes is Linux's limit")
 def test_a_location_too_close_to_the_path_limit_for_numbas_files_compiles_uncached_and_is_told_so(tmp_path):
-    # numba's own check of a location makes a temporary file, one without a
-    # name on Linux, so a NUMBA_CACHE_DIR whose location for a module fits the
-    # path limit while numba's files, of a hundred bytes and more, do not
-    # passed it, and the import died at the first save. The probe makes a file
-    # named as long as numba's longest for the package, and the warning says
-    # what the length's remedy is. The location of the first module asked,
-    # the directory's name and a hash of its path under NUMBA_CACHE_DIR, ends
-    # 20 bytes short of the limit, whatever the checkout's own path.
+    """A ``NUMBA_CACHE_DIR`` whose location for numbox ends 20 bytes short of Linux's path limit makes the import warn
+    once and ask for a shorter ``NUMBA_CACHE_DIR``. numba's own test of the location passes there, because its
+    temporary file usually has no name on Linux, but numba's cache files, with names of a hundred bytes or more, do not
+    fit."""
+    # The check creates a file with a name of LONGEST_CACHE_FILE_NAME bytes, which does not fit either. The first
+    # module that the check asks about is configurations.py. Its location is the name of its directory and a hash of
+    # the directory's path, under NUMBA_CACHE_DIR, so the test sizes NUMBA_CACHE_DIR by that name, whatever the
+    # checkout's path.
     from numba.core.caching import _CacheLocator
     location = _CacheLocator.get_suitable_cache_subpath(str(REPO / "numbox" / "core" / "configurations.py"))
     cache_dir = _directory_of_length(tmp_path, 4096 - 20 - 1 - len(location))
@@ -812,12 +803,12 @@ def test_a_location_too_close_to_the_path_limit_for_numbas_files_compiles_uncach
 @needs_a_directory_it_cannot_write
 @pytest.mark.skipif(sys.platform != "linux", reason="a path of 4096 bytes is Linux's limit")
 def test_a_read_only_install_whose_user_cache_directory_is_too_long_is_told_to_shorten_that(tmp_path):
-    # Where the source's __pycache__ cannot be written and NUMBA_CACHE_DIR is
-    # not set, numba caches under the user's cache directory, and a location
-    # there too long for numba's files was told "a shorter NUMBA_CACHE_DIR, or
-    # none, where it is set, else numbox installed at a shorter path": a
-    # variable that was not set and a reinstall that changes nothing. The first
-    # module asked has its location there end 20 bytes short of the limit.
+    """A read-only install whose location in the user's cache directory ends 20 bytes short of Linux's path limit warns
+    once, and the remedy asks for the user's cache directory at a shorter path. With a short ``XDG_CACHE_HOME``, numba
+    caches numbox there without a warning."""
+    # NUMBA_CACHE_DIR is unset, and the __pycache__ beside each source cannot be written, so numba chooses its location
+    # under the user's cache directory. The location of configurations.py, the first module that the check asks about,
+    # ends 20 bytes short of the limit.
     from numba.core.caching import _CacheLocator
     site = tmp_path / "site"
     shutil.copytree(REPO / "numbox", site / "numbox", ignore=shutil.ignore_patterns("__pycache__"))
@@ -834,6 +825,8 @@ def test_a_read_only_install_whose_user_cache_directory_is_too_long_is_told_to_s
         assert run.returncode == 0 and str(site) in run.stdout, run.stderr
         assert run.stderr.count("compiles without a cache") == 1, run.stderr
         assert "at a shorter path, through XDG_CACHE_HOME or HOME" in run.stderr, run.stderr
+        # NUMBA_CACHE_DIR is unset, so the remedy cannot ask for a shorter one. numbox installed at a shorter path would
+        # not shorten the location under the user's cache directory.
         assert "a shorter NUMBA_CACHE_DIR" not in run.stderr and "numbox installed" not in run.stderr, run.stderr
         cured = _run(dict(env, XDG_CACHE_HOME=str(tmp_path / "short")), tmp_path, warnings="error")
         assert cured.returncode == 0, cured.stderr
@@ -843,8 +836,10 @@ def test_a_read_only_install_whose_user_cache_directory_is_too_long_is_told_to_s
             path.chmod(0o755)
 
 
-# Each case: where NUMBA_CACHE_DIR is, where the source is, and which of numba's
-# locations for it is too long; "user" stands for the user's cache directory.
+# Each case gives the directory that NUMBA_CACHE_DIR names, or None if the variable is unset; the directory that holds
+# the source; and the location that is too long. The directories are relative to tmp_path. The location is the
+# variable's, the __pycache__ beside the source, or "user", numba's directory for the source under the user's cache
+# directory.
 LOCATION_CASES = {
     "NUMBA_CACHE_DIR": ("cache", "site", "NUMBA_CACHE_DIR"),
     "beside the source": (None, "site", "beside"),
@@ -859,17 +854,11 @@ LOCATION_CASES = {
 @pytest.mark.parametrize("named", ["the location", "a file in it"])
 @pytest.mark.parametrize("case", list(LOCATION_CASES))
 def test_a_location_too_long_is_told_what_shortens_the_one_it_is(tmp_path, monkeypatch, case, named):
-    # numba takes a directory under NUMBA_CACHE_DIR where that is set, else the
-    # __pycache__ beside the source, else a directory under the user's cache
-    # directory, and the error names the one that is too long. One remedy for
-    # all three named a variable that was not set and a reinstall that changes
-    # nothing where the location was under the user's cache directory, and
-    # telling them apart by which directory a location starts with took one for
-    # another where they nest: an install under either cache directory, or
-    # NUMBA_CACHE_DIR above the user's. The user's cache directory is one under
-    # tmp_path, so that every case runs on every platform. numbox's own check
-    # names the location; numba's first save names a file in it, and a caller
-    # can pass that error on.
+    """The remedy for a location too long for the file system names what shortens that location: a shorter
+    ``NUMBA_CACHE_DIR``, the package at a shorter path, or the user's cache directory at a shorter path. The remedy
+    compares whole paths in numba's order, so it distinguishes the locations where they nest, as for an install under a
+    cache directory or for a ``NUMBA_CACHE_DIR`` above the user's cache directory."""
+    # The user's cache directory lies under tmp_path, so that every case runs on every platform.
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -886,10 +875,9 @@ def test_a_location_too_long_is_told_what_shortens_the_one_it_is(tmp_path, monke
     py_file.write_text("")
     subpath = _CacheLocator.get_suitable_cache_subpath(str(py_file))
     user_cache_dir = tmp_path / "user-cache" / "numba"
-    # A location other than NUMBA_CACHE_DIR's where the variable is set means
-    # numba passed it over, so the warning names it rather than telling the
-    # reader to set what is set.
     monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", "", raising=False)
+    # If NUMBA_CACHE_DIR is set and numba chose another location, numba could not use the variable. The remedy then
+    # names the variable as set instead of asking for it to be set.
     if cache_dir:
         instead = (f", or NUMBA_CACHE_DIR, which is set to {tmp_path / cache_dir} and numba could not use, made a "
                    "writable directory at a short path")
@@ -902,6 +890,7 @@ def test_a_location_too_long_is_told_what_shortens_the_one_it_is(tmp_path, monke
                  f"the user's cache directory, {user_cache_dir}, at a shorter path{configurations._moved_through()}"
                  f"{instead}"),
     }[which]
+    # The check's error names the location. numba's first save names a file in it, and a caller can pass that error on.
     if named == "a file in it":
         where = where / "module.f-1.py312.nbi"
     failure = OSError(errno.ENAMETOOLONG, "File name too long", str(where))
@@ -910,13 +899,9 @@ def test_a_location_too_long_is_told_what_shortens_the_one_it_is(tmp_path, monke
 
 
 def test_a_relative_numba_cache_dir_is_matched_as_the_location_numba_names(tmp_path, monkeypatch):
-    # numba joins NUMBA_CACHE_DIR as set to the name it gives the source's
-    # directory, so set relative, to the directory the process runs from, the
-    # location is relative, and so is the path numba's error, and the
-    # package's own, names. The remedy writes the locations absolute, and the
-    # path as named matched none of them, so it was told as a location that
-    # is none of numba's, with the variable to be made a writable directory
-    # at a short path, where a shorter NUMBA_CACHE_DIR shortens it.
+    """An error that names the location under a relative ``NUMBA_CACHE_DIR`` by its relative path gets the remedy for
+    the variable's own location, a shorter ``NUMBA_CACHE_DIR``. numba joins the variable as it is set, so the location
+    and its errors are relative, and the remedy reads both paths as absolute before it compares them."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -941,16 +926,12 @@ def test_a_relative_numba_cache_dir_is_matched_as_the_location_numba_names(tmp_p
 ])
 def test_a_location_too_long_that_is_numba_cache_dirs_and_the_users_cache_directorys_is_told_by_the_locator_order(
         tmp_path, monkeypatch, locators, cure):
-    # NUMBA_CACHE_DIR set to the user's cache directory makes one path of two
-    # of numba's locations, and which locator took it is the order's to say:
-    # numba's own order tries the variable first, so a shorter NUMBA_CACHE_DIR
-    # shortens it, and nothing else does: numba's own check passed the
-    # location, so numba keeps taking the variable, and the user's cache
-    # directory at a shorter path, once offered beside it, moved nothing numba
-    # reads; a list that tries the user's cache directory before the
-    # variable, or never reads the variable, took it as the user's cache
-    # directory, and the variable's remedy, matched first whatever the order,
-    # told the reader to shorten a variable numba did not read.
+    """When ``NUMBA_CACHE_DIR`` names the user's cache directory, the variable's location and the user-wide location
+    are one path, and the remedy attributes an error there to the locator that numba tries first. It asks for a
+    shorter ``NUMBA_CACHE_DIR`` if numba tries the variable first, and for the user's cache directory at a shorter path
+    otherwise."""
+    # numba's own test passed the variable's location, so numba continues to use the variable. A shorter path for the
+    # user's cache directory would then change nothing that numba reads, and the remedy does not offer it.
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -981,18 +962,12 @@ def test_a_location_too_long_that_is_numba_cache_dirs_and_the_users_cache_direct
 ])
 def test_a_location_too_long_that_is_none_of_numbas_is_named_with_the_variable_numba_tries_first(
         tmp_path, monkeypatch, locators, offered, cache_dir_set):
-    # A caller can pass on an error naming a location that is none of the three
-    # numba builds from the file. The remedy names it and offers NUMBA_CACHE_DIR
-    # where numba tries the variable before any other location, the IPython
-    # locator ahead taking no file on disk; it read "NUMBA_CACHE_DIR set to a
-    # short path, which numba takes first", the alternative's clause cut from
-    # its "or" and nothing said of the location. Set, the variable is named
-    # without the claim that numba passed it over: a location that is none of
-    # numba's shows nothing of what numba did with the variable, where the
-    # remedy said it was one "numba could not use", as it says of a set
-    # variable passed over for a location numba took. With another locator
-    # ahead of the variable's, the variable is not offered, and no case here
-    # held that: the offer with the position dropped passed every one.
+    """A caller's error that names a location that none of numba's locators would choose gets a remedy that names that
+    location. The remedy offers ``NUMBA_CACHE_DIR`` only if numba tries the variable before every other locator that
+    accepts the file, and it names a set variable without saying that numba could not use it."""
+    # A caller's error that names such a location does not show what numba did with the variable. numba's IPython
+    # locator, listed first in the second case, does not accept a file on disk, so numba still tries the variable
+    # first. In the third case, the in-tree locator comes before the variable's.
     import numba
     from numbox.core.configurations import cache_remedy
     cache_dir = tmp_path / "cache"
@@ -1019,16 +994,9 @@ def test_a_location_too_long_that_is_none_of_numbas_is_named_with_the_variable_n
 @pytest.mark.parametrize("cache_dir", [None, "cache", "user-cache/numba"])
 def test_a_location_too_long_that_the_error_does_not_name_is_told_the_locations_numba_could_have_taken(
         tmp_path, monkeypatch, cache_dir, filename):
-    # numba's errors and the package's own check name the file refused, but a
-    # caller can pass on an ENAMETOOLONG that names nothing. The remedy then
-    # cannot tell which location numba took, and it lists the locations numba
-    # could have taken for the file, in numba's order, for the reader to put
-    # the one that is too long at a shorter path; it read "that location,
-    # None, at a shorter path", and matched the empty name against the working
-    # directory and its parent, which could have taken one location for
-    # another. NUMBA_CACHE_DIR set to the user's cache directory makes one
-    # path of two locations, and the list named it twice. An empty name is no
-    # name either, and it read "that location, , at a shorter path".
+    """A caller's ``ENAMETOOLONG`` that names no file, or an empty one, gets a remedy that lists every location that
+    numba could have chosen, each once and in numba's order. The error does not show which location numba chose, and
+    a ``NUMBA_CACHE_DIR`` set to the user's cache directory makes two of the locations one path."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -1044,8 +1012,8 @@ def test_a_location_too_long_that_the_error_does_not_name_is_told_the_locations_
     py_file = tmp_path / "site" / "package" / "module.py"
     py_file.parent.mkdir(parents=True)
     py_file.write_text("")
-    # The working directory is the source's __pycache__, so an empty name
-    # matched against it would take the in-tree location for the one named.
+    # The working directory is the source's __pycache__. A remedy that read an empty name as the working directory would
+    # attribute the error to the in-tree locator.
     (py_file.parent / "__pycache__").mkdir()
     monkeypatch.chdir(py_file.parent / "__pycache__")
     subpath = _CacheLocator.get_suitable_cache_subpath(str(py_file))
@@ -1072,9 +1040,9 @@ def test_a_location_too_long_that_the_error_does_not_name_is_told_the_locations_
                  "there, or make it writable", id="unwritable"),
 ])
 def test_an_error_that_names_no_file_under_one_locator_is_told_its_one_location(tmp_path, monkeypatch, failure, told):
-    # A list of one locator leaves numba one location to take for the file, so
-    # an error that names no file is told that location. The list of the
-    # locations numba could have taken read "one of" before the one path.
+    """Under a ``NUMBA_CACHE_LOCATOR_CLASSES`` of one locator, an error that names no file gets a remedy that names the
+    one location numba could have chosen, without the words "one of". The test covers a path too long and a location
+    that cannot be written in."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -1094,8 +1062,10 @@ def test_an_error_that_names_no_file_under_one_locator_is_told_its_one_location(
     assert remedy == f"{told.format(location=location)}; or silence", remedy
 
 
-# Each case: where NUMBA_CACHE_DIR is, NUMBA_CACHE_LOCATOR_CLASSES, which of
-# numba's locations the error names, and the alternative offered after it.
+# Each case gives the directory that NUMBA_CACHE_DIR names, or None if the variable is unset; the value of
+# NUMBA_CACHE_LOCATOR_CLASSES; the location that the error names; and the alternative that the remedy offers after it
+# asks for room or write access. The location "none" is none of numba's, and "unnamed" stands for an error that names
+# no file.
 UNWRITABLE_CASES = {
     "NUMBA_CACHE_DIR's": ("cache", "", "NUMBA_CACHE_DIR", ", or NUMBA_CACHE_DIR set to another writable directory"),
     "beside the source, NUMBA_CACHE_DIR unset": (None, "", "beside", ", or NUMBA_CACHE_DIR set to a writable directory"),
@@ -1116,21 +1086,12 @@ UNWRITABLE_CASES = {
 @pytest.mark.parametrize("case", list(UNWRITABLE_CASES))
 def test_a_location_numba_took_where_no_file_can_be_written_is_told_the_location_and_the_reason(
         tmp_path, monkeypatch, case, error):
-    # numba takes a location its own check could write a temporary file in,
-    # and the package's check then writes a named file there, which a full
-    # disk, a quota or permissions changed since can refuse. The location is
-    # the one numba took, so "NUMBA_CACHE_DIR is set to X, which numba could
-    # not use: set it to a writable directory at a short path", the answer for
-    # a variable numba passed over, was false on both counts; the remedy names
-    # the location and the reason, and offers the variable as the alternative
-    # where numba tries it before that location, or set elsewhere where the
-    # location is the variable's own. A location that is none of numba's for
-    # the file, which a caller can pass on, is named as the error names it,
-    # as the too-long remedy names one; "numba caches this file in" claimed it
-    # for numba. An error naming no file, a caller's too, is told the
-    # locations numba could have taken, as the too-long remedy tells them; it
-    # fell past this branch to the no-locator remedy, which dropped the reason
-    # and said the variable, set and writable, was one numba could not use.
+    """An error from a location that refused a file, on a full disk or without permission, gets a remedy that names the
+    location and the reason and asks for room or write access. As the alternative, the remedy offers ``NUMBA_CACHE_DIR``
+    if numba tries the variable before that location, and the variable set to another directory if the location is the
+    variable's own."""
+    # numba chooses a location only if its own test can write a temporary file there. The check, or numba's first
+    # save, writes a named file later, which a full disk, a quota or a change of permissions can refuse.
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -1155,6 +1116,8 @@ def test_a_location_numba_took_where_no_file_can_be_written_is_told_the_location
         "unnamed": None,
     }[which]
     number, reason = error
+    # The remedy names a location that none of numba's locators would choose as the error gives it. For an error that
+    # names no file, it lists the locations that numba could have chosen.
     if which == "unnamed":
         failure = OSError(number, reason)
         could_have_taken = [py_file.parent / "__pycache__", tmp_path / "user-cache" / "numba" / subpath]
@@ -1175,11 +1138,9 @@ def test_a_location_numba_took_where_no_file_can_be_written_is_told_the_location
     "a .zip member, naming a location that is none of numba's",
 ])
 def test_an_error_with_no_strerror_is_told_its_own_text_as_the_reason(tmp_path, monkeypatch, placement):
-    # is_a_cache_error admits any OSError, and a caller can pass on one built
-    # from a message alone, with no errno, no strerror and no filename, or one
-    # naming a file with no strerror. The reason read "(None)" and the message
-    # was lost, for a source on disk; the remedies for a source not on disk
-    # give the reason the same way, and nothing held them to it.
+    """An ``OSError`` without a ``strerror`` gets a remedy that gives the error's own text as the reason. A caller can
+    pass on such an error, built from a message alone or naming a file without a message, because
+    ``is_a_cache_error`` counts every ``OSError``."""
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -1192,6 +1153,7 @@ def test_an_error_with_no_strerror_is_told_its_own_text_as_the_reason(tmp_path, 
     monkeypatch.setattr(configurations, "AppDirs", UserCacheUnderTmp)
     monkeypatch.setattr(numba.config, "CACHE_DIR", "")
     monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", "", raising=False)
+    # A stand-in for IPython.paths puts IPython's cache directory under tmp_path, whether or not IPython is installed.
     ipython_dir = tmp_path / "ipython"
     paths = types.ModuleType("IPython.paths")
     paths.get_ipython_cache_dir = lambda: str(ipython_dir)
@@ -1248,14 +1210,12 @@ def test_an_error_with_no_strerror_is_told_its_own_text_as_the_reason(tmp_path, 
 ])
 def test_a_cell_file_numbas_ipython_locator_takes_is_told_ipythons_cache_directory(
         tmp_path, monkeypatch, locators, ipython, expected):
-    # numba's IPython locator takes a file on disk in an ipykernel directory,
-    # a notebook's cell file, and caches it in numba_cache under IPython's
-    # cache directory, with no directory of its own per file. That location
-    # too long for the file system got "that location, X", the wording for a
-    # location that is none of numba's. numba imports IPython for the location
-    # when it makes it and catches only OSError there, so without IPython it
-    # raises ImportError at decoration, no cache error; an error a caller
-    # passes on naming that location is then told it as none of numba's.
+    """A cell file on disk, in an ``ipykernel_`` directory, gets a remedy for a path too long that asks for IPython's
+    cache directory at a shorter path. numba's IPython locator caches every such file in ``numba_cache`` under that
+    directory. Without IPython, the remedy names the location as one that none of numba's locators chose."""
+    # numba imports IPython to find its location and catches only OSError there. Without IPython, numba raises
+    # ImportError at decoration, which is not a cache error, so a caller's error that names IPython's location names a
+    # location that numba did not choose.
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -1269,9 +1229,9 @@ def test_a_cell_file_numbas_ipython_locator_takes_is_told_ipythons_cache_directo
     monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", locators, raising=False)
     ipython_dir = tmp_path / "ipython"
     if ipython:
-        # The module numba imports the location from: IPython.paths, or
-        # IPython.utils.path in an older IPython, which numba falls back to
-        # when IPython.paths does not import.
+        # numba imports get_ipython_cache_dir from IPython.paths. If that module does not import, numba imports the
+        # function from IPython.utils.path, where an older IPython defines it. The stand-in module gives a directory
+        # under tmp_path.
         paths = types.ModuleType(ipython)
         paths.get_ipython_cache_dir = lambda: str(ipython_dir)
         monkeypatch.setitem(sys.modules, "IPython", types.ModuleType("IPython"))
@@ -1295,19 +1255,11 @@ def test_a_cell_file_numbas_ipython_locator_takes_is_told_ipythons_cache_directo
 @pytest.mark.parametrize("parent, name", [("", "bundle.zip"), ("container.zip", "bundle.zip"), ("", "bundle.egg")],
                          ids=["the archive", "under a directory named .zip", "an .egg"])
 def test_a_zip_member_in_an_ipykernel_directory_is_asked_with_the_probes_source(tmp_path, monkeypatch, parent, name):
-    # numba's IPython locator takes a file in an ipykernel directory, on disk
-    # or not, and reads the function's source when it does: from the file, or
-    # through the module's loader for a member of a .zip. The probe the check
-    # compiles has no module, so for such a member inspect found no source,
-    # and the check raised the OSError from reading it, which is no cache
-    # error and which the remedy, taking an OSError for a source not on disk
-    # as the .zip's, answered with the user's cache directory made writable,
-    # a directory numba never tried. The probe's module reads the member's
-    # source for inspect, as the member's own does, and the question goes on
-    # to IPython's cache directory, as numba's does. zipimport finds the archive
-    # below a directory named .zip, and whatever its name, an .egg as Spark
-    # ships; a check that took the first part named .zip for the archive found
-    # no member in the directory, or no archive in the .egg, and raised there.
+    """The check raises no error for a member of an archive in an ``ipykernel_`` directory, as numba raises none, and
+    it creates ``numba_cache`` under IPython's cache directory. numba's IPython locator reads the function's source
+    through the module's loader, so the probe's module reads the member's source as zipimport does."""
+    # zipimport finds the archive under a directory whose name ends in .zip, and it reads an archive of any name, such
+    # as an .egg. The check finds the archive in the same way.
     import linecache
     import types
     import numba
@@ -1326,7 +1278,7 @@ def test_a_zip_member_in_an_ipykernel_directory_is_asked_with_the_probes_source(
     py_file = str(archive / "ipykernel_123" / "cell.py")
     configurations.check_cache_location(py_file, configurations.LONGEST_CACHE_FILE_NAME)
     assert (ipython_dir / "numba_cache").is_dir()
-    # What linecache holds from then on is the member's own, as any reader leaves it.
+    # After the check, linecache holds the member's own lines, as it does after any read of the member.
     assert linecache.getlines(py_file) == ["def f():\n", "    pass\n"]
     linecache.cache.pop(py_file, None)
 
@@ -1335,15 +1287,12 @@ def test_a_zip_member_in_an_ipykernel_directory_is_asked_with_the_probes_source(
                          ids=["with the package's bound on names", "with no bound, as a package may ask"])
 def test_a_zip_member_in_an_ipykernel_directory_under_a_temporary_ipython_directory_takes_the_fallback(
         tmp_path, monkeypatch, longest):
-    # numba's IPython locator asks IPython for its cache directory at every
-    # save, and IPython, able to write neither that directory nor its own,
-    # gives a new temporary directory on every call: numba makes numba_cache
-    # in one and saves in another, dying with FileNotFoundError at the
-    # function's first call. The check made numba_cache the same way and
-    # passed the file, where before the probe's source was given it raised
-    # inspect's error and the package fell back. With a bound on names the
-    # file the check makes in the location raises first, under the next
-    # directory IPython gives; without one the location itself is asked for.
+    """The check raises ``FileNotFoundError`` for a member in an ``ipykernel_`` directory if IPython gives a new
+    temporary directory on every call, and the remedy names that cause and ``IPYTHONDIR``. numba would create
+    ``numba_cache`` in one directory and save in another, so numba's first save would fail in the same way."""
+    # IPython gives such directories when it can write neither its cache directory nor its own. In both cases, the
+    # check raises when it asks IPython for the location once more, because that directory does not exist. With a
+    # bound on names, the check raises before it creates the file with a long name.
     import tempfile
     import types
     import numba
@@ -1374,10 +1323,10 @@ def test_a_zip_member_in_an_ipykernel_directory_under_a_temporary_ipython_direct
     def left_behind():
         return len([path for path in tmp_path.iterdir() if path.name.startswith("tmp")])
 
-    # Each call leaves a directory behind: numba asks IPython twice making
-    # the directory, the check once more for the one numba would save in,
-    # and the remedy twice, the second to tell a new answer from the first.
-    # The check asked at every step, and left four.
+    # Each request for IPython's cache directory leaves a temporary directory behind. The check makes three requests:
+    # numba's set-up of the cache, numba's test that the location can be written in, and the check's own request for
+    # the location that numba would save in. The remedy makes two, the second to tell whether IPython gives a new
+    # directory on every call.
     assert left_behind() == 3
     assert configurations.cache_remedy(py_file, raised.value, "silence") == (
         "numba caches this file in numba_cache under IPython's cache directory, and IPython, able to write neither "
@@ -1392,12 +1341,9 @@ def test_a_zip_member_in_an_ipykernel_directory_under_a_temporary_ipython_direct
                  marks=needs_a_directory_it_cannot_write),
 ])
 def test_a_cell_file_on_disk_under_a_temporary_ipython_directory_is_told_so(tmp_path, monkeypatch, locators):
-    # A cell file on disk in an ipykernel directory reaches numba's IPython
-    # locator where it is listed first, or once the in-tree and user-wide
-    # locators passed the file over, and IPython giving a new temporary
-    # directory on every call dies the same way a .zip member does; the
-    # remedy, written for the member alone, told the file on disk to make
-    # room in the temporary directory, and offered NUMBA_CACHE_DIR.
+    """A cell file on disk that reaches numba's IPython locator, under an IPython that gives a new temporary directory
+    on every call, gets the remedy that names that cause and ``IPYTHONDIR``. numba reaches that locator if the list
+    puts it first, or once the in-tree and user-wide locators skip the file."""
     import tempfile
     import types
     import numba
@@ -1408,8 +1354,8 @@ def test_a_cell_file_on_disk_under_a_temporary_ipython_directory_is_told_so(tmp_
         def __init__(self, appname, appauthor):
             self.user_cache_dir = str(tmp_path / "read-only" / "user-cache" / "numba")
 
-    # numba's own user-wide locator reads the directory through its caching
-    # module, the remedy through this one.
+    # numba's user-wide locator reads AppDirs from numba's caching module, and the remedy reads it from configurations,
+    # so the test replaces both.
     monkeypatch.setattr(numba.core.caching, "AppDirs", UserCacheUnderTmp)
     monkeypatch.setattr(configurations, "AppDirs", UserCacheUnderTmp)
     monkeypatch.setattr(numba.config, "CACHE_DIR", "")
@@ -1424,8 +1370,8 @@ def test_a_cell_file_on_disk_under_a_temporary_ipython_directory_is_told_so(tmp_
     py_file.write_text("def f():\n    pass\n")
     read_only = [tmp_path / "read-only", kernel]
     if not locators:
-        # The in-tree locator cannot make __pycache__ beside the cell, the
-        # user-wide one cannot make the user's cache directory.
+        # The in-tree locator then cannot create the __pycache__ beside the cell, and the user-wide locator cannot
+        # create the user's cache directory, which lies under the read-only directory.
         for path in read_only:
             path.chmod(0o555)
     try:
@@ -1446,12 +1392,10 @@ def test_a_cell_file_on_disk_under_a_temporary_ipython_directory_is_told_so(tmp_
 @pytest.mark.parametrize("named", ["the directory", "a file numba writes in it"])
 def test_a_cell_file_on_disk_refused_its_pycache_is_told_that_under_a_temporary_ipython_directory_too(
         tmp_path, monkeypatch, named):
-    # The in-tree locator took the cell file and the __pycache__ beside it
-    # refused a file: that is the remedy, whatever IPython would give for its
-    # directory, which numba never asked; a remedy that asked IPython first
-    # told IPYTHONDIR for an error naming the __pycache__, or a file in it,
-    # as the first save's error does, which nothing told apart from one
-    # naming the directory itself.
+    """A cell file on disk whose ``__pycache__`` refused a file gets the remedy for that ``__pycache__``, also under an
+    IPython that gives a new temporary directory on every call. The in-tree locator accepted the file, so numba never
+    asked IPython, and the remedy does not offer ``IPYTHONDIR``."""
+    # The check's error names the __pycache__, and numba's first save names a file in it.
     import tempfile
     import types
     import numba
@@ -1480,15 +1424,16 @@ def test_a_cell_file_on_disk_refused_its_pycache_is_told_that_under_a_temporary_
     assert remedy == (
         f"numba caches this file in {kernel / '__pycache__'}, where no file can be written (Permission denied): make "
         "room there, or make it writable, or NUMBA_CACHE_DIR set to a writable directory; or silence"), remedy
-    # IPython is asked for its location once, to tell it from the error's,
-    # and never whether it gives a new one on every call.
+    # The remedy asks IPython for its location once, to compare it with the path that the error names. It makes no
+    # second request, which would test whether IPython gives a new directory on every call.
     assert len([path for path in tmp_path.iterdir() if path.name.startswith("tmp")]) == 1
 
 
 def test_a_cell_under_a_locator_list_without_the_ipython_locator_is_told_to_list_it(tmp_path, monkeypatch):
-    # numba's IPython locator alone takes a cell, so a list without it leaves
-    # numba no locator for one, and the remedy offered source files on disk,
-    # locators for a file on disk and a .zip, none of which takes a cell.
+    """A cell under a ``NUMBA_CACHE_LOCATOR_CLASSES`` without the IPython locator raises numba's error that no locator
+    accepts the file, and the remedy asks for that locator to be listed. numba's IPython locator alone accepts a cell,
+    so source files on disk or a ``.zip`` would not help."""
+    # IPython holds a cell's source in linecache while the cell runs, and the test puts the cell's source there.
     import linecache
     import types
     import numba
@@ -1514,12 +1459,12 @@ def test_a_cell_under_a_locator_list_without_the_ipython_locator_is_told_to_list
 @needs_a_directory_it_cannot_write
 @pytest.mark.parametrize("ipython", ["left alone", "giving a temporary directory per call"])
 def test_a_source_on_disk_numba_cannot_read_is_told_to_make_it_readable(tmp_path, monkeypatch, ipython):
-    # numba 0.68 and later read a source on disk for the stamp, and its
-    # IPython locator reads the function's source in every version, so a file
-    # that cannot be read raises PermissionError naming the source; the
-    # remedy told it as the location numba took, to make room in or make
-    # writable, and, under an IPython giving temporary directories, told
-    # IPYTHONDIR, the error naming no location of another locator's.
+    """A source on disk that cannot be read gets a remedy that asks for it to be made readable, also under an IPython
+    that gives temporary directories. The remedy does not treat the source as a location that refused a file, and it
+    does not offer ``IPYTHONDIR``."""
+    # numba 0.68 and later read the source on disk to hash it into the stamp, so there the check raises numba's
+    # PermissionError, which names the source. numba's IPython locator reads the source in every release, but here the
+    # in-tree locator accepts the file first, so under earlier releases the test builds the error itself.
     import tempfile
     import types
     import numba
@@ -1561,12 +1506,10 @@ def test_a_source_on_disk_numba_cannot_read_is_told_to_make_it_readable(tmp_path
 ])
 def test_a_source_on_disk_under_a_directory_named_zip_is_told_the_directory_once_the_locators_before_passed(
         tmp_path, monkeypatch, locators):
-    # numba's .zip locator takes a file on disk for the ".zip" in its path once
-    # the in-tree and user-wide locators passed it over, takes the directory so
-    # named for the archive and, from 0.68, opens it for the source, which a
-    # directory refuses; the remedy told the reader to make room in that
-    # directory, writable already and no cache location, where the member's
-    # remedy knew the case.
+    """A source on disk under a directory named ``data.zip`` gets a remedy for the ``IsADirectoryError`` that names
+    that directory as the archive of numba's ``.zip`` locator. That locator takes the directory for the archive, and
+    numba 0.68 and later open it for the source, so the remedy does not ask for room in a directory that is no cache
+    location."""
     import numba
     import numba.core.caching
     import numbox.core.configurations as configurations
@@ -1585,16 +1528,14 @@ def test_a_source_on_disk_under_a_directory_named_zip_is_told_the_directory_once
     py_file = package / "m.py"
     py_file.write_text("x = 1\n")
     if locators and "ZipCacheLocator" not in locators:
-        # Under a list with no .zip locator the error naming the directory is
-        # a caller's, and is told as the location it names; the remedy spoke
-        # of the list putting the .zip locator first.
+        # Under a list with no .zip locator, the error that names the directory is a caller's, and the remedy names
+        # the location that the error gives.
         expected = (
             f"that location, {container}, where no file can be written (Is a directory): make room there, or make it "
             "writable, or NUMBA_CACHE_DIR set to a writable directory; or silence")
     elif locators:
-        # Listed first, the .zip locator takes the file before any locator for
-        # a file on disk; the remedy spoke of locators before it passing the
-        # file over, where there were none.
+        # Listed first, the .zip locator accepts the file before any locator for a file on disk, so the remedy asks for
+        # such a locator to be listed before it.
         expected = (
             "numba's .zip locator, which NUMBA_CACHE_LOCATOR_CLASSES puts before every locator for a source file on "
             f"disk, takes the first part of the path ending in .zip, {container}, for an archive, and it is a "
@@ -1602,6 +1543,7 @@ def test_a_source_on_disk_under_a_directory_named_zip_is_told_the_directory_once
             "NUMBA_CACHE_DIR set, InTreeCacheLocator or UserWideCacheLocator before it, or put the file under a path "
             "with no such directory; or silence")
     else:
+        # In numba's order, the .zip locator accepts the file once the locators before it skip the file.
         expected = (
             "numba's .zip locator, reached once the locators before it passed this file over, takes the first part of "
             f"the path ending in .zip, {container}, for an archive, and it is a directory, which numba 0.68 and later "
@@ -1609,10 +1551,12 @@ def test_a_source_on_disk_under_a_directory_named_zip_is_told_the_directory_once
             "writable directory, or put the file under a path with no such directory; or silence")
     failure = IsADirectoryError(errno.EISDIR, "Is a directory", str(container))
     assert configurations.cache_remedy(str(py_file), failure, "silence") == expected
+    # The check raises the error itself only under numba 0.68 and later. The test runs the check under numba's order
+    # alone, and only where it can make directories read-only.
     if numba_version < 68 or os.name == "nt" or os.geteuid() == 0 or locators:
         return
-    # The in-tree locator cannot make __pycache__ beside the source, the
-    # user-wide one cannot make the user's cache directory.
+    # With these directories read-only, the in-tree locator cannot create the __pycache__ beside the source, and the
+    # user-wide locator cannot create the user's cache directory under them.
     read_only = [tmp_path / "read-only", package]
     for path in read_only:
         path.chmod(0o555)
@@ -1628,9 +1572,9 @@ def test_a_source_on_disk_under_a_directory_named_zip_is_told_the_directory_once
 
 
 def test_an_ipython_that_raises_for_its_cache_directory_leaves_the_remedy_a_remedy(tmp_path, monkeypatch):
-    # The remedy asks IPython for its cache directory as numba's locator does,
-    # and took OSError and ImportError for no directory; anything else escaped,
-    # and the import died with IPython's error where the warning was due.
+    """If IPython raises an error other than ``OSError`` for its cache directory, the remedy for a cell still returns,
+    and it asks for IPython's home to be made writable. The remedy asks IPython for the directory only to compose its
+    text, so it treats any error there as no directory."""
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -1654,11 +1598,9 @@ def test_an_ipython_that_raises_for_its_cache_directory_leaves_the_remedy_a_reme
 
 
 def test_an_error_naming_no_file_for_an_ipykernel_source_on_disk_is_not_blamed_on_ipython(tmp_path, monkeypatch):
-    # A cell file on disk in an ipykernel directory that the in-tree locator
-    # took, with an error naming no file, a full disk at the first save, under
-    # an IPython giving temporary directories: the error shows nothing of
-    # which locator took the file, and the remedy, finding no other location
-    # named, blamed IPython's temporary directory and told IPYTHONDIR.
+    """An error that names no file, for a cell file on disk under an IPython that gives temporary directories, gets the
+    remedy that lists the locations numba could have chosen, without ``IPYTHONDIR``. Such an error, as from a full disk
+    at the first save, does not show which locator accepted the file."""
     import tempfile
     import types
     import numba
@@ -1688,11 +1630,9 @@ def test_an_error_naming_no_file_for_an_ipykernel_source_on_disk_is_not_blamed_o
 
 def test_a_name_too_long_under_the_zip_locator_listed_before_the_in_tree_one_is_not_offered_the_pycache(
         tmp_path, monkeypatch):
-    # numba's .zip locator, listed first, takes a source on disk with .zip in
-    # its path and reaches nothing after it, so the in-tree locator listed
-    # after it never caches beside the source; the remedy for a name too long
-    # offered the __pycache__ beside the source all the same, reading the
-    # whole list for the locators numba reaches.
+    """If the list puts the ``.zip`` locator before the in-tree one, a directory name too long gets a remedy that asks
+    for the in-tree locator to be listed before the ``.zip`` one, and not for a writable ``__pycache__``. The ``.zip``
+    locator accepts a source on disk whose path contains ``.zip``, and numba reaches no locator after it."""
     import numba
     from numba.core.caching import _CacheLocator
     import numbox.core.configurations as configurations
@@ -1704,6 +1644,8 @@ def test_a_name_too_long_under_the_zip_locator_listed_before_the_in_tree_one_is_
     monkeypatch.setattr(configurations, "AppDirs", UserCacheUnderTmp)
     monkeypatch.setattr(numba.config, "CACHE_DIR", "")
     monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", "ZipCacheLocator,InTreeCacheLocator", raising=False)
+    # The source's directory has a name 30 characters shorter than the file system's limit. numba's directory named
+    # after it is 41 characters longer, so its name exceeds the limit.
     limit = configurations._name_limit(str(tmp_path))
     parent = tmp_path / ("d" * (limit - 34) + ".zip")
     parent.mkdir()
@@ -1720,13 +1662,9 @@ def test_a_name_too_long_under_the_zip_locator_listed_before_the_in_tree_one_is_
 
 def test_a_path_too_long_the_user_wide_and_zip_locators_share_is_offered_the_variable_listed_between_them(
         tmp_path, monkeypatch):
-    # A source on disk with .zip in its path is one the user-wide and .zip
-    # locators give one path under the user's cache directory; with the
-    # user-provided locator listed between them, a path too long that the
-    # user-wide one passed over and the .zip one took is cured by
-    # NUMBA_CACHE_DIR too, which numba tried between. The remedy read the
-    # location as the user-wide locator's, the first to match, and left the
-    # variable out.
+    """When the user-wide and ``.zip`` locators give a source on disk one location, a path too long there gets a
+    remedy that offers ``NUMBA_CACHE_DIR`` too, if the list puts the variable's locator between them. The error cannot
+    show which of the two locators accepted the file, and numba tries the variable before the ``.zip`` locator."""
     import numba
     from numba.core.caching import _CacheLocator
     import numbox.core.configurations as configurations
@@ -1754,13 +1692,12 @@ def test_a_path_too_long_the_user_wide_and_zip_locators_share_is_offered_the_var
 
 def test_a_name_too_long_behind_the_zip_locators_error_for_a_path_with_zip_in_it_is_told_the_name(
         tmp_path, monkeypatch):
-    # A source on disk in a directory whose name holds .zip without ending in
-    # it, long enough that the directory numba names after it is too long for
-    # the file system: the locators that name theirs so pass the file over,
-    # the in-tree one cannot cache beside the source, and numba's .zip locator
-    # raises for the ".zip" in the path. The remedy read the .zip locator's
-    # error alone and asked for NUMBA_CACHE_DIR, whose directory is named the
-    # same way and cannot be made either.
+    """A source on disk in a long directory whose name contains ``.zip`` without ending in it gets the remedy for a
+    directory name too long, not one for the ``.zip`` locator's ``ValueError`` alone. The remedy offers a writable
+    ``__pycache__`` and does not offer ``NUMBA_CACHE_DIR``, whose directory numba would name in the same way."""
+    # The directory's name is 11 characters shorter than the file system's limit, and numba's directory named after
+    # it is 41 characters longer, so the user-wide locator skips the file. The in-tree locator skips it too, and
+    # numba's .zip locator then raises for the ".zip" in the path.
     import numba
     import numbox.core.configurations as configurations
 
@@ -1777,7 +1714,7 @@ def test_a_name_too_long_behind_the_zip_locators_error_for_a_path_with_zip_in_it
     package.mkdir()
     py_file = package / "module.py"
     py_file.write_text("def f():\n    pass\n")
-    # The in-tree locator cannot make __pycache__ beside the source.
+    # A file named __pycache__ prevents the in-tree locator from creating that directory beside the source.
     (package / "__pycache__").write_text("")
     with pytest.raises(ValueError, match="No zip file found") as raised:
         configurations.check_cache_location(str(py_file), configurations.LONGEST_CACHE_FILE_NAME)
@@ -1792,11 +1729,11 @@ def test_a_name_too_long_behind_the_zip_locators_error_for_a_path_with_zip_in_it
 
 @pytest.mark.skipif(not hasattr(os, "statvfs"), reason="the file system's name limit is asked through statvfs")
 def test_the_name_limit_is_the_file_systems_own_asked_of_the_nearest_directory_that_exists(tmp_path, monkeypatch):
-    # The longest name a file can have is the file system's to say, 255 nearly
-    # everywhere; the remedy reads it from the nearest directory above the
-    # location that exists, and 255 where the system cannot say. Nothing told
-    # a limit the remedy made up from one the file system gave: the tests
-    # took their expected limit from the remedy's own answer.
+    """``_name_limit`` reads the file system's limit on names through ``os.statvfs``, from the nearest existing path at
+    or above the location. It returns 255 if ``os.statvfs`` is missing or raises, if the file system reports 0, and for
+    no location at all."""
+    # The stand-in for os.statvfs reports 80, a limit that no common file system has, so that the result shows where
+    # the limit came from.
     import numbox.core.configurations as configurations
     asked = []
     real = os.statvfs
@@ -1818,8 +1755,7 @@ def test_the_name_limit_is_the_file_systems_own_asked_of_the_nearest_directory_t
     def refusing(path):
         raise OSError(errno.EACCES, "Permission denied", path)
 
-    # A statvfs that raises, for a directory the user cannot search, leaves
-    # 255 too; no test held the fallback, and one answering 0 passed.
+    # os.statvfs raises for a directory that the user cannot search, and the limit is then 255.
     monkeypatch.setattr(os, "statvfs", refusing, raising=False)
     assert configurations._name_limit(str(tmp_path)) == 255
     assert configurations._name_limit(None) == 255
@@ -1827,20 +1763,16 @@ def test_the_name_limit_is_the_file_systems_own_asked_of_the_nearest_directory_t
     class NoLimit:
         f_namemax = 0
 
-    # A file system that reports 0, no limit of its own, left 0 for the
-    # limit, and every name was too long for it.
+    # A file system with no limit of its own reports 0. The limit is then 255, because a limit of 0 would make every
+    # name too long.
     monkeypatch.setattr(os, "statvfs", lambda path: NoLimit())
     assert configurations._name_limit(str(tmp_path)) == 255
 
 
 def test_is_a_cache_error_admits_numbas_errors_by_their_text_and_no_other():
-    # The line between numba's cache errors and the rest: any OSError; the
-    # .zip locator's ValueError by its text; numba's no-locator RuntimeError
-    # by its text; and, from numba 0.68, zipfile's KeyError for a member the
-    # archive does not hold, by its text, so that a KeyError of the code's
-    # own, a dictionary's, is raised as it was and not turned into the
-    # warning. Nothing pinned the texts: a classifier admitting every
-    # KeyError passed every test.
+    """``is_a_cache_error`` admits any ``OSError``, and admits numba's ``ValueError`` and ``RuntimeError`` and, from
+    numba 0.68, zipfile's ``KeyError`` only by their messages. Any other error, such as a dictionary's ``KeyError``, is
+    no cache error, so the check raises it unchanged instead of warning."""
     from numbox.core.configurations import is_a_cache_error
     assert is_a_cache_error(OSError(errno.EACCES, "Permission denied", "/x"))
     assert is_a_cache_error(ValueError("No zip file found in path"))
@@ -1854,14 +1786,9 @@ def test_is_a_cache_error_admits_numbas_errors_by_their_text_and_no_other():
 
 
 def test_a_reader_of_the_member_meanwhile_reads_the_members_own_lines_for_a_file_not_on_disk(tmp_path, monkeypatch):
-    # The probe's two lines stood in the process-wide linecache under the
-    # member's name while numba picked the locator, and numba's IPython
-    # locator reading another function's source from the member meanwhile, in
-    # another thread, read the probe's two lines for it and raised inspect's
-    # error for a function past them, "lineno is out of bounds". The probe is
-    # a function of a module of its own, whose loader reads the member's
-    # source from the archive as the member's own module's does, and the lines
-    # linecache holds from then on are the member's own.
+    """A reader of a member's source while the check runs, as in another thread, reads the member's own lines and not
+    the probe's. The probe belongs to a module of its own, whose loader reads the member's source from the archive, so
+    the check never stores the probe's two lines in linecache under the member's name."""
     import inspect
     import linecache
     import types
@@ -1882,7 +1809,7 @@ def test_a_reader_of_the_member_meanwhile_reads_the_members_own_lines_for_a_file
     linecache.cache.pop(py_file, None)
 
     class ReadingTheMember:
-        # zipimport, for the member's own module.
+        # A stand-in for zipimport, the loader of the member's own module.
         def get_source(self, name):
             return source
 
@@ -1891,10 +1818,14 @@ def test_a_reader_of_the_member_meanwhile_reads_the_members_own_lines_for_a_file
     member.__loader__ = ReadingTheMember()
     exec(compile(source, py_file, "exec"), member.__dict__)
     monkeypatch.setitem(sys.modules, member.__name__, member)
+    # The member's function starts at line 4, after the probe's two lines, so a read of the probe's lines would raise
+    # inspect's error, "lineno is out of bounds".
     assert member.cell.__code__.co_firstlineno == 4
     seen = []
     real = configurations.CompileResultCacheImpl
 
+    # The stand-in reads the member's source just before and just after numba picks the locator for the probe, as
+    # another thread could.
     def reading_meanwhile(probe):
         seen.append(inspect.getsource(member.cell))
         locator = real(probe)
@@ -1912,11 +1843,9 @@ def test_a_reader_of_the_member_meanwhile_reads_the_members_own_lines_for_a_file
 @pytest.mark.parametrize("given", ["Path", "bytes"])
 def test_a_zip_member_in_an_ipykernel_directory_given_as_bytes_or_a_path_object_is_checked_as_its_string_is(
         tmp_path, monkeypatch, given):
-    # check_cache_location takes any path-like, bytes too, and the probe's
-    # code carries the name as a string, as compile makes it; the probe's
-    # module and loader were given the path as os.fspath left it, bytes for
-    # bytes, and the loader raised TypeError, through inspect, at the first
-    # path operation asked of it for a member numba's IPython locator reads.
+    """``check_cache_location`` checks a member given as a path object or as bytes as it checks the member's string.
+    compile stores the probe's file name as a string, so the check decodes the path once and gives the probe's module
+    and loader that string."""
     import linecache
     import types
     import numba
@@ -1943,13 +1872,9 @@ def test_a_zip_member_in_an_ipykernel_directory_given_as_bytes_or_a_path_object_
 @pytest.mark.parametrize("placement", ["a .zip member", "on disk"])
 def test_an_error_naming_no_file_under_a_temporary_ipython_directory_is_told_the_locations_with_its_reason(
         tmp_path, monkeypatch, placement):
-    # An error naming no file is told the locations numba could have taken,
-    # with its reason, as the docstring says; the remedy for an IPython that
-    # gives a new temporary directory on every call, to set IPYTHONDIR, took
-    # a caller's error with a reason and no name too, a full disk's, for a
-    # .zip member in an ipykernel directory, and dropped the reason. The error
-    # numba's first save raises under such an IPython names the directory it
-    # could not save in.
+    """An error with a reason and no file name, under an IPython that gives temporary directories, gets the remedy that
+    lists the locations numba could have chosen, with the reason, and not the one that names ``IPYTHONDIR``. numba's
+    first save under such an IPython raises an error that names the ``numba_cache`` it could not save in."""
     import tempfile
     import types
     import numba
@@ -1981,21 +1906,18 @@ def test_an_error_naming_no_file_under_a_temporary_ipython_directory_is_told_the
     assert "IPYTHONDIR" not in remedy and "temporary" not in remedy, remedy
     assert "the location numba took, " in remedy and "(No space left on device)" in remedy, remedy
     assert "numba_cache" in remedy, remedy
-    # The .zip locator's location, under the user's cache directory, is among
-    # them; a file on disk has the user-wide locator's there under every version.
+    # The list also holds a location under the user's cache directory: the .zip locator's for the member, and the
+    # user-wide locator's for the file on disk.
     assert str(tmp_path / "user-cache" / "numba") in remedy, remedy
 
 
 @pytest.mark.parametrize("placement", ["a .zip member", "on disk"])
 def test_a_locator_of_none_of_numbas_families_listed_before_the_ipython_one_is_told_its_own_location(
         tmp_path, monkeypatch, placement):
-    # A class of none of numba's families takes any file for the remedy, so
-    # numba reaches none listed after it; the remedy for an IPython that gives
-    # a new temporary directory on every call, to set IPYTHONDIR, asked only
-    # whether a locator of IPython's family was listed before the .zip one,
-    # and blamed IPython for the error such a class raised naming its own
-    # location, for a file in an ipykernel directory, where the location the
-    # error names is the remedy.
+    """A class outside numba's locator families that accepts the file, listed before the IPython locator, gets a remedy
+    that names the location in the class's error, not ``IPYTHONDIR``. numba reaches no locator listed after one that
+    accepts the file, so IPython's temporary directories cannot cause that error."""
+    # OurLocator accepts every file, and its test of the location raises an error that names its own location.
     import tempfile
     import types
     import numba
@@ -2059,11 +1981,9 @@ def test_a_locator_of_none_of_numbas_families_listed_before_the_ipython_one_is_t
 
 @needs_a_directory_it_cannot_write
 def test_a_zip_members_location_that_cannot_be_made_is_told_the_directory_refusing_it(tmp_path, monkeypatch):
-    # numba's .zip locator takes a member without making its location, and
-    # the first save makes it under the user's cache directory, as the check
-    # does; where a directory on the way is not writable, the error names the
-    # location, which is not there, and the remedy asked for room in it, or
-    # for it to be made writable, and never named the directory refusing.
+    """A ``.zip`` member whose location cannot be created gets a remedy that names the location and the existing
+    directory under which numba cannot create it. numba's ``.zip`` locator does not create its location when it
+    accepts the file, so the check's error, like numba's first save's, names a directory that does not exist."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -2100,14 +2020,10 @@ def test_a_zip_members_location_that_cannot_be_made_is_told_the_directory_refusi
 @pytest.mark.parametrize("placement", ["a .zip member", "on disk"])
 def test_a_locator_of_none_of_numbas_families_that_passes_the_file_over_leaves_the_ipython_one_reached(
         tmp_path, monkeypatch, placement):
-    # A class of none of numba's families takes what its from_function takes,
-    # which the remedy asks it with a probe as numba does; the remedy took
-    # such a class for taking any file, so for one listed before
-    # IPythonCacheLocator that passed the file over, numba going on to
-    # IPython's locator, it read IPython's locator as never reached, and told
-    # the error numba's first save raises under an IPython giving a temporary
-    # directory per call as a location that is none of numba's, to make
-    # writable, where IPYTHONDIR is the remedy.
+    """A class outside numba's families whose ``from_function`` skips the file, listed before the IPython locator, does
+    not prevent numba from reaching that locator, and the remedy names IPython's temporary directories and
+    ``IPYTHONDIR``. The remedy asks such a class about the file with a probe, as numba asks it, and does not assume that
+    the class accepts every file."""
     import tempfile
     import types
     import numba
@@ -2152,11 +2068,9 @@ def test_a_locator_of_none_of_numbas_families_that_passes_the_file_over_leaves_t
 @pytest.mark.parametrize("placement", ["a .zip member", "on disk"])
 def test_a_location_of_a_locator_listed_after_a_class_of_none_of_numbas_families_that_took_the_file_is_none_of_numbas(
         tmp_path, monkeypatch, placement):
-    # A class of none of numba's families that takes the file, asked with a
-    # probe as numba asks it, is the last locator numba reaches; the remedy
-    # read the ones listed after it as reached too, and told an error naming
-    # IPython's numba_cache as numba caching the file there, a location numba
-    # never reached. It is a location that is none of numba's for the file.
+    """A class outside numba's families that accepts the file is the last locator numba reaches, so an error that names
+    the location of a locator listed after the class names a location that numba did not choose. The remedy names that
+    location as the error gives it and does not say that numba caches the file there."""
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -2219,12 +2133,9 @@ def test_a_location_of_a_locator_listed_after_a_class_of_none_of_numbas_families
 
 @pytest.mark.parametrize("placement", ["a .zip member", "on disk"])
 def test_a_locator_of_none_of_numbas_families_whose_from_function_raises_takes_the_file(tmp_path, monkeypatch, placement):
-    # A class of none of numba's families whose from_function raises takes
-    # the file, the error being its own, as numba raises it at decoration:
-    # numba reaches none listed after it. Read as passing the file over, it
-    # would leave IPython's locator, listed after it, reached, and the error
-    # it raised naming its own location would be told as IPython's, to set
-    # IPYTHONDIR for. No test held the rule.
+    """A class outside numba's families whose ``from_function`` raises counts as accepting the file, because numba
+    raises that error at decoration and reaches no locator listed after the class. The remedy names the location that
+    the error gives and does not offer ``IPYTHONDIR`` for the IPython locator listed after the class."""
     import tempfile
     import types
     import numba
@@ -2274,11 +2185,9 @@ def test_a_locator_of_none_of_numbas_families_whose_from_function_raises_takes_t
 
 @on_windows_under_numba_0_68_0
 def test_a_zip_members_location_under_a_file_is_told_the_file_in_its_path(tmp_path, monkeypatch):
-    # The user's cache directory can lie under a file, XDG_CACHE_HOME set to
-    # a path through one; numba's first save, making the member's location,
-    # raises for it, and the remedy named the first directory above the
-    # location that is there, writable, and asked for room in it: the file
-    # in the way is what to move.
+    """A ``.zip`` member whose location lies under a file gets a remedy that names that file and asks for it to be put
+    elsewhere. The user's cache directory lies under a file if ``XDG_CACHE_HOME`` names a path through one, and room or
+    write access in the directory above that file would not help."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -2313,13 +2222,11 @@ def test_a_zip_members_location_under_a_file_is_told_the_file_in_its_path(tmp_pa
 @pytest.mark.parametrize("error", ["no archive in the path", "a directory named .zip"])
 def test_the_zip_locators_errors_after_a_class_of_none_of_numbas_families_that_took_the_file_are_a_callers(
         tmp_path, monkeypatch, error):
-    # numba's .zip locator listed after a class of none of numba's families
-    # that takes the file, asked, is not reached, so its errors under the
-    # list are a caller's: the ValueError for a path with .zip in it and no
-    # part ending in it, and the IsADirectoryError for a directory named
-    # .zip above a source on disk. The remedy told both as the .zip
-    # locator's, the locators before it having passed the file over, where
-    # one of them took it.
+    """If the list puts the ``.zip`` locator after a class outside numba's families that accepts the file, the
+    ``.zip`` locator's errors are a caller's, and the remedy does not attribute them to that locator. numba reaches no
+    locator listed after the class, and the check passes under that list."""
+    # The errors are the ValueError for a path that contains ".zip" with no part that ends in .zip, and the
+    # IsADirectoryError for a directory named .zip above a source on disk.
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -2377,12 +2284,12 @@ def test_the_zip_locators_errors_after_a_class_of_none_of_numbas_families_that_t
 
 @pytest.mark.parametrize("beside", ["its source beside it", "alone"])
 def test_a_keyerror_for_a_pyc_compiled_to_name_another_path_in_the_archive_is_told_the_pyc(tmp_path, beside):
-    # numba 0.68 and later read a .zip member's source by the name the
-    # module's code gives, and zipfile raises for a name the archive does not
-    # hold; the remedy read every such error as a module shipped as .pyc
-    # alone and asked for source files, where the archive held the module's
-    # source beside a .pyc compiled to name another path in it, compileall's
-    # -d, which zipimport runs: the .pyc is what to recompile or leave out.
+    """A ``KeyError`` for a member whose ``.pyc`` was compiled to name another path in the archive gets a remedy that
+    names that ``.pyc``, if the archive holds the module's source beside it. The remedy then asks for the ``.pyc`` to be
+    compiled to name its own path or left out, and it asks for source files only for a ``.pyc`` shipped alone."""
+    # numba 0.68 and later read a member's source by the name that the module's code gives, and zipfile raises
+    # KeyError for a name that the archive does not hold. zipimport runs an unchecked hash-based .pyc without comparing
+    # it with the .py beside it.
     import numbox.core.configurations as configurations
 
     archive = tmp_path / "bundle.zip"
@@ -2413,10 +2320,9 @@ def test_a_keyerror_for_a_pyc_compiled_to_name_another_path_in_the_archive_is_to
 
 
 def test_an_archive_numba_cannot_read_is_told_to_make_it_readable(tmp_path, monkeypatch):
-    # numba reads the archive for the member's stamp, and from 0.68 opens it
-    # for the member's source; one it cannot read raises naming the archive,
-    # and the remedy told the archive as a location that refused a file, to
-    # make room in or make writable, which reads nothing.
+    """If numba cannot read the archive above a member, the error that names the archive gets a remedy that asks for the
+    archive to be made readable, and not for room or write access. numba reads the archive for the member's stamp and,
+    from 0.68, for the member's source."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -2442,14 +2348,11 @@ def test_an_archive_numba_cannot_read_is_told_to_make_it_readable(tmp_path, monk
 
 def test_an_error_naming_a_members_moved_archive_under_a_temporary_ipython_directory_is_the_archives(
         tmp_path, monkeypatch):
-    # The error numba's first save raises under an IPython giving a temporary
-    # directory per call names a numba_cache under that directory; one naming
-    # the archive a member's code names, where that has since moved, is the
-    # stamp's, told as the archive's, and the remedy for the temporary
-    # directory took it, for a member in an ipykernel directory, and said
-    # IPYTHONDIR. In the flow itself inspect reads no source from an archive
-    # that is gone, and that error is told first; a caller's error can name
-    # the archive.
+    """An error that names the moved archive of a member in an ``ipykernel_`` directory gets the archive's remedy, also
+    under an IPython that gives temporary directories. The remedy that names ``IPYTHONDIR`` needs an error that names a
+    ``numba_cache``, as numba's first save under such an IPython raises."""
+    # In a real check, inspect reads no source from an archive that is gone and raises first. A caller can still pass
+    # on an error that names the archive.
     import tempfile
     import types
     import numba
@@ -2471,14 +2374,11 @@ def test_an_error_naming_a_members_moved_archive_under_a_temporary_ipython_direc
 
 @pytest.mark.parametrize("name", ["APP.ZIP", "bundle.egg", "my.zipdir/bundle.egg"])
 def test_an_archive_numbas_zip_locator_does_not_read_is_told_to_be_named_zip(tmp_path, monkeypatch, name):
-    # numba's .zip locator takes a path with ".zip" in it, lower-case, so an
-    # archive named APP.ZIP, or an .egg, which Python imports from all the
-    # same, leaves numba no locator; the remedy told the reader to import
-    # from a .zip holding the source files, which they did, and never named
-    # the extension numba does not read. An .egg under a directory with
-    # ".zip" in its name is taken by that locator, which finds no part ending
-    # in .zip and raises its ValueError; the remedy held the rename back for
-    # the ".zip" in the path, and told the same.
+    """An archive that numba's ``.zip`` locator does not accept, such as ``APP.ZIP`` or an ``.egg``, gets a remedy that
+    asks for the archive to be renamed to end in ``.zip``, lower-case. Python imports from such an archive, so the
+    remedy names the extension instead of offering a ``.zip``, which the reader may already use."""
+    # The .zip locator looks for ".zip", lower-case, in the path. Under my.zipdir, the locator accepts the .egg and
+    # raises ValueError, because no part of the path ends in .zip, and the remedy is the same rename.
     import numba
     import numbox.core.configurations as configurations
     monkeypatch.setattr(numba.config, "CACHE_DIR", "")
@@ -2503,11 +2403,9 @@ def test_an_archive_numbas_zip_locator_does_not_read_is_told_to_be_named_zip(tmp
 
 
 def test_the_archive_above_a_file_is_found_with_os_name_set_to_windows(tmp_path, monkeypatch):
-    # The archive above a file was found through pathlib.Path, which makes a
-    # path of the platform os.name says: set to Windows's, as the tests for
-    # numba's separator bug set it, Python before 3.12 refuses to make one on
-    # Linux, and the remedy for such a member, finding the archive for the
-    # rename it offers, died on it. The path is read by the separator in use.
+    """``_archive_above`` finds the archive above a file with ``os.name`` set to Windows's value, as the tests of
+    numba's separator bug set it. It splits the path through the pure path classes, because the concrete
+    ``pathlib.Path`` follows ``os.name``, and Python before 3.12 refuses to build a Windows path on Linux."""
     import numbox.core.configurations as configurations
     archive = tmp_path / "bundle.zip"
     with zipfile.ZipFile(archive, "w") as zipped:
@@ -2519,11 +2417,10 @@ def test_the_archive_above_a_file_is_found_with_os_name_set_to_windows(tmp_path,
 
 
 def test_a_relative_members_moved_archive_under_a_temporary_ipython_directory_is_the_archives(tmp_path, monkeypatch):
-    # The file numba names can be relative, run from the archive's directory,
-    # and the error naming the archive above it relative too; the remedy for
-    # an IPython giving a temporary directory per call compared the file as
-    # given against the archive's name made absolute, matched nothing, and
-    # said IPYTHONDIR, where the archive's remedy is the one.
+    """A member named by a relative path, whose error names its moved archive by a relative path too, gets the
+    archive's remedy, also under an IPython that gives temporary directories. The remedy reads both paths as absolute
+    before it compares them."""
+    # numba names the member by a relative path if the process imports the archive from its own directory.
     import tempfile
     import types
     import numba
@@ -2544,11 +2441,9 @@ def test_a_relative_members_moved_archive_under_a_temporary_ipython_directory_is
 
 
 def test_a_relative_members_archive_named_absolute_by_the_error_is_told_as_moved(tmp_path, monkeypatch):
-    # The file numba names can be relative, run from the archive's directory,
-    # while the error names the archive absolute, as the stamp's does; the
-    # archive's remedy compared the file as given against the name, matched
-    # nothing, and told the archive that is gone as a location refusing a
-    # file, to make room in or make writable.
+    """A member named by a relative path, whose error names its moved archive by an absolute path, as the stamp's error
+    does, gets the archive's remedy and not the remedy for a location that refused a file. The remedy reads both paths
+    as absolute before it compares them."""
     import numba
     import numbox.core.configurations as configurations
     monkeypatch.setattr(numba.config, "CACHE_DIR", "")
@@ -2564,12 +2459,10 @@ def test_a_relative_members_archive_named_absolute_by_the_error_is_told_as_moved
 
 
 def test_a_name_too_long_names_the_locator_the_in_tree_one_is_to_be_listed_before(tmp_path, monkeypatch):
-    # The in-tree locator caches beside the source under no directory named
-    # after the source's, so a name too long for the user's cache directory
-    # is told to list it before the locator that took the file; the remedy
-    # named numba's .zip locator for any, where a class of none of numba's
-    # families, listed before the in-tree one, took the file and the .zip
-    # locator was not listed at all.
+    """For a directory name too long, the remedy asks for the in-tree locator to be listed before the locator that
+    accepted the file, here a class outside numba's families, and does not name the ``.zip`` locator, which the list
+    omits. The in-tree locator caches in the ``__pycache__`` beside the source, under no name that numba derives from
+    the source's directory."""
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -2603,6 +2496,7 @@ def test_a_name_too_long_names_the_locator_the_in_tree_one_is_to_be_listed_befor
     monkeypatch.setattr(numba.config, "CACHE_DIR", "")
     monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES",
                         "UserWideCacheLocator,our_locators.OurLocator,InTreeCacheLocator", raising=False)
+    # A limit of 20 makes numba's directory name for the source too long on any file system.
     monkeypatch.setattr(configurations, "_name_limit", lambda location: 20)
     py_file = tmp_path / "site" / "package" / "module.py"
     py_file.parent.mkdir(parents=True)
@@ -2612,8 +2506,8 @@ def test_a_name_too_long_names_the_locator_the_in_tree_one_is_to_be_listed_befor
     failure = OSError(errno.ENAMETOOLONG, "File name too long", named)
     remedy = configurations.cache_remedy(str(py_file), failure, "silence")
     assert "ZipCacheLocator" not in remedy, remedy
-    # The name is counted as the file system counts it, in UTF-16 units on
-    # Windows and macOS, bytes elsewhere; the test said bytes everywhere.
+    # The remedy counts the name as the file system does: in UTF-16 units, which it calls characters, on Windows and
+    # macOS, and in bytes elsewhere.
     counted_in = "characters" if os.name == "nt" or sys.platform == "darwin" else "bytes"
     assert remedy == (
         f"numba names the directory it caches this file in after the source's directory, {subpath}, "
@@ -2626,11 +2520,9 @@ def test_a_name_too_long_names_the_locator_the_in_tree_one_is_to_be_listed_befor
 @pytest.mark.skipif(sys.platform == "darwin", reason="APFS takes no name that is not UTF-8")
 @pytest.mark.parametrize("error", ["a full __pycache__", "numba's no-locator error"])
 def test_a_source_under_a_directory_that_is_not_utf8_is_not_offered_numba_cache_dir(tmp_path, monkeypatch, error):
-    # numba names the directory it caches a file in under NUMBA_CACHE_DIR by
-    # hashing the source's directory as UTF-8, and raises UnicodeEncodeError
-    # for one that is not, no cache error; the remedy offered the variable
-    # for such a source, and set as advised, the import died where the
-    # warning had stood.
+    """A source under a directory whose path is not UTF-8 gets a remedy that does not offer ``NUMBA_CACHE_DIR``. numba
+    names its directory under the variable with a hash of the source's directory encoded as UTF-8, so with the variable
+    set numba would raise ``UnicodeEncodeError`` for this path, and the warning would remain."""
     import numba
     import numbox.core.configurations as configurations
     monkeypatch.setattr(numba.config, "CACHE_DIR", "")
@@ -2653,9 +2545,9 @@ def test_a_source_under_a_directory_that_is_not_utf8_is_not_offered_numba_cache_
             "make room there, or make it writable, and NUMBA_CACHE_DIR cures nothing, numba hashing the source's "
             "directory as UTF-8 for its directory there, which this one is not; or silence"), remedy
     else:
-        # numba's no-locator error here is the in-tree locator passing an
-        # unwritable __pycache__ over before the user-wide one raised, so
-        # that directory writable is a cure too, hashing no path.
+        # The test builds numba's error that no locator accepts the file. In numba's order, the in-tree locator comes
+        # before every locator that hashes the path, and it hashes no path, so the remedy also offers a writable
+        # __pycache__.
         assert remedy == (
             "numba hashes the source's directory as UTF-8 for the directory it caches this file in under "
             f"NUMBA_CACHE_DIR or the user's cache directory, and {directory} is not: put the file under a UTF-8 "
@@ -2664,12 +2556,10 @@ def test_a_source_under_a_directory_that_is_not_utf8_is_not_offered_numba_cache_
 
 
 def test_a_zip_member_in_an_ipykernel_directory_that_is_not_utf8_is_told_so(tmp_path, monkeypatch):
-    # numba's IPython locator reads a member's source through zipimport,
-    # which decodes it as UTF-8 and raises for one that is not, as numba then
-    # does at decoration; the probe's loader read it the same way, and the
-    # UnicodeDecodeError came out of the check as its own, no cache error, so
-    # the import died where the warning should have stood. inspect's error
-    # tells such a member, and the remedy reads why.
+    """A member in an ``ipykernel_`` directory whose source is not UTF-8 makes the check raise inspect's ``OSError``, a
+    cache error, and the remedy asks for the member to be shipped as UTF-8. zipimport raises ``UnicodeDecodeError`` for
+    such a source, which is no cache error, so the probe's loader returns no source instead."""
+    # The remedy reads the member from the archive to say where its bytes stop being UTF-8.
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -2694,11 +2584,9 @@ def test_a_zip_member_in_an_ipykernel_directory_that_is_not_utf8_is_told_so(tmp_
 
 
 def test_a_listed_locator_whose_module_raises_on_import_is_no_locator_for_the_remedy(tmp_path, monkeypatch):
-    # An entry of NUMBA_CACHE_LOCATOR_CLASSES whose module raises on import,
-    # anything, not importlib's error alone, numba raises as its own at
-    # decoration, and the check before any remedy; the remedy, reached for
-    # an error of the cache's, imported the module for the entry and raised
-    # the module's error in place of the remedy.
+    """``_locators`` leaves out a listed class whose module raises on import, with any error, so the remedy for a cache
+    error does not raise the module's error. numba raises that error at decoration, and the check raises it before any
+    remedy is composed."""
     import numba
     import numbox.core.configurations as configurations
     (tmp_path / "badmod.py").write_text("raise RuntimeError('boom on import')\n")
@@ -2717,10 +2605,9 @@ def test_a_listed_locator_whose_module_raises_on_import_is_no_locator_for_the_re
 
 
 def test_an_empty_path_object_as_an_errors_name_is_the_working_directory_not_an_archive_above(tmp_path, monkeypatch):
-    # A path object built from an empty string names the working directory,
-    # which the remedy tells as a location that is none of numba's; for a
-    # member under that directory it stood as a path above the file, and a
-    # FileNotFoundError naming it was told as the member's moved archive.
+    """An error whose file name is a path object built from an empty string names the working directory, and the remedy
+    names ``.`` as a location that numba did not choose. The working directory lies above a member under it, but the
+    remedy does not read it as the member's moved archive."""
     import numba
     import numbox.core.configurations as configurations
     monkeypatch.setattr(numba.config, "CACHE_DIR", "")
@@ -2741,12 +2628,9 @@ def test_an_empty_path_object_as_an_errors_name_is_the_working_directory_not_an_
 @pytest.mark.parametrize("placement", ["on disk", "a .zip member"])
 def test_an_error_naming_no_numba_cache_under_a_temporary_ipython_directory_is_not_told_ipythondir(
         tmp_path, monkeypatch, placement):
-    # The error numba's first save raises under an IPython giving a temporary
-    # directory per call names the numba_cache it could not save in, as the
-    # check's does; the remedy for that case took any error naming a location
-    # that is none of numba's, and told IPYTHONDIR for a cell file on disk
-    # that the in-tree locator took, IPython never reached, on a caller's
-    # error naming an unrelated place.
+    """A caller's error that names an unrelated location, under an IPython that gives temporary directories, gets the
+    remedy for that location and not ``IPYTHONDIR``. The remedy names ``IPYTHONDIR`` only for an error that names a
+    ``numba_cache``, as the check's error and numba's first save's error under such an IPython do."""
     import tempfile
     import types
     import numba
@@ -2758,6 +2642,7 @@ def test_an_error_naming_no_numba_cache_under_a_temporary_ipython_directory_is_n
     monkeypatch.setitem(sys.modules, "IPython", types.ModuleType("IPython"))
     monkeypatch.setitem(sys.modules, "IPython.paths", paths)
     if placement == "on disk":
+        # The in-tree locator accepts the cell file on disk, so numba never reaches the IPython locator.
         py_file = tmp_path / "ipykernel_123" / "cell.py"
         py_file.parent.mkdir()
         py_file.write_text("def cell():\n    return 1\n")
@@ -2775,10 +2660,8 @@ def test_an_error_naming_no_numba_cache_under_a_temporary_ipython_directory_is_n
 
 
 def test_the_windows_separator_skip_fails_the_test_on_any_other_platform(monkeypatch):
-    # The end-to-end .zip tests skip where the import met numba issue 10889,
-    # numba 0.68.0's on Windows alone; keyed on the remedy's text in stderr,
-    # the skip hid that remedy wrongly given on Linux, to a module shipped
-    # as .pyc alone for one, as a skip. The skip holds on Windows alone.
+    """``_skip_for_windows_separator_bug`` skips a test for the remedy of numba issue 10889 only on Windows, and fails
+    the test if that remedy appears on any other platform. Other text in ``stderr`` neither skips nor fails the test."""
     stderr = f"RuntimeWarning: numba cannot cache numbox here (...). {windows_path_sep_bug}, x, which no archive holds"
     monkeypatch.setattr(os, "name", "posix")
     with pytest.raises(AssertionError, match="the Windows separator remedy on posix"):
@@ -2790,10 +2673,11 @@ def test_the_windows_separator_skip_fails_the_test_on_any_other_platform(monkeyp
 
 
 def test_an_ipython_that_gives_its_directory_once_and_then_raises_is_not_read_as_temporary(tmp_path, monkeypatch):
-    # The remedy asks IPython for its cache directory twice to tell a new
-    # temporary directory from a steady one; an IPython that answers once and
-    # raises on the second call gave no second directory, and the remedy,
-    # reading the raise as a new answer, blamed a temporary directory.
+    """A member's error that names IPython's ``numba_cache`` gets the remedy for that location, without temporary
+    directories or ``IPYTHONDIR``, if IPython gives its cache directory once and raises at the next request."""
+    # The remedy asks IPython a second time only to tell whether IPython gives a new temporary directory on every call,
+    # and it asks so only for an error with ENOENT. This error has EACCES, so the remedy asks IPython once, and the
+    # stand-in never raises.
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -2830,11 +2714,9 @@ def test_an_ipython_that_gives_its_directory_once_and_then_raises_is_not_read_as
 
 @pytest.mark.parametrize("placement", ["on disk", "a .zip member"])
 def test_a_callers_error_with_no_errno_and_no_name_is_not_read_as_inspects(tmp_path, monkeypatch, placement):
-    # inspect's error for a source it cannot read has no errno and no name,
-    # and so can a caller's, OSError("Disk quota exceeded on /home"); the
-    # remedy read every such error for a file numba's IPython locator takes
-    # as inspect's and told the reader to make the file readable. inspect's
-    # are known by their words.
+    """A caller's ``OSError`` with no errno and no file name, for a file that numba's IPython locator accepts, is not
+    read as inspect's error, which has no errno and no file name either. The remedy knows inspect's errors by their
+    messages, so it gives the caller's message as the reason and does not ask for the file to be made readable."""
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -2867,11 +2749,9 @@ def test_a_callers_error_with_no_errno_and_no_name_is_not_read_as_inspects(tmp_p
 
 
 def test_the_check_reads_the_lines_linecache_holds_for_a_file_not_on_disk(tmp_path, monkeypatch):
-    # A traceback through a .zip member, or inspect, leaves the member's lines
-    # in the process-wide linecache under its name, and inspect reads those
-    # for the probe before it asks the module's loader; the check gave the
-    # probe's source to inspect under that name instead for the time numba
-    # picked the locator, and owed what was there back.
+    """The check leaves a member's linecache entry as it found it, and numba reads the member's lines from that entry
+    while it picks the locator. A traceback through a member, or a read by inspect, leaves such an entry, and inspect
+    reads the entry before it asks the module's loader."""
     import linecache
     import types
     import numba
@@ -2908,15 +2788,11 @@ def test_the_check_reads_the_lines_linecache_holds_for_a_file_not_on_disk(tmp_pa
     pytest.param("IPythonCacheLocator,InTreeCacheLocator", "numba_cache", id="the IPython locator first"),
 ])
 def test_a_cell_file_on_disk_is_asked_without_touching_linecache(tmp_path, monkeypatch, locators, made):
-    # inspect reads a file on disk itself, and asks the probe's module's
-    # loader, which reads a .zip member from the archive, for no file on disk.
-    # The probe's source, given to inspect for every file once, stood in for the
-    # real file's lines in the process-wide linecache while numba picked the
-    # locator, and a locator reading another function's source from the file
-    # meanwhile, as numba's IPython locator reads the function's own, read the
-    # probe's two lines instead. numba's own order tries the in-tree locator
-    # before the IPython one, which takes a cell file on disk only listed
-    # ahead of it.
+    """The check of a cell file on disk leaves linecache's lines for the file unchanged while numba picks the locator
+    and afterward. inspect reads a file on disk from the file itself, so a reader of the file's source during the
+    check reads the file's own lines."""
+    # In numba's order, the in-tree locator accepts the cell file before the IPython locator, which accepts the file
+    # only if the list puts it first.
     import linecache
     import types
     import numba
@@ -2948,12 +2824,9 @@ def test_a_cell_file_on_disk_is_asked_without_touching_linecache(tmp_path, monke
 
 
 def test_two_checks_of_a_file_not_on_disk_overlap_and_each_reads_the_members_source(tmp_path, monkeypatch):
-    # The probe's source was given under a lock, one check at a time, so that
-    # each check put back what it had found in the process-wide linecache,
-    # and a second check waited at the lock while the first held it. Each
-    # probe reads the member's source through a module of its own now, and
-    # leaves the member's lines, so there is nothing to put back and nothing
-    # to wait for.
+    """Two checks of one member can run at once in two threads, and each probe reads the member's source. Each probe
+    reads the source through a module of its own, so neither check waits for the other. Afterward linecache holds the
+    member's own lines, and no probe module remains in ``sys.modules``."""
     import inspect
     import linecache
     import threading
@@ -2990,7 +2863,7 @@ def test_two_checks_of_a_file_not_on_disk_overlap_and_each_reads_the_members_sou
     checks[0].start()
     assert inside["first"].wait(5)
     checks[1].start()
-    # The second check goes in while the first is still there.
+    # The second check reaches numba's locator while the first check waits there.
     assert inside["second"].wait(5)
     hold.set()
     for check in checks:
@@ -3011,14 +2884,9 @@ def test_two_checks_of_a_file_not_on_disk_overlap_and_each_reads_the_members_sou
 ])
 def test_a_zip_member_in_an_ipykernel_directory_refused_ipythons_location_is_told_ipythons_cache_directory(
         tmp_path, monkeypatch, refused, told):
-    # numba's IPython locator takes a member of a .zip in an ipykernel directory
-    # before the .zip locator is reached, and caches it in numba_cache under
-    # IPython's cache directory, which the error names, or a file numba writes
-    # in it. The remedy, taking every OSError for a source not on disk as the
-    # .zip's, told that location as the user's cache directory, with what moves
-    # that directory, where it is IPython's and the remedy is the one a cell
-    # file on disk gets there, with no NUMBA_CACHE_DIR to offer for a source
-    # not on disk.
+    """A member in an ``ipykernel_`` directory whose error names IPython's ``numba_cache``, or a file in it, gets the
+    remedy for IPython's location, as a cell file on disk does, but without ``NUMBA_CACHE_DIR``. numba's IPython
+    locator accepts such a member before numba reaches the ``.zip`` locator."""
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -3044,13 +2912,9 @@ def test_a_zip_member_in_an_ipykernel_directory_refused_ipythons_location_is_tol
 
 
 def test_a_zip_members_error_is_answered_without_asking_ipython_for_its_cache_directory(tmp_path, monkeypatch):
-    # numba's IPython locator takes a file in an ipykernel directory alone, so
-    # a .zip member anywhere else is never cached in IPython's cache directory;
-    # the remedy asked IPython for that directory all the same, to compare the
-    # error's path against it, and IPython, with its own directory unwritable,
-    # under a read-only home, warned on every import of the package and left a
-    # temporary directory behind. The directory is asked for where numba's
-    # IPython locator takes the file and is listed.
+    """The remedy for a ``.zip`` member outside an ``ipykernel_`` directory never asks IPython for its cache directory.
+    Under a read-only home, IPython warns and creates a temporary directory each time it is asked, so the remedy asks
+    only if numba reaches its IPython locator and that locator accepts the file."""
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -3072,8 +2936,8 @@ def test_a_zip_members_error_is_answered_without_asking_ipython_for_its_cache_di
     monkeypatch.setitem(sys.modules, "IPython.paths", paths)
     py_file = str(tmp_path / "bundle.zip" / "package" / "module.py")
     location = tmp_path / "user-cache" / "numba" / _CacheLocator.get_suitable_cache_subpath(py_file)
-    # The location is there and refuses, as a directory made can; one not
-    # there is told the directory it cannot be made under as well.
+    # The location exists and refuses the file. For a location that does not exist, the remedy would also name the
+    # directory under which numba cannot create it.
     location.mkdir(parents=True)
     remedy = configurations.cache_remedy(py_file, OSError(errno.EACCES, "Permission denied", str(location)), "silence")
     assert remedy == (
@@ -3086,10 +2950,9 @@ def test_a_zip_members_error_is_answered_without_asking_ipython_for_its_cache_di
     ("linux", ", through XDG_CACHE_HOME or HOME"), ("darwin", ", through HOME"), ("win32", ""),
 ])
 def test_the_user_cache_directory_is_told_what_moves_it_on_the_platform(tmp_path, monkeypatch, platform, moved_through):
-    # numba's appdirs puts the user's cache directory under XDG_CACHE_HOME or
-    # HOME on Linux, under HOME alone on macOS, and asks the system on Windows,
-    # so "through XDG_CACHE_HOME or HOME" sent a macOS reader to a variable that
-    # moves nothing, for a source on disk and for a .zip alike.
+    """The remedy that asks for the user's cache directory at a shorter path names the variables that set that
+    directory on the platform: ``XDG_CACHE_HOME`` or ``HOME`` on Linux, ``HOME`` on macOS, and none on Windows. It
+    names them alike for a source on disk and for a ``.zip`` member."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -3100,6 +2963,8 @@ def test_the_user_cache_directory_is_told_what_moves_it_on_the_platform(tmp_path
     py_file.write_text("")
     user_cache_dir = configurations.AppDirs(appname="numba", appauthor=False).user_cache_dir
     location = os.path.join(user_cache_dir, _CacheLocator.get_suitable_cache_subpath(str(py_file)))
+    # The test sets sys.platform after it reads the user's cache directory, so that the platform changes only the
+    # remedy's text.
     monkeypatch.setattr(sys, "platform", platform)
     on_disk = configurations.cache_remedy(
         str(py_file), OSError(errno.ENAMETOOLONG, "File name too long", location), "silence")
@@ -3122,16 +2987,12 @@ def test_the_user_cache_directory_is_told_what_moves_it_on_the_platform(tmp_path
 ])
 def test_numba_cache_dir_is_offered_only_where_numba_tries_it_before_the_location_it_took(
         tmp_path, monkeypatch, locators, offered):
-    # numba takes NUMBA_CACHE_LOCATOR_CLASSES as the locators and
-    # their order, each entry a class of numba's caching module by its name or
-    # its dotted path. NUMBA_CACHE_DIR is an alternative to the __pycache__
-    # numba took only where numba tries the variable before that: a set one
-    # was passed over, an unset one would be taken. The IPython and .zip
-    # locators take no plain file on disk, so one of them ahead changes
-    # nothing, where the first entry's name alone said another locator was
-    # first. numba's InTreeCacheLocatorFsAgnostic caches in the __pycache__ as
-    # its parent does, and keyed by name alone it was no in-tree locator, so
-    # its too-long __pycache__ got "that location" and no cure.
+    """For a ``__pycache__`` too long, the remedy offers ``NUMBA_CACHE_DIR`` only if numba tries the variable's locator
+    before the in-tree one, whether the list names classes by name or by dotted path. The IPython and ``.zip`` locators
+    accept no plain file on disk, so one of them listed first changes nothing, and ``InTreeCacheLocatorFsAgnostic``
+    counts as the in-tree locator, because it caches in the same ``__pycache__``."""
+    # If numba tries a set variable before the location that it chose, numba skipped the variable, so the remedy names
+    # the variable as one that numba could not use. numba strips the space after a comma in the list.
     import numba
     from numbox.core.configurations import cache_remedy
     monkeypatch.setattr(numba.config, "CACHE_DIR", str(tmp_path / "cache"))
@@ -3147,8 +3008,8 @@ def test_numba_cache_dir_is_offered_only_where_numba_tries_it_before_the_locatio
         remedy)
 
 
-# Each case: whether NUMBA_CACHE_DIR is set, NUMBA_CACHE_LOCATOR_CLASSES, and
-# the remedy before "or silence".
+# Each case gives whether NUMBA_CACHE_DIR is set, the value of NUMBA_CACHE_LOCATOR_CLASSES, and the remedy up to its
+# last clause, "or silence".
 NO_LOCATOR_CASES = {
     "unset": (False, "", "Set NUMBA_CACHE_DIR to a writable directory"),
     "set, passed over": (
@@ -3174,17 +3035,12 @@ NO_LOCATOR_CASES = {
 
 @pytest.mark.parametrize("setting", list(NO_LOCATOR_CASES))
 def test_no_locator_for_a_source_on_disk_is_told_what_numba_would_take(tmp_path, monkeypatch, setting):
-    # numba raises "no locator available" where it passed every location over.
-    # "Set NUMBA_CACHE_DIR to a writable directory" was the answer whatever the
-    # setting: to a NUMBA_CACHE_DIR too deep for numba to make its directory in,
-    # where a writable one as deep cures nothing, and to a locator list numba
-    # reads from NUMBA_CACHE_LOCATOR_CLASSES without the
-    # user-provided locator, where numba never reads the variable. With that
-    # locator anywhere in the list numba reads the variable once the locators
-    # before it have passed, so its place in the list changes nothing here. A
-    # list of numba's IPython and .zip locators alone has no locator for a
-    # plain file on disk, and "make one of those locations writable" asked for
-    # what no listing can give.
+    """numba's error that no locator accepts a source on disk gets a remedy that fits the settings of
+    ``NUMBA_CACHE_DIR`` and ``NUMBA_CACHE_LOCATOR_CLASSES``. The user-provided locator's place in the list does not
+    change the remedy, because numba reads the variable once the locators before it skip the file."""
+    # A set variable that numba skipped names a directory that numba could not write in, or one too deep for numba's
+    # own directory. A writable directory at the same depth would not help, so the remedy asks for a short path. The
+    # variable here names a long path.
     import numba
     from numbox.core.configurations import cache_remedy
     py_file = tmp_path / "package" / "module.py"
@@ -3200,13 +3056,10 @@ def test_no_locator_for_a_source_on_disk_is_told_what_numba_would_take(tmp_path,
 
 
 def test_a_location_too_long_under_the_zip_locator_listed_first_is_the_users_cache_directorys(tmp_path, monkeypatch):
-    # numba's .zip locator takes any path with ".zip" in it before every
-    # locator after it, and caches one with a part ending in ".zip", a
-    # directory of that name included, under the user's cache directory.
-    # Listed first it leaves
-    # NUMBA_CACHE_DIR unread for such a path, where the remedy, holding that
-    # locator to take no file on disk, left it out of the order and offered
-    # the variable.
+    """A source on disk under a directory named ``bundle.zip``, with the ``.zip`` locator listed first, gets a remedy
+    for a path too long that names the user's cache directory and does not offer ``NUMBA_CACHE_DIR``. The ``.zip``
+    locator accepts any path that contains ``.zip`` and caches it under the user's cache directory, so numba never reads
+    the variable for that path."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -3232,8 +3085,8 @@ def test_a_location_too_long_under_the_zip_locator_listed_first_is_the_users_cac
         f"{configurations._moved_through()}; or silence"), remedy
 
 
-# Each case: whether NUMBA_CACHE_DIR is set, NUMBA_CACHE_LOCATOR_CLASSES, and
-# the remedy before "or silence".
+# Each case gives whether NUMBA_CACHE_DIR is set, the value of NUMBA_CACHE_LOCATOR_CLASSES, and the remedy up to its
+# last clause, "or silence".
 @pytest.mark.parametrize("cache_dir_set, locators, expected", [
     (False, "", "Set NUMBA_CACHE_DIR to a writable directory"),
     pytest.param(
@@ -3260,19 +3113,16 @@ def test_a_location_too_long_under_the_zip_locator_listed_first_is_the_users_cac
 ])
 def test_a_source_on_disk_with_zip_in_its_path_and_no_archive_is_told_by_the_zip_locators_place(
         tmp_path, monkeypatch, cache_dir_set, locators, expected):
-    # numba's .zip locator takes a path with ".zip" in it and raises ValueError
-    # where no part of the path ends in .zip. numba tries the locators before
-    # it and none after, so the error means the ones before it passed the file
-    # over: in numba's own order that is every locator for a file on disk, and
-    # the no-locator remedy applies; listed first it takes the file first, and
-    # the remedy offered NUMBA_CACHE_DIR, which numba never reaches; listed
-    # after one locator for a file on disk and before the user-provided one,
-    # it raised before numba read NUMBA_CACHE_DIR, and the remedy, answering
-    # the error only where the .zip locator came first, said the variable, set
-    # and writable, was one numba could not use. The user-provided locator
-    # takes a file only with NUMBA_CACHE_DIR set, so listing it is asked for
-    # with the variable set, as the no-locator remedy asks; without that, the
-    # reader who listed it first saw the same error again.
+    """The ``.zip`` locator's ``ValueError``, for a source on disk whose path contains ``.zip`` but has no part that
+    ends in it, gets a remedy that depends on the locator's place in the list. numba tries the locators before the
+    ``.zip`` one and none after it, so the error means that those before it skipped the file."""
+    # In numba's order, every locator for a file on disk comes before the .zip one. The remedy is then the one for
+    # numba's error that no locator accepts the file. Listed first, the .zip locator accepts the file before any
+    # locator for a file on disk, and the remedy asks for one of those to be listed before it. Listed before the
+    # user-provided locator, it raises before numba reads NUMBA_CACHE_DIR, so the remedy does not call a set variable
+    # one that numba could not use. Listed after that locator, it raises once numba has skipped the variable, and the
+    # remedy is the one for the variable. The user-provided locator accepts a file only while NUMBA_CACHE_DIR is set,
+    # so the remedy asks for that locator to be listed with the variable set.
     import numba
     from numbox.core.configurations import cache_remedy
     cache_dir = str(tmp_path / "cache")
@@ -3292,12 +3142,9 @@ def test_a_source_on_disk_with_zip_in_its_path_and_no_archive_is_told_by_the_zip
 ])
 def test_an_error_under_a_locator_list_with_no_locator_that_takes_the_file_is_told_the_list(
         tmp_path, monkeypatch, failure):
-    # A list with no locator that takes a source file on disk leaves numba no
-    # location for it, and numba's error is the no-locator one, which is told
-    # the list. An OSError a caller passes on under such a list was answered
-    # as if numba had taken a location: unnamed, "the location numba took"
-    # with no location to list after it, and named, that location at a
-    # shorter path, though the list keeps numba from caching the file at all.
+    """If no listed locator accepts a source file on disk, a caller's ``OSError``, with or without a file name, gets the
+    remedy that names the list, as numba's error that no locator accepts the file does. numba chooses no location under
+    such a list, so the remedy neither names a location nor asks for a shorter path."""
     import numba
     from numbox.core.configurations import cache_remedy
     monkeypatch.setattr(numba.config, "CACHE_DIR", "")
@@ -3318,13 +3165,9 @@ def test_an_error_under_a_locator_list_with_no_locator_that_takes_the_file_is_to
 ])
 def test_an_error_under_the_user_provided_locator_alone_with_numba_cache_dir_unset_is_told_to_set_it(
         tmp_path, monkeypatch, failure):
-    # numba's user-provided locator takes a file only with NUMBA_CACHE_DIR set,
-    # so a list of that locator alone leaves numba no locator while the
-    # variable is unset, and numba's error is the no-locator one, told to set
-    # the variable. An OSError a caller passes on under that list counted the
-    # locator as taking the file, and was told "the location numba took" with
-    # no location after it, or the location it named at a shorter path, where
-    # numba took none.
+    """If the list holds the user-provided locator alone and ``NUMBA_CACHE_DIR`` is unset, numba's error that no locator
+    accepts the file and a caller's ``OSError`` both get the remedy that asks for the variable to be set. That locator
+    accepts nothing while the variable is unset, so numba chooses no location."""
     import numba
     from numbox.core.configurations import cache_remedy
     monkeypatch.setattr(numba.config, "CACHE_DIR", "")
@@ -3338,6 +3181,8 @@ def test_an_error_under_the_user_provided_locator_alone_with_numba_cache_dir_uns
     assert cache_remedy(str(py_file), failure, "silence") == told, cache_remedy(str(py_file), failure, "silence")
 
 
+# These are the clauses of the archive remedy under NUMBA_CACHE_LOCATOR_CLASSES, whose value {locators} stands for.
+# They are the install on disk and the .zip, and the clause that each gains if the list lacks the locator it needs.
 ON_DISK = ("install numbox with its source files on disk, unpacked from any archive")
 LIST_ON_DISK = (", and list UserProvidedCacheLocator, with NUMBA_CACHE_DIR set, InTreeCacheLocator or UserWideCacheLocator "
                 "in NUMBA_CACHE_LOCATOR_CLASSES, {locators}, which has none of them")
@@ -3364,16 +3209,10 @@ SET_THE_VARIABLE = (", with NUMBA_CACHE_DIR set, which UserProvidedCacheLocator,
 ])
 def test_an_import_from_an_egg_under_a_locator_list_is_offered_each_way_with_the_locator_it_needs(
         tmp_path, monkeypatch, locators, cache_dir_set, on_disk, a_zip):
-    # The remedy for an archive numba does not cache offers the source files
-    # on disk, which the three locators for a file on disk take, or a .zip
-    # holding them, which the .zip locator alone takes. It offered both under
-    # any list, so under one without the .zip locator it offered a .zip numba
-    # then had no locator for, as under one without a locator for a file on
-    # disk it offered an install numba would not cache either; and the
-    # user-provided locator, alone of the three in the list, takes nothing
-    # without NUMBA_CACHE_DIR, so unset it is asked for with the install,
-    # where the in-tree or the user-wide one alone takes a file on disk as
-    # it is, and the install is offered as it is.
+    """The archive remedy for an ``.egg`` under a ``NUMBA_CACHE_LOCATOR_CLASSES`` offers each way to cache with the
+    locator that it needs: the install on disk with a locator for a file on disk, and a ``.zip`` with
+    ``ZipCacheLocator``. If the user-provided locator is the only listed one for a file on disk, the remedy also asks
+    for ``NUMBA_CACHE_DIR`` to be set, because that locator accepts nothing without it."""
     import numba
     from numbox.core.configurations import cache_remedy
     monkeypatch.setattr(numba.config, "CACHE_DIR", str(tmp_path / "cache") if cache_dir_set else "")
@@ -3396,11 +3235,9 @@ def test_an_import_from_an_egg_under_a_locator_list_is_offered_each_way_with_the
 ])
 def test_a_zip_import_under_a_locator_list_without_the_zip_locator_is_told_to_list_it(
         tmp_path, monkeypatch, locators, expected):
-    # numba caches a .zip through its .zip locator alone, so a list that leaves
-    # that locator out gives numba no locator for a source in a .zip, and the
-    # error is the no-locator one. The archive remedy, which reads the list for
-    # a source on disk only, told the reader to import from a .zip holding the
-    # source files, which they had done, and never named the list.
+    """A ``.zip`` member under a list without ``ZipCacheLocator`` gets the remedy that asks for that locator to be
+    listed, and not the archive remedy, which would offer the ``.zip`` that the reader already uses. numba caches a
+    ``.zip`` through that locator alone."""
     import numba
     from numbox.core.configurations import cache_remedy
     monkeypatch.setattr(numba.config, "CACHE_DIR", "")
@@ -3421,11 +3258,9 @@ def test_a_zip_import_under_a_locator_list_without_the_zip_locator_is_told_to_li
 ])
 def test_a_frozen_application_under_a_locator_list_without_the_user_wide_locator_is_told_to_list_it(
         tmp_path, monkeypatch, locators, expected):
-    # numba's user-wide locator alone takes a frozen application, whose source
-    # is not on disk, so a list that leaves it out gives numba no locator and
-    # the error is the no-locator one. The frozen remedy, reading no list,
-    # asked for the user's cache directory to be made writable, which it was
-    # and which numba never tried.
+    """A frozen application under a list without ``UserWideCacheLocator`` gets the remedy that asks for that locator to
+    be listed, and not for the user's cache directory to be made writable. numba caches a frozen application through
+    that locator alone, so under such a list it never tries the user's cache directory."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -3445,6 +3280,8 @@ def test_a_frozen_application_under_a_locator_list_without_the_user_wide_locator
     assert remedy == f"{expected}, or silence", remedy
 
 
+# NONE_OF_NUMBAS_OFF_DISK holds the remedies, by errno, for a source not on disk whose error names a location that
+# none of numba's locators chose.
 NONE_OF_NUMBAS_OFF_DISK = {
     "too long": ((errno.ENAMETOOLONG, "File name too long"),
                  "the path is too long for the file system, so put that location, {named}, at a shorter path"),
@@ -3463,18 +3300,12 @@ NONE_OF_NUMBAS_OFF_DISK = {
 ])
 def test_an_error_naming_ipythons_location_numbas_ipython_locator_did_not_take_is_told_the_location_as_named(
         tmp_path, monkeypatch, locators, in_numba_cache, refused):
-    # numba's .zip locator takes a file without trying its location, so a
-    # list with it before the IPython one leaves that one unreached for a
-    # .zip member in an ipykernel directory, and numba caches the member in
-    # the user's cache directory; the remedy answered an error a caller passes
-    # on naming IPython's numba_cache with IPython's cache directory all the
-    # same, a directory numba never used. And numba's IPython locator writes
-    # its files in numba_cache itself, with no directory under it, so a path
-    # under one is none of numba's, and was told as the .zip's directory to
-    # put at a shorter path through what moves the user's cache directory,
-    # which moves nothing of it. A location that is none of numba's is told
-    # as the error names it, as for a source on disk, and with nothing of
-    # where numba caches the file, which it is none of.
+    """A member's error that names a path under IPython's ``numba_cache`` that numba's IPython locator did not choose
+    gets the remedy for a location that no locator chose, as the error names it. numba never reaches the IPython
+    locator if the list puts the ``.zip`` locator first, and the IPython locator writes nothing in a subdirectory of
+    ``numba_cache``."""
+    # Listed first, the .zip locator accepts the member without trying its location, and numba caches the member under
+    # the user's cache directory. The error names a path elsewhere, so the remedy does not mention that directory.
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -3502,11 +3333,10 @@ def test_an_error_naming_ipythons_location_numbas_ipython_locator_did_not_take_i
 
 def test_a_zip_members_error_naming_the_zips_location_after_ipythons_locator_passed_it_over_is_told_the_location(
         tmp_path, monkeypatch):
-    # numba's IPython locator passes a location it cannot make or write over,
-    # and the .zip locator listed after it then takes the member and caches
-    # it in the user's cache directory: an error naming that location is the
-    # .zip's, under numba's own order and under one that lists the IPython
-    # locator first alike.
+    """A member's error that names the ``.zip`` locator's location, after numba's IPython locator skipped the member,
+    gets the ``.zip`` remedy for that location. The IPython locator skips a location that it cannot create or write in,
+    and the ``.zip`` locator listed after it, as in numba's own order, then caches the member in the user's cache
+    directory."""
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -3544,15 +3374,11 @@ def test_a_zip_members_error_naming_the_zips_location_after_ipythons_locator_pas
 @on_windows_under_numba_0_68_0
 def test_a_file_not_on_disk_numbas_ipython_locator_does_not_read_is_asked_without_touching_linecache(
         tmp_path, monkeypatch, locators, member):
-    # numba's IPython locator reads the function's source when it takes the
-    # file, through the probe's module's loader for a .zip member, which
-    # leaves the member's lines in the process-wide linecache; the probe's own
-    # source stood there instead, for every file not on disk, while numba
-    # picked the locator, and a reader in another thread, formatting a
-    # traceback through that file meanwhile, got the probe's two lines for it,
-    # for a .zip member in no ipykernel directory too, which that locator
-    # never takes. The linecache is untouched for a file no locator of that
-    # family numba reaches takes.
+    """The check puts no entry in linecache for a file not on disk that no IPython locator reached by numba accepts, and
+    IPython's directory is not created. numba's IPython locator alone reads the function's source, so for such a file
+    nothing reads the member while numba picks the locator."""
+    # The files are a member outside an ipykernel_ directory, and a member under a list that omits the IPython locator
+    # or puts the .zip locator first.
     import linecache
     import types
     import numba
@@ -3603,15 +3429,10 @@ def test_a_file_not_on_disk_numbas_ipython_locator_does_not_read_is_asked_withou
 ])
 def test_a_file_on_disk_under_a_zip_directory_with_the_zip_locator_first_is_answered_for_the_locators_numba_reaches(
         tmp_path, monkeypatch, refused, told):
-    # numba's .zip locator takes a path with .zip in it, a file on disk under
-    # a directory named so included, without trying its location, so numba
-    # reaches no locator listed after it. The remedy matched the error's path
-    # against the locations of those too, and an error naming the __pycache__
-    # beside the source, under a list with the in-tree locator after the .zip
-    # one, was told the package installed at a shorter path, for a location
-    # numba never used. The path is matched against the locations of the
-    # locators numba reaches alone, and any other is told as the error names
-    # it.
+    """If the list puts the ``.zip`` locator first, the remedy matches the error of a source on disk under a directory
+    named ``d.zip`` against the ``.zip`` locator's location alone. That locator accepts the file without trying its
+    location, so numba never reaches the in-tree locator listed after it, and the ``__pycache__`` beside the source is
+    a location that numba did not choose."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -3636,11 +3457,9 @@ def test_a_file_on_disk_under_a_zip_directory_with_the_zip_locator_first_is_answ
 
 
 def test_an_empty_path_object_names_the_working_directory_as_pathlib_reads_it(tmp_path, monkeypatch):
-    # An error that names no file, or an empty name, is told the locations
-    # numba could have taken; a path object has no empty name, pathlib
-    # reading an empty string as the working directory, ".", so one built
-    # from it names that directory, which is none of numba's, and is told as
-    # named, as the string "." is.
+    """An error whose file name is ``Path("")`` names the working directory, ``.``, and gets the remedy that the string
+    ``"."`` gets, because pathlib reads an empty string as ``.``. An empty string or empty bytes is no name, and such an
+    error gets the remedy that lists the locations numba could have chosen."""
     import numba
     import numbox.core.configurations as configurations
     monkeypatch.setattr(numba.config, "CACHE_DIR", "")
@@ -3662,13 +3481,9 @@ def test_an_empty_path_object_names_the_working_directory_as_pathlib_reads_it(tm
 
 
 def test_a_locator_entry_naming_no_class_is_left_to_numba_and_its_error_raised_as_it_was(tmp_path, monkeypatch):
-    # numba resolves a dotted entry of NUMBA_CACHE_LOCATOR_CLASSES to whatever
-    # the module holds under the name and fails, for want of from_function,
-    # at a function it decorates where it reaches that entry; the check
-    # read the entry as numba does and asked issubclass of it first, which
-    # raised a TypeError naming neither the entry nor the variable, ahead of
-    # numba's error. An entry that is no class is no locator here, numba's
-    # own error is raised as it was, and the remedy reads the list without it.
+    """A dotted entry of ``NUMBA_CACHE_LOCATOR_CLASSES`` that names no class makes the check raise numba's own
+    ``AttributeError``, which is no cache error, and the remedy reads the list without that entry. numba resolves the
+    entry to whatever the module holds under that name, and it fails when it calls the entry's ``from_function``."""
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -3701,11 +3516,11 @@ def test_a_locator_entry_naming_no_class_is_left_to_numba_and_its_error_raised_a
 
 @pytest.mark.parametrize("refused", ["CacheLocator", "SourceFileBackedLocatorMixin"])
 def test_a_listed_name_numba_refuses_is_left_out_as_numba_leaves_it(tmp_path, monkeypatch, refused):
-    # numba resolves a plain entry of NUMBA_CACHE_LOCATOR_CLASSES
-    # as a name of the caching module and refuse any other before a location
-    # is tried; the remedy read the two names of numba's base
-    # classes as those classes and answered for a list numba refuses, with
-    # one of their locations to make writable.
+    """A plain entry of ``NUMBA_CACHE_LOCATOR_CLASSES`` that names nothing in numba's caching module is left out of the
+    remedy's list, as numba refuses it. The check raises numba's ``RuntimeError``, which is no cache error, and the
+    remedy for a caller's error names the list as holding no locator for a file on disk."""
+    # The two names are those of numba's base classes, _CacheLocator and _SourceFileBackedLocatorMixin, without their
+    # leading underscore.
     import numba
     import numbox.core.configurations as configurations
     from numba.core import caching
@@ -3727,11 +3542,9 @@ def test_a_listed_name_numba_refuses_is_left_out_as_numba_leaves_it(tmp_path, mo
 
 
 def test_a_locator_entry_with_an_empty_module_path_is_left_out_and_numbas_error_raised_as_it_was(tmp_path, monkeypatch):
-    # numba imports the module of a dotted entry and lets the ValueError for
-    # an empty module path, ".InTreeCacheLocator", through at the first
-    # function it decorates; the remedy, reading the list, raised that
-    # ValueError itself instead of answering an error a caller passes on
-    # under such a list.
+    """A dotted entry with an empty module path, such as ``.InTreeCacheLocator``, makes the check raise importlib's
+    ``ValueError``, which is no cache error, and the remedy reads the list without that entry. numba does not catch
+    that error, so the first function that numba decorates raises it."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core import caching
@@ -3752,12 +3565,12 @@ def test_a_locator_entry_with_an_empty_module_path_is_left_out_and_numbas_error_
 @pytest.mark.parametrize("placement", ["a cell file on disk", "a .zip member in an ipykernel directory"])
 def test_an_ipython_that_raises_for_its_cache_directory_leaves_numba_no_location_of_ipythons(
         tmp_path, monkeypatch, placement):
-    # numba's IPython locator asks IPython for its cache directory when it
-    # makes its location, and passes the file over on OSError there as it does
-    # a location it cannot make; IPython raises one where it can make the
-    # directory nowhere. The remedy, asking IPython the same for the location
-    # to match the error's path against, raised that error instead of
-    # answering, for numba's no-locator error and for the .zip's alike.
+    """If IPython raises ``OSError`` for its cache directory, numba's IPython locator skips the file, and the remedy
+    treats IPython as giving no location instead of raising IPython's error. The test covers numba's error that no
+    locator accepts a cell file on disk, and an error that names the ``.zip`` locator's location for a member."""
+    # IPython raises such an error if it can create its directory nowhere. numba's IPython locator asks for the
+    # directory when it creates its location, and it skips the file on that error as on any location that it cannot
+    # create.
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -3793,8 +3606,8 @@ def test_an_ipython_that_raises_for_its_cache_directory_leaves_numba_no_location
         monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", "", raising=False)
         py_file = tmp_path / "bundle.zip" / "ipykernel_123" / "cell.py"
         location = tmp_path / "user-cache" / "numba" / _CacheLocator.get_suitable_cache_subpath(str(py_file))
-        # The location is there and refuses, as a directory made can; one not
-        # there is told the directory it cannot be made under as well.
+        # The location exists and refuses the file. For a location that does not exist, the remedy would also name
+        # the directory under which numba cannot create it.
         location.mkdir(parents=True)
         failure = OSError(errno.EACCES, "Permission denied", str(location))
         remedy = configurations.cache_remedy(str(py_file), failure, "silence")
@@ -3804,6 +3617,8 @@ def test_an_ipython_that_raises_for_its_cache_directory_leaves_numba_no_location
             f"{location} (Permission denied), so make room there, or make it writable, or silence"), remedy
 
 
+# Each case gives the value of NUMBA_CACHE_LOCATOR_CLASSES, the source's path under tmp_path, the error's errno and
+# message, and the remedy.
 NO_LOCATOR_TAKES_IT_OFF_DISK = {
     "a .zip member, too long": (
         "IPythonCacheLocator", "bundle.zip/package/module.py", (errno.ENAMETOOLONG, "File name too long"),
@@ -3824,15 +3639,10 @@ NO_LOCATOR_TAKES_IT_OFF_DISK = {
 @pytest.mark.parametrize("names", ["the location", "nothing"])
 def test_an_error_for_a_source_not_on_disk_under_a_list_with_no_locator_that_takes_it_is_told_the_list(
         tmp_path, monkeypatch, case, names):
-    # numba's .zip locator alone takes a .zip member in no ipykernel directory,
-    # and its user-wide one alone a frozen application's file, so a list
-    # without the one leaves numba no locator for the file, and its error is
-    # the no-locator one, told to list it. An OSError a caller passes on under
-    # such a list, naming a location or none, was answered as a .zip's or a
-    # frozen application's: that numba caches the file in the user's cache
-    # directory, and that location, or that directory, to make writable or put
-    # at a shorter path, while numba took none. It is told the list, as
-    # numba's no-locator error is, as for a source on disk.
+    """If the list lacks the one locator that accepts a source not on disk, a caller's ``OSError``, with or without a
+    file name, gets the remedy that asks for that locator to be listed. That locator is ``ZipCacheLocator`` for a member
+    outside an ``ipykernel_`` directory and ``UserWideCacheLocator`` for a frozen application, and numba chooses no
+    location without it."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -3855,6 +3665,8 @@ def test_an_error_for_a_source_not_on_disk_under_a_list_with_no_locator_that_tak
     assert configurations.cache_remedy(py_file, no_locator, "silence") == told
 
 
+# Each case gives the value of NUMBA_CACHE_LOCATOR_CLASSES, the source's path under tmp_path, the error's errno and
+# message, and the remedy up to its last clause.
 NO_NAME_OFF_DISK = {
     "a .zip member in an ipykernel directory, numba's order, a full disk": (
         "", "bundle.zip/ipykernel_123/cell.py", (errno.ENOSPC, "No space left on device"),
@@ -3892,17 +3704,10 @@ NO_NAME_OFF_DISK = {
 @pytest.mark.parametrize("case", [pytest.param(case, id=case) for case in NO_NAME_OFF_DISK])
 def test_an_error_naming_no_file_for_a_source_not_on_disk_is_told_the_locations_numba_could_have_taken(
         tmp_path, monkeypatch, case):
-    # numba's first save raises an OSError that names no file where a write
-    # fails, as on a full disk, and a caller can pass one on. Which location
-    # numba took cannot be told from it, so the remedy for a source on disk
-    # lists the ones numba could have taken; the remedy for a source not on
-    # disk told the user's cache directory, which for a .zip member in an
-    # ipykernel directory under numba's order, cached through its IPython
-    # locator in numba_cache under IPython's cache directory, is a directory
-    # numba never used, and for a .zip or a frozen application is above the
-    # directory numba took. It is told the locations numba could have taken,
-    # in numba's order and each once, and where IPython's is among them
-    # nothing of the user's cache directory as where numba caches the file.
+    """An ``OSError`` that names no file, for a source not on disk, gets a remedy that lists the locations numba could
+    have chosen, each once and in numba's order. If IPython's ``numba_cache`` is among them, the remedy does not say
+    that numba caches the file in the user's cache directory."""
+    # numba's first save raises such an error when a write fails, as on a full disk, and a caller can pass one on.
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -3933,13 +3738,10 @@ def test_an_error_naming_no_file_for_a_source_not_on_disk_is_told_the_locations_
 @pytest.mark.parametrize("refused", list(NONE_OF_NUMBAS_OFF_DISK))
 def test_an_error_naming_ipythons_location_with_ipython_not_importable_is_told_the_location_as_none_of_numbas(
         tmp_path, monkeypatch, refused):
-    # numba's IPython locator takes a .zip member in an ipykernel directory
-    # and imports IPython for its location, catching OSError alone, so with
-    # IPython not importable numba raises ImportError at decoration, no cache
-    # error, and caches the file nowhere; an error a caller passes on naming
-    # IPython's location is told it as none of numba's. The remedy opened with
-    # where numba caches a .zip, or a frozen application, the user's cache
-    # directory, which numba did not cache this file in.
+    """Without IPython, a member's error that names IPython's ``numba_cache`` gets the remedy for a location that no
+    locator chose, without saying where numba caches a ``.zip``. numba's IPython locator accepts the member and imports
+    IPython for its location, catching only ``OSError``, so numba raises ``ImportError`` at decoration and caches the
+    member nowhere."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -3974,13 +3776,11 @@ def test_an_error_naming_ipythons_location_with_ipython_not_importable_is_told_t
 ])
 def test_a_cell_numbas_ipython_locator_takes_by_its_name_is_asked_and_told_as_a_cell_file_is(
         tmp_path, monkeypatch, refused, told):
-    # numba's IPython locator takes a cell, "<ipython-...>", by its name, as it
-    # takes a file in an ipykernel directory, reads its source from linecache,
-    # where IPython holds it while it runs the cell, and caches it in
-    # numba_cache under IPython's cache directory: the check leaves linecache
-    # to the locator, which reads the cell as numba does, and the remedy is
-    # the one a cell file on disk gets. Nothing held the remedy to the cell:
-    # it told IPython's location as none of numba's.
+    """The check raises no error for a cell named ``<ipython-...>``, whose source linecache holds, and it creates
+    ``numba_cache`` under IPython's cache directory, as numba does. An error there gets the remedy that a cell file on
+    disk gets for IPython's location."""
+    # numba's IPython locator accepts a cell by its name and reads the cell's source from linecache, where IPython
+    # holds it while the cell runs. The check leaves linecache's entry for the cell as it was.
     import linecache
     import types
     import numba
@@ -4006,11 +3806,9 @@ def test_a_cell_numbas_ipython_locator_takes_by_its_name_is_asked_and_told_as_a_
 
 
 def test_a_frozen_application_whose_user_cache_directory_is_too_deep_is_told_a_shorter_path(tmp_path, monkeypatch):
-    # numba's user-wide locator passes a location it cannot make over, one too
-    # deep for the file system as an unwritable one, and numba's error for a
-    # frozen application is then its no-locator one, which gives no reason;
-    # the remedy asked for the user's cache directory to be made writable
-    # alone, which cures no path too long.
+    """A frozen application whose user cache directory cannot be created, because a component of its path is too long,
+    gets a remedy that offers a shorter path as well as write access. numba's user-wide locator skips such a location as
+    it skips an unwritable one, and numba's error that no locator accepts the file gives no reason."""
     import numba
     from numba.core import caching
     import numbox.core.configurations as configurations
@@ -4036,6 +3834,7 @@ def test_a_frozen_application_whose_user_cache_directory_is_too_deep_is_told_a_s
         f"path{configurations._moved_through()}, or silence"), remedy
 
 
+# Each case gives the value of NUMBA_CACHE_LOCATOR_CLASSES and the remedy up to its last clause.
 A_FROZEN_ZIP_PATH = {
     "the .zip locator first": (
         "ZipCacheLocator,UserWideCacheLocator",
@@ -4058,14 +3857,10 @@ A_FROZEN_ZIP_PATH = {
 @pytest.mark.parametrize("case", [pytest.param(case, id=case) for case in A_FROZEN_ZIP_PATH])
 def test_a_frozen_applications_path_with_zip_in_it_and_no_archive_is_answered_for_the_zip_locators_error(
         tmp_path, monkeypatch, case):
-    # numba's .zip locator takes a path with ".zip" in it without trying its
-    # location and raises where no part of the path ends in .zip, so a frozen
-    # application's file at such a path gets that error where the list puts
-    # the .zip locator before the user-wide one, which alone takes the file,
-    # or once the user-wide one passed its location over. The remedy answered
-    # with the user's cache directory to make writable, a directory numba never
-    # tried under such a list; it is the user-wide locator to list before the
-    # .zip one, or the location that one passed over, as for a source on disk.
+    """A frozen application whose path contains ``.zip`` but has no part that ends in it gets a remedy for the ``.zip``
+    locator's ``ValueError`` that depends on the list. If the list puts that locator before the user-wide one, which
+    alone accepts the file, the remedy asks for the user-wide locator to be listed first. In numba's order, the remedy
+    names the user's cache directory, which the user-wide locator could not use."""
     import numba
     from numba.core import caching
     import numbox.core.configurations as configurations
@@ -4098,17 +3893,12 @@ def test_a_frozen_applications_path_with_zip_in_it_and_no_archive_is_answered_fo
 ])
 def test_the_check_raises_inspects_error_naming_no_file_for_a_cell_file_on_disk_it_reads_no_source_in(
         tmp_path, monkeypatch, cell_file, order):
-    # numba's IPython locator reads the function's source, and for a file on
-    # disk inspect reads it from the file itself and raises OSError, naming no
-    # file and with no errno, where it reads no source there, a file it cannot
-    # read or, before Python 3.13, an empty one, which linecache gives a blank
-    # line from then on; the check raises that error before that locator
-    # tries its location, the locators numba tries before it having passed
-    # the file over, and is_a_cache_error admits it as it admits every
-    # OSError. The
-    # check's docstring said every OSError from it names the location numba
-    # picked, and the remedy told the location numba took, which it had not,
-    # as refusing a file.
+    """The check raises inspect's ``OSError``, with no errno and no file name, for a cell file on disk in which inspect
+    reads no source, before numba's IPython locator tries its location. The remedy asks for the file to be made
+    readable, with the source in it, and does not name a location that refused a file."""
+    # inspect reads no source in a file that cannot be read, or before Python 3.13 in an empty one. From 3.13,
+    # linecache holds an empty file as one blank line. is_a_cache_error counts inspect's error, as it counts every
+    # OSError.
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -4117,9 +3907,8 @@ def test_the_check_raises_inspects_error_naming_no_file_for_a_cell_file_on_disk_
     listed = "IPythonCacheLocator" if order == "the IPython locator alone" else ""
     monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", listed, raising=False)
     if order == "numba's order":
-        # The in-tree and user-wide locators try their locations first and
-        # pass the file over, the cell's directory unwritable and the user's
-        # cache directory under a file.
+        # In numba's order, the in-tree and user-wide locators try their locations first and skip the file: the cell's
+        # directory is read-only, and the user's cache directory lies under a file.
         from numba.core import caching
         blocker = tmp_path / "not_a_dir"
         blocker.write_text("")
@@ -4156,8 +3945,8 @@ def test_the_check_raises_inspects_error_naming_no_file_for_a_cell_file_on_disk_
     assert remedy == (
         f"numba's IPython locator reads the function's source from its file before trying its location, and read "
         f"none in {cell} (could not get source code): make the file readable, with the source in it; or silence"), remedy
-    # An error with no errno that names a file is a caller's, not inspect's,
-    # and is told the location it names.
+    # An error with no errno that names a file is a caller's and not inspect's, so the remedy names the location that
+    # the error gives.
     named = OSError("could not get source code")
     named.filename = str(tmp_path / "elsewhere")
     remedy = configurations.cache_remedy(str(cell), named, "silence")
@@ -4165,15 +3954,12 @@ def test_the_check_raises_inspects_error_naming_no_file_for_a_cell_file_on_disk_
 
 
 def test_a_source_not_on_disk_under_a_directory_named_for_a_zip_is_in_no_zip(tmp_path, monkeypatch):
-    # numba's .zip locator takes a path with ".zip" in it and finds the archive
-    # by a part of the path that ends in .zip, so a source under a directory
-    # named my.zipped is in no .zip: under a list without that locator, numba's
-    # no-locator error is told the source files on disk or a .zip holding them,
-    # with the locator each needs, and under numba's order the .zip locator
-    # takes the path and raises for the archive it finds no part of it to be,
-    # which is told the same. Nothing held the remedy to the part: with the
-    # substring enough, the no-locator error was told to list the .zip locator
-    # alone, which numba then raises through, and the suite passed.
+    """A source in an ``.egg`` under a directory named ``my.zipped`` is in no ``.zip``, so it gets the archive remedy,
+    under a list without ``ZipCacheLocator`` and under numba's order alike. The ``.zip`` locator finds the archive only
+    by a part of the path that ends in ``.zip``, and listing that locator alone would leave numba raising its
+    ``ValueError``."""
+    # Under the list, the archive remedy names the locator that each of its two ways needs. Under numba's order, the
+    # .zip locator accepts the path for its ".zip" and raises, because no part of the path ends in .zip.
     import numba
     import numbox.core.configurations as configurations
 
@@ -4200,11 +3986,10 @@ def test_a_source_not_on_disk_under_a_directory_named_for_a_zip_is_in_no_zip(tmp
 @pytest.mark.parametrize("entry", ["..InTreeCacheLocator", ".a.InTreeCacheLocator"])
 def test_a_locator_entry_with_a_relative_module_path_is_left_out_and_numbas_error_raised_as_it_was(
         tmp_path, monkeypatch, entry):
-    # numba imports the module of a dotted entry and lets importlib's TypeError
-    # for a relative module path, "..InTreeCacheLocator", through at the first
-    # function it decorates, as it lets the ValueError for an empty one; the
-    # remedy, reading the list, caught the ValueError and raised the TypeError
-    # itself instead of answering an error a caller passes on under such a list.
+    """A dotted entry with a relative module path, such as ``..InTreeCacheLocator``, makes the check raise importlib's
+    ``TypeError``, which is no cache error, and the remedy reads the list without that entry. numba does not catch that
+    error, as it does not catch the ``ValueError`` for an empty module path, so the first function that numba
+    decorates raises it."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core import caching
@@ -4225,13 +4010,10 @@ def test_a_locator_entry_with_a_relative_module_path_is_left_out_and_numbas_erro
 @pytest.mark.parametrize("entry", ["CacheImpl", "pathlib.PurePath"])
 def test_a_locator_entry_naming_a_class_with_no_from_function_is_left_out_as_one_naming_no_class_is(
         tmp_path, monkeypatch, entry):
-    # numba fails on a listed class with no from_function, its own CacheImpl or
-    # any other, as it fails on an entry naming no class, for want of that
-    # method at a function it decorates where it reaches the entry; the
-    # remedy left out the entry naming no class and kept the class, as a
-    # locator of its own that takes any file on disk, so the remedy with the
-    # entry lost the NUMBA_CACHE_DIR offer, and the entry alone was told to
-    # make one of its locations writable, a list with no locator at all.
+    """A listed class without ``from_function``, such as numba's ``CacheImpl``, is left out of the remedy's list, as an
+    entry that names no class is. The check raises numba's ``AttributeError``, which is no cache error, and the remedy
+    with the entry equals the remedy without it, so the class neither counts as a locator nor removes the offer of
+    ``NUMBA_CACHE_DIR``."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core import caching
@@ -4268,14 +4050,10 @@ def test_a_locator_entry_naming_a_class_with_no_from_function_is_left_out_as_one
 ])
 def test_an_error_naming_no_file_with_ipython_not_importable_says_nothing_of_the_user_cache_directory(
         tmp_path, monkeypatch, refused, told):
-    # numba's IPython locator takes a .zip member in an ipykernel directory
-    # before its .zip locator can, so an error naming no file for the member
-    # may be IPython's location's, and the remedy says nothing of the user's
-    # cache directory as where numba caches the file; it did so only where
-    # IPython gave its directory, and with IPython not importable, which
-    # numba raises ImportError for at decoration, opened with that directory
-    # as where numba caches a .zip, or a frozen application, against its own
-    # comment.
+    """Without IPython, an error that names no file for a member in an ``ipykernel_`` directory gets a remedy that does
+    not say that numba caches the member in the user's cache directory. numba's IPython locator comes before the
+    ``.zip`` locator for such a member, so the error may belong to the IPython locator, whether or not IPython gives a
+    directory."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -4309,13 +4087,10 @@ def test_an_error_naming_no_file_with_ipython_not_importable_says_nothing_of_the
 ])
 def test_an_error_naming_ipythons_location_with_ipython_not_importable_is_told_the_list_where_no_locator_has_a_place(
         tmp_path, monkeypatch, locators, told):
-    # numba's IPython locator imports IPython for its location and lets the
-    # ImportError through at decoration, so with IPython not importable numba
-    # caches a cell file nowhere and raises no cache error; an error a caller
-    # passes on naming IPython's location is told it as none of numba's where
-    # another listed locator has a place for the file, and the list where
-    # none has, as numba's no-locator error is told it. The docstring promised
-    # the location as named under any list.
+    """Without IPython, a caller's error that names IPython's location for a cell file on disk gets the remedy for a
+    location that no locator chose, if another listed locator has a place for the file. If no listed locator has one,
+    the error gets the remedy that names the list. numba's IPython locator does not catch the ``ImportError`` at
+    decoration, so numba never chooses IPython's location."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -4346,19 +4121,11 @@ def test_an_error_naming_ipythons_location_with_ipython_not_importable_is_told_t
 ])
 def test_a_listed_class_of_none_of_numbas_families_is_told_the_location_the_error_names(
         tmp_path, monkeypatch, placement, refused):
-    # NUMBA_CACHE_LOCATOR_CLASSES exists for a locator of the reader's own, a
-    # class of none of numba's families, with a from_function and a place of
-    # its own that the remedy cannot know; numba caches through it, and the
-    # check's error names its location. The remedy read the class as taking
-    # files on disk alone and as having no place, so a path too long on disk
-    # was told to make one of the list's locations writable, with the cause
-    # dropped, and a .zip member's refused file to list the .zip locator, with
-    # the location dropped; upstream main named the cause for the one and the
-    # location for the other. The class takes any file for the remedy, and the
-    # location the error names, which no locator of numba's gives the file, is
-    # told as named, with the cause; an error naming no file is told the
-    # location numba took as the class's own, with no path to name, among
-    # numba's locators' places where those are reached.
+    """A reader's own locator class, outside numba's families, gets remedies that name the location in the check's
+    error, with the cause, for a source on disk and for a ``.zip`` member. For an error that names no file, the remedy
+    calls the location that numba chose the class's own, because only the class can name it."""
+    # A reader can list such a class in NUMBA_CACHE_LOCATOR_CLASSES. The class has a from_function and a place of its
+    # own, numba caches the file in that place, and the check's error names it.
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -4400,8 +4167,8 @@ def test_a_listed_class_of_none_of_numbas_families_is_told_the_location_the_erro
     if refused == "naming no file":
         remedy = configurations.cache_remedy(str(py_file), OSError(errno.ENOSPC, "No space left on device"), "silence")
         if placement.startswith("a source on disk"):
-            # OurLocator takes the file, asked, so the in-tree locator listed
-            # after it is not reached: the remedy named its __pycache__ too.
+            # OurLocator accepts the file when the remedy asks it, so numba never reaches the in-tree locator listed
+            # after it, and the remedy does not name the __pycache__.
             assert remedy == (
                 "the location numba took, OurLocator's own, where no file can be written (No space left on device): "
                 "make room there, or make it writable; or silence"), remedy
@@ -4441,12 +4208,9 @@ def test_a_listed_class_of_none_of_numbas_families_is_told_the_location_the_erro
 
 def test_a_frozen_applications_no_locator_error_under_a_class_of_none_of_numbas_families_is_told_the_user_wide_locator(
         tmp_path, monkeypatch):
-    # A locator of the reader's own listed alone can pass a frozen
-    # application's file over, and numba's error is then its no-locator one,
-    # which names nothing; the remedy, counting the class as having a place
-    # of its own, answered with the user's cache directory as one numba could
-    # not use, a directory numba never tried, where under a list of numba's
-    # own locators without the user-wide one it asks for that locator.
+    """A frozen application under a list of a reader's own locator alone, which skips the file, gets the remedy that
+    asks for ``UserWideCacheLocator`` to be listed. numba never tries the user's cache directory under that list, so
+    the remedy does not ask for that directory to be made writable."""
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -4474,12 +4238,9 @@ def test_a_frozen_applications_no_locator_error_under_a_class_of_none_of_numbas_
 
 
 def test_an_error_naming_a_file_descriptor_names_no_file(tmp_path, monkeypatch):
-    # os.stat(fd) and the other calls that take a descriptor raise OSError with
-    # the integer as the file name, and is_a_cache_error admits every OSError;
-    # the remedy read every name as a path and raised TypeError on the integer
-    # instead of answering. A name of another kind than str, bytes or a path
-    # object is none, and the error is told the locations numba could have
-    # taken, as one naming no file is.
+    """An ``OSError`` whose file name is an integer descriptor, as ``os.stat`` raises for one, gets the remedy for an
+    error that names no file. The remedy reads only a string, bytes or a path object as a file name, so it lists the
+    locations numba could have chosen and does not name the descriptor."""
     import numba
     import numbox.core.configurations as configurations
     monkeypatch.setattr(numba.config, "CACHE_DIR", "")
@@ -4508,15 +4269,12 @@ def test_an_error_naming_a_file_descriptor_names_no_file(tmp_path, monkeypatch):
 @pytest.mark.parametrize("ipython", ["cannot make its directory", "raises for its directory"])
 def test_a_file_numbas_ipython_locator_alone_takes_and_passes_over_is_told_ipythons_location(
         tmp_path, monkeypatch, placement, ipython):
-    # numba's IPython locator passes its location over where it cannot make or
-    # write in it, or where IPython raises for its directory, and a cell, which
-    # no other locator takes, then gets numba's no-locator error, as does a
-    # .zip member in an ipykernel directory under a list with no .zip locator
-    # after the IPython one; the remedy answered with the archive remedy, the
-    # source files on disk or a .zip holding them, which touch no cell, and
-    # answered so again for a cell under a list of the IPython locator and a
-    # class of none of numba's families, which passed the cell over too and
-    # is named as having.
+    """A cell, or a member in an ``ipykernel_`` directory under a list of the IPython locator alone, gets the remedy for
+    IPython's location when that locator skips the file. The remedy asks for the location or IPython's home to be made
+    writable, as the case needs, and it names a reader's own locator, listed too, as having skipped the file."""
+    # numba's IPython locator skips its location if it cannot create it or write in it, or if IPython raises OSError
+    # for its directory. No other locator accepts a cell, so numba then raises its error that no locator accepts the
+    # file. The archive remedy, with source files on disk or a .zip, would not help a cell.
     import linecache
     import types
     import numba
@@ -4537,14 +4295,13 @@ def test_a_file_numbas_ipython_locator_alone_takes_and_passes_over_is_told_ipyth
     py_file = "<ipython-input-3-0123456789ab>" if placement.startswith("a cell") else str(
         tmp_path / "bundle.zip" / "ipykernel_123" / "cell.py")
     if placement.startswith("a cell"):
-        # IPython holds a cell's source in linecache while it runs it, and
-        # numba's IPython locator reads it there.
+        # IPython holds a cell's source in linecache while the cell runs, and numba's IPython locator reads the source
+        # there.
         source = "def f():\n    pass\n"
         monkeypatch.setitem(linecache.cache, py_file, (len(source), None, source.splitlines(True), py_file))
     else:
-        # inspect reads a .zip member's source through the module's loader,
-        # which the probe has none of, so the check gives it the probe's
-        # where the archive holds the member's source.
+        # inspect reads a .zip member's source through its module's loader. The probe's loader reads the member from
+        # the archive, as zipimport does, so the test writes the member's source into the archive.
         with zipfile.ZipFile(tmp_path / "bundle.zip", "w") as zipped:
             zipped.writestr("ipykernel_123/cell.py", "def cell():\n    pass\n")
     if placement == "a cell":
@@ -4582,12 +4339,9 @@ def test_a_file_numbas_ipython_locator_alone_takes_and_passes_over_is_told_ipyth
 
 
 def test_the_check_raises_the_stamps_error_naming_the_archive_a_moved_zips_members_code_names(tmp_path, monkeypatch):
-    # numba reads the source's stamp at decoration, the archive's for a .zip
-    # member, and the check reads it as numba does, so for a member whose code
-    # names an archive since moved it raises FileNotFoundError naming that
-    # archive, no location of numba's, before any location is tried; the
-    # check's docstring excepted inspect's error alone from naming the
-    # location numba picked.
+    """The check raises ``FileNotFoundError`` naming the archive that a member's code names, if that archive has moved,
+    before numba tries any location. numba reads the archive's stamp at decoration, and the remedy names the archive as
+    missing and asks for the source files to be shipped."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -4606,14 +4360,17 @@ def test_the_check_raises_the_stamps_error_naming_the_archive_a_moved_zips_membe
     assert configurations.is_a_cache_error(raised.value)
     assert not (tmp_path / "user-cache").exists()
     remedy = configurations.cache_remedy(py_file, raised.value, "silence")
-    # Members compiled to name the archive's path now cache under numba 0.67
-    # and earlier; from 0.68 the archive must hold the sources too.
+    # Under numba 0.67 and earlier, members compiled to name the archive's present path cache, so the remedy offers that
+    # compilation. numba 0.68 and later also read the source from the archive, so there the remedy asks for the source
+    # files alone.
     recompile = "" if numba_version >= 68 else "compile the archive's .pyc members to name its path now, or "
     assert remedy == (
         f"the module's code names {archive}, which is not there: its .pyc was compiled to name that path, so "
         f"{recompile}ship its source files; or silence"), remedy
 
 
+# A_NAME_TOO_LONG maps each case of the test below to the marks that it runs under. A case's name gives the source's
+# place, the settings and the error.
 A_NAME_TOO_LONG = {
     "a .zip member, numba's order": [on_windows_under_numba_0_68_0],
     "on disk, NUMBA_CACHE_DIR set, the user-provided locator alone": [],
@@ -4641,24 +4398,13 @@ A_NAME_TOO_LONG = {
 @pytest.mark.parametrize("case", [pytest.param(case, marks=marks, id=case) for case, marks in A_NAME_TOO_LONG.items()])
 def test_a_source_directory_whose_name_is_too_long_for_numbas_cache_directory_name_is_told_a_shorter_name(
         tmp_path, monkeypatch, case):
-    # numba names the directory it caches a file in, under NUMBA_CACHE_DIR or
-    # the user's cache directory, after the source's directory, by its name
-    # and a hash of its path, forty-one bytes more, and a name longer than the
-    # file system takes can be made at no path: numba passes the location
-    # over, or the first save dies there for a .zip member, and the remedy
-    # asked for the user's cache directory at a shorter path, or a writable
-    # NUMBA_CACHE_DIR at a short path, which cure nothing there. It tells the
-    # name and its length, and asks for the file in a directory of a shorter
-    # name, with the __pycache__ beside a source on disk, which the in-tree
-    # locator names after nothing, made writable or that locator listed; a
-    # name that just fits is told as before. The name is counted as the
-    # file system counts it, in bytes, or in UTF-16 units on Windows and
-    # macOS, where a name of CJK characters that fits was counted in bytes
-    # and told too long; Windows refuses a name too long as an invalid one,
-    # errno EINVAL, and the check runs whatever the errno. A name of astral
-    # characters, each one code point, two UTF-16 units and four bytes, is
-    # too long in units where it fits in code points: the count by units
-    # was held by no test, and one by code points passed them all.
+    """If numba's directory name for a source, the source directory's name and 41 bytes more, is too long for the file
+    system, the remedy names that name and its length and asks for a directory of a shorter name. No path is short
+    enough for such a name, so for a source on disk the remedy offers the ``__pycache__`` beside the source, whose name
+    holds no hash, instead of a shorter path."""
+    # numba names its directory under NUMBA_CACHE_DIR or the user's cache directory with the source directory's name
+    # and a hash of its path. numba skips a location whose name is too long, and for a .zip member the first save fails
+    # there. A name that just fits gets the remedy for a location that numba could not use.
     import numba
     from numba.core import caching
     import numbox.core.configurations as configurations
@@ -4686,6 +4432,9 @@ def test_a_source_directory_whose_name_is_too_long_for_numbas_cache_directory_na
         listed = "ZipCacheLocator,UserWideCacheLocator"
     monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", listed, raising=False)
     directory = "d" * (limit - 41 if just_fits else limit - 35)
+    # The remedy counts a name as the file system does: in bytes, or in UTF-16 units on Windows and macOS. A name of
+    # CJK characters fits in UTF-16 units and not in bytes. A name of astral characters, each two UTF-16 units and four
+    # bytes, fits in code points and not in UTF-16 units.
     if "CJK" in case:
         directory = "\u5b57" * ((limit - 41) // 3 + 1)
     if "astral" in case:
@@ -4716,15 +4465,16 @@ def test_a_source_directory_whose_name_is_too_long_for_numbas_cache_directory_na
         Path(py_file).parent.chmod(0o555)
     try:
         if "an error naming" in case:
+            # Windows refuses a name too long as an invalid one, with EINVAL, and the remedy measures the name
+            # whatever the errno.
             refused = ((errno.EINVAL, "Invalid argument") if "invalid name" in case
                        else (errno.ENAMETOOLONG, "File name too long"))
             named = os.path.join(cache_dir or str(tmp_path / "user-cache" / "numba"), subpath)
             failure = OSError(*refused, named)
         elif "a caller's no-locator error" in case:
-            # numba's .zip locator takes the path without trying its
-            # location, so numba raises no no-locator error here, and a
-            # caller's reached a class listed after that locator, unreached,
-            # for its location and raised KeyError.
+            # numba's .zip locator accepts the path without trying its location, so numba raises no such error here,
+            # and the test builds it. The remedy measures the name only for the locators that numba reaches, and the
+            # user-wide locator listed after the .zip one is not among them.
             failure = RuntimeError(f"cannot cache function '_cache_probe': no locator available for file '{py_file}'")
         else:
             expected = OSError if case.startswith("a .zip") else RuntimeError
@@ -4749,9 +4499,8 @@ def test_a_source_directory_whose_name_is_too_long_for_numbas_cache_directory_na
             "under no such name; "
             "or silence"), remedy
     elif case.startswith("on disk"):
-        # The user-provided locator alone, with the variable unset, took no
-        # location and measured no name; the variable it takes nothing
-        # without is named beside the shorter name it would then need.
+        # The user-provided locator alone, with the variable unset, chose no location and measured no name. The remedy
+        # then names the variable, without which that locator accepts nothing, beside the shorter name.
         variable = (", with NUMBA_CACHE_DIR set, which UserProvidedCacheLocator takes nothing without"
                     if listed == "UserProvidedCacheLocator" and not cache_dir else "")
         assert remedy == (
@@ -4773,14 +4522,11 @@ def test_a_source_directory_whose_name_is_too_long_for_numbas_cache_directory_na
 ])
 def test_a_source_whose_path_holds_bytes_that_are_not_utf8_is_answered_where_numba_hashes_no_path(
         tmp_path, monkeypatch, placement):
-    # numba names the directory it caches a file in under NUMBA_CACHE_DIR or
-    # the user's cache directory with a SHA-1 of the source's directory path
-    # encoded as UTF-8, and raises UnicodeEncodeError for a path holding bytes
-    # that are not, decoded with surrogates, where a locator that names its
-    # directory so reaches the file; the remedy computed that name for every
-    # file and raised the same where numba hashed no path, an .egg member no
-    # locator takes and a source on disk under the in-tree locator alone, and
-    # the import died where upstream main warned.
+    """A source with bytes in its path that are not UTF-8 gets a remedy, and not a ``UnicodeEncodeError``, if numba
+    hashes no path for it. The test covers an ``.egg`` member, which no locator accepts, and a source on disk under the
+    in-tree locator alone. numba encodes the path as UTF-8 only to name its directory under ``NUMBA_CACHE_DIR`` or the
+    user's cache directory."""
+    # Python decodes such bytes in a path to surrogates, which UTF-8 cannot encode.
     import numba
     import numbox.core.configurations as configurations
 
@@ -4814,14 +4560,10 @@ def test_a_source_whose_path_holds_bytes_that_are_not_utf8_is_answered_where_num
 
 @pytest.mark.parametrize("ipython", ["giving its directory", "giving a temporary directory per call"])
 def test_a_cell_whose_source_linecache_does_not_hold_raises_inspects_error_as_numba_does(tmp_path, monkeypatch, ipython):
-    # numba's IPython locator reads a cell's source from linecache, where
-    # IPython holds it while it runs the cell, and inspect raises, with no
-    # errno and no name, for a cell linecache does not hold, before the
-    # locator tries its location; the check gave the probe's source to every
-    # file the locator takes by name and returned for such a cell, where numba
-    # raises at decoration, and the remedy told the location numba took as
-    # refusing a file, or, under an IPython giving temporary directories,
-    # blamed the directory the locator never tried.
+    """The check raises inspect's ``OSError`` for a cell whose source linecache does not hold, before numba's IPython
+    locator tries its location, as numba raises at decoration. The remedy says that numba caches a cell only while
+    IPython holds its source, also under an IPython that gives temporary directories."""
+    # IPython holds a cell's source in linecache while the cell runs, and numba's IPython locator reads it there.
     import linecache
     import tempfile
     import types
@@ -4853,15 +4595,9 @@ def test_a_cell_whose_source_linecache_does_not_hold_raises_inspects_error_as_nu
 @pytest.mark.parametrize("name", ["bundle.zip", "bundle.egg"])
 def test_a_zip_member_in_an_ipykernel_directory_compiled_to_pyc_alone_raises_inspects_error_as_numba_does(
         tmp_path, monkeypatch, name, ipython):
-    # numba's IPython locator reads the function's source through the module's
-    # loader for a .zip member, and zipimport gives none for a member compiled
-    # to .pyc alone, so numba raises inspect's error at decoration; the check
-    # gave the probe's source to every member a locator of that family takes
-    # and returned, where upstream main's check raised as numba does, and the
-    # remedy told the location numba took as refusing a file where the
-    # archive's remedy, its source files to ship, is the one, and, under an
-    # IPython giving temporary directories, blamed the directory the locator
-    # never tried.
+    """The check raises inspect's ``OSError`` for a member in an ``ipykernel_`` directory shipped as ``.pyc`` alone, as
+    numba raises at decoration, and the remedy is the archive remedy, which asks for the source files. numba's IPython
+    locator reads the source through the module's loader, and zipimport gives none for such a member."""
     import linecache
     import tempfile
     import types
@@ -4888,15 +4624,15 @@ def test_a_zip_member_in_an_ipykernel_directory_compiled_to_pyc_alone_raises_ins
     with pytest.raises(OSError, match="could not get source code") as raised:
         configurations.check_cache_location(py_file, configurations.LONGEST_CACHE_FILE_NAME)
     assert raised.value.errno is None and raised.value.filename is None
-    # linecache kept the probe's loader under the member's name, to ask again
-    # for a file whose source it found none of; the check takes it out.
+    # linecache stores the probe's loader in an entry of one item under the member's name, to ask it again later, and
+    # the check removes that entry.
     assert py_file not in linecache.cache
     assert temporary or not ipython_dir.exists()
     assert configurations.is_a_cache_error(raised.value)
     remedy = configurations.cache_remedy(py_file, raised.value, "silence")
     if name.endswith(".egg"):
-        # An archive numba's .zip locator never takes is told to be renamed
-        # to end in .zip, with its source files in it.
+        # The remedy asks for an archive that numba's .zip locator never accepts to be renamed to end in .zip, with its
+        # source files in it.
         assert remedy == (
             "NUMBA_CACHE_DIR has no effect here, because the source is not a file on disk: to cache, install numbox "
             f"with its source files on disk, unpacked from any archive, or rename the archive, {archive}, to end in "
@@ -4906,6 +4642,8 @@ def test_a_zip_member_in_an_ipykernel_directory_compiled_to_pyc_alone_raises_ins
         assert remedy == f"{ARCHIVE_REMEDY}; or silence", remedy
 
 
+# A_ZIP_REFUSED holds the remedies, by errno, for a .zip member whose error names its location under the user's cache
+# directory, without the opening that every such remedy shares.
 A_ZIP_REFUSED = {
     "unwritable": ((errno.EACCES, "Permission denied"),
                    "no file can be written in that directory, {location} (Permission denied), so make room there, or "
@@ -4919,13 +4657,9 @@ A_ZIP_REFUSED = {
 @pytest.mark.parametrize("refused", list(A_ZIP_REFUSED))
 def test_a_zip_import_refused_its_location_under_a_list_without_the_user_wide_locator_is_told_the_location(
         tmp_path, monkeypatch, refused):
-    # The remedy that asks for the user-wide locator to be listed is for
-    # numba's no-locator error, which a frozen application gets under a list
-    # without that locator. A .zip's error names the location numba took
-    # through its .zip locator, which such a list can hold, and the remedy is
-    # that location made writable or put at a shorter path, as under numba's
-    # own order; held to any error under such a list, the frozen remedy would
-    # tell a .zip's reader to list a locator numba takes no .zip through.
+    """A ``.zip`` member's error that names its location, under a list with the ``.zip`` locator and without the
+    user-wide one, gets the remedy for that location, as under numba's order. The remedy that asks for
+    ``UserWideCacheLocator`` to be listed is for a frozen application, which only that locator accepts."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -4940,8 +4674,8 @@ def test_a_zip_import_refused_its_location_under_a_list_without_the_user_wide_lo
     py_file = str(tmp_path / "bundle.zip" / "package" / "module.py")
     location = tmp_path / "user-cache" / "numba" / _CacheLocator.get_suitable_cache_subpath(py_file)
     error, told = A_ZIP_REFUSED[refused]
-    # The location is there and refuses, as a directory made can; one not
-    # there is told the directory it cannot be made under as well.
+    # The location exists and refuses the file. For a location that does not exist, the remedy would also name the
+    # directory under which numba cannot create it.
     location.mkdir(parents=True)
     remedy = configurations.cache_remedy(py_file, OSError(*error, str(location)), "silence")
     told = told.format(location=location, moved_through=configurations._moved_through())
@@ -4952,12 +4686,10 @@ def test_a_zip_import_refused_its_location_under_a_list_without_the_user_wide_lo
 
 @pytest.mark.parametrize("refused", list(A_ZIP_REFUSED))
 def test_a_zip_error_naming_a_file_numba_writes_in_its_location_is_told_the_location(tmp_path, monkeypatch, refused):
-    # The package's own check names the location numba took for a .zip, a
-    # directory of its own under the user's cache directory; numba's first
-    # save names the file it was writing there, under a temporary name, and a
-    # caller can pass that error on. The remedy quoted the file as the
-    # directory to make writable or to put at a shorter path, which the
-    # remedy for a source on disk, matching the file's directory too, did not.
+    """A ``.zip`` member's error that names a file in its location, as numba's first save names its temporary file,
+    gets the remedy for the location, a directory, and not for the file. The remedy compares the error's path and that
+    path's directory with the location, as it does for a source on disk."""
+    # The check's error names the location instead, and a caller can pass on the first save's error.
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -4983,15 +4715,9 @@ def test_a_zip_error_naming_a_file_numba_writes_in_its_location_is_told_the_loca
 @pytest.mark.parametrize("refused", list(A_ZIP_REFUSED))
 def test_a_frozen_applications_error_naming_a_file_numba_writes_in_its_location_is_told_the_location(
         tmp_path, monkeypatch, refused):
-    # numba's user-wide locator takes a frozen application's file, which is
-    # not on disk, besides any file on disk, and caches it in a directory of
-    # its own under the user's cache directory, as the .zip locator does a
-    # .zip; numba's first save names the file it was writing there, and the
-    # remedy is the directory, to make writable or put at a shorter path, as
-    # for a .zip. Nothing held the remedy to that locator taking the file:
-    # with the frozen application left to the locators for a file on disk, no
-    # locator took it, and the error was answered with the list, the archive
-    # remedy, instead of the location numba took.
+    """A frozen application's error that names a file in its location gets the remedy for that location under the
+    user's cache directory, as a ``.zip`` member's error does. numba's user-wide locator accepts a frozen application's
+    file, which is not on disk, and caches it in a directory of its own there."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -5016,11 +4742,9 @@ def test_a_frozen_applications_error_naming_a_file_numba_writes_in_its_location_
 
 
 def test_a_file_not_found_error_that_names_no_file_for_a_source_not_on_disk_gets_the_archive_remedy(tmp_path, monkeypatch):
-    # numba's errors name the file they are about, and so does the package's
-    # own check, but a caller can pass on a FileNotFoundError that names none.
-    # The check for a moved archive, which asks whether the source lies under
-    # the file the error names, added os.sep to that name before asking, and
-    # raised TypeError on None instead of returning a remedy.
+    """A caller's ``FileNotFoundError`` that names no file, for a source that is not on disk, gets the archive remedy
+    and not the remedy for a moved archive. No locator accepts a source that is not on disk, not in a ``.zip`` and not
+    a frozen application's, so the error gets the same remedy as numba's error that no locator accepts the file."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -5033,18 +4757,14 @@ def test_a_file_not_found_error_that_names_no_file_for_a_source_not_on_disk_gets
     monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", "", raising=False)
     py_file = str(tmp_path / "site" / "package" / "module.py")
     remedy = configurations.cache_remedy(py_file, FileNotFoundError(errno.ENOENT, "No such file or directory"), "silence")
-    # No locator takes a source neither on disk, in a .zip nor a frozen
-    # application's, so the error gets the remedy numba's no-locator one does.
     assert remedy == f"{ARCHIVE_REMEDY}; or silence", remedy
 
 
 def test_a_zip_member_whose_source_the_archive_does_not_hold_is_told_the_source_files_naming_the_member(
         tmp_path, monkeypatch):
-    # numba 0.68 and later read a member's source from the archive for the
-    # stamp, and zipfile's KeyError names the member it did not find, a module
-    # shipped as .pyc alone: the error was not the cache's, so the import died
-    # at the first decorated function, and the archive remedy told the source
-    # files without the member.
+    """zipfile's ``KeyError`` for a member whose source the archive does not hold is a cache error from numba 0.68, and
+    the remedy names the member as a module shipped as ``.pyc`` alone and asks for the source files. numba 0.68 and
+    later read the member's source from the archive for its stamp."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -5067,9 +4787,9 @@ def test_a_zip_member_whose_source_the_archive_does_not_hold_is_told_the_source_
 
 
 def test_a_zip_members_name_built_with_windows_separator_is_told_numba_0_68_1(tmp_path, monkeypatch):
-    # numba 0.68.0 builds the member's name with the platform's separator, so
-    # on Windows no archive holds it (numba issue 10889, fixed in 0.68.1): the
-    # archive's user was told to add source files that were there.
+    """On Windows, a ``KeyError`` for a member named with backslashes, which the archive holds under forward slashes,
+    gets the remedy for numba issue 10889: the install on disk or a numba release with the fix. numba 0.68.0 builds a
+    member's name with the platform's separator, and numba 0.68.1 reads the name as the archive gives it."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -5085,7 +4805,7 @@ def test_a_zip_members_name_built_with_windows_separator_is_told_numba_0_68_1(tm
     with zipfile.ZipFile(archive, "w") as zipped:
         zipped.writestr("numbox/core/bindings/libm.py", "")
     py_file = str(archive / "numbox" / "core" / "bindings" / "libm.py")
-    # zipfile quotes the name as Python does, each backslash doubled.
+    # zipfile quotes the name in its message as repr does, so each backslash is doubled.
     failure = KeyError("There is no item named 'numbox\\\\core\\\\bindings\\\\libm.py' in the archive")
     assert configurations.is_a_cache_error(failure) == (numba_version >= 68)
     remedy = configurations.cache_remedy(py_file, failure, "silence")
@@ -5098,10 +4818,9 @@ def test_a_zip_members_name_built_with_windows_separator_is_told_numba_0_68_1(tm
 
 
 def test_a_pyc_alone_in_a_zip_on_windows_is_told_the_source_files_not_numba_0_68_1(tmp_path, monkeypatch):
-    # The separator is in the name numba 0.68.0 builds for every member on
-    # Windows, a module shipped as .pyc alone among them, and that one numba
-    # 0.68.1 cannot cache either, the archive holding no source under the name
-    # it reads; the remedy read the backslash alone and promised that release.
+    """On Windows, a ``KeyError`` for a member shipped as ``.pyc`` alone gets the remedy that asks for the source files,
+    although numba 0.68.0 named the member with backslashes. The archive holds no source under the name that numba
+    0.68.1 reads either, so a release with the fix would not cache the module."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -5127,10 +4846,9 @@ def test_a_pyc_alone_in_a_zip_on_windows_is_told_the_source_files_not_numba_0_68
 
 
 def test_a_directory_named_zip_above_the_archive_is_told_as_the_directory_from_numba_0_68(tmp_path, monkeypatch):
-    # numba takes the first part of the path ending in .zip for the archive, a
-    # directory so named above it included, and from 0.68 opens it to read the
-    # member's source, which the directory refuses; the remedy told the reader
-    # to make room in the directory, or make it writable.
+    """A member of an archive under a directory named ``container.zip`` gets a remedy for the ``IsADirectoryError`` that
+    names that directory and asks for the archive to be put under a path without it. numba takes the first part of the
+    path that ends in ``.zip`` for the archive, and numba 0.68 and later open that part to read the member's source."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -5154,15 +4872,17 @@ def test_a_directory_named_zip_above_the_archive_is_told_as_the_directory_from_n
     ), remedy
 
 
+# SUBCLASSED_LOCATORS is a module of two locator classes that subclass numba's own, and the test lists them by their
+# dotted paths.
 SUBCLASSED_LOCATORS = (
     "from numba.core.caching import UserProvidedCacheLocator, ZipCacheLocator\n"
     "class OurUserProvided(UserProvidedCacheLocator):\n    pass\n"
     "class OurZip(ZipCacheLocator):\n    pass\n"
 )
 
-# Each case: NUMBA_CACHE_LOCATOR_CLASSES, whether NUMBA_CACHE_DIR is set, the
-# source's directory, which location the error names ("none" for numba's
-# no-locator error), and the remedy before "; or silence" or ", or silence".
+# Each case gives the value of NUMBA_CACHE_LOCATOR_CLASSES, whether NUMBA_CACHE_DIR is set, the source's directory,
+# the location that the error names, and the remedy up to its last clause. The location "none" stands for numba's
+# error that no locator accepts the file.
 SUBCLASS_CASES = {
     "the user-provided subclass took NUMBA_CACHE_DIR's location": (
         "our_locators.OurUserProvided,InTreeCacheLocator,UserWideCacheLocator", True, "site", "NUMBA_CACHE_DIR",
@@ -5184,12 +4904,9 @@ SUBCLASS_CASES = {
 
 @pytest.mark.parametrize("case", list(SUBCLASS_CASES))
 def test_a_subclass_of_one_of_numbas_locators_is_told_as_its_parent_is(tmp_path, monkeypatch, case):
-    # NUMBA_CACHE_LOCATOR_CLASSES takes a dotted path to any class, and a
-    # subclass of one of numba's locators caches where its parent does; numba
-    # takes it as it takes the parent. The remedy knew a subclass of the
-    # in-tree locator for one, and matched the user-provided and .zip
-    # locators by identity, so their subclasses got "that location, X" with no
-    # cure, and the variable the subclass reads counted as unread.
+    """A subclass of one of numba's locators, listed by its dotted path, gets the remedy that its parent gets, and a
+    subclass of the user-provided locator counts as reading ``NUMBA_CACHE_DIR``. A subclass accepts what its parent
+    accepts and caches where its parent does."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -5230,13 +4947,9 @@ def test_a_subclass_of_one_of_numbas_locators_is_told_as_its_parent_is(tmp_path,
 @pytest.mark.parametrize("placement", ["no locator", "too long", "archive"])
 def test_a_source_given_as_a_path_object_or_bytes_gets_the_remedy_its_string_gets(
         tmp_path, monkeypatch, placement, given):
-    # check_cache_location takes any path-like through os.fspath, and the
-    # remedy took one too until it asked '".zip" in py_file' of it, which a
-    # Path cannot answer: TypeError for every source on disk under numba's own
-    # order, and AttributeError at 'py_file.startswith' for a source not on disk.
-    # A bytes path, which check_cache_location takes as well, raised TypeError
-    # at the first 'startswith' asked of it with a str, os.fspath passing bytes
-    # through as bytes.
+    """``cache_remedy`` gives a source passed as a path object or as bytes the remedy that the source's string gets,
+    for numba's error that no locator accepts the source, for a path too long and for a moved archive.
+    ``check_cache_location`` accepts any path-like, and the remedy reads the source as a string, as the check does."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -5267,13 +4980,9 @@ def test_a_source_given_as_a_path_object_or_bytes_gets_the_remedy_its_string_get
 @pytest.mark.parametrize("placement", ["too long", "unwritable", "a .zip's location", "a moved archive"])
 def test_an_error_naming_its_file_as_a_path_object_or_bytes_gets_the_remedy_a_string_name_gets(
         tmp_path, monkeypatch, placement, given):
-    # An error names the file it refused as the call that raised it was given
-    # it, bytes for a call given bytes, or as a caller built it, a path object
-    # too, and the remedy read the name as a string: bytes matched none of
-    # the locations, which the remedy writes as strings, and were told as a
-    # location that is none of numba's, and for a source not on disk the
-    # check for a moved archive, adding os.sep to the name, raised TypeError
-    # on bytes and on a path object alike.
+    """An error that names its file as a path object or as bytes gets the remedy that the same error with a string name
+    gets, for a source on disk and for a ``.zip`` member. A call that receives bytes raises an error that names its file
+    as bytes, and a caller can build an error with a path object, so the remedy reads the name as a string."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -5306,9 +5015,9 @@ def test_an_error_naming_its_file_as_a_path_object_or_bytes_gets_the_remedy_a_st
 
 @pytest.mark.parametrize("placement", ["too long", "archive"])
 def test_the_remedies_that_name_a_package_name_the_one_given(tmp_path, monkeypatch, placement):
-    # A package built on numbox puts the question for its own files and takes
-    # the remedy from cache_remedy; the two remedies that tell the reader to
-    # install a package again named numbox whichever package had asked.
+    """The two remedies that ask for a package to be installed again, at a shorter path or with its source files on
+    disk, name the package passed as ``package``, and numbox by default. A package built on numbox runs the check on
+    its own files and passes its own name."""
     import numba
     from numbox.core.configurations import cache_remedy
     if placement == "too long":
@@ -5327,7 +5036,12 @@ def test_the_remedies_that_name_a_package_name_the_one_given(tmp_path, monkeypat
 
 
 def _function_names(tree):
-    """Each function's qualified name as numba names its cache files, angle brackets dropped, with its line."""
+    """Yield the qualified name of each function in ``tree``, as numba writes it in cache file names, with its line.
+
+    numba drops the angle brackets of ``<locals>``, so a nested function reads ``outer.locals.inner``. The line is that
+    of the ``def``. numba writes the line of the first decorator, which is at or before the ``def``, so the line given
+    here has at least as many digits.
+    """
     def walk(node, scope):
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -5341,12 +5055,13 @@ def _function_names(tree):
 
 
 def test_numbas_longest_file_name_for_the_package_is_within_the_probes_bound():
-    # The probe reserves LONGEST_CACHE_FILE_NAME bytes in a location for the
-    # files numba writes there: the module's stem, the function's qualified
-    # name, a line number, the interpreter tag with its abiflags and an index
-    # number, written under a 21-byte temporary name. Every function of the
-    # package must fit, decorated or not, and so must the builder's generated
-    # kernel, anchored to its file under a name of 64 hex characters.
+    """The longest cache file name that numba can write for a function of numbox, or for the graph maker that
+    ``make_graph`` compiles as code of ``builder.py``, fits within ``LONGEST_CACHE_FILE_NAME``. The check creates a file
+    with a name of that length in each location, so a longer name could still fail at numba's first save."""
+    # Each name holds the module's stem, the function's qualified name and line, and the interpreter tag. The tag
+    # carries t, the abiflags of a free-threaded build. Each name also holds the data file's number at the width that
+    # numbox reserves for it, and numba's temporary suffix of 21 bytes. The test counts every function, decorated or
+    # not. The graph maker's name holds a SHA-256 digest of 64 hexadecimal digits, and its line is given four digits.
     from numbox.core.configurations import LONGEST_CACHE_FILE_NAME, _OVERLOAD_DIGITS
     tag = f".py{sys.version_info[0]}{sys.version_info[1]}t.{'9' * _OVERLOAD_DIGITS}.nbc.tmp.0123456789abcdef"
     names = [f"{path.stem}.{qualname}-{lineno}{tag}"
@@ -5358,6 +5073,8 @@ def test_numbas_longest_file_name_for_the_package_is_within_the_probes_bound():
     assert len(longest) <= LONGEST_CACHE_FILE_NAME, longest
 
 
+# ANOTHER_ERROR_AT_THE_CACHE_SET_UP is a child that makes numba's cache set-up raise a RuntimeError of another kind,
+# and then imports numbox's configurations module.
 ANOTHER_ERROR_AT_THE_CACHE_SET_UP = (
     "import numba.core.caching as caching\n"
     "def refuse(self, py_func):\n"
@@ -5368,10 +5085,9 @@ ANOTHER_ERROR_AT_THE_CACHE_SET_UP = (
 
 
 def test_an_error_that_is_not_the_caches_is_raised_as_it_was(tmp_path):
-    # The fallback answers two errors of numba's cache set-up, no locator and
-    # a directory that cannot be written. A RuntimeError of another kind at
-    # the same step, a locator of the user's own refusing, say, is not its to
-    # turn into an uncached import with a remedy that does not apply.
+    """A ``RuntimeError`` other than numba's error that no locator accepts the file, raised while numba sets up the
+    cache, fails the import of numbox unchanged and without a warning. ``is_a_cache_error`` admits only numba's cache
+    errors, so the check does not turn another fault into an uncached import with a remedy that does not apply."""
     env = dict(os.environ, NUMBA_CACHE_DIR=str(tmp_path / "cache"))
     env.pop("NUMBOX_JIT_OPTIONS", None)
     run = subprocess.run([sys.executable, "-W", "always", "-c", ANOTHER_ERROR_AT_THE_CACHE_SET_UP],
@@ -5380,8 +5096,11 @@ def test_an_error_that_is_not_the_caches_is_raised_as_it_was(tmp_path):
     assert "compiles without a cache" not in run.stderr
 
 
-# The code numbox generates at run time, each child importing the helpers of
-# the test module that exercises it.
+# Each child runs code that numbox generates at run time. The five are a struct, an SQLite aggregate, a kernel for a
+# graph of formulas, a work graph with a derive function, and a table-valued function. numbox writes each piece of
+# generated code to an anchor, a file under NUMBA_CACHE_DIR or the user's cache directory. It compiles the code under
+# that file's name. Each child prints a word once its code has run. The two SQLite children import their helpers from
+# the test modules of those bindings.
 MAKE_A_STRUCTREF = (
     "from numba.core.types import StructRef, float32\n"
     "from numba.experimental.structref import register\n"
@@ -5451,14 +5170,9 @@ REGISTER_A_TVF = (
     (MAKE_A_STRUCTREF, "made"), (REGISTER_AN_AGGREGATE, "summed"), (REGISTER_A_TVF, "selected"),
 ], ids=["make_structref", "register_aggregate", "register_tvf"])
 def test_generated_code_compiles_uncached_where_its_anchor_cannot_be_written(tmp_path, child, word):
-    # The code numbox generates at run time is anchored to a file under
-    # NUMBA_CACHE_DIR or the user's cache directory, and the anchor was written
-    # whatever the cache option said. So with the tree writable, where the
-    # package's own functions cache, and the user's cache directory not,
-    # make_structref and the sqlite registrations died at the anchor's
-    # directory. The anchor is written to be cached from, and where it cannot
-    # be, the code compiles without a cache after a warning; NUMBA_CACHE_DIR at
-    # a writable directory cures it and holds the anchor.
+    """Generated code whose anchor cannot be written, under a read-only home with ``NUMBA_CACHE_DIR`` unset, compiles
+    without a cache after a warning that offers ``NUMBA_CACHE_DIR``. numbox's own functions cache beside their sources
+    here, and with the variable set to a writable directory, the anchor is written there and no warning appears."""
     home = tmp_path / "home"
     home.mkdir()
     home.chmod(0o555)
@@ -5484,14 +5198,14 @@ def test_generated_code_compiles_uncached_where_its_anchor_cannot_be_written(tmp
     (COMPILE_A_KERNEL, "executed", True), (BUILD_A_DERIVE, "derived", False),
 ], ids=["make_structref", "register_aggregate", "register_tvf", "compile_kernel", "derive"])
 def test_a_warm_anchor_in_a_directory_that_stopped_being_writable(tmp_path, child, word, warns):
-    # The anchor is on disk from an earlier run, in a NUMBA_CACHE_DIR that can
-    # no longer be written. numba then caches the code in the user's cache
-    # directory, and a check on the anchor's own directory would have turned
-    # caching off where numba had a location. With the user's cache directory
-    # unwritable too there is none, and a check that only wrote the anchor
-    # would have let the first decorated function die at numba's set-up. The
-    # builder's derive falls back without a word, as it did for an anchor it
-    # could not write.
+    """Generated code whose anchor exists, in a ``NUMBA_CACHE_DIR`` that can no longer be written, is cached in the
+    user's cache directory, because the check asks numba where it would cache. Once the user's cache directory is
+    read-only too, the code compiles without a cache after one warning, and a derive function compiles without a
+    cache and without a warning."""
+    # A check of the anchor's own directory alone would disable caching in the second run, although numba has a
+    # location in the user's cache directory. In the third run the anchor exists, so numbox does not write it again,
+    # and only the check finds that numba has no location. The work builder compiles a derive function without a
+    # cache whenever numba has no location for its anchor, and it gives no warning.
     home = tmp_path / "home"
     home.mkdir()
     cache = tmp_path / "cache"
@@ -5534,20 +5248,19 @@ def test_a_warm_anchor_in_a_directory_that_stopped_being_writable(tmp_path, chil
 @pytest.mark.parametrize("placement", ["a file", "a component too long"])
 def test_generated_code_compiles_uncached_under_a_numba_cache_dir_numba_cannot_use(
         tmp_path, placement, child, word, warns):
-    # NUMBA_CACHE_DIR pointing into a file, or with a component longer than the
-    # file system allows: the package's own functions cache beside their
-    # sources, numba passing such a location over, and the anchor's directory
-    # cannot be made. Any error there means no cache here, so the code compiles
-    # without one, as it did before the anchors asked numba, and the warning's
-    # remedy is the error's: a directory numba can use, or a shorter path.
+    """Generated code compiles without a cache after a warning whose remedy fits the error, if ``NUMBA_CACHE_DIR``
+    names a file or has a component too long for the file system. numba skips such a location, so numbox's own
+    functions cache beside their sources, while the anchor's directory cannot be created."""
+    # numbox counts any OSError from writing the anchor as an error of the location. The derive function compiles
+    # without a cache and without a warning.
     if placement == "a file":
         cache_dir = tmp_path / "file"
         cache_dir.write_text("not a directory\n")
         remedy = "Set NUMBA_CACHE_DIR to a writable directory"
     else:
         cache_dir = tmp_path / ("c" * 300)
-        # Windows reports the component as a syntax error (WinError 123, EINVAL),
-        # naming no length, and the warning offers the directory then.
+        # Windows refuses the long component as an invalid name, with WinError 123 and EINVAL, and the error gives no
+        # length, so the warning gives the general remedy there.
         remedy = ("Set NUMBA_CACHE_DIR to a writable directory" if os.name == "nt"
                   else "too long for the file system: NUMBA_CACHE_DIR at a shorter path")
     env = dict(os.environ, PYTHONPATH=str(REPO), NUMBA_CACHE_DIR=str(cache_dir))
@@ -5562,10 +5275,10 @@ def test_generated_code_compiles_uncached_under_a_numba_cache_dir_numba_cannot_u
 
 
 def test_make_graph_under_a_callers_cache_option_falls_back_from_an_archive(tmp_path):
-    # make_graph's kernel is anchored to builder.py itself and cached beside it,
-    # and a caller's options reach numba as they are: with cache on from an
-    # archive the kernel died at numba's set-up, where the package, the
-    # structref, the kernel compiler and the derives had fallen back.
+    """``make_graph`` from an ``.egg``, with a caller's ``{"cache": True}``, warns once for the graph maker, which it
+    compiles as code of ``builder.py``, and the derive function still caches under its own anchor. numba receives a
+    caller's options without the check that numbox's options pass at import, so ``make_graph`` runs that check for
+    ``builder.py``."""
     archive = _archive(tmp_path / "numbox-0.0.0-py3.12.egg")
     child = BUILD_A_DERIVE.replace("make_graph(y)", "make_graph(y, jit_options={'cache': True})")
     assert child != BUILD_A_DERIVE
@@ -5576,11 +5289,13 @@ def test_make_graph_under_a_callers_cache_option_falls_back_from_an_archive(tmp_
     assert run.returncode == 0 and "derived" in run.stdout, run.stderr
     assert "the code generated at builder.py" in run.stderr and "source is not a file on disk" in run.stderr
     assert '"cache" off in the jit options this code was given' in run.stderr, run.stderr
-    # The derives cache under anchors of their own, written here, and the
-    # builder's answer for its file is not theirs.
+    # The derive function caches under an anchor of its own, under NUMBA_CACHE_DIR, which the check of builder.py does
+    # not affect.
     assert _index_files(tmp_path / "cache"), "the derive did not cache under NUMBA_CACHE_DIR"
 
 
+# A_STRUCTREF_WITH_A_TYPING_ERROR is a child whose struct has a method that adds a string to a float32, so that numba
+# raises a TypingError at the call.
 A_STRUCTREF_WITH_A_TYPING_ERROR = MAKE_A_STRUCTREF.replace(
     "Struct = make_structref('Struct', {'value': float32}, TypeClass)\n",
     "def bad(self):\n"
@@ -5591,10 +5306,8 @@ A_STRUCTREF_WITH_A_TYPING_ERROR = MAKE_A_STRUCTREF.replace(
 
 
 def test_a_typing_error_in_generated_code_quotes_the_source_with_caching_off(tmp_path):
-    # numba quotes the offending line from the file the code names, the
-    # anchor, which with caching off was no longer written: the message then
-    # pointed at a file that was not there, with "source missing", where main
-    # showed the line. The anchor is written where it can be, cache or no.
+    """A typing error in generated code quotes the offending line with caching disabled too, because numbox writes the
+    anchor, from which numba reads the line, whether or not caching is enabled. numba writes no cache file then."""
     assert A_STRUCTREF_WITH_A_TYPING_ERROR != MAKE_A_STRUCTREF
     script = tmp_path / "probe.py"
     script.write_text(A_STRUCTREF_WITH_A_TYPING_ERROR)
@@ -5611,11 +5324,10 @@ def test_a_typing_error_in_generated_code_quotes_the_source_with_caching_off(tmp
     (COMPILE_A_KERNEL.replace("'calc.y')", "'calc.y', jit_options={'cache': False}, cache=True)"), "executed"),
 ], ids=["make_structref with jit_options", "compile_kernel with cache"])
 def test_the_anchor_warning_names_the_options_the_caller_gave(tmp_path, child, word):
-    # make_structref, compile_kernel and the builder take jit options of the
-    # caller's, which NUMBOX_JIT_OPTIONS does not reach, and compile_kernel's
-    # cache argument overrides those too; the warning offered the variable
-    # alone, here set to turn caching off already, and then the jit options,
-    # here off as well.
+    """Generated code that the caller asks to cache, under ``NUMBOX_JIT_OPTIONS='{"cache": false}'``, warns with a
+    remedy that names the caller's jit options and the ``cache`` argument as ways to disable the cache. A caller's
+    ``"cache"`` option takes precedence over the variable, and the ``cache`` argument of ``compile_kernel`` takes
+    precedence over both."""
     assert child not in (MAKE_A_STRUCTREF, COMPILE_A_KERNEL)
     cache_dir = tmp_path / "file"
     cache_dir.write_text("not a directory\n")
@@ -5628,8 +5340,8 @@ def test_the_anchor_warning_names_the_options_the_caller_gave(tmp_path, child, w
     assert '"cache" off in the jit options this code was given, or in its cache argument where it takes one' in run.stderr
 
 
-# The type class lives in a module of its own, as the docs ask, so that the
-# struct's cache entries load in a second process.
+# The type class is defined in a module of its own, as the docs ask, so that a second process can load the struct's
+# cache entries.
 A_TYPE_CLASS = (
     "from numba.core.types import StructRef\n"
     "from numba.experimental.structref import register\n"
@@ -5667,22 +5379,17 @@ MAKE_A_LONG_NAMED_STRUCTREF = (
 @pytest.mark.parametrize("name", ["S" * 40, "S" * 41, "S" * 150, "S" * 300, "é" * 40, "結" * 100],
                          ids=["40 ascii", "41 ascii", "150 ascii", "300 ascii", "40 accented", "100 cjk"])
 def test_a_struct_name_of_any_length_caches(tmp_path, name):
-    # numba names a cache file after the anchor's stem and the jitted
-    # function's qualname, both of which carried the struct's name, so a
-    # name of about 93 characters overflowed the file system's 255 bytes in
-    # numba's own files, past the anchor's check. The stems and the generated
-    # names are bounded now: as they are up to 40 bytes, a prefix and a digest
-    # beyond, and the class takes its full name back once compiled. The file
-    # system counts bytes, so a name of 40 accented characters (80 bytes) is
-    # bounded, and 100 CJK characters (300 bytes) are cut by whole characters.
-    # A field named with the struct's length is bounded in its getter the same
-    # way, and a field named with that bounded name, defined before it, keeps
-    # its property: the long field's getter took the name and the hand-over
-    # deleted the short field's. One method's name is 40 bytes, the most a
-    # bounded name can be, so its thunk's files are the longest numba writes
-    # for any struct: under the 230 bytes bounded_stem promises, which leave
-    # room for numba's temporary name at the write; the other's is 200, which
-    # the thunk's and the overload's names must bound.
+    """A struct whose name has any length, in ASCII, accented or CJK characters, caches without a warning, and a second
+    process loads its entries without adding any. numbox bounds each name that it puts into a file name to 40 bytes of
+    UTF-8, so every cache file name stays under 230 bytes, and the struct's class still has its full name."""
+    # numba names a cache file after the anchor's stem and the jitted function's qualified name, and both hold the
+    # struct's name. A name of 40 accented characters is 80 bytes, so numbox bounds it, and it cuts a name of 100 CJK
+    # characters at a whole character. The struct also has a field whose name is as long as the struct's name, and a
+    # field named after that field's bounded name, defined first. numbox bounds the long field's getter as it bounds
+    # the struct's name, and the short field retains its own property. One method's name is 40 bytes, the longest that a
+    # bounded name can be, so the files of its jitted helper are the longest that numba writes for any struct. The
+    # other method's name, of 200 bytes, must be bounded in the names of its helper and its overload. The bound of 230
+    # bytes leaves room for the 21 bytes of numba's temporary name.
     (tmp_path / "long_named_type_class.py").write_text(A_TYPE_CLASS)
     script = tmp_path / "make.py"
     script.write_text(MAKE_A_LONG_NAMED_STRUCTREF.replace("NAME", repr(name)), encoding="utf-8")
@@ -5707,20 +5414,16 @@ def test_a_struct_name_of_any_length_caches(tmp_path, name):
 ])
 def test_an_anchor_path_too_long_for_the_file_system_compiles_uncached_and_the_warning_says_so(
         tmp_path, directory, remedy):
-    # A cache directory deep enough that the anchor's directory fits the path
-    # limit and the anchor's own name, of fixed length, does not: the user's
-    # cache directory under a deep home, which the warning met with "a shorter
-    # NUMBA_CACHE_DIR" where none was set. There is no cache here, and the
-    # warning names the length rather than offering a writable directory, which
-    # this one is; NUMBA_CACHE_DIR at a short path cures it. A NUMBA_CACHE_DIR
-    # is made deep enough for the package's own files instead, whose location
-    # under it, a directory named for theirs by its name and a hash of its
-    # path, ends 20 bytes short of the limit: numba's own check passes there,
-    # with a named temporary file too where the file system makes no unnamed
-    # one, and the package's does not, so the package answers first, with its
-    # remedy, and the struct compiles under its answer without a word of its
-    # own. At the home's depth numba's check failed the location on such a file
-    # system and moved on to the tree, and the anchor answered instead.
+    """A cache directory too close to Linux's path limit makes generated code compile without a cache after one warning
+    whose remedy says that the path is too long, under a deep ``HOME`` and under a deep ``NUMBA_CACHE_DIR``. Under the
+    deep variable, numbox's own check fails first, and the struct then compiles under numbox's options without a second
+    warning."""
+    # Under the deep HOME, the anchor's directory fits the path limit and the anchor's own name does not. The anchor's
+    # remedy then asks for NUMBA_CACHE_DIR at a shorter path. The deep NUMBA_CACHE_DIR leaves numbox's location for
+    # configurations.py 20 bytes short of the limit. numba's own test passes there, also with a named temporary file
+    # where the file system makes no unnamed one, and numbox's check fails, so numbox warns first. At the depth of the
+    # HOME case, numba's own test would fail on such a file system, numba would cache numbox in the tree, and the
+    # anchor would warn instead.
     if directory == "NUMBA_CACHE_DIR":
         from numba.core.caching import _CacheLocator
         location = _CacheLocator.get_suitable_cache_subpath(str(REPO / "numbox" / "core" / "configurations.py"))
@@ -5738,6 +5441,8 @@ def test_an_anchor_path_too_long_for_the_file_system_compiles_uncached_and_the_w
     assert remedy in run.stderr, run.stderr
 
 
+# A_CACHE_FILE_NAME_TOO_LONG lists the cases of the test below. A case's name gives the source's place, the settings,
+# and whether some file system in use allows the name.
 A_CACHE_FILE_NAME_TOO_LONG = (
     "on disk, numba's order",
     "on disk, numba's order, an invalid name",
@@ -5757,21 +5462,13 @@ A_CACHE_FILE_NAME_TOO_LONG = (
     "case", [pytest.param(case, id=case) for case in A_CACHE_FILE_NAME_TOO_LONG])
 def test_a_cache_file_whose_name_is_too_long_for_the_file_system_is_told_the_name_which_no_shorter_path_cures(
         tmp_path, monkeypatch, case):
-    # numba names the files it caches a function in after the source's name
-    # and the function's qualified name, and a name longer than the file
-    # system takes can be made at no path: numba's first read of the index
-    # dies on it, and the remedy told the path as too long, asking for the
-    # package, the user's cache directory, IPython's or NUMBA_CACHE_DIR at a
-    # shorter path, which move nothing of the name. It tells the name and its
-    # length, counted as the file system counts it, that no shorter path
-    # cures it, and the cure, a shorter name for the function or its file,
-    # the package's to give, with the variable, where numba tries it before
-    # the locator that took the file and a file system in use takes the name,
-    # 255 being their limit, pointed at a directory on one, and the
-    # variable's own location named where it took the file; the remedy
-    # offered such a file system for a name none takes, and never the
-    # shorter name. Windows refuses a name too long as an invalid one, errno
-    # EINVAL, and the check runs whatever the errno.
+    """A cache file name too long for the file system gets a remedy that names the file and its length. No shorter path
+    avoids the error, so the remedy asks for a shorter name for the function or its file. If some file system in use
+    allows the name, the remedy for a source on disk also offers ``NUMBA_CACHE_DIR`` on such a file system."""
+    # numba names the files that it caches a function in after the source's name and the function's qualified name. Its
+    # first read of the index fails on a name that is too long. The remedy counts the name as the file system counts it.
+    # It offers the variable on the terms on which it offers the variable for a path too long. It names the variable as
+    # set if the variable's own locator accepted the file.
     import types
     import numba
     from numba.core import caching
@@ -5812,8 +5509,8 @@ def test_a_cache_file_whose_name_is_too_long_for_the_file_system_is_told_the_nam
     else:
         location = Path(cache_dir or str(tmp_path / "user-cache" / "numba")) / subpath
     if "a file system in use takes" in case:
-        # A limit the directory numba names after the source's, its name and
-        # forty-one bytes, fits, and the file's name does not.
+        # A limit of 60 fits numba's directory name for the source, the directory's name and 41 bytes more, but not the
+        # cache file's name.
         monkeypatch.setattr(configurations, "_name_limit", lambda location: 60)
     limit = configurations._name_limit(str(location))
     name = f"{Path(py_file).stem}.{'f' * (limit + 5)}-1.py{sys.version_info[0]}{sys.version_info[1]}.nbi"
@@ -5821,6 +5518,8 @@ def test_a_cache_file_whose_name_is_too_long_for_the_file_system_is_told_the_nam
     length = len(name.encode("utf-16-le")) // 2 if counted_in == "characters" else len(os.fsencode(name))
     assert length > limit
     assert (length <= 255) == ("a file system in use takes" in case)
+    # Windows refuses a name too long as an invalid one, with EINVAL, and the remedy measures the name whatever the
+    # errno.
     refused = ((errno.EINVAL, "Invalid argument") if "invalid name" in case
                else (errno.ENAMETOOLONG, "File name too long"))
     failure = OSError(*refused, str(location / name))
@@ -5831,6 +5530,8 @@ def test_a_cache_file_whose_name_is_too_long_for_the_file_system_is_told_the_nam
         f"{name}, {length} {counted_in}, which is longer than a name can be on that file system ({limit})")
     fits = "directory on a file system that takes a name that long"
     cure = f"{clause}, and no shorter path cures it: a shorter name for the function or its file, which is numbox's to give"
+    # 255 is the limit on names of ext4, NTFS and APFS, so the remedy offers another file system only for a name of 255
+    # or fewer.
     if length > 255:
         offer = ""
     elif case.startswith("on disk, numba's order"):
@@ -5849,12 +5550,10 @@ def test_a_cache_file_whose_name_is_too_long_for_the_file_system_is_told_the_nam
 
 def test_a_function_whose_cache_file_name_is_too_long_for_the_file_system_is_told_the_name_by_numbas_own_error(
         tmp_path, monkeypatch):
-    # numba's own error for a cache file whose name is too long, which its
-    # first read of the index raises at the first call, names the file, and
-    # the remedy told the path as too long and asked for the package installed
-    # at a shorter path, or NUMBA_CACHE_DIR set to a short one, which cure
-    # nothing of the name. Windows refuses the name as an invalid one, errno
-    # EINVAL, and the remedy reads the name whatever the errno.
+    """numba's own error for a cache file name too long, which numba raises at the function's first call when it opens
+    the index, gets the remedy that names the file and asks for a shorter name. The function's name is five characters
+    longer than the file system's limit, so no path is short enough for its cache files."""
+    # Windows refuses such a name as an invalid one, with EINVAL, and the remedy reads the name whatever the errno.
     import importlib
     import numba
     import numbox.core.configurations as configurations
@@ -5889,12 +5588,10 @@ def test_a_function_whose_cache_file_name_is_too_long_for_the_file_system_is_tol
 
 def test_a_cell_file_on_disk_the_in_tree_locator_takes_is_not_told_ipythondir_for_an_error_naming_another_numba_cache(
         tmp_path, monkeypatch):
-    # numba's in-tree locator takes a cell file on disk in an ipykernel
-    # directory whose __pycache__ it can write, and IPython's locator, listed
-    # after it, is never reached; the remedy read IPython's as reached for any
-    # file its locator takes by name, and told a caller's error naming another
-    # numba_cache, a location that is none of numba's, as IPython giving a
-    # temporary directory per call, with IPYTHONDIR for it.
+    """A caller's error that names an unrelated ``numba_cache``, for a cell file on disk that the in-tree locator
+    accepts, gets the remedy for that location and not ``IPYTHONDIR``, also under an IPython that gives temporary
+    directories. The in-tree locator accepts such a file if it can write its ``__pycache__``, and numba then never
+    reaches the IPython locator."""
     import tempfile
     import types
     import numba
@@ -5925,16 +5622,12 @@ def test_a_cell_file_on_disk_the_in_tree_locator_takes_is_not_told_ipythondir_fo
 @needs_a_directory_it_cannot_write
 def test_a_source_under_a_directory_that_is_not_utf8_whose_pycache_is_unwritable_is_a_cache_error_told_a_utf8_path(
         tmp_path, monkeypatch):
-    # numba hashes the source's directory path as UTF-8 for the name of its
-    # directory under NUMBA_CACHE_DIR or the user's cache directory, and
-    # raises UnicodeEncodeError for bytes that are not, decoded with
-    # surrogates, at decoration, where a locator that names its directory so
-    # reaches the file: the user-wide one, once the in-tree locator passed an
-    # unwritable __pycache__ over. The check raises it as numba does, and
-    # is_a_cache_error did not admit it, a ValueError that is not the .zip
-    # locator's, so a package installed under such a directory died at import
-    # on it, where with caching off it imports, and the remedy for it stood
-    # unreached. A UnicodeEncodeError of another reason is no cache error.
+    """The check raises numba's ``UnicodeEncodeError`` for a source under a directory whose path is not UTF-8, once the
+    in-tree locator skips its unwritable ``__pycache__``, and ``is_a_cache_error`` counts that error. The remedy asks
+    for a UTF-8 path or a writable ``__pycache__``. A ``UnicodeEncodeError`` for another reason is no cache error."""
+    # numba raises the error when its user-wide locator hashes the path to name its directory under the user's cache
+    # directory. Because the error counts as a cache error, a package under such a directory imports without a cache
+    # instead of failing.
     import numba
     from numba.core import caching
     import numbox.core.configurations as configurations
@@ -5975,11 +5668,10 @@ def test_a_source_under_a_directory_that_is_not_utf8_whose_pycache_is_unwritable
 @pytest.mark.skipif(os.name == "nt", reason="Windows decodes any byte of a path")
 def test_an_error_naming_a_file_with_a_byte_that_is_not_utf8_is_answered_where_names_are_counted_in_utf16(
         tmp_path, monkeypatch):
-    # A name an error carries decoded with surrogateescape holds a surrogate
-    # for a byte that is not UTF-8, and Windows takes a lone surrogate in a
-    # name of its own; counting the name in UTF-16 units, as Windows and
-    # macOS count one, raised UnicodeEncodeError on it, and the remedy died on
-    # an error it admits instead of answering it.
+    """``_measured`` counts a name with a byte that is not UTF-8 in UTF-16 units, as Windows and macOS count names, and
+    the remedy for an error that names such a file returns normally. Python decodes such a byte to a lone surrogate,
+    which a strict UTF-16 encoding refuses, and Windows accepts one in a name."""
+    # The test sets sys.platform to macOS's value, so that the remedy counts the name in UTF-16 units.
     import numba
     import numbox.core.configurations as configurations
 
@@ -6005,12 +5697,10 @@ def test_an_error_naming_a_file_with_a_byte_that_is_not_utf8_is_answered_where_n
 @pytest.mark.skipif(sys.platform == "darwin", reason="APFS takes no name that is not UTF-8")
 def test_a_zip_under_a_directory_that_is_not_utf8_is_a_cache_error_told_the_archive_under_a_utf8_path(
         tmp_path, monkeypatch):
-    # numba's .zip locator names its directory under the user's cache
-    # directory after the source's directory, the archive's path in it, hashed
-    # as UTF-8, and raises UnicodeEncodeError for bytes that are not, at
-    # decoration and in the check alike; the remedy took the error for a
-    # caller's with no place for the file, and offered the .zip the reader was
-    # importing from, with nothing of the path.
+    """A ``.zip`` under a directory whose path is not UTF-8 makes the check raise numba's ``UnicodeEncodeError``, a
+    cache error, and the remedy asks for the archive to be put under a UTF-8 path. numba's ``.zip`` locator hashes the
+    member's directory path, which contains the archive's path, to name its directory under the user's cache
+    directory."""
     import numba
     from numba.core import caching
     import numbox.core.configurations as configurations
@@ -6043,11 +5733,9 @@ def test_a_zip_under_a_directory_that_is_not_utf8_is_a_cache_error_told_the_arch
 @pytest.mark.skipif(sys.platform == "darwin", reason="APFS takes no name that is not UTF-8")
 def test_an_anchor_under_a_cache_directory_that_is_not_utf8_compiles_uncached_and_the_warning_asks_for_a_utf8_path(
         tmp_path, monkeypatch):
-    # numba hashes the anchor's directory path as UTF-8 to name its cache
-    # directory under NUMBA_CACHE_DIR or the user's cache directory, and
-    # raises UnicodeEncodeError for bytes that are not, which is a cache
-    # error; the anchor's warning offered a writable directory, which the
-    # anchor's is, and said nothing of the path.
+    """An anchor under a ``NUMBA_CACHE_DIR`` whose path is not UTF-8 compiles without a cache after one warning that
+    asks for ``NUMBA_CACHE_DIR`` at a UTF-8 path. numba raises ``UnicodeEncodeError`` when it hashes the anchor's
+    directory path, and that directory is writable, so a writable directory would not help."""
     import warnings
     import numba
     from numbox.utils import preprocessing
@@ -6076,12 +5764,9 @@ def test_an_anchor_under_a_cache_directory_that_is_not_utf8_compiles_uncached_an
 @pytest.mark.skipif(sys.platform == "darwin", reason="APFS takes no name that is not UTF-8")
 def test_a_source_under_a_directory_that_is_not_utf8_with_numba_cache_dir_set_is_told_to_unset_it(
         tmp_path, monkeypatch):
-    # With NUMBA_CACHE_DIR set, numba's user-provided locator hashes the
-    # source's directory path as UTF-8 for its directory under the variable
-    # and raises for bytes that are not, before the in-tree locator is
-    # reached, which caches beside the source and hashes no path: the same
-    # install imports cached with the variable unset. The remedy said the
-    # variable cures nothing and asked for a UTF-8 path alone.
+    """A source under a directory whose path is not UTF-8, with ``NUMBA_CACHE_DIR`` set, gets a remedy that asks for the
+    variable to be unset. The variable's locator hashes the path before numba reaches the in-tree locator, which hashes
+    no path, and with the variable unset the check passes and numba caches beside the source."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -6112,12 +5797,9 @@ def test_a_source_under_a_directory_that_is_not_utf8_with_numba_cache_dir_set_is
 @pytest.mark.skipif(sys.platform == "darwin", reason="APFS takes no name that is not UTF-8")
 def test_a_source_under_a_directory_that_is_not_utf8_under_the_user_wide_locator_alone_is_told_a_utf8_path(
         tmp_path, monkeypatch):
-    # Under a list of the user-wide locator alone, numba hashes the source's
-    # directory path as UTF-8 for its directory under the user's cache
-    # directory and raises for bytes that are not; the remedy told the list
-    # and its locations to make writable, which hashing refuses whatever
-    # they are, with nothing of the path or of the in-tree locator, which
-    # caches beside the source hashing no path.
+    """If the list holds the user-wide locator alone, a source under a directory whose path is not UTF-8 gets a remedy
+    that asks for a UTF-8 path or for the in-tree locator to be listed first. The user-wide locator hashes the path, so
+    no change to its location helps, and the in-tree locator caches beside the source without hashing a path."""
     import numba
     from numba.core import caching
     import numbox.core.configurations as configurations
@@ -6151,12 +5833,10 @@ def test_a_source_under_a_directory_that_is_not_utf8_under_the_user_wide_locator
 @pytest.mark.skipif(sys.platform == "darwin", reason="APFS takes no name that is not UTF-8")
 def test_a_source_under_a_zip_named_directory_on_a_path_that_is_not_utf8_is_told_the_path_not_a_missing_archive(
         tmp_path, monkeypatch):
-    # numba's .zip locator, listed after the in-tree one, takes a source on
-    # disk under a directory named .zip once an unwritable __pycache__ left
-    # it, and hashes the source's directory path as UTF-8 for its directory,
-    # raising UnicodeEncodeError for bytes that are not; the remedy read
-    # every ValueError the .zip locator reaches as its own for a path with
-    # no archive, and told a missing archive and locations to make writable.
+    """A source on disk under a directory named ``proj.zip``, on a path that is not UTF-8, gets the remedy for the path
+    and not the one for a missing archive. Once the in-tree locator skips the unwritable ``__pycache__``, the ``.zip``
+    locator listed after it accepts the file and raises ``UnicodeEncodeError`` when it hashes the path."""
+    # A UnicodeEncodeError is a ValueError, but it is not the .zip locator's error for a path with no archive.
     import numba
     import numbox.core.configurations as configurations
 
@@ -6189,12 +5869,9 @@ def test_a_source_under_a_zip_named_directory_on_a_path_that_is_not_utf8_is_told
 @pytest.mark.skipif(sys.platform == "darwin", reason="APFS takes no name that is not UTF-8")
 def test_a_frozen_application_under_a_path_that_is_not_utf8_is_told_the_application_under_a_utf8_path(
         tmp_path, monkeypatch):
-    # numba's user-wide locator, the one of numba's that takes a frozen
-    # application's file, hashes the file's directory path as UTF-8 for its
-    # directory under the user's cache directory and raises for bytes that
-    # are not; the remedy took the error for a caller's with no place for
-    # the file and offered the source files on disk, or a .zip holding them,
-    # with nothing of the path.
+    """A frozen application under a path that is not UTF-8 makes the check raise numba's ``UnicodeEncodeError``, and the
+    remedy asks for the application to be put under a UTF-8 path. numba's user-wide locator, the one locator of numba's
+    that accepts a frozen application's file, hashes the path to name its directory under the user's cache directory."""
     import numba
     from numba.core import caching
     import numbox.core.configurations as configurations
@@ -6228,12 +5905,10 @@ def test_a_frozen_application_under_a_path_that_is_not_utf8_is_told_the_applicat
 ])
 def test_a_source_under_a_directory_that_is_not_utf8_is_told_the_in_tree_locator_before_the_first_that_hashes(
         tmp_path, monkeypatch, listed):
-    # The in-tree locator caches beside the source hashing no path, and
-    # listed after one that hashes, the variable's set or the user-wide one,
-    # it is never reached: the remedy asked for it to be listed, with no
-    # place, where appended it leaves numba raising the same error, and, for
-    # one listed after the user-wide locator, for its __pycache__ to be made
-    # writable, which it was.
+    """A source under a directory whose path is not UTF-8 gets a remedy that asks for the in-tree locator to be listed
+    before the first listed locator that hashes the path, and the check passes once the list follows it. The in-tree
+    locator hashes no path, but numba never reaches it after a locator that raises for the path."""
+    # The locators that hash the path are the variable's locator while NUMBA_CACHE_DIR is set, and the user-wide one.
     import numba
     from numba.core import caching
     import numbox.core.configurations as configurations
@@ -6275,7 +5950,7 @@ def test_a_source_under_a_directory_that_is_not_utf8_is_told_the_in_tree_locator
             "or silence"), remedy
         monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", "InTreeCacheLocator,UserWideCacheLocator",
                             raising=False)
-    # Listed as the remedy says, numba caches the file.
+    # The check passes once the list is changed as the remedy says.
     configurations.check_cache_location(py_file, configurations.LONGEST_CACHE_FILE_NAME)
 
 
@@ -6283,10 +5958,9 @@ def test_a_source_under_a_directory_that_is_not_utf8_is_told_the_in_tree_locator
 @pytest.mark.skipif(sys.platform == "darwin", reason="APFS takes no name that is not UTF-8")
 def test_a_frozen_application_under_a_zip_named_directory_on_a_path_that_is_not_utf8_is_told_the_application(
         tmp_path, monkeypatch):
-    # numba's user-wide locator, before the .zip one in numba's order, takes
-    # a frozen application's file and hashes its directory path as UTF-8,
-    # raising for bytes that are not; the remedy read the .zip in the path
-    # and told an archive to put under a UTF-8 path, where there is none.
+    """A frozen application under a directory whose name ends in ``.zip``, on a path that is not UTF-8, gets the remedy
+    that asks for the application, not an archive, to be put under a UTF-8 path. In numba's order, the user-wide
+    locator comes before the ``.zip`` one, and it raises first, when it hashes the path."""
     import numba
     from numba.core import caching
     import numbox.core.configurations as configurations
@@ -6314,11 +5988,9 @@ def test_a_frozen_application_under_a_zip_named_directory_on_a_path_that_is_not_
 
 
 def test_a_source_that_is_nowhere_under_a_directory_named_zip_is_not_told_to_list_the_zip_locator(tmp_path, monkeypatch):
-    # A list without numba's .zip locator was told to list it for any path
-    # with .zip in it, where a directory so named above a source that is
-    # nowhere is no archive: listed, that locator takes the directory for one
-    # and caches nothing, numba's check raising for it. Such a source is told
-    # the source files, on disk or in a .zip.
+    """A source that does not exist, under a real directory named ``proj.zip``, gets the remedy that asks for the source
+    files, on disk or in a ``.zip``, and not one that asks for ``ZipCacheLocator`` to be listed. That locator treats the
+    directory as an archive and caches nothing under it, so listing it would not help."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -6339,11 +6011,9 @@ def test_a_source_that_is_nowhere_under_a_directory_named_zip_is_not_told_to_lis
 
 def test_a_cell_under_a_directory_named_zip_whose_source_linecache_does_not_hold_is_told_the_cell_remedy(
         tmp_path, monkeypatch):
-    # inspect raises for a cell whose source linecache does not hold, before
-    # numba's IPython locator tries its location, and the remedy tells it as
-    # such, but for a member of an archive, told the source files to ship: a
-    # directory named .zip above the cell was read as an archive, and the
-    # cell was told to ship source files.
+    """A cell file that does not exist, under a directory named ``proj.zip``, makes the check raise inspect's error, and
+    the remedy is the one for a cell whose source linecache does not hold. The directory is no archive, so the remedy
+    does not ask for source files to be shipped, as it does for a member of an archive."""
     import types
     import numba
     import numbox.core.configurations as configurations
@@ -6368,10 +6038,10 @@ def test_a_cell_under_a_directory_named_zip_whose_source_linecache_does_not_hold
 
 @on_windows_under_numba_0_68_0
 def test_an_egg_under_a_directory_named_zip_is_told_to_put_the_renamed_archive_out_from_under_it(tmp_path, monkeypatch):
-    # numba's .zip locator takes the first part of the path ending in .zip for
-    # the archive, a directory so named above an .egg included, and opens it:
-    # the remedy told the .egg renamed to end in .zip, under that directory
-    # still, where numba then raises IsADirectoryError for the directory.
+    """An ``.egg`` under a directory named ``dir.zip`` gets a remedy that asks for the archive to be renamed to end in
+    ``.zip`` and put under a path without that directory, and the check passes once both are done. numba's ``.zip``
+    locator takes the first part of the path that ends in ``.zip`` for the archive, so after the rename alone, numba
+    would still take the directory for the archive."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -6392,7 +6062,7 @@ def test_an_egg_under_a_directory_named_zip_is_told_to_put_the_renamed_archive_o
         f"path with no part ending in .zip above it, {in_the_way} being one, which that locator takes for the archive "
         "first, so that numba caches it in the user's cache directory through ZipCacheLocator, once "
         "NUMBA_CACHE_LOCATOR_CLASSES, InTreeCacheLocator, lists it; or silence")
-    # Done as told, numba caches the member.
+    # With the archive renamed and moved, and the .zip locator listed, the check passes.
     moved = tmp_path / "numbox.zip"
     egg.rename(moved)
     monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", "InTreeCacheLocator,ZipCacheLocator", raising=False)
@@ -6401,16 +6071,11 @@ def test_an_egg_under_a_directory_named_zip_is_told_to_put_the_renamed_archive_o
 
 @pytest.mark.parametrize("units", [230, 231, 251, 252])
 def test_the_offer_of_a_file_system_that_takes_a_cache_file_name_holds_at_the_usual_limit(tmp_path, monkeypatch, units):
-    # NUMBA_CACHE_DIR on a file system that takes the name is offered where
-    # the longest name numba writes for the function fits 255, the file
-    # systems in use's limit: the index's base, ".999.nbc" for a data file
-    # with the three digits reserved for its number, and the 21 of the
-    # temporary name numba writes each file through, ".tmp." and sixteen hex
-    # digits; and not for one over. No test held the boundary, and a count of
-    # less than 255 passed them all; then the offer went to a name of 255,
-    # whose temporary name numba's save of it failed on; then to an index of
-    # 234, whose data file's did; then two digits left a hundredth
-    # signature's data file a byte over.
+    """The remedy offers ``NUMBA_CACHE_DIR`` on a file system that allows the name only if the longest name that numba
+    writes for the function fits in 255. That name is the index's base, a data file's suffix ``.999.nbc`` with three
+    digits for its number, and the 21 bytes of numba's temporary name. The test puts names at that bound and one byte
+    past it."""
+    # A limit of 143, as on eCryptfs, makes each of these names too long for the file system that holds the location.
     import numba
     import numbox.core.configurations as configurations
 
@@ -6424,7 +6089,7 @@ def test_the_offer_of_a_file_system_that_takes_a_cache_file_name_holds_at_the_us
         handle.write("x = 1\n")
     tail = f"-1.py{sys.version_info[0]}{sys.version_info[1]}.nbi"
     if units > 240:
-        # numba's save names the temporary file, the name and 21 more.
+        # The longer names are those of numba's temporary file, the index's name and 21 bytes more.
         tail += ".tmp.0123456789abcdef"
     name = f"module.{'f' * (units - len('module.') - len(tail))}{tail}"
     counted_in = "characters" if os.name == "nt" or sys.platform == "darwin" else "bytes"
@@ -6443,12 +6108,9 @@ def test_the_offer_of_a_file_system_that_takes_a_cache_file_name_holds_at_the_us
 
 def test_a_callers_error_naming_another_numba_cache_for_a_member_is_told_that_location_under_a_temporary_ipython_too(
         tmp_path, monkeypatch):
-    # The error numba's first save raises under an IPython giving a temporary
-    # directory per call is FileNotFoundError, naming the numba_cache it could
-    # not save in; the remedy for it took any OSError naming a numba_cache,
-    # a caller's refused directory of its own among them, for a member in an
-    # ipykernel directory, and told IPYTHONDIR where, with IPython giving its
-    # directory, the same error is told as the location it names.
+    """A caller's ``EACCES`` that names an unrelated ``numba_cache``, for a member in an ``ipykernel_`` directory, gets
+    the remedy for that location, whether or not IPython gives temporary directories. Only an ``ENOENT`` that names a
+    ``numba_cache``, as numba's first save under such an IPython raises, gets the remedy that names ``IPYTHONDIR``."""
     import tempfile
     import types
     import numba
@@ -6474,7 +6136,7 @@ def test_a_callers_error_naming_another_numba_cache_for_a_member_is_told_that_lo
     assert configurations.cache_remedy(py_file, refused, "silence") == told
     paths.get_ipython_cache_dir = lambda: tempfile.mkdtemp(dir=tmp_path)
     assert configurations.cache_remedy(py_file, refused, "silence") == told
-    # The shape numba's own first save has there is told IPYTHONDIR still.
+    # numba's first save under such an IPython raises ENOENT, and that error gets the remedy that names IPYTHONDIR.
     missing = FileNotFoundError(errno.ENOENT, "No such file or directory", unrelated)
     assert configurations.cache_remedy(py_file, missing, "silence") == (
         "numba caches this file in numba_cache under IPython's cache directory, and IPython, able to write neither "
@@ -6487,13 +6149,9 @@ def test_a_callers_error_naming_another_numba_cache_for_a_member_is_told_that_lo
 @pytest.mark.skipif(sys.platform == "darwin", reason="APFS takes no name that is not UTF-8")
 def test_a_source_under_a_directory_that_is_not_utf8_with_the_variable_set_and_its_pycache_unwritable_is_told_both(
         tmp_path, monkeypatch):
-    # With NUMBA_CACHE_DIR set, its locator hashes the source's directory path
-    # and raises before the in-tree locator is tried, so the remedy cannot
-    # read from numba's error whether the __pycache__ beside the source can
-    # be written; it asks numba, and tells the variable to unset and the
-    # __pycache__ to make writable where it cannot be: the remedy hedged
-    # "where that directory can be written" and never asked for it, and the
-    # variable unset as told left numba raising the same error.
+    """A source under a directory whose path is not UTF-8, with ``NUMBA_CACHE_DIR`` set and the ``__pycache__`` beside
+    it read-only, gets a remedy that asks for both changes: the variable unset and the ``__pycache__`` made writable.
+    numba's error does not show whether the in-tree locator could cache the file, so the remedy asks that locator."""
     import numba
     import numbox.core.configurations as configurations
 
@@ -6518,7 +6176,8 @@ def test_a_source_under_a_directory_that_is_not_utf8_with_the_variable_set_and_i
             f"NUMBA_CACHE_DIR or the user's cache directory, and {directory} is not, and NUMBA_CACHE_DIR, which is set "
             f"to {cache_dir}, is hashed for first: unset it, and make the __pycache__ beside the source, {pycache}, "
             "writable, and numba caches there, hashing no path; or put the file under a UTF-8 path; or silence"), remedy
-        # Unset alone, numba raises the same error; both as told, it caches.
+        # With the variable unset alone, the in-tree locator skips the read-only __pycache__, and the user-wide locator
+        # raises the same error. With both changes made, the check passes.
         monkeypatch.setattr(numba.config, "CACHE_DIR", "")
         with pytest.raises(UnicodeEncodeError):
             configurations.check_cache_location(py_file, configurations.LONGEST_CACHE_FILE_NAME)
@@ -6527,6 +6186,8 @@ def test_a_source_under_a_directory_that_is_not_utf8_with_the_variable_set_and_i
     configurations.check_cache_location(py_file, configurations.LONGEST_CACHE_FILE_NAME)
 
 
+# MAKE_A_STRUCTREF_OF_FORTY_CHARACTER_NAMES is a child whose struct and field have names of 40 characters, the longest
+# names that numbox puts into a file name unchanged.
 MAKE_A_STRUCTREF_OF_FORTY_CHARACTER_NAMES = MAKE_A_STRUCTREF.replace(
     "make_structref('Struct', {'value': float32}, TypeClass)",
     "make_structref('S' * 40, {'v' * 40: float32}, TypeClass)").replace(
@@ -6537,12 +6198,10 @@ MAKE_A_STRUCTREF_OF_FORTY_CHARACTER_NAMES = MAKE_A_STRUCTREF.replace(
 @pytest.mark.parametrize("short_of_the_limit", [230, 190])
 def test_an_anchor_within_numbas_longest_name_of_the_path_limit_compiles_uncached_and_the_warning_says_so(
         tmp_path, short_of_the_limit):
-    # The anchor's check asked numba's location for a name of eight, which
-    # numba's own check makes too, so a NUMBA_CACHE_DIR within the longest
-    # name numba writes for a struct of the path limit passed both, and the
-    # struct's making died at numba's first save with no warning; the check
-    # asks for a name as long as that, and the code compiles without a cache
-    # after the warning naming the remedy.
+    """A ``NUMBA_CACHE_DIR`` that leaves less room under the path limit than the longest cache file name of a struct
+    makes the struct compile without a cache after one warning that asks for ``NUMBA_CACHE_DIR`` at a shorter path. The
+    anchor's check creates a file with a name as long as the longest name that numba writes for the struct's code, so
+    the location fails the check instead of numba's first save."""
     deep = _directory_of_length(tmp_path, 4096 - short_of_the_limit)
     env = dict(os.environ, PYTHONPATH=str(REPO), NUMBA_CACHE_DIR=str(deep))
     for name in ("NUMBOX_JIT_OPTIONS", "XDG_CACHE_HOME"):
@@ -6556,10 +6215,9 @@ def test_an_anchor_within_numbas_longest_name_of_the_path_limit_compiles_uncache
 
 def test_an_error_naming_a_zips_location_by_a_relative_path_under_nothing_yet_names_the_directory_it_is_made_under(
         tmp_path, monkeypatch):
-    # The first path at or above the location that is there is the directory
-    # it cannot be made under; walked up a relative path with no ancestor on
-    # the way, it came to nothing, and the remedy said a file with no name
-    # was in the way.
+    """A ``.zip`` member's error that names its location by a relative path, under directories that do not exist yet,
+    gets a remedy that names the working directory as the one under which numba cannot create the location. The remedy
+    reads the path as absolute before it walks up to the nearest existing directory."""
     import numba
     import numbox.core.configurations as configurations
     from numba.core.caching import _CacheLocator
@@ -6587,12 +6245,11 @@ def test_an_error_naming_a_zips_location_by_a_relative_path_under_nothing_yet_na
 
 def test_a_name_limit_below_the_longest_name_the_check_asks_for_is_told_the_length_not_a_shorter_path(
         tmp_path, monkeypatch):
-    # The check makes a file of the longest name the package's functions get
-    # in the location, and where the file system takes no name as long, its
-    # error, re-raised as the location's, was read as a path too long and a
-    # shorter NUMBA_CACHE_DIR offered, which cures nothing of a name; the
-    # error carries the length now, and the remedy asks for a file system
-    # that takes it. The anchor's warning does the same for a struct's.
+    """If the file system allows no name as long as the one that the check creates, the check's error carries that
+    length, and the remedy asks for a file system that allows it instead of a shorter path. The anchor's warning does
+    the same for generated code, with the longest name that numba writes for that code."""
+    # The stand-in for tempfile's NamedTemporaryFile refuses a name longer than the stand-in limit, as such a file
+    # system would.
     import tempfile
     import warnings
     import numba
@@ -6624,8 +6281,8 @@ def test_a_name_limit_below_the_longest_name_the_check_asks_for_is_told_the_leng
         f"numba's cache files for numbox's functions have names of up to {configurations.LONGEST_CACHE_FILE_NAME} "
         f"{counted_in}, longer than a name can be on that file system (100), so no shorter path cures it, or "
         "NUMBA_CACHE_DIR set to a directory on a file system that takes a name that long; or silence")
-    # The anchor, whose check asks for numba's longest name for the code's
-    # functions, read off the code.
+    # The anchor's check asks for the longest name that numba writes for the functions of the code, which numbox reads
+    # off the code.
     monkeypatch.setattr(numba.config, "CACHE_DIR", str(tmp_path / "cache"))
     code_txt = "@njit(**jit_options)\ndef f():\n    return 1\n"
     path = preprocessing._structref_anchor_path("S", code_txt)
@@ -6644,15 +6301,10 @@ def test_a_name_limit_below_the_longest_name_the_check_asks_for_is_told_the_leng
 
 
 def test_the_anchors_check_asks_for_the_longest_name_the_code_gets_not_a_bound_for_any_struct(tmp_path, monkeypatch):
-    # The anchor's check asked numba's location for a name of 251, a bound
-    # for any struct, so a file system whose name limit is under it, eCryptfs's
-    # 143, turned caching off for every struct, one whose names were 58
-    # included; the check asks for the longest name numba writes for the
-    # code's own functions, read off the code: the stem, the qualified name
-    # with the angle brackets numba drops, the line, Python's version, two
-    # digits for the overload and the temporary name, of the functions the
-    # code jits alone, a struct's method under its own name, which calls the
-    # jitted thunk, and an overload's getting no cache file.
+    """The anchor's check asks for the longest name that numba writes for the code's own functions, read off the code,
+    and not for a bound that fits any struct. Code with short names therefore caches on a file system with a limit of
+    143 bytes, such as eCryptfs, and code with a longer name warns there."""
+    # The stand-in for tempfile's NamedTemporaryFile refuses a name longer than 143 bytes.
     import tempfile
     import warnings
     import numba
@@ -6686,12 +6338,10 @@ def test_the_anchors_check_asks_for_the_longest_name_the_code_gets_not_a_bound_f
         assert preprocessing._anchored_or_uncached(path, long, {"cache": True}) == {"cache": False}
     assert len(caught) == 1 and f"names of up to {longest} bytes, longer than a name can be on that file system (143)" in str(
         caught[0].message), [str(w.message) for w in caught]
-    # The names counted: a function decorated itself, with njit or a decorator
-    # of the package's own that jits, or defined within a decorated one, an
-    # overload's constructor among them, with numba's "locals" for the
-    # nesting; and not a plain method's under its own name. Counted by five
-    # decorators' names alone, the builder's derive function and the
-    # constructor overload's inner function were left out.
+    # numbox counts each decorated function, whatever the decorator, and each function defined inside one, with
+    # numba's "locals" for the nesting. That includes an overload and the constructor that it returns, and a derive
+    # function under a decorator of numbox's own. A plain method under its own name gets no cache file, and numbox does
+    # not count it. Each name has three digits for the data file's number and numba's temporary suffix.
     version = f"py{sys.version_info[0]}{sys.version_info[1]}{getattr(sys, 'abiflags', '')}"
     code_txt = ("class C:\n    @njit(**jit_options)\n    def m(self):\n        def inner():\n"
                 "            return 1\n        return inner\n\n    def plain_but_long_" + "p" * 200 + "(self):\n"
@@ -6714,12 +6364,10 @@ def test_the_anchors_check_asks_for_the_longest_name_the_code_gets_not_a_bound_f
 ])
 def test_a_cache_file_name_with_a_number_wider_than_the_reserve_is_read_by_its_own_width(
         tmp_path, monkeypatch, number, base, offered):
-    # numba numbers a function's data files from one without bound, so a
-    # hundredth signature's name is a byte longer than two reserved digits
-    # allowed for, and the offer of a file system that takes the name went to
-    # a name whose data file that file system then refused; three digits are
-    # reserved now, and a number the error names that is wider is read by its
-    # own width.
+    """The remedy measures a data file's name with three digits for its number, or with the width of the number that the
+    error names if that is wider, before it offers a file system that allows the name. numba numbers a function's data
+    files from one without bound, so the remedy must not offer a file system on which a later data file's name would not
+    fit."""
     import numba
     import numbox.core.configurations as configurations
 
