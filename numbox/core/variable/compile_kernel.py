@@ -47,9 +47,9 @@ _orphan_anchor_sweep(_ANCHOR_SUBDIR)
 
 
 class _KernelCtx(NamedTuple):
-    """The results of compile_kernel that a `CompiledKernel` keeps for its searches, its store and its recompute plans.
+    """The results of compile_kernel that a `CompiledKernel` stores for its searches, its store and its recompute plans.
 
-    It stays in Python and never reaches compiled code.
+    It is used only in Python and is never passed to compiled code.
     """
     compiled: Any
     idents: dict
@@ -69,7 +69,7 @@ def _formula_fingerprint(formula) -> tuple[str, bool]:
     module attribute that the function reads only if the attribute is data, a dispatcher or a @vectorize function. A
     dispatcher or a @vectorize formula adds its target options. Builtins are not among a function's globals, so they
     are not hashed. A value that a module provides only through a module-level ``__getattr__`` (PEP 562) is not
-    hashed either, because resolving it would run the ``__getattr__`` of unrelated modules at every compile. After a
+    hashed either, because resolving it would run the ``__getattr__`` of unrelated modules at every compilation. After a
     change of such a value, numba loads the cached kernel until the user deletes its cache files.
 
     If the formula has no Python function, or reads a value without a canonical form, the text names the object by
@@ -77,7 +77,7 @@ def _formula_fingerprint(formula) -> tuple[str, bool]:
     cache. numbox hashes a @cfunc formula, but the second value is False as well: the kernel calls it at an address
     that differs from process to process, and numba cannot cache that.
     """
-    # A dispatcher keeps its Python function in py_func, and a @vectorize or @cfunc function in __wrapped__. A cres
+    # A dispatcher stores its Python function in py_func, and a @vectorize or @cfunc function in __wrapped__. A cres
     # function has neither, so it reaches the id branch below and leaves the kernel uncached, although _canon_value
     # in numbox.utils.fingerprint hashes a cres function that a formula calls, through its _numbox_py_func.
     target = getattr(formula, "py_func", None)
@@ -102,22 +102,22 @@ def _is_self_cached(formula) -> bool:
 
     numba's key for such a cache leaves out the values of the globals that the dispatcher reads and the jit options
     that it compiles under, so the cache can hold stale code. The kernel's digest cannot make numba refresh that
-    cache. numbox must therefore keep numba from caching a kernel that links the code, or the kernel's cache would
+    cache. numbox must therefore prevent numba from caching a kernel that links the code, or the kernel's cache would
     hold the stale code as well. A dispatcher compiled with ``cache=False`` compiles in every process and is safe.
-    The check covers dispatchers only: a @vectorize function compiled with ``cache=True`` keeps a cache of its own as
+    The check covers dispatchers only: a @vectorize function compiled with ``cache=True`` has a cache of its own as
     well, but numba caches a kernel that calls it, and that kernel can hold stale code from the function's cache. The
     digest holds the target options of a @vectorize formula.
     """
     if isinstance(formula, Dispatcher):
-        # numba gives a dispatcher compiled with cache=False a NullCache, and one compiled with cache=True a
-        # FunctionCache.
+        # numba assigns a NullCache to a dispatcher compiled with cache=False, and a FunctionCache to one compiled
+        # with cache=True.
         cache = getattr(formula, "_cache", None)
         return cache is not None and not isinstance(cache, NullCache)
     return False
 
 
 def _pyfunc_of(formula):
-    """Return the Python function behind a formula, or None.
+    """Return the Python function that implements a formula, or None.
 
     That is a dispatcher's `py_func`, the ``__wrapped__`` function of a @vectorize or @cfunc function, or the formula
     itself if it is a plain function. A cres function has neither attribute, so the result for it is None.
@@ -136,9 +136,9 @@ def _references_self_cached(value, seen: set[int]) -> bool:
     A formula reaches such a dispatcher through a call, a default argument, a closure variable, a global, a module
     attribute, or a container of these. The kernel then links the dispatcher's code, which can be stale, and the
     digest cannot make numba refresh the dispatcher's cache. The walk follows the channels that `_canon_value`
-    follows when it computes the digest, because a channel missed here would let stale code into a cached kernel. It
-    differs in two places: it reads only the values of a dict, not its keys, and it stops at a cres function. `seen`
-    holds the ids of the objects already visited.
+    follows when it computes the digest. If the walk skipped one of those channels, numba could cache a kernel that
+    links a dispatcher's stale code. The walk differs in two places: it reads only the values of a dict, not its keys,
+    and it stops at a cres function. `seen` holds the ids of the objects already visited.
     """
     if id(value) in seen:
         return False
@@ -205,8 +205,8 @@ def _self_cached_name(formula) -> str:
     return getattr(getattr(formula, "py_func", formula), "__qualname__", None) or _safe_repr(formula)
 
 
-# The return-type checks that passed, keyed by the formula's fingerprint, the input types, the declared type and the
-# jit options, so that a later compile_kernel of the same declarations does not compile the check again.
+# This set holds the return-type checks that passed, keyed by the formula's fingerprint, the input types, the declared
+# type and the jit options. A later compile_kernel of the same declarations therefore does not compile the check again.
 # compile_kernel checks a formula without a canonical fingerprint every time.
 _validated_returns: set = set()
 
@@ -223,7 +223,7 @@ def _classify(compiled: CompiledGraph):
     the set of external variables that a formula reads. The case is "A" if every variable is "STATIC_JIT" and every
     consumed external variable has a type: compile_kernel then compiles one fused kernel. The case is "B" if no
     variable is "UNKNOWN", some are "STATIC_PY", and every consumed external variable has a type: compile_kernel
-    then compiles the segments. Otherwise the case is "C", and the kernel decides at its first call.
+    then compiles the segments. Otherwise the case is "C", and the kernel determines its mode at its first call.
     """
     external = {v for vs in compiled.required_external_variables.values() for v in vs.values()}
     consumed = set()
@@ -243,8 +243,8 @@ def _classify(compiled: CompiledGraph):
         else:
             dispositions[var] = "UNKNOWN"
     vals = set(dispositions.values())
-    # A request of external variables alone leaves `dispositions` empty. Such a graph takes case "C", as a graph
-    # without declarations does: nothing compiles in compile_kernel, and `partition` stays None until the first call.
+    # A request of external variables alone leaves `dispositions` empty. Such a graph is assigned case "C", the case of
+    # a graph without declarations: compile_kernel compiles nothing, and `partition` remains None until the first call.
     if not dispositions or "UNKNOWN" in vals or any(not _is_typed(e) for e in consumed):
         case = "C"
     elif "STATIC_PY" in vals:
@@ -257,8 +257,9 @@ def _classify(compiled: CompiledGraph):
 def _assemble_source(params: list[tuple[str, str, str]], lines: list[str], out_ids: list[str]) -> str:
     """Return the source of a kernel or a segment: ``def _kernel(<params>):``, the body lines, and a return of a tuple.
 
-    The fused kernel and every segment take their source from this function, so the same nodes always give the same
-    text, and with it the same digest. `_compile` renames the function by replacing ``def _kernel(``.
+    This function generates the source of the fused kernel and of every segment. The same nodes therefore always
+    produce the same text, and the same text produces the same digest. `_compile` renames the function by replacing
+    ``def _kernel(``.
     """
     sig = ", ".join(ident for _, _, ident in params)
     ret = f"    return ({', '.join(out_ids)},)"
@@ -308,8 +309,9 @@ def _generate_segment_body(
     """Return the source of one compiled segment, with its bindings, parameters and outputs.
 
     The segment takes the variables of `live_in` as parameters and returns those of `live_out`, in the order given,
-    which the callers sort by qualified name. The source has the shape of the fused kernel's, so `_compile` handles
-    both alike. Returns ``(source, bindings, params, outputs)``, as `_generate_body` does.
+    which the callers sort by qualified name. The source has the same structure as the source of the fused kernel, so
+    `_compile` processes both in the same way. Returns ``(source, bindings, params, outputs)``, as `_generate_body`
+    does.
     """
     params = [(v.source, v.name, idents[v]) for v in live_in]
     bindings = {}
@@ -366,11 +368,11 @@ def _compile(
     The digest covers the source, the fingerprint of each formula in `bindings`, the jit options other than
     ``cache``, the ``NUMBA_*`` settings that change the compiled code, and `declared_sigs`. `declared_sigs` holds the
     declared signature of an eager fused kernel, or the declared types of an eager segment's inputs and outputs, and
-    is empty when the types are undeclared (case "C"). One source compiled for two sets of declared types therefore
-    gets two names.
+    is empty when the types are undeclared (case "C"). The digest of one source therefore differs for each set of
+    declared types, and so does the name derived from it.
 
     numba caches the dispatcher unless `cache`, `jit_options` or numbox's default options disable caching, or the
-    digest misses something that the code depends on. That happens for:
+    digest does not cover every value that the code depends on. That happens for:
 
     - a formula without a canonical fingerprint;
     - a formula that is or reaches a dispatcher with a cache of its own;
@@ -391,8 +393,9 @@ def _compile(
             cacheable = False
             self_cached.append(_self_cached_name(formula))
     if self_cached:
-        # numbox keeps the possibly stale code of such a dispatcher out of the kernel's cache, but not out of the
-        # kernel: numba loads the dispatcher's own cached code when it compiles the kernel, in every process.
+        # numbox prevents numba from caching a kernel that links such a dispatcher, but the kernel still runs the
+        # dispatcher's possibly stale code: numba loads that code from the dispatcher's own cache when it compiles the
+        # kernel, in every process.
         warnings.warn(
             "compile_kernel: formula(s) " + ", ".join(sorted(set(self_cached)))
             + " are, or reference, a @njit(cache=True) dispatcher whose cache key is "
@@ -417,12 +420,13 @@ def _compile(
             f"compile_kernel: jit flags {sorted(flags)} have no canonical "
             "fingerprint; compiling this kernel without an on-disk cache."
         )
-    # Each declared signature is a tuple of numba types. The digest takes each type through _type_identity, which is
-    # the same in every process, and not through its repr: the repr of a dispatcher type, such as
-    # type(CPUDispatcher(<function f at 0x...>)), holds an address that changes from process to process. A digest of
-    # it would rename the kernel in every process and leave a new pair of cache files behind each time. A type that is
-    # or holds a dispatcher type makes the unit uncached. _type_identity marks such a type uncacheable, because
-    # numba's own cache index misses a signature that holds one in every process and adds an entry each time.
+    # Each declared signature is a tuple of numba types. The digest holds the result of _type_identity for each type,
+    # which is the same in every process. The digest does not hold the type's repr. The repr of a dispatcher type,
+    # such as type(CPUDispatcher(<function f at 0x...>)), holds an address that changes from process to process. With
+    # a digest of that repr, the kernel would have a different name in every process. Each process would then write a
+    # new pair of cache files that no later process loads. A type that is or holds a dispatcher type makes the unit
+    # uncached. _type_identity marks such a type uncacheable, because numba's own cache index misses a signature that
+    # holds a dispatcher type in every process and adds an entry each time.
     declared_ids = [[_type_identity(t) for t in s] for s in declared_sigs]
     declared_canon = [[h for h, _ok in sig] for sig in declared_ids]
     if not all(ok for sig in declared_ids for _h, ok in sig):
@@ -446,13 +450,13 @@ def _compile(
     )
     anchor = _anchor_root(_ANCHOR_SUBDIR) / f"_kernel_{digest}.py"
     if opts["cache"]:
-        # Only a cached kernel gets an anchor file. The structref and the SQLite registrations write theirs whether
-        # cached or not, so that numba's messages can quote their source.
+        # numbox writes an anchor file only for a cached kernel. The structref and the SQLite registrations write
+        # theirs whether cached or not, so that numba's messages can quote their source.
         opts = _anchored_or_uncached(anchor, final_src, opts)
     code = compile(final_src, str(anchor), "exec")
     # The namespace's __name__ must name an importable module: numba rebuilds the environment of a cached function in
-    # another process with importlib.import_module, which fails for None. make_graph and make_structref set it the
-    # same way.
+    # another process with importlib.import_module, and that call fails if __name__ is None. make_graph and
+    # make_structref set it the same way.
     ns = {**bindings, "njit": njit, "_kernel_jit_options": opts, "__name__": __name__}
     exec(code, ns)  # nosec B102 - JIT codegen of internal source
     return ns.pop(name)
@@ -465,8 +469,9 @@ def _build_plan(
     """Turn the runs of `build_runs` into the steps of a plan, and return ``(steps, segments)``.
 
     Each Python run becomes a `_PyStep` for each of its nodes. Each compiled run becomes one `_JitStep`, a segment that
-    numba compiles at once for the types that `live_in_type` gives for its inputs, so a compile failure raises here.
-    `liveness` returns the inputs and outputs of a compiled run. With `declared_sigs` True, the digest of each segment
+    numba compiles while the plan is built, for the types that `live_in_type` returns for its inputs. This function
+    therefore raises numba's error if a segment fails to compile. `liveness` returns the inputs and outputs of a
+    compiled run. With `declared_sigs` True, the digest of each segment
     holds its declared input and output types. With `demoted`, which maps each Python variable to its reason, the
     function records a `Segment` of each run for the partition report; without it, `segments` is empty.
     """
@@ -509,14 +514,15 @@ def _build_plan(
 
 
 class CompiledKernel:
-    """A kernel that :func:`compile_kernel` compiled from a graph, with a description of the kernel.
+    """An object that holds the kernel that :func:`compile_kernel` compiled from a graph, and describes the kernel.
 
     The kernel runs in one of two modes. A fused kernel is one function that numba compiled. A segmented kernel runs
-    the formulas that numba cannot compile in Python, between compiled segments. Without declared types, the first
-    call decides the mode: numba compiles the kernel for that call's argument types, and if numba fails, numbox
-    searches for the formulas that must run in Python. With declared types, compile_kernel decides the mode.
+    the formulas that numba cannot compile in Python, between compiled segments. Without declared types, numbox
+    determines the mode at the first call: numba compiles the kernel for that call's argument types, and if numba
+    cannot compile it, numbox searches for the formulas that must run in Python. With declared types, compile_kernel
+    determines the mode.
 
-    A fused kernel stays fused: a later call with types that numba cannot compile raises numba's ``TypingError``. A
+    A fused kernel remains fused: a later call with types that numba cannot compile raises numba's ``TypingError``. A
     segmented kernel without declared types searches again when a segment fails to compile for a call's types. The new
     search replaces the partition, and it fills the store of :meth:`recompute` with that call's values. A segmented
     kernel built from declared types raises instead.
@@ -528,9 +534,9 @@ class CompiledKernel:
     - `source`: the kernel's source as numbox generates it, with the function named ``_kernel``.
     - `identifiers`: a dict that maps each qualified name to its identifier in `source`.
     - `partition`: a ``PartitionReport`` that describes the split into segments and Python formulas. It is None until
-      the first call, unless compile_kernel decided the mode from declared types.
-    - `is_declared`: True if compile_kernel decided the mode from declared types. Such a kernel checks each value that
-      :meth:`recompute` receives against its declared type, and never searches.
+      the first call, unless compile_kernel determined the mode from declared types.
+    - `is_declared`: True if compile_kernel determined the mode from declared types. Such a kernel checks each value
+      that :meth:`recompute` receives against its declared type, and never searches.
     """
 
     def __init__(self, kernel: Dispatcher, params: list[tuple[str, str, str]],
@@ -550,24 +556,27 @@ class CompiledKernel:
         self.identifiers = identifiers
         self._required_vars = required_vars
         self._external_vars = external_vars
-        # The store, {Variable: value}, from which recompute reads the values that do not change. A search fills it
-        # at the first call; otherwise the first recompute fills it from _last_args.
+        # _store is the store, {Variable: value}, from which recompute reads the values that do not change. A search
+        # fills it at the first call; otherwise the first recompute fills it from _last_args.
         self._store = None
-        # {Variable: reason} for each variable that runs in Python. A search or the declarations set it, and the
+        # _demoted maps each variable that runs in Python to the reason. A search or the declarations set it, and the
         # recompute plans run those variables in Python too.
         self._demoted = {}
-        # The external values of the first completed call, from which _ensure_store fills and refills the store. A
-        # fused kernel without declared types records them only at its first call; see _resolve_and_call.
+        # _last_args holds the external values of the first completed call, from which _ensure_store fills and
+        # refills the store. A fused kernel without declared types records them only at its first call; see
+        # _resolve_and_call.
         self._last_args = None
-        # The variables that a change can start from: the external variables, and each calculated variable that a
-        # recompute has overridden. None until recompute needs it.
+        # _sources holds the change sources for compute_boundary: the external variables, and each calculated variable
+        # that a recompute has overridden. It is None until recompute needs it.
         self._sources = None
-        # The variables whose values the recompute plans keep current in the store, computed when first needed.
+        # _boundary holds the variables whose values the recompute plans write back into the store. It is computed
+        # when it is first needed.
         self._boundary = None
-        # The recompute plans, keyed by the affected variables and the variables that they read from the store, in
-        # the order of their last use.
+        # _cone_cache holds the recompute plans, keyed by the affected variables and the variables that they read from
+        # the store, in the order of their last use.
         self._cone_cache = OrderedDict()
-        # The number of recompute plans kept. Beyond it, _cone_plan_cached discards the plan used least recently.
+        # _cone_cap is the largest number of recompute plans that _cone_cache holds. Beyond it, _cone_plan_cached
+        # discards the plan used least recently.
         self._cone_cap = 64
 
     @property
@@ -577,11 +586,11 @@ class CompiledKernel:
         It returns the requested values as a tuple, in the order of `outputs`. Before the first call, it is a method
         of this object that compiles or searches as needed and records the call's arguments for :meth:`recompute`.
         Once the kernel is fused, it is numba's dispatcher itself; for a segmented kernel, it is a method that runs
-        the segments. A name bound to it before the first call keeps working, but each call through that name passes
-        through the method, so a loop should bind the name after the first call.
+        the segments. A name bound to it before the first call still calls the kernel, but every call through that
+        name first invokes the method, so a loop should bind the name after the first call.
         """
         if self._mode == "fused":
-            # A fused kernel stays fused. numba compiles another version for new argument types, or raises a typing
+            # A fused kernel remains fused. numba compiles another version for new argument types, or raises a typing
             # error; numbox does not fall back to segments.
             return self._fused
         if self._mode == "fused-pending":
@@ -615,8 +624,8 @@ class CompiledKernel:
     def _resolve_and_call(self, *args) -> tuple:
         if self._mode != "virgin":
             return self.kernel(*args)
-        # An argument that numba cannot type sends the call straight to the search, which runs the formulas that read
-        # it in Python.
+        # If numba cannot type an argument, the method starts the search without compiling the fused kernel. The
+        # search runs the formulas that read that argument in Python.
         try:
             arg_types = tuple(typeof(a) for a in args)
         except (ValueError, TypeError):
@@ -628,9 +637,9 @@ class CompiledKernel:
                 result = self._discover_and_run(args)
                 self._last_args = args
                 return result
-            # The mode changes before the call runs. If the call raises, _last_args stays None. Every later call goes
-            # to the dispatcher directly, which never sets it, so recompute raises RuntimeError on this kernel from
-            # then on.
+            # The mode changes before the call runs. If the call raises, _last_args remains None. Every later call goes
+            # to the dispatcher directly, which never sets it, so every later recompute on this kernel raises
+            # RuntimeError.
             self._mode = "fused"
             self.partition = self._fused_report()
             result = self._fused(*args)
@@ -644,10 +653,11 @@ class CompiledKernel:
         try:
             result = self._plan.run(args)
         except NumbaError:
-            # The catch is broad on purpose: a segment that fails to compile for new argument types starts a new
-            # search. If a Python formula raised the NumbaError, the search runs the same formula on the same values
-            # and raises it again, so no error is hidden. A kernel built from declared types does not search again,
-            # because a search would replace the demoted set that the declarations give; it raises instead.
+            # The handler catches every NumbaError intentionally: a segment that fails to compile for new argument types
+            # starts a new search. If a Python formula raised the NumbaError, the search runs the same formula on the
+            # same values and raises it again, so no error is hidden. A kernel built from declared types does not
+            # search again, because a search would replace the demoted set that the declarations define; it raises
+            # instead.
             if self.is_declared:
                 raise
             result = self._discover_and_run(args)
@@ -674,8 +684,9 @@ class CompiledKernel:
             external_vars=tuple(self._external_vars),
             output_vars=tuple(self._required_vars),
         )
-        # The search computed every value, so the values fill the store. A new search, after a segment failed for
-        # new argument types, replaces the store with this call's values, while _last_args keeps the first call's.
+        # The search computed every value, so the method uses the dict of those values as the store. A new search,
+        # after a segment failed for new argument types, replaces the store with this call's values, while _last_args
+        # still holds the arguments of the first call.
         self._store = values
         # The recompute plans run the variables of this search in Python.
         self._demoted = demoted
@@ -693,13 +704,14 @@ class CompiledKernel:
             )
         compiled, _, bindings_by_var, jit_options, cache, external = self._ctx
         flags = _effective_flags(jit_options)
-        # The store is empty until the first recompute, unless a search filled it, and again after _flush_and_reseed:
-        # a fused kernel and a plan of segments return only the requested values. This method fills the store by
-        # computing every variable once more from the first call's arguments, formula by formula. Each formula
-        # therefore runs once more, with any side effect that it has.
+        # The store is empty until the first recompute unless a search filled it, and it is empty again after
+        # _flush_and_reseed, because a fused kernel and a plan of segments return only the requested values. This
+        # method fills the store by computing every variable once more from the first call's arguments, formula by
+        # formula. Each formula therefore runs once more, with any side effect that it has.
         values = dict(zip(self._external_vars, self._last_args))
         if self.is_declared:
-            # The declarations give the demoted set. A search could disagree with them, so _evaluate runs without one.
+            # The declarations define the demoted set. A search could find a different set of formulas that run in
+            # Python, so _evaluate uses the declared set without a search.
             _evaluate(compiled.ordered_nodes, external, values, bindings_by_var, flags, self._demoted)
         else:
             self._demoted = discover(compiled.ordered_nodes, external, values, bindings_by_var, flags)
@@ -709,8 +721,8 @@ class CompiledKernel:
         """Write the changed values into the store, and return the set of changed variables.
 
         The method looks a name up among the required external variables first, then among the calculated variables
-        of the compiled graph; a name found in neither changes nothing, with a warning. The first override of a
-        calculated variable adds it to the variables that a change can start from. On a kernel built from declared
+        of the compiled graph. A name found in neither changes nothing, and the method issues a warning. The first
+        override of a calculated variable adds it to the change sources in `_sources`. On a kernel built from declared
         types, the method raises ``ValueError``, before it writes anything, if numba cannot convert a value to its
         declared type.
         """
@@ -730,9 +742,9 @@ class CompiledKernel:
                         warnings.warn(f"{qual} is not in the calculation path, update has no effect.")
                         continue
                 if self.is_declared and _is_typed(var):
-                    # The check asks numba only whether it can convert the value's type to the declared type. A lossy
-                    # conversion passes, such as a float for an int64 variable. The second pass stores the value as it
-                    # is, without a conversion, and numba compiles the plan for the value's own type.
+                    # The check tests only whether numba can convert the value's type to the declared type. A lossy
+                    # conversion passes, such as a float for an int64 variable. The second pass stores the value
+                    # unchanged, and numba compiles the plan for the value's own type.
                     try:
                         got = typeof(val)
                         ok = self._fused.typingctx.can_convert(got, var.params.type) is not None
@@ -756,7 +768,7 @@ class CompiledKernel:
         return changed_vars
 
     def _expand_sources(self, new_sources: set):
-        """Add overridden calculated variables to the variables that a change can start from.
+        """Add overridden calculated variables to the change sources in `_sources`.
 
         The method resets the boundary, which `_ensure_boundary` computes again when it is next needed, and it discards
         every recompute plan, because the plans depend on the old boundary.
@@ -792,8 +804,8 @@ class CompiledKernel:
 
         The method orders the nodes and splits them into runs, as compile_kernel does for the kernel. A node that runs
         in Python according to `_demoted` runs in Python here as well, and numba compiles each compiled run for the
-        types of its inputs, which `_cone_live_in_type` gives. `_cone_plan_cached` calls this when it holds no plan for
-        the nodes.
+        input types that `_cone_live_in_type` returns. `_cone_plan_cached` calls this when it holds no plan for the
+        nodes.
         """
         compiled, idents, _, jit_options, cache, _ = self._ctx
         flags = _effective_flags(jit_options)
@@ -812,8 +824,8 @@ class CompiledKernel:
         """Return the key of the recompute plan for the `affected` nodes.
 
         The key holds the qualified names of the nodes and of the variables that they read from the store. The second
-        part keeps apart a change of an external value and an override of a calculated variable that affect the same
-        nodes, because their plans read different variables from the store.
+        part distinguishes a change of an external value from an override of a calculated variable when both affect
+        the same nodes, because their plans read different variables from the store.
         """
         cone_vars = {n.variable for n in affected}
         live_in_boundary = {inp for n in affected for inp in n.inputs if inp not in cone_vars}
@@ -854,17 +866,17 @@ class CompiledKernel:
         returns: numba compiles the recompute plan again for new types. A changed name may be a calculated variable.
         Its formula then does not run, and numbox recomputes the variables that depend on it from the given value. If
         the same call also changes one of its inputs, its formula runs and replaces the given value. A name outside the
-        requested part of the graph changes nothing, with a warning.
+        requested part of the graph changes nothing, and numbox warns that the name is not in the calculation path.
 
         :raises RuntimeError: if no call has given the store its starting values: before the first call that
             completes, and always on a kernel without declared types whose first call compiled it as one function and
             then raised.
         :raises ValueError: on a kernel built from declared types, if numba cannot convert a changed value to the
-            variable's declared type. numbox then writes nothing. It stores a value that numba can convert as it is,
-            without a conversion.
+            variable's declared type. numbox then writes nothing. numbox stores a value that numba can convert without
+            converting it.
 
         numba's ``TypingError`` propagates if numba cannot compile a new plan for the changed values, and the values
-        of that call stay in the store. If a plan that an earlier ``recompute`` built fails on the new values, numbox
+        of that call remain in the store. If a plan that an earlier ``recompute`` built fails on the new values, numbox
         retries once. The retry refills the store from the first call's arguments, applies this call's changes, and
         builds a new plan; the changes of earlier ``recompute`` calls are lost. If the new plan fails as well, numba's
         error propagates. A kernel built from declared types does not retry. The section "Recomputing after a change"
@@ -881,18 +893,18 @@ class CompiledKernel:
             return tuple(self._store[v] for v in self._required_vars)
         # The plan recomputes only the affected nodes and reads every other value from the store. A node that runs in
         # Python in the kernel runs in Python in the plan, and numba compiles the other nodes in segments. A plan is
-        # compiled at its first use and kept for the same affected nodes and store inputs, up to _cone_cap plans, so a
-        # recurring change reuses its compiled plan.
+        # compiled at its first use and cached for the same affected nodes and store inputs, up to _cone_cap plans, so
+        # a recurring change reuses its compiled plan.
         plan = self._cone_plan_cached(affected)
         try:
             plan.run_into(self._store)
         except NumbaError:
-            # A plan fails here when numba cannot compile it for the types of the values it reads. That happens to a
-            # plan built for earlier types. A new plan that fails to compile raises in _cone_plan_cached instead, with
+            # A plan fails here when numba cannot compile it for the types of the values it reads. A plan built for
+            # earlier types fails this way. A new plan that fails to compile raises in _cone_plan_cached instead, with
             # no retry. The retry discards every plan and refills the store from the first call's arguments. It then
             # applies this call's changes again and builds a new plan for the new types. A kernel built from declared
-            # types raises at once. numba compiles its plans for the declared types, which a retry would not change,
-            # and _apply_changes has already refused the values that numba cannot convert to them.
+            # types raises the error without a retry. numba compiles its plans for the declared types, which a retry
+            # would not change, and _apply_changes has already refused the values that numba cannot convert to them.
             if self.is_declared:
                 raise
             self._flush_and_reseed()
@@ -930,9 +942,9 @@ def compile_kernel(
     :param graph: the graph that holds the variables and their formulas.
     :param required: the qualified name of a variable, such as ``"calc.total"``, or a list of them, each named once.
         The kernel returns the variables in this order.
-    :param jit_options: numba's jit options for the kernel, the keyword arguments of ``@njit``. numbox merges them over
-        its default options, which it reads from the ``NUMBOX_JIT_OPTIONS`` environment variable, and decorates every
-        plain Python formula with the result, ``cache`` left out.
+    :param jit_options: numba's jit options for the kernel, the keyword arguments of ``@njit``. numbox merges them with
+        its default options, which it reads from the ``NUMBOX_JIT_OPTIONS`` environment variable, and the options given
+        here take precedence. numbox decorates every plain Python formula with the merged options, except ``cache``.
     :param cache: ``True`` or ``False`` to enable or disable the kernel's cache. The default, ``None``, defers to the
         ``cache`` option of `jit_options`, then to that of numbox's default options. numbox sets the latter to
         ``False`` when numba can write no cache for numbox's own modules, even if the kernel's own file could be
@@ -945,7 +957,7 @@ def compile_kernel(
     :raises RecursionError: if a chain of dependencies is deeper than Python's recursion limit.
 
     Without declared types, numba compiles the kernel at its first call, for the types of that call's arguments, and
-    numba's typing errors surface there. :class:`~numbox.core.variable.variable.Params` declares the type of a
+    numba raises its typing errors at that call. :class:`~numbox.core.variable.variable.Params` declares the type of a
     variable. If every calculated variable in the requested part of the graph has a declared type, and so does every
     external variable that a formula reads, compile_kernel compiles the kernel or its segments for the declared
     types. It then raises ``ValueError`` for a formula that returns a type other than its declaration, and numba's
@@ -959,14 +971,15 @@ def compile_kernel(
     in every process, without a cache, if a formula is itself a ``@cfunc`` or a ``cres`` function, reads a value that
     numbox cannot hash, or is or calls a dispatcher compiled with ``cache=True``. numbox warns in the last case, when
     a jit option has no form that numbox can hash, and when numba cannot cache in the kernel's directory. A dispatcher
-    compiled with ``cache=True`` keeps a cache of its own, which can be stale, and even an uncached kernel runs the
-    code from that cache.
+    compiled with ``cache=True`` has an on-disk cache of its own, which can hold stale code. A kernel that calls such a
+    dispatcher runs the code from that cache, even when the kernel itself is uncached.
 
     With numba's default options, the values that numbox computes formula by formula equal those that a segment or a
     fused kernel computes. Under ``fastmath``, which lets LLVM reorder floating-point arithmetic within one compiled
-    function, they can differ. numbox computes formula by formula in the search at the first call, and when it fills
-    a fused kernel's store at its first ``recompute``. The numbox.core.variable documentation gives the details in
-    "When the kernel compiles again", "When the kernel is not cached" and "If a formula cannot be compiled".
+    function, they can differ. numbox computes formula by formula in two places: in the search at the first call, and
+    when it fills the store of a fused kernel at the first ``recompute``. The numbox.core.variable documentation gives
+    the details in "When the kernel compiles again", "When the kernel is not cached" and "If a formula cannot be
+    compiled".
     """
     required = [required] if isinstance(required, str) else list(required)
     for entry in required:
@@ -1017,9 +1030,9 @@ def compile_kernel(
     required_vars = [_registry_var(q) for q in outputs]
     external_vars = [graph.registry[src][name] for src, name, _ in params]
     # In case "A", the digest holds the declared types of the external variables that the formulas read, in the order
-    # of the kernel's arguments, as the eager compile below uses them. One source that holds no types therefore gets one
-    # name for int64 values and another for float64 values. Cases "B" and "C" pass no signature here; the segments of
-    # case "B" carry their own.
+    # of the kernel's arguments, as the eager compilation below uses them. One source, which holds no types, therefore
+    # compiles under one name for int64 values and under another for float64 values. Cases "B" and "C" pass no
+    # signature here. In case "B", _build_plan adds the declared types of each segment to that segment's digest.
     declared_sigs = ()
     if case == "A":
         consumed_sig = tuple(v.params.type for v in external_vars if v in consumed)
@@ -1035,7 +1048,7 @@ def compile_kernel(
         ck = CompiledKernel(kernel, params, outputs, source, identifiers, ctx,
                             required_vars, external_vars, is_declared=True)
         sig_vars = [v for v in external_vars if v in consumed]
-        # The eager compile needs a type for every parameter of the kernel. A requested external variable that no
+        # The eager compilation needs a type for every parameter of the kernel. A requested external variable that no
         # formula reads is a parameter but not in `consumed`, so its type is not in the signature, even if it is
         # declared. A signature without it would have too few types, so such a kernel compiles at its first call.
         if len(sig_vars) == len(external_vars):
@@ -1050,7 +1063,7 @@ def compile_kernel(
         order = linearize(nodes, demoted)
         runs = build_runs(order, demoted)
         # compile_kernel builds the segments as _discover_and_run does, but for the declared types and with the demoted
-        # set that the declarations give, without a search.
+        # set that the declarations define, without a search.
         steps, segments = _build_plan(
             runs, idents, flags, jit_options, cache,
             liveness=lambda run_nodes: segment_liveness(run_nodes, external, required_vars, order),

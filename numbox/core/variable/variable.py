@@ -34,8 +34,8 @@ class Namespace(ABC):
     def update(self, key: str, var: 'Variable') -> None:
         """Store `var` under the name `key`, replacing any variable stored under that name.
 
-        :meth:`External.declare` uses it to add a variable created after the namespace. A request that the graph has
-        already compiled keeps the variable it found then.
+        :meth:`External.declare` uses it to add a variable created after the namespace. A request that the graph
+        compiled before the update still uses the variable that was stored at that time.
         """
         self._variables[key] = var
 
@@ -83,8 +83,8 @@ class Params:
     when every calculated variable in the requested part of the graph is declared with its type, and every external
     variable that a formula reads has a declared type; otherwise it ignores them all.
 
-    A graph caches what it compiles, so a declaration must be in place before the first :meth:`Graph.compile` or
-    compile_kernel of a request that involves the variable, as a formula must. A declaration added later has no
+    A graph caches what it compiles, so a declaration, like a formula, must exist before the first
+    :meth:`Graph.compile` or compile_kernel of a request that involves the variable. A declaration added later has no
     effect on that request.
     """
     jitable: bool = True
@@ -126,8 +126,8 @@ class External(Namespace):
     """A namespace for the variables of one external source of data, whose values the caller supplies.
 
     A lookup of a name that the namespace does not hold creates a variable of that name, without inputs or formula,
-    and stores it. The graph finds the external variables that a calculation needs through these lookups, so a
-    misspelled name becomes one more external variable instead of an error.
+    and stores it. The graph finds the external variables that a calculation needs through these lookups, so a lookup
+    of a misspelled name creates an additional external variable instead of raising an error.
     """
     def __init__(self, name: str):
         self.name = name
@@ -152,8 +152,8 @@ class External(Namespace):
         """Create the variable `name` with the declaration `params`, store it, and return it.
 
         A lookup creates an external variable without a declaration, so this method is the supported way to declare
-        the type of one. It replaces a variable already stored under `name`. Declare before the first compile of a
-        request that involves the variable, because the graph keeps what it compiled.
+        the type of one. It replaces a variable already stored under `name`. Declare before the first compilation of a
+        request that involves the variable, because the graph caches what it compiles.
         """
         variable = Variable(name=name, source=self.name, params=params)
         self.update(name, variable)
@@ -318,8 +318,8 @@ class CompiledGraph:
         :raises RuntimeError: if an input of a formula holds ``_null``, as a variable without a formula does unless
             `values` already holds a value for it.
 
-        The method writes the external values first. Then each formula runs after the formulas of its inputs. A
-        variable without a formula keeps the value that `values` holds for it.
+        The method writes the external values first. Then each formula runs after the formulas of its inputs. The
+        method does not change the value that `values` holds for a variable without a formula.
         """
         self._assign_external_values(external_values, values)
         self._calculate(self.ordered_nodes, values)
@@ -397,10 +397,11 @@ class CompiledGraph:
             to a :class:`Variables` namespace.
         :param values: the storage that holds the values of an earlier calculation.
 
-        Each variable that depends on a changed variable is reset and calculated again from its formula, so the graph
-        decides the final values. A given value of a calculated variable is therefore kept only if the variable does
-        not depend on another variable changed in the same call; otherwise its formula replaces the value. A name that
-        the compiled graph does not hold changes nothing, and a warning says that it is not in the calculation path.
+        Each variable that depends on a changed variable is reset and calculated again from its formula, so the
+        formulas of the graph determine the final values. A given value of a calculated variable therefore remains in
+        `values` only if the variable does not depend on another variable changed in the same call; otherwise its
+        formula replaces the value. A name that the compiled graph does not hold changes nothing, and the method warns
+        that the name is not in the calculation path.
         """
         changed_vars = set()
         for src, vals in changed.items():
@@ -468,8 +469,8 @@ class Graph:
         :raises RecursionError: if a chain of dependencies is deeper than Python's recursion limit.
 
         The graph caches the result for each set of names, in any order, and returns the cached compiled graph for a
-        later request of the same names, whatever `debug` that request passes. A variable or a declaration added
-        afterwards therefore has no effect on that request.
+        later request of the same names, regardless of the `debug` value of that request. A variable or a declaration
+        added afterwards therefore has no effect on that request.
         """
         if isinstance(required, str):
             required = [required]
@@ -576,9 +577,9 @@ class Graph:
 
         :param qual_names: a qualified name, or a list or set of them.
 
-        A dependency may be direct or pass through other variables. The search covers every namespace of the graph,
-        not only a compiled request. The graph builds the map of dependents on the first call and keeps it, so a
-        variable added or replaced afterwards is not seen.
+        A dependency may be direct or indirect, through other variables. The search covers every namespace of the
+        graph, not only a compiled request. The graph builds the map of dependents on the first call and caches it, so
+        the map does not include a variable added or replaced afterwards.
         """
         if isinstance(qual_names, str):
             qual_names = {qual_names}
@@ -599,17 +600,17 @@ class Graph:
         """Return a text that explains how the variable `qual_name` is derived from its dependencies.
 
         :param qual_name: the qualified name of the variable.
-        :param right_to_left: if True, the default, the text starts with `qual_name` and moves toward the end nodes of
-            the graph; if False, it starts with the end nodes.
+        :param right_to_left: if True, the default, the text begins with `qual_name` and ends with the end nodes of the
+            graph; if False, the order is reversed.
 
         The text has one entry for `qual_name` and one for each variable that it depends on. The entry of an external
-        variable names its source; the entry of any other variable names its inputs and gives its metadata.
+        variable names its source; the entry of any other variable names its inputs and includes its metadata.
         """
         derived = set()
         derivation = []
 
         def collect(qual_name_: str):
-            """Add the entries of the dependencies of `qual_name_`, then its own, each variable once."""
+            """Add the entries of the dependencies of `qual_name_`, then its entry, with one entry per variable."""
             if qual_name_ in derived:
                 return
             derived.add(qual_name_)

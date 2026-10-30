@@ -1,8 +1,8 @@
 """Split a kernel into compiled segments and Python formulas, and run the parts; a private module of compile_kernel.
 
 The search, `discover`, runs every formula once to find the formulas that numba cannot compile. `linearize` orders the
-nodes so that compiled and Python formulas form the fewest runs, and the liveness functions give each segment its
-inputs and outputs. The plans run the segments and the Python formulas in turn, and `PartitionReport`, which
+nodes so that compiled and Python formulas form the fewest runs, and the liveness functions determine the inputs and
+outputs of each segment. The plans run the segments and the Python formulas in turn, and `PartitionReport`, which
 `CompiledKernel.partition` holds, reports the split. The code works on the variables and nodes of
 `numbox.core.variable.variable` and on plain values. It uses numba only to type values, to compile formulas and to
 call compiled code.
@@ -104,8 +104,8 @@ class _Plan:
 class _ConePlan:
     """The steps that recompute the variables a change affects, run against the store of the kernel.
 
-    Unlike `_Plan.run`, which starts from the arguments and returns the outputs, `run_into` reads the inputs of each
-    step from the store and writes the outputs of each step back into it.
+    Unlike `_Plan.run`, which reads the external values from its arguments and returns the outputs, `run_into` reads
+    the inputs of each step from the store and writes the outputs of each step into the store.
     """
     steps: tuple[_JitStep | _PyStep, ...]
 
@@ -124,10 +124,10 @@ def _qual(node: CompiledNode) -> str:
 
 
 def _linearize_from(nodes: list[CompiledNode], demoted: set[Variable], start_jit: bool) -> list[CompiledNode]:
-    # Kahn's topological sort that stays with one kind of node while it can: it takes the ready nodes of the current
-    # kind, in qualified-name order, until none is ready, and only then switches to the other kind. `start_jit`
-    # chooses the first kind. With the first kind fixed, each node lands in the earliest run that its inputs allow,
-    # so no order that starts with that kind has fewer runs.
+    # This function runs Kahn's topological sort, and it continues with one kind of node as long as a node of that
+    # kind is ready. It takes the ready nodes of the current kind, in qualified-name order, until none is ready, and
+    # only then switches to the other kind. `start_jit` chooses the first kind. If the first kind is fixed, the sort
+    # places each node in the earliest run that its inputs allow, so no order that starts with that kind has fewer runs.
     by_var = {n.variable: n for n in nodes}
     indeg = {n: 0 for n in nodes}
     dependents = {}
@@ -162,8 +162,9 @@ def linearize(nodes: list[CompiledNode], demoted: set[Variable]) -> list[Compile
     A run is a sequence of consecutive nodes that are all compiled, or all in `demoted` and so run in Python. Ties
     between ready nodes are broken by qualified name, so the order is deterministic.
     """
-    # Each start gives the fewest runs for its first kind, so the better of the two gives the fewest runs overall. A
-    # tie goes to the order that starts with compiled nodes.
+    # Each of the two orders has the fewest runs possible for its first kind, so the order with fewer runs has the
+    # fewest runs of any order. If both orders have the same number of runs, linearize returns the order that starts
+    # with compiled nodes.
     jit_first = _linearize_from(nodes, demoted, start_jit=True)
     py_first = _linearize_from(nodes, demoted, start_jit=False)
     if len(build_runs(py_first, demoted)) < len(build_runs(jit_first, demoted)):
@@ -226,7 +227,7 @@ def cone_liveness(
 
     The segment reads, from the store, every input of its nodes that it does not produce itself. It returns every
     variable that it produces and that a later step in `cone_order` reads, that is requested, or that is in
-    `boundary`, the variables whose values the store keeps current for other recompute plans.
+    `boundary`. The recompute plans write the values of `boundary` back into the store for other plans.
     """
     produced = {n.variable for n in run_nodes}
     live_in = set()
@@ -255,8 +256,9 @@ _REASON_LIMIT = 200
 def _error_reason(exc: Exception) -> str:
     """Return the type of `exc` and the first informative line of its message, cut to `_REASON_LIMIT` characters.
 
-    numba opens the message of a typing error with a line about its nopython pipeline that every such error shares.
-    The function skips that line, because otherwise every reason in a partition report would read the same.
+    The message of a numba typing error begins with a line about the nopython pipeline, and that line is the same in
+    every such error. The function skips that line, because otherwise every reason in a partition report would have
+    the same text.
     """
     lines = [ln.strip() for ln in str(exc).splitlines() if ln.strip()]
     informative = next(
@@ -282,8 +284,8 @@ def _call_exotic(binding, args: list, arg_types: tuple, flags: dict | None = Non
     """Call a cres, @cfunc or @vectorize formula on `args` through a one-line @njit function, and return the result.
 
     The function calls the formula through a global, as a segment does. numba compiles it for `arg_types` under
-    `flags`, the kernel's jit options, so that the call computes as the fused kernel and the segments do. Such a formula
-    has no Python version to fall back to, so a numba error propagates.
+    `flags`, the kernel's jit options, so that the call compiles with the same options as the fused kernel and the
+    segments. Such a formula has no Python version to fall back to, so a numba error propagates.
     """
     names = ", ".join(f"a{i}" for i in range(len(args)))
     ns = {"_formula": binding}
@@ -317,7 +319,7 @@ def _dominators(nodes: list[CompiledNode], sources: set[Variable]) -> dict[Varia
 def compute_boundary(
     nodes: list[CompiledNode], sources: set[Variable], required: set[Variable],
 ) -> set[Variable]:
-    """Return the variables whose values recompute plans must keep current in the store.
+    """Return the variables whose values the recompute plans must write back into the store.
 
     These are the variables in `required`, and every variable that fails to dominate one of the variables that read
     it. A change in `sources` can then reach that reader without passing through the variable, so a recompute plan
@@ -347,11 +349,11 @@ def _evaluate(
     flags: dict | None,
     demoted: set[Variable] | dict[Variable, str],
 ) -> None:
-    """Calculate the value of every calculated variable into `values`, keeping `demoted` as given, without a search.
+    """Calculate the value of every calculated variable into `values` with the fixed set `demoted`, without a search.
 
     A cres, @cfunc or @vectorize formula always runs through the function of `_call_exotic`. A formula in `demoted`
     runs its Python function, and any other formula runs its dispatcher. `CompiledKernel._ensure_store` calls this to
-    fill the store at the first recompute of a kernel built from declared types. The declarations give the demoted
+    fill the store at the first recompute of a kernel built from declared types. The declarations define the demoted
     set, so no search is needed. This function is not a fallback after a numba error. On a kernel without declared
     types, `discover` searches after such an error, and a kernel built from declared types never searches.
     """

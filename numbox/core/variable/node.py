@@ -1,7 +1,8 @@
 """Represent a variable of a graph and its dependencies as linked Python objects, one `Node` for each variable.
 
 `make_node` follows the inputs of each variable through a graph's registry and returns the node of the requested
-variable. A node holds the nodes of its inputs, and a variable that several others read has one node, which they share.
+variable. A node holds the nodes of its inputs. A variable that several other variables read has one node, and the
+nodes of those variables share it.
 """
 from numbox.core.variable.variable import Namespace, Variable
 
@@ -27,9 +28,9 @@ class Node:
 def make_node(name: str, source: str, registry_: dict[str, Namespace]):
     """Return the node of the variable `name` of the namespace `source`, linked to the nodes of its dependencies.
 
-    `registry_` maps each namespace name to its namespace, as `Graph.registry` does. Each variable gets one node,
-    shared by every node that reads it. The function recurses through the inputs without a check for cycles, so a
-    cycle raises ``RecursionError``. An unknown namespace raises ``KeyError``.
+    `registry_` maps each namespace name to its namespace, as `Graph.registry` does. The function creates one node for
+    each variable, and the nodes of all the variables that read it share that node. The function recurses through the
+    inputs without a check for cycles, so a cycle raises ``RecursionError``. An unknown namespace raises ``KeyError``.
     """
     made = {}
 
