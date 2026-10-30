@@ -2,13 +2,13 @@
 
 Each binding takes the statement's handle and the parameter's index, which counts from 1, and returns ``SQLITE_OK``,
 ``SQLITE_RANGE`` for an index out of range, or ``SQLITE_MISUSE`` for a statement that has been stepped since its last
-reset. ``sqlite3_bind_text`` and ``sqlite3_bind_blob`` take a destructor as their last argument, an ``intp`` that tells
-SQLite how long the buffer lives:
+reset. ``sqlite3_bind_text`` and ``sqlite3_bind_blob`` take a destructor as their last argument, an ``intp`` that sets
+how SQLite manages the lifetime of the buffer:
 
 - ``SQLITE_STATIC`` (0): SQLite reads the buffer in place until the statement is finalized or the parameter is bound
   again, so the caller keeps the buffer alive and unchanged until then.
 - ``SQLITE_TRANSIENT`` (-1): SQLite copies the buffer before the call returns.
-- Any other value: the address of a C function that SQLite calls to free the buffer when it is done with it.
+- Any other value: the address of a C function that SQLite calls to free the buffer when SQLite no longer needs it.
 
 For a NumPy array passed through ``array_data_p``, pass ``SQLITE_TRANSIENT`` unless the array outlives the prepared
 statement.
@@ -37,7 +37,7 @@ def sqlite3_bind_int(stmt_p, idx, val):
 
     C reference: `sqlite3_bind_int <https://sqlite.org/c3ref/bind_blob.html>`_.
 
-    numba converts ``val`` to int32 without a check, so a wider value keeps only its low 32 bits; bind it with
+    numba converts ``val`` to int32 without a check, so a wider value is truncated to its low 32 bits; bind it with
     :func:`sqlite3_bind_int64` instead. Returns ``SQLITE_OK``, ``SQLITE_RANGE`` for an index out of range, or
     ``SQLITE_MISUSE`` if the statement has been stepped since its last reset.
     """

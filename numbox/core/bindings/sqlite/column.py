@@ -4,8 +4,8 @@ Each binding takes the statement's handle and a column index that counts from 0.
 called only after ``sqlite3_step`` returned ``SQLITE_ROW``, and before the statement is stepped again, reset or
 finalized. ``sqlite3_column_database_name``, ``sqlite3_column_table_name`` and ``sqlite3_column_origin_name`` exist
 only in a SQLite compiled with ``SQLITE_ENABLE_COLUMN_METADATA``. CPython's ``sqlite3.dll`` on Windows has them, and
-numbox loads only that DLL on Windows. On Linux and macOS, numbox loads the system's SQLite, which has them or not
-depending on the distribution. If the loaded library lacks one of them, its binding is a stub, as its docstring
+numbox loads only that DLL on Windows. On Linux and macOS, numbox loads the system's SQLite, and whether that library
+has them depends on the distribution. If the loaded library lacks one of them, its binding is a stub, as its docstring
 describes. Every other binding of the module exists in every SQLite that numbox supports.
 """
 from numbox.core.bindings.call import _call_lib_func
@@ -34,8 +34,8 @@ def sqlite3_column_int(stmt_p, idx):
 
     C reference: `sqlite3_column_int <https://sqlite.org/c3ref/column_blob.html>`_.
 
-    SQLite converts a value of another type, and NULL reads as 0. A value outside the int32 range loses its high bits;
-    :func:`sqlite3_column_int64` reads all 64.
+    SQLite converts a value of another type, and the binding returns 0 for NULL. A value outside the int32 range loses
+    its high bits; :func:`sqlite3_column_int64` reads all 64 bits.
     """
     return _call_lib_func("sqlite3_column_int", (stmt_p, idx))
 
@@ -46,7 +46,7 @@ def sqlite3_column_int64(stmt_p, idx):
 
     C reference: `sqlite3_column_int64 <https://sqlite.org/c3ref/column_blob.html>`_.
 
-    NULL reads as 0. SQLite converts a REAL or a text value as SQL's ``CAST`` to ``INTEGER`` does.
+    The binding returns 0 for NULL. SQLite converts a REAL or a text value as SQL's ``CAST`` to ``INTEGER`` does.
     """
     return _call_lib_func("sqlite3_column_int64", (stmt_p, idx))
 
@@ -57,7 +57,7 @@ def sqlite3_column_double(stmt_p, idx):
 
     C reference: `sqlite3_column_double <https://sqlite.org/c3ref/column_blob.html>`_.
 
-    NULL reads as 0.0. SQLite converts an integer or a text value as SQL's ``CAST`` to ``REAL`` does.
+    The binding returns 0.0 for NULL. SQLite converts an integer or a text value as SQL's ``CAST`` to ``REAL`` does.
     """
     return _call_lib_func("sqlite3_column_double", (stmt_p, idx))
 
@@ -128,9 +128,9 @@ def sqlite3_column_name(stmt_p, idx):
 
     C reference: `sqlite3_column_name <https://sqlite.org/c3ref/column_name.html>`_.
 
-    The name is the one that the column's ``AS`` clause gives; without one, SQLite does not specify the name. The
-    text is valid until the statement is finalized, until its first step prepares it again, or until the next call
-    for the same column. Returns 0 when memory runs out.
+    The name is the one that the column's ``AS`` clause sets. If the column has no ``AS`` clause, SQLite does not
+    specify its name. The text is valid until the statement is finalized, until its first step prepares it again, or
+    until the next call for the same column. Returns 0 when an allocation fails.
     """
     return _call_lib_func("sqlite3_column_name", (stmt_p, idx))
 
@@ -141,8 +141,8 @@ def sqlite3_column_decltype(stmt_p, idx):
 
     C reference: `sqlite3_column_decltype <https://sqlite.org/c3ref/column_decltype.html>`_.
 
-    The UTF-8 text is the type in the table's definition. SQLite types each value on its own, so a value need not have
-    the declared type of its column.
+    The UTF-8 text is the type in the table's definition. SQLite assigns a type to each value, not to each column, so a
+    value need not have the declared type of its column.
     """
     return _call_lib_func("sqlite3_column_decltype", (stmt_p, idx))
 
@@ -160,7 +160,7 @@ def sqlite3_column_database_name(stmt_p, idx):
     finalized or prepared again. SQLite has the function only when it is compiled with
     ``SQLITE_ENABLE_COLUMN_METADATA``. If the loaded library lacks it, this binding is a stub: a call from Python
     raises ``NotImplementedError``, and a jitted call fails to compile with a ``TypingError``. A stub has no
-    ``as_func``, so ``hasattr(sqlite3_column_database_name, "as_func")`` tells whether the binding is present.
+    ``as_func``, so ``hasattr(sqlite3_column_database_name, "as_func")`` is true only when the binding is present.
     """
     return _call_lib_func("sqlite3_column_database_name", (stmt_p, idx))
 
@@ -171,8 +171,9 @@ def sqlite3_column_table_name(stmt_p, idx):
 
     C reference: `sqlite3_column_table_name <https://sqlite.org/c3ref/column_database_name.html>`_.
 
-    Returns 0 for a column that is an expression or a subquery. The name is the table's own, not an alias. If the
-    loaded library lacks the function, this binding is a stub, as :func:`sqlite3_column_database_name` describes.
+    Returns 0 for a column that is an expression or a subquery. The name is the table's original name, not an alias.
+    If the loaded library lacks the function, this binding is a stub, as :func:`sqlite3_column_database_name`
+    describes.
     """
     return _call_lib_func("sqlite3_column_table_name", (stmt_p, idx))
 
@@ -183,7 +184,8 @@ def sqlite3_column_origin_name(stmt_p, idx):
 
     C reference: `sqlite3_column_origin_name <https://sqlite.org/c3ref/column_database_name.html>`_.
 
-    Returns 0 for a column that is an expression or a subquery. The name is the column's own, not an alias. If the
-    loaded library lacks the function, this binding is a stub, as :func:`sqlite3_column_database_name` describes.
+    Returns 0 for a column that is an expression or a subquery. The name is the column's original name, not an alias.
+    If the loaded library lacks the function, this binding is a stub, as :func:`sqlite3_column_database_name`
+    describes.
     """
     return _call_lib_func("sqlite3_column_origin_name", (stmt_p, idx))

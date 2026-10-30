@@ -1,8 +1,8 @@
-"""Bindings that register SQL functions on a SQLite connection and serve their callbacks.
+"""Bindings that register SQL functions on a SQLite connection, and bindings that their callbacks call.
 
-``sqlite3_create_function_v2`` registers a scalar or an aggregate function, and ``sqlite3_create_window_function`` a
-window function. The callbacks of such a function call ``sqlite3_aggregate_context`` for an aggregate's state,
-``sqlite3_user_data`` for the pointer that the registration passed, and ``sqlite3_context_db_handle`` for the
+``sqlite3_create_function_v2`` registers a scalar or an aggregate function, and ``sqlite3_create_window_function``
+registers a window function. The callbacks of such a function call ``sqlite3_aggregate_context`` for an aggregate's
+state, ``sqlite3_user_data`` for the pointer that the registration passed, and ``sqlite3_context_db_handle`` for the
 connection. Each callback is the ``intp`` address of a C function, such as the ``.address`` of a function that numba's
 ``cfunc`` compiles, and 0 stands for an unused callback or pointer.
 :func:`~numbox.core.bindings.sqlite.udf_helpers.register_aggregate` and
@@ -35,8 +35,8 @@ def sqlite3_create_function_v2(
     C reference: `sqlite3_create_function_v2 <https://sqlite.org/c3ref/create_function.html>`_.
 
     A scalar function passes ``x_func`` and 0 for ``x_step`` and ``x_final``, and an aggregate passes ``x_step`` and
-    ``x_final`` and 0 for ``x_func``; three zeros delete the function. ``x_func`` and ``x_step`` have the C type
-    ``void (*)(sqlite3_context *, int argc, sqlite3_value **argv)``, and ``x_final`` the type
+    ``x_final`` and 0 for ``x_func``; passing 0 for all three deletes the function. ``x_func`` and ``x_step`` have the
+    C type ``void (*)(sqlite3_context *, int argc, sqlite3_value **argv)``, and ``x_final`` has the type
     ``void (*)(sqlite3_context *)``. ``n_arg`` is the number of SQL arguments, from 0 to 127, or -1 for any number.
     ``e_text_rep`` is ``SQLITE_UTF8``, combined with flags such as ``SQLITE_DETERMINISTIC`` by a bitwise OR. SQLite
     returns ``p_app`` from :func:`sqlite3_user_data`. Unless ``x_destroy`` is 0, SQLite calls it with ``p_app`` when
@@ -59,9 +59,9 @@ def sqlite3_create_window_function(
 
     C reference: `sqlite3_create_window_function <https://sqlite.org/c3ref/create_function.html>`_.
 
-    ``x_step`` and ``x_final`` are required. ``x_value`` and ``x_inverse`` are both set for a window function, or both
-    0 for a plain aggregate. ``x_step`` and ``x_inverse`` have the C type
-    ``void (*)(sqlite3_context *, int argc, sqlite3_value **argv)``, and ``x_final`` and ``x_value`` the type
+    ``x_step`` and ``x_final`` are required. ``x_value`` and ``x_inverse`` are both set for a window function, and both
+    are 0 for a plain aggregate. ``x_step`` and ``x_inverse`` have the C type
+    ``void (*)(sqlite3_context *, int argc, sqlite3_value **argv)``, and ``x_final`` and ``x_value`` have the type
     ``void (*)(sqlite3_context *)``. The other arguments and the result codes are as for
     :func:`sqlite3_create_function_v2`.
     """
@@ -78,9 +78,9 @@ def sqlite3_aggregate_context(ctx, n_bytes):
     C reference: `sqlite3_aggregate_context <https://sqlite.org/c3ref/aggregate_context.html>`_.
 
     The first call of a group with a positive ``n_bytes`` allocates that many bytes and zeroes them, and later calls
-    return the same memory whatever their ``n_bytes``. A first call with an ``n_bytes`` of 0 or less returns 0, and so
-    does a failed allocation. ``xFinal`` usually passes 0, because SQLite calls it once without any ``xStep`` when no
-    row matches. SQLite frees the memory when the aggregate query ends.
+    return the same memory regardless of their ``n_bytes``. A first call with an ``n_bytes`` of 0 or less returns 0, and
+    a failed allocation also returns 0. ``xFinal`` usually passes 0, because SQLite calls it once without any ``xStep``
+    when no row matches. SQLite frees the memory when the aggregate query ends.
     """
     return _call_lib_func("sqlite3_aggregate_context", (ctx, n_bytes))
 

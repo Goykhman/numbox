@@ -43,9 +43,9 @@ def _put_unicode(buf, off, scratch8, src_p, nbytes, width_cp):
     stores it. Malformed input decodes to U+FFFD.
     """
     inp = carray(_cast_int_to_void_p(src_p), (nbytes,), dtype=np.uint8)
-    # The decoder is _typemap._utf8_decode_one, as in utf8_to_utf32, but each code point goes into buf through the
-    # uint32 view of scratch8 and _copy_bytes, writes to arrays that numba tracks. utf8_to_utf32 stores through a raw
-    # pointer instead, and the optimizer for macOS on arm64 has removed such stores as dead code.
+    # The decoder is _typemap._utf8_decode_one, as in utf8_to_utf32, but each code point is written into buf through
+    # the uint32 view of scratch8 and through _copy_bytes. Both write to arrays that numba tracks. utf8_to_utf32 stores
+    # through a raw pointer instead, and the optimizer for macOS on arm64 has removed such stores as dead code.
     cps = scratch8.view(np.uint32)
     i = 0
     k = 0
@@ -65,10 +65,10 @@ def _store_cell(buf, off, tag, width, stmt, j, scratch8):
     a string field; only a float field receives NaN for NULL.
     """
     # Each scalar is written through a typed view of scratch8, so that its bytes are in the machine's byte order, and
-    # _copy_bytes then copies them into buf. Every write goes to an array that numba tracks, so the optimizer for
-    # macOS on arm64 cannot remove it as it removes a store through a raw pointer. An integer keeps the low bits that
-    # fit its field. The text or BLOB accessor runs before sqlite3_column_bytes, as SQLite advises, because the
-    # accessor can convert the value and change its length.
+    # _copy_bytes then copies them into buf. Every write is a store into an array that numba tracks, so the optimizer
+    # for macOS on arm64 cannot remove it as it removes a store through a raw pointer. An integer is truncated to the
+    # low bits that fit its field. The text or BLOB accessor runs before sqlite3_column_bytes, as SQLite advises,
+    # because the accessor can convert the value and change its length.
     ctype = sqlite3_column_type(stmt, j)
     if ctype == SQLITE_NULL:
         if tag == _TAG_F32:
@@ -140,8 +140,8 @@ def _query_core(stmt, ncols, offsets, tags, widths, itemsize):
         n += 1
         rc = sqlite3_step(stmt)
     # The slice alone would keep the memory alive, because it shares the parent's NRT meminfo (make_view and
-    # impl_ret_borrowed). The copy only drops the unused rows, fewer than one doubling: fewer than n rows when n > 16,
-    # and at most 16 rows when n <= 16, because the capacity starts at 16.
+    # impl_ret_borrowed). The copy only discards the unused rows. They number fewer than n when n > 16, because the
+    # last doubling left the buffer more than half full, and at most 16 when n <= 16, because the capacity starts at 16.
     return out_u8[:n * itemsize].copy(), rc
 
 
@@ -157,14 +157,14 @@ def query_to_array(db, sql_p, dtype):
     """Run the SQL query at ``sql_p`` on ``db`` and return its rows as a 1-D NumPy structured array of ``dtype``.
 
     ``db`` is the connection's ``sqlite3 *`` handle. ``sql_p`` is the address of NUL-terminated UTF-8 SQL text, not a
-    Python ``str``: :func:`~numbox.utils.cstrings.c_string` makes one from any text, and
-    :func:`~numbox.utils.lowlevel.get_unicode_data_p` gives one for ASCII text. Only the first statement of the text
-    runs. The fields of ``dtype`` take the result columns in order, one field for each column.
+    Python ``str``: :func:`~numbox.utils.cstrings.c_string` provides one for any text, and
+    :func:`~numbox.utils.lowlevel.get_unicode_data_p` provides one for ASCII text. Only the first statement of the
+    text runs. The fields of ``dtype`` correspond to the result columns in order, one field for each column.
 
     A SQL NULL becomes NaN in a float field, 0 in an integer or ``bool`` field, and an empty value in an ``'S'`` or
-    ``'U'`` field. An integer field keeps the low bits of a value too wide for it, and a ``bool`` field is true for any
-    nonzero value. A string longer than its field is cut to the field's width, and the text for a ``'U'`` field is
-    decoded from UTF-8, with U+FFFD for malformed bytes.
+    ``'U'`` field. A value too wide for an integer field is truncated to the field's low bits, and a ``bool`` field is
+    true for any nonzero value. A string longer than its field is truncated to the field's width, and the text for a
+    ``'U'`` field is decoded from UTF-8, with U+FFFD for malformed bytes.
 
     Raises ``TypeError`` for a ``dtype`` without fields or with a field type that has no SQLite counterpart, such as
     a complex number. Raises ``ValueError`` when the number of fields differs from the number of result columns, and

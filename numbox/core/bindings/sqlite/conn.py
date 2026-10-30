@@ -1,10 +1,11 @@
 """Bindings that open and close a SQLite connection and report its state.
 
-The module binds ``sqlite3_open``, ``sqlite3_open_v2`` and ``sqlite3_close``, the library's version, the error of the
-most recent failed call, a database's file name and read-only state, and the counts of changed rows. SQLite added
-``sqlite3_changes64`` and ``sqlite3_total_changes64`` in version 3.37, of November 2021. Older libraries lack them,
-such as the SQLite 3.34 that CPython 3.10 ships on Windows, or a system SQLite on Linux or macOS older than 3.37.
-Each of the two bindings is a stub if the loaded library lacks its function, as its docstring describes.
+The module binds ``sqlite3_open``, ``sqlite3_open_v2`` and ``sqlite3_close``, and the functions that report the
+library's version, the error of the most recent failed call, a database's file name and read-only state, and the counts
+of changed rows. SQLite added ``sqlite3_changes64`` and ``sqlite3_total_changes64`` in version 3.37, released in
+November 2021. Older libraries lack them, such as the SQLite 3.34 that CPython 3.10 ships on Windows, or a system
+SQLite on Linux or macOS older than 3.37. Each of the two bindings is a stub if the loaded library lacks its function,
+as its docstring describes.
 """
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
@@ -47,14 +48,15 @@ def sqlite3_open(filename_p, db_pp):
 
 @proxy(signatures.get("sqlite3_open_v2"), jit_options=jit_options)
 def sqlite3_open_v2(filename_p, db_pp, flags, vfs_p):
-    """Open the database file named at ``filename_p`` as ``flags`` asks, and write the connection's handle to ``db_pp``.
+    """Open the database file named at ``filename_p`` in the mode that ``flags`` sets; write the handle to ``db_pp``.
 
     C reference: `sqlite3_open_v2 <https://sqlite.org/c3ref/open.html>`_.
 
     ``flags`` holds ``SQLITE_OPEN_READONLY``, ``SQLITE_OPEN_READWRITE``, or ``SQLITE_OPEN_READWRITE`` with
     ``SQLITE_OPEN_CREATE``, and may add other ``SQLITE_OPEN_*`` flags of
     :mod:`~numbox.core.bindings.sqlite.constants` with a bitwise OR. ``vfs_p`` is the address of the name of a VFS,
-    or 0 for the default one. The file name, the handle and the result code are as for :func:`sqlite3_open`.
+    or 0 for the default one. The file name, the handle and the result code have the meaning that
+    :func:`sqlite3_open` describes.
     """
     return _call_lib_func("sqlite3_open_v2", (filename_p, db_pp, flags, vfs_p))
 
@@ -66,7 +68,8 @@ def sqlite3_close(db_p):
     C reference: `sqlite3_close <https://sqlite.org/c3ref/close.html>`_.
 
     SQLite returns ``SQLITE_BUSY`` and leaves the connection open while a prepared statement on it is not finalized
-    or a BLOB handle is not closed. It rolls back a transaction that is still open. A handle of 0 is a no-op.
+    or a BLOB handle is not closed. It rolls back a transaction that is still open. A call with a handle of 0 does
+    nothing.
     """
     return _call_lib_func("sqlite3_close", (db_p,))
 
@@ -178,7 +181,7 @@ def sqlite3_changes(db_p):
 
     C reference: `sqlite3_changes <https://sqlite.org/c3ref/changes.html>`_.
 
-    The count leaves out the rows that triggers, foreign key actions and REPLACE conflict resolution changed. Above
+    The count excludes the rows that triggers, foreign key actions and REPLACE conflict resolution changed. Above
     the int32 range the value is undefined; :func:`sqlite3_changes64` returns it as an int64.
     """
     return _call_lib_func("sqlite3_changes", (db_p,))
@@ -199,8 +202,9 @@ def sqlite3_total_changes(db_p):
 
     C reference: `sqlite3_total_changes <https://sqlite.org/c3ref/total_changes.html>`_.
 
-    The count includes the rows that triggers and foreign key actions changed, and leaves out REPLACE conflict
-    resolution. Above the int32 range the value is undefined; :func:`sqlite3_total_changes64` returns it as an int64.
+    The count includes the rows that triggers and foreign key actions changed, and it excludes the rows that REPLACE
+    conflict resolution changed. Above the int32 range the value is undefined; :func:`sqlite3_total_changes64` returns
+    it as an int64.
     """
     return _call_lib_func("sqlite3_total_changes", (db_p,))
 
@@ -214,7 +218,7 @@ def sqlite3_changes64(db_p):
 
     SQLite has the function from version 3.37. If the loaded library is older, this binding is a stub: a call from
     Python raises ``NotImplementedError``, and a jitted call fails to compile with a ``TypingError``. A stub has no
-    ``as_func``, so ``hasattr(sqlite3_changes64, "as_func")`` tells whether the binding is present.
+    ``as_func``, so ``hasattr(sqlite3_changes64, "as_func")`` is true only when the binding is present.
     """
     return _call_lib_func("sqlite3_changes64", (db_p,))
 

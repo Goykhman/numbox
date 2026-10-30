@@ -1,9 +1,9 @@
 """Expose a NumPy array, or a mapping of 1-D arrays, as a read-only SQLite virtual table.
 
-:func:`register_table` registers the data under a name on a connection. SQL then queries the name as a table, and no
-data is copied. :mod:`~numbox.core.bindings.sqlite.tvf` reuses the module's NumPy layouts of SQLite's virtual table
-structs, its function that sets a cell as a column's result, and its registration. The registration keeps a table's
-data alive while SQLite can read it.
+:func:`register_table` registers the data under a name on a connection. A SQL statement can then query the name as a
+table, and numbox copies none of the data. :mod:`~numbox.core.bindings.sqlite.tvf` reuses the module's NumPy layouts
+of SQLite's virtual table structs, its function that sets a cell as a column's result, and its registration. The
+registration keeps a table's data alive while SQLite can read it.
 """
 import ctypes
 from collections.abc import Mapping
@@ -119,7 +119,7 @@ _SPEC_SIZE = _SPEC_DTYPE.itemsize
 assert _SPEC_SIZE == 8
 
 # The callbacks below compile with the cache option alone, taken from numbox's jit options and treated as enabled when
-# the key is absent; no other jit option reaches them. The jitted helpers that they call compile under all of
+# the key is absent; no other jit option applies to them. The jitted helpers that they call compile under all of
 # numbox's jit options.
 _CACHE = jit_options.get("cache", True)
 
@@ -142,7 +142,7 @@ def sqlite3_create_module_v2(db, z_name, p_module, p_client_data, x_destroy):
 # _DATA_ANCHOR maps the client-data address of each registration to the handle that keeps the registration's data
 # alive. _register_with_destroy passes _XDESTROY_ADDR to sqlite3_create_module_v2 as the destructor of the client
 # data. SQLite calls it with that address when it no longer needs the module, that is when the connection closes or
-# when the name is registered again, and the destructor drops the handle.
+# when the name is registered again, and the destructor removes the handle from _DATA_ANCHOR.
 _DATA_ANCHOR = {}
 
 
@@ -151,7 +151,7 @@ def _xdestroy_py(p_aux):
 
 
 # A ctypes callback must stay referenced for as long as C code can call it, because ctypes frees the callback's code
-# when the object is collected, so the object lives at module level.
+# when the object is collected, so the object is assigned to a module-level name.
 _XDESTROY_CFUNC = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(_xdestroy_py)
 _XDESTROY_ADDR = ctypes.cast(_XDESTROY_CFUNC, ctypes.c_void_p).value
 
@@ -329,10 +329,10 @@ def _is_supported_op(op):
 
 @cfunc(types.int32(types.intp, types.intp), cache=_CACHE)
 def _xbestindex(vtab, idx_info):
-    # The callback claims every usable constraint on a numeric column whose operator _is_supported_op accepts. Each
-    # claimed constraint gets an argvIndex, so that xFilter receives its value, and its (col, op) pair goes into
-    # idxStr, which SQLite passes on to xFilter. The callback reports a row estimate in every case, because SQLite
-    # assumes 25 rows otherwise and then misjudges the cost of joins and subqueries.
+    # The callback claims every usable constraint on a numeric column whose operator _is_supported_op accepts. It
+    # assigns each claimed constraint an argvIndex, so that xFilter receives its value, and it writes the constraint's
+    # (col, op) pair into idxStr, which SQLite passes to xFilter. The callback reports a row estimate in every case,
+    # because SQLite otherwise assumes 25 rows and then estimates the cost of joins and subqueries wrongly.
     idx_p = 0
     try:
         v = carray(_cast_int_to_void_p(vtab), (1,), dtype=_VTAB_DTYPE)
@@ -371,8 +371,9 @@ def _xbestindex(vtab, idx_info):
             idx_p = 0
 
         nrows = d[0].nrows
-        # A heuristic, because the table keeps no column statistics: each bound constraint is assumed to divide the
-        # remaining rows, which favors plans that bind more constraints. The + 1 keeps the estimate above 0.
+        # The estimate is a heuristic, because the table keeps no column statistics: each bound constraint is assumed
+        # to divide the remaining rows, which favors plans that bind more constraints. The + 1 makes the estimate at
+        # least 1.
         ii[0].estimatedRows = nrows if nbound == 0 else nrows // (nbound + 1) + 1
         ii[0].estimatedCost = float64(nrows)
         return SQLITE_OK
@@ -439,7 +440,8 @@ def _xclose(cur):
 def _load_cell_i64(addr, tag):
     """Return the integer or ``bool`` cell at ``addr`` as the int64 that SQLite receives.
 
-    A ``uint64`` of 2**63 or more wraps to a negative value, and a ``bool`` is 0 or 1. Any other tag reads as 0.
+    A ``uint64`` of 2**63 or more wraps to a negative value, and a ``bool`` is 0 or 1. For any other tag, the function
+    returns 0.
     """
     if tag == _TAG_I8:
         return int64(load_unaligned(addr, int8))
@@ -466,8 +468,8 @@ def _load_cell_i64(addr, tag):
 def _load_cell_f64(addr, tag):
     """Return the float or ``bool`` cell at ``addr`` as a float64.
 
-    No other numeric tag reaches it: ``_emit_cell`` sends it the float tags only, and the predicate scan compares every
-    integer column as int64, through ``_cell_value_i64``. Any other tag reads as 0.
+    No other numeric tag is passed to it: ``_emit_cell`` passes it only the float tags, and the predicate scan compares
+    every integer column as int64, through ``_cell_value_i64``. For any other tag, the function returns 0.
     """
     if tag == _TAG_BOOL:
         return float64(1) if load_unaligned(addr, uint8) != 0 else float64(0)
@@ -492,7 +494,7 @@ def _cell_at(d, rowid, col):
 def _cell_value_f64(d, rowid, col):
     """Return the cell at ``(rowid, col)`` as a float64, loaded as ``_xcolumn`` loads it.
 
-    xBestIndex claims only the tags up to ``_TAG_BOOL``, and a string or BLOB tag reads as 0.
+    xBestIndex claims only the tags up to ``_TAG_BOOL``, and the function returns 0 for a string or BLOB tag.
     """
     addr, tag = _cell_at(d, rowid, col)
     return _load_cell_f64(addr, tag)
@@ -526,8 +528,8 @@ def _cmp(op, cv, rv):
 def _int_float_cmp(i, r):
     """Return the sign of ``i - r``, -1, 0 or 1, for an int64 cell ``i`` and a REAL constraint value ``r``.
 
-    The result is exact at every magnitude, as in SQLite's ``sqlite3IntFloatCompare``, so an integer column
-    constrained by a REAL value never loses a matching row.
+    The result is exact at every magnitude, as in SQLite's ``sqlite3IntFloatCompare``, so a constraint with a REAL
+    value on an integer column never excludes a matching row.
     """
     # The function never converts i to float64, which would lose precision above 2**53.
     if r < -9.223372036854775808e18:   # r < INT64_MIN, so i > r
@@ -572,10 +574,10 @@ def _row_matches(cur):
     for k in range(c[0].n_pred):
         op = preds[k].op
         mode = preds[k].is_int
-        # Each mode calls _cmp from a call site of its own, so numba never unifies an int64 cell with a float64 one
-        # in a phi node. That widening loses precision above 2**53, and a predicate evaluated on the rounded value
-        # would drop rows that SQLite's own check of the omit=0 constraints never sees, because SQLite checks only
-        # the rows that the cursor returns.
+        # Each mode calls _cmp from a separate call site, so numba never unifies an int64 cell with a float64 cell in
+        # a phi node. That widening loses precision above 2**53. A predicate evaluated on the rounded value would skip
+        # matching rows, and SQLite could not restore them, because SQLite checks the omit=0 constraints only on the
+        # rows that the cursor returns.
         if mode == 1:
             ok = _cmp(op, _cell_value_i64(d, c[0].rowid, preds[k].col), preds[k].ival)
         elif mode == 0:
@@ -624,13 +626,14 @@ def _xfilter(cur, idx_num, idx_str, argc, argv):
                 preds[k].col = col
                 preds[k].op = spec[k].op
                 # The mode depends on the type of the constraint's value as well as on the column's tag. An integer
-                # column constrained by a REAL value must not truncate the value to int64, because a row dropped
-                # here never reaches SQLite's own check, which sees only the rows that the cursor returns.
+                # column constrained by a REAL value must not truncate the value to int64. SQLite checks the
+                # constraint only on the rows that the cursor returns, so a row skipped here is lost.
                 if _is_int_tag(col_tags[col]):
                     if sqlite3_value_numeric_type(vals[k]) == SQLITE_FLOAT:
                         # An integer column against a REAL value compares exactly, in mode 2. Truncating the value
-                        # to int64 would drop rows for a fractional or out-of-range value, and widening the cell to
-                        # float64 would drop rows for an integer value above 2**53.
+                        # to int64 would skip matching rows when the value is fractional or out of range, and
+                        # widening the cell to float64 would skip matching rows when the value is an integer above
+                        # 2**53.
                         preds[k].is_int = 2
                         preds[k].ival = 0
                         preds[k].fval = sqlite3_value_double(vals[k])
@@ -688,8 +691,8 @@ def _emit_cell(ctx, addr, tag, width, scratch_p, s_blob_destructor):
 
     An ``'S'`` or BLOB result points at ``addr`` itself, so the caller passes the destructor value that matches how
     long ``addr`` stays valid. A ``'U'`` result is converted to UTF-8 in ``scratch_p``, which the next call
-    overwrites, so it is always ``SQLITE_TRANSIENT``. Each tag that ``_col_tag`` returns has a branch. Any other tag
-    fails the query with an error instead of reading back as NULL.
+    overwrites, so it is always ``SQLITE_TRANSIENT``. Each tag that ``_col_tag`` returns has a branch. For any other
+    tag, the query fails with an error instead of returning NULL for the cell.
     """
     if _is_int_tag(tag) or tag == _TAG_BOOL:
         sqlite3_result_int64(ctx, _load_cell_i64(addr, tag))
@@ -742,7 +745,7 @@ class _Sqlite3Module(ctypes.Structure):
     _fields_ = [("iVersion", ctypes.c_int)] + _fields_
 
 
-# One sqlite3_module, built when this module is imported, serves every table that register_table registers, because
+# One sqlite3_module, built when this module is imported, implements every table that register_table registers, because
 # each callback reads its table's layout from the descriptor that SQLite passes as client data. xCreate is the same
 # function as xConnect, which makes every table eponymous, and xDestroy is xDisconnect, because a table has no storage
 # of its own to delete.
@@ -794,10 +797,10 @@ def register_table(db, name, data, columns=None, *, text_as_blob=False):
       rename the columns, but they keep the order of the fields; to reorder them, reorder the fields of the array or
       pass a mapping.
     - a 2-D NumPy array, one table row for each row of the array. ``columns`` is required and names each column.
-    - a mapping, such as a ``dict``, from column name to 1-D NumPy array, all of one length. The keys name the
-      columns in their order, so passing ``columns`` raises ``ValueError``. Each value must be a ``numpy.ndarray``,
-      because numbox converts nothing: another value raises ``TypeError``, and an array that is not 1-D raises
-      ``ValueError``.
+    - a mapping, such as a ``dict``, from column name to 1-D NumPy array. The arrays must all have the same length.
+      The keys name the columns in their order, so passing ``columns`` raises ``ValueError``. Each value must be a
+      ``numpy.ndarray``, because numbox converts nothing: another value raises ``TypeError``, and an array that is not
+      1-D raises ``ValueError``.
 
     numbox keeps the data and the table's descriptor alive until SQLite drops the module, when the connection closes
     or when the name is registered again. The caller must not change or resize the arrays while the table is
@@ -807,8 +810,8 @@ def register_table(db, name, data, columns=None, *, text_as_blob=False):
     Values:
 
     - A ``uint64`` value of 2**63 or more becomes SQLite's signed INTEGER, so it wraps to a negative value.
-    - A float becomes a REAL, infinities included, except NaN: SQLite turns a NaN REAL into SQL NULL, so a NaN cell
-      reads back as NULL. NumPy has no missing value, so every other cell is non-NULL. Masked arrays are not
+    - A float becomes a REAL, infinities included, except NaN: SQLite converts a NaN REAL to SQL NULL, so a query
+      returns NULL for a NaN cell. NumPy has no missing value, so every other cell is non-NULL. Masked arrays are not
       supported, and the table ignores the mask.
 
     String columns:
@@ -820,7 +823,7 @@ def register_table(db, name, data, columns=None, *, text_as_blob=False):
     - NumPy pads a fixed-width ``'S'`` or ``'U'`` value with NULs. The table drops the trailing NULs of each value and
       keeps the interior ones.
     - SQLite receives the whole of a TEXT value with an interior NUL, because numbox passes its length in bytes. C
-      string functions and most SQL text functions stop at the first NUL, though. Read such a value with
+      string functions and most SQL text functions, however, stop at the first NUL. Read such a value with
       ``sqlite3_column_bytes`` and the text or BLOB pointer, or pass ``text_as_blob=True`` to keep every byte.
 
     Raises ``TypeError`` for ``data`` of another type, for a column name that is not a string and for a dtype without

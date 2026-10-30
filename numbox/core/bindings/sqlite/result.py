@@ -3,12 +3,12 @@
 A SQL function's ``xFunc``, ``xFinal`` and ``xValue`` callbacks report their result through these bindings, and a
 virtual table's ``xColumn`` reports a cell's value the same way. Each binding takes, as its first argument, the
 ``sqlite3_context *`` that SQLite passed to the callback, and it must be called in that callback's thread. The text
-and BLOB setters take a destructor after the byte count, an ``intp`` that tells SQLite what to do with the buffer:
+and BLOB setters take a destructor after the byte count, an ``intp`` that sets how SQLite manages the buffer:
 
 - ``SQLITE_STATIC`` (0): SQLite uses the buffer in place, without a copy, and never frees it, so the buffer must stay
   valid and unchanged until SQLite has finished with the result.
 - ``SQLITE_TRANSIENT`` (-1): SQLite copies the buffer before the call returns.
-- Any other value: the address of a C function that SQLite calls to free the buffer when it has finished with it.
+- Any other value: the address of a C function that SQLite calls to free the buffer when SQLite no longer needs it.
 """
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
@@ -38,7 +38,7 @@ def sqlite3_result_int(ctx, val):
 
     C reference: `sqlite3_result_int <https://sqlite.org/c3ref/result_blob.html>`_.
 
-    numba converts ``val`` to int32 without a check, so a wider value keeps only its low 32 bits;
+    numba converts ``val`` to int32 without a check, so a wider value is truncated to its low 32 bits;
     :func:`sqlite3_result_int64` sets the whole value.
     """
     return _call_lib_func("sqlite3_result_int", (ctx, val))
@@ -59,7 +59,7 @@ def sqlite3_result_double(ctx, val):
 
     C reference: `sqlite3_result_double <https://sqlite.org/c3ref/result_blob.html>`_.
 
-    SQLite turns a NaN into SQL NULL, and an infinity stays a REAL.
+    SQLite converts a NaN to SQL NULL, and an infinity remains a REAL.
     """
     return _call_lib_func("sqlite3_result_double", (ctx, val))
 
@@ -74,7 +74,7 @@ def sqlite3_result_text(ctx, text_p, n_bytes, destructor):
     check. A ``destructor`` of ``SQLITE_TRANSIENT`` makes SQLite copy the text before the call returns. With
     ``SQLITE_STATIC``, SQLite reads the text in place, and the caller keeps it alive and unchanged until SQLite has
     finished with the result. Any other value is the address of a C function that SQLite calls to free the text. A
-    NUL before byte ``n_bytes`` stays in the text, and SQL expressions on such text give undefined results.
+    NUL before byte ``n_bytes`` remains part of the text, and the result of a SQL expression on such text is undefined.
     """
     return _call_lib_func("sqlite3_result_text", (ctx, text_p, n_bytes, destructor))
 
@@ -85,7 +85,7 @@ def sqlite3_result_text64(ctx, text_p, n_bytes, destructor, encoding):
 
     C reference: `sqlite3_result_text64 <https://sqlite.org/c3ref/result_blob.html>`_.
 
-    ``encoding`` is ``SQLITE_UTF8`` for UTF-8 text. ``n_bytes`` is a uint64, so it must give the length: numba
+    ``encoding`` is ``SQLITE_UTF8`` for UTF-8 text. ``n_bytes`` is a uint64, so it must be the length itself: numba
     converts -1 to the largest uint64, and a length above 2**31 - 1 makes the function fail with ``SQLITE_TOOBIG``.
     ``destructor`` is as for :func:`sqlite3_result_text`.
     """
@@ -107,12 +107,12 @@ def sqlite3_result_blob(ctx, data_p, n_bytes, destructor):
 
 @proxy(signatures.get("sqlite3_result_blob64"), jit_options=jit_options)
 def sqlite3_result_blob64(ctx, data_p, n_bytes, destructor):
-    """Set the result of the SQL function on ``ctx`` to a BLOB of the ``n_bytes`` bytes at ``data_p``, a uint64 length.
+    """Set the result of the SQL function on ``ctx`` to a BLOB of the ``n_bytes`` bytes at ``data_p``.
 
     C reference: `sqlite3_result_blob64 <https://sqlite.org/c3ref/result_blob.html>`_.
 
-    A length above 2**31 - 1 makes the function fail with ``SQLITE_TOOBIG``. ``destructor`` is as for
-    :func:`sqlite3_result_text`.
+    ``n_bytes`` is a uint64, and a length above 2**31 - 1 makes the function fail with ``SQLITE_TOOBIG``.
+    ``destructor`` is as for :func:`sqlite3_result_text`.
     """
     return _call_lib_func("sqlite3_result_blob64", (ctx, data_p, n_bytes, destructor))
 
@@ -133,7 +133,8 @@ def sqlite3_result_error(ctx, msg_p, n_bytes):
     C reference: `sqlite3_result_error <https://sqlite.org/c3ref/result_blob.html>`_.
 
     A negative ``n_bytes`` makes SQLite read the message up to the first NUL. SQLite copies the message before the
-    call returns. The error code is ``SQLITE_ERROR`` unless a later :func:`sqlite3_result_error_code` sets another.
+    call returns. The error code is ``SQLITE_ERROR`` unless a later call of :func:`sqlite3_result_error_code` sets
+    another code.
     """
     return _call_lib_func("sqlite3_result_error", (ctx, msg_p, n_bytes))
 
@@ -162,8 +163,8 @@ def sqlite3_result_error_code(ctx, errcode):
 
     C reference: `sqlite3_result_error_code <https://sqlite.org/c3ref/result_blob.html>`_.
 
-    If no message was set, SQLite uses its standard message for the code. A later :func:`sqlite3_result_error` sets
-    the code back to ``SQLITE_ERROR``, so call this binding after it.
+    If no message was set, SQLite uses its standard message for the code. A later call of
+    :func:`sqlite3_result_error` resets the code to ``SQLITE_ERROR``, so call this binding after that call.
     """
     return _call_lib_func("sqlite3_result_error_code", (ctx, errcode))
 

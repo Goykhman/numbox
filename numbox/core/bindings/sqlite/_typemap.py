@@ -36,8 +36,8 @@ def utf32_to_utf8(src, n_codepoints, dst):
     """Encode the UTF-32 code points at ``src`` as UTF-8 at ``dst``, and return the number of bytes written.
 
     ``src`` holds ``n_codepoints`` code points in the machine's byte order, as a NumPy ``'U'`` value stores them. The
-    function drops the trailing zero code points of the value's padding and keeps the interior ones. A surrogate or a
-    value above U+10FFFF is written as U+FFFD, and no NUL follows the bytes. ``dst`` must hold at least
+    function ignores the trailing zero code points of the value's padding and encodes the interior ones. A surrogate or
+    a value above U+10FFFF is written as U+FFFD, and no NUL follows the bytes. ``dst`` must hold at least
     ``4 * n_codepoints + 1`` bytes.
     """
     m = n_codepoints
@@ -70,9 +70,9 @@ def utf32_to_utf8(src, n_codepoints, dst):
     return k
 
 
-# numba inlines the helpers that run once per element, here and in vtable.py, in its own IR. LLVM's inliner would
-# leave the larger ones, _utf8_decode_one and _emit_cell, out of line, and a call for each code point or each cell
-# measurably slows their loops.
+# numba inlines the helpers that run once per element, here and in vtable.py, in its own IR. Without that, LLVM's
+# inliner leaves the larger ones, _utf8_decode_one and _emit_cell, out of line, and a call for each code point or each
+# cell measurably slows their loops.
 _INLINE_JIT_OPTIONS = {**jit_options, "inline": "always"}
 
 
@@ -81,8 +81,9 @@ def _utf8_decode_one(inp, i, nbytes):
     """Decode the UTF-8 form that starts at ``inp[i]``, and return the code point and the index just past the form.
 
     ``inp`` holds ``nbytes`` bytes. A malformed form that still parses, such as a surrogate, an overlong encoding or a
-    value above U+10FFFF, decodes to U+FFFD and is consumed whole. A byte that starts no complete form, such as a
-    stray continuation byte or a truncated form, decodes to U+FFFD and is consumed alone.
+    value above U+10FFFF, decodes to U+FFFD, and the decoder consumes all of its bytes. A byte that starts no complete
+    form, such as a stray continuation byte or a truncated form, decodes to U+FFFD, and the decoder consumes only that
+    byte.
     """
     # A form of RFC 3629 starts with a lead byte 0xxxxxxx (b0 < 0x80), 110xxxxx (b0 >> 5 == 0x6), 1110xxxx
     # (b0 >> 4 == 0xE) or 11110xxx (b0 >> 3 == 0x1E). Each continuation byte after it is 10xxxxxx (>> 6 == 0x2) and
@@ -116,7 +117,7 @@ def _utf8_decode_one(inp, i, nbytes):
 
 @njit(**jit_options)
 def utf8_to_utf32(src, nbytes, dst, width_cp):
-    """Decode the UTF-8 bytes at ``src`` into at most ``width_cp`` code points at ``dst``, and return how many it wrote.
+    """Decode the UTF-8 bytes at ``src`` into at most ``width_cp`` code points at ``dst``; return the number written.
 
     ``nbytes`` is the length of the input. Each code point is written as a 4-byte unsigned integer in the machine's
     byte order, which is little-endian on every platform that numbox supports, and the rest of the ``width_cp`` slots

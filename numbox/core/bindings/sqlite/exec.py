@@ -8,8 +8,8 @@ call a C function once for each result row, with this type::
 ``ctx`` is the pointer that the caller passed to ``sqlite3_exec``. ``col_values`` and ``col_names`` are arrays of
 ``ncol`` addresses of NUL-terminated UTF-8 strings, valid only during the call, and a NULL value has the address 0. The
 callback returns 0 to continue. Any other value stops ``sqlite3_exec``, which then returns ``SQLITE_ABORT``. numba's
-``cfunc`` compiles such a function, and its ``.address`` is the value to pass. Here the callback counts the rows into
-a NumPy array::
+``cfunc`` compiles such a function, and its ``.address`` is the value to pass. Here the callback stores the number of
+rows in a NumPy array::
 
     from ctypes import addressof, c_int64
 
@@ -62,11 +62,11 @@ def sqlite3_exec(db_p, sql_p, cb_p, ctx_p, errmsg_pp):
 
     C reference: `sqlite3_exec <https://sqlite.org/c3ref/exec.html>`_.
 
-    ``cb_p`` is the address of a row callback of the type that the module docstring gives, or 0 for none, and SQLite
-    passes ``ctx_p`` to it. A statement that fails stops the run, and SQLite skips the statements after it. Unless
+    ``cb_p`` is 0, or the address of a row callback of the type that the module docstring gives, and SQLite passes
+    ``ctx_p`` to that callback. If a statement fails, SQLite stops and skips the statements after it. Unless
     ``errmsg_pp`` is 0, SQLite then writes to it the address of an error message, which the caller frees with
-    :func:`sqlite3_free`; after a success it writes 0 there. Returns ``SQLITE_OK``, ``SQLITE_ABORT`` when the callback
-    returned a nonzero value, or the error code of the statement that failed.
+    :func:`sqlite3_free`. If every statement succeeds, SQLite writes 0 there. Returns ``SQLITE_OK``, ``SQLITE_ABORT``
+    when the callback returned a nonzero value, or the error code of the statement that failed.
     """
     return _call_lib_func(
         "sqlite3_exec", (db_p, sql_p, cb_p, ctx_p, errmsg_pp)
@@ -79,8 +79,8 @@ def sqlite3_free(mem_p):
 
     C reference: `sqlite3_free <https://sqlite.org/c3ref/free.html>`_.
 
-    A pointer of 0 is a no-op. A pointer that SQLite's allocator did not return can corrupt memory or crash the
-    process, and so can a read of the memory after it is freed.
+    A call with a pointer of 0 does nothing. Freeing a pointer that SQLite's allocator did not return can corrupt
+    memory or crash the process. Reading the memory after it is freed can have the same effect.
     """
     return _call_lib_func("sqlite3_free", (mem_p,))
 

@@ -41,7 +41,8 @@ def sqlite3_finalize(stmt_p):
 
     C reference: `sqlite3_finalize <https://sqlite.org/c3ref/finalize.html>`_.
 
-    A handle of 0 is a no-op. Any use of the statement after this call is undefined, and can crash the process.
+    A call with a handle of 0 does nothing. Any use of the statement after this call is undefined, and can crash the
+    process.
     """
     return _call_lib_func("sqlite3_finalize", (stmt_p,))
 
@@ -83,16 +84,16 @@ def sqlite3_sql(stmt_p):
     return _call_lib_func("sqlite3_sql", (stmt_p,))
 
 
-# The binding returns SQLite's pointer as it is and leaves the free to the caller, as every other binding leaves
-# ownership in view. A wrapper that freed the text itself would hide who owns the memory, so each call site frees it.
+# The binding returns SQLite's pointer unchanged, and the caller frees the text with sqlite3_free. No binding of this
+# subpackage frees memory on behalf of its caller, so the ownership of the memory stays explicit at each call site.
 @proxy(signatures.get("sqlite3_expanded_sql"), jit_options=jit_options)
 def sqlite3_expanded_sql(stmt_p):
     """Return the address of the SQL text of the statement ``stmt_p``, with the bound parameter values written in.
 
     C reference: `sqlite3_expanded_sql <https://sqlite.org/c3ref/expanded_sql.html>`_.
 
-    SQLite allocates the text, and the caller frees it with ``sqlite3_free``. Returns 0 when memory runs out, when
-    the text would exceed SQLite's length limit, and in a SQLite built with ``SQLITE_OMIT_TRACE``.
+    SQLite allocates the text, and the caller frees it with ``sqlite3_free``. Returns 0 when an allocation fails,
+    when the text would exceed SQLite's length limit, and in a SQLite built with ``SQLITE_OMIT_TRACE``.
     """
     return _call_lib_func("sqlite3_expanded_sql", (stmt_p,))
 

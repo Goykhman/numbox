@@ -48,7 +48,7 @@ def sqlite3_progress_handler(db_p, n_ops, cb_p, ctx_p):
 
     C reference: `sqlite3_progress_handler <https://sqlite.org/c3ref/progress_handler.html>`_.
 
-    The callback has the C type ``int (*)(void *ctx)`` and receives ``ctx_p``. A nonzero return interrupts the
+    The callback has the C type ``int (*)(void *ctx)`` and receives ``ctx_p``. A nonzero return value interrupts the
     operation. An ``n_ops`` below 1 or a ``cb_p`` of 0 removes the handler. The callback must not change the
     connection. Keep the ``cfunc`` whose address is ``cb_p`` referenced while the handler is installed.
     """
@@ -57,15 +57,15 @@ def sqlite3_progress_handler(db_p, n_ops, cb_p, ctx_p):
 
 @proxy(signatures.get("sqlite3_busy_handler"), jit_options=jit_options)
 def sqlite3_busy_handler(db_p, cb_p, ctx_p):
-    """Install ``cb_p`` to be called when ``db_p`` meets a table that another thread or process has locked.
+    """Install ``cb_p`` to be called when ``db_p`` tries to access a table that another thread or process has locked.
 
     C reference: `sqlite3_busy_handler <https://sqlite.org/c3ref/busy_handler.html>`_.
 
     The callback has the C type ``int (*)(void *ctx, int count)``. It receives ``ctx_p`` and the number of earlier
-    calls for the same lock. A return of 0 makes the waiting call fail with ``SQLITE_BUSY``, and a nonzero return
-    retries. A ``cb_p`` of 0 removes the handler, and ``sqlite3_busy_timeout`` or ``PRAGMA busy_timeout`` replaces
-    it. The callback must neither change the connection nor close it. Keep the ``cfunc`` whose address is ``cb_p``
-    referenced while the handler is installed. Returns a result code.
+    calls for the same lock. A return value of 0 makes the waiting call fail with ``SQLITE_BUSY``, and a nonzero return
+    value makes SQLite try again. A ``cb_p`` of 0 removes the handler, and ``sqlite3_busy_timeout`` or
+    ``PRAGMA busy_timeout`` replaces it. The callback must neither change the connection nor close it. Keep the
+    ``cfunc`` whose address is ``cb_p`` referenced while the handler is installed. Returns a result code.
     """
     return _call_lib_func("sqlite3_busy_handler", (db_p, cb_p, ctx_p))
 
@@ -76,8 +76,8 @@ def sqlite3_commit_hook(db_p, cb_p, ctx_p):
 
     C reference: `sqlite3_commit_hook <https://sqlite.org/c3ref/commit_hook.html>`_.
 
-    The callback has the C type ``int (*)(void *ctx)`` and receives ``ctx_p``. A nonzero return turns the commit into
-    a rollback. The callback must not change the connection, and running any statement counts as a change. A
+    The callback has the C type ``int (*)(void *ctx)`` and receives ``ctx_p``. A nonzero return value converts the
+    commit into a rollback. The callback must not change the connection, and running any statement counts as a change. A
     ``cb_p`` of 0 removes the hook. Keep the ``cfunc`` whose address is ``cb_p`` referenced while the hook is
     installed. Returns the ``ctx_p`` of the previous call on the connection, or 0 for the first call.
     """
@@ -107,7 +107,7 @@ def sqlite3_trace_v2(db_p, mask, cb_p, ctx_p):
     ``mask`` combines ``SQLITE_TRACE_STMT``, ``SQLITE_TRACE_PROFILE``, ``SQLITE_TRACE_ROW`` and
     ``SQLITE_TRACE_CLOSE`` with a bitwise OR. The callback has the C type
     ``int (*)(unsigned event, void *ctx, void *p, void *x)``. It receives the event, ``ctx_p`` and two pointers whose
-    meaning depends on the event, and it should return 0. A ``mask`` of 0 or a ``cb_p`` of 0 turns tracing off. Keep
-    the ``cfunc`` whose address is ``cb_p`` referenced while tracing is on.
+    meaning depends on the event, and it should return 0. A ``mask`` of 0 or a ``cb_p`` of 0 disables tracing. Keep
+    the ``cfunc`` whose address is ``cb_p`` referenced while tracing is enabled.
     """
     return _call_lib_func("sqlite3_trace_v2", (db_p, mask, cb_p, ctx_p))

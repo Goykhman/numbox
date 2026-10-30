@@ -1,9 +1,9 @@
 """Bindings for SQLite's incremental BLOB I/O, which reads and writes part of a stored value without loading the rest.
 
 The module binds ``sqlite3_blob_open``, ``sqlite3_blob_close``, ``sqlite3_blob_bytes``, ``sqlite3_blob_read``,
-``sqlite3_blob_write`` and ``sqlite3_blob_reopen``. SQLite has had each of them since version 3.4.0, of 2007, except
-``sqlite3_blob_reopen``, which it added in 3.7.4, of 2010. Both versions are far older than 3.34, the oldest SQLite in
-numbox's test matrix, so every binding of the module is present.
+``sqlite3_blob_write`` and ``sqlite3_blob_reopen``. Each of them exists in SQLite from version 3.4.0, released in
+2007, except ``sqlite3_blob_reopen``, which SQLite added in version 3.7.4, released in 2010. Both versions are far
+older than 3.34, the oldest SQLite in numbox's test matrix, so every binding of the module is present.
 """
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
@@ -46,7 +46,7 @@ def sqlite3_blob_close(blob_p):
     C reference: `sqlite3_blob_close <https://sqlite.org/c3ref/blob_close.html>`_.
 
     The handle is closed even when the call returns an error. If the handle was writable and the connection is in
-    autocommit mode, the close can commit the transaction. A handle of 0 is a no-op.
+    autocommit mode, the close can commit the transaction. A call with a handle of 0 does nothing.
     """
     return _call_lib_func("sqlite3_blob_close", (blob_p,))
 
@@ -83,7 +83,8 @@ def sqlite3_blob_write(blob_p, buf_p, n, offset):
 
     Returns ``SQLITE_OK``, ``SQLITE_READONLY`` for a handle opened read-only, ``SQLITE_ERROR`` with nothing written
     when ``offset + n`` exceeds the size or either is negative, or ``SQLITE_ABORT`` when a change to the row has
-    expired the handle. The write cannot grow the value. numba converts ``n`` and ``offset`` to int32 without a check.
+    expired the handle. The write cannot increase the size of the value. numba converts ``n`` and ``offset`` to int32
+    without a check.
     """
     return _call_lib_func("sqlite3_blob_write", (blob_p, buf_p, n, offset))
 

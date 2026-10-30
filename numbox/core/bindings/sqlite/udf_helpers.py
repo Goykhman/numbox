@@ -2,8 +2,8 @@
 
 :func:`register_aggregate` and :func:`register_window` take a state type and the functions that create, update and
 finalize the state. They generate and compile the C callbacks that SQLite calls. The callbacks keep each group's
-state alive between rows, release it at the end of the group, and turn an exception in one of the functions into a
-SQL error. The caller writes only the logic of the state, as plain Python functions or jitted ones.
+state alive between rows, release it at the end of the group, and convert an exception in one of the functions into
+a SQL error. The caller writes only the logic of the state, as plain Python functions or jitted ones.
 """
 import ctypes
 
@@ -48,19 +48,19 @@ _orphan_anchor_sweep(_ANCHOR_SUBDIR)
 # is enabled. The caller's functions are globals of that namespace, so numba links their code into the generated
 # functions, and the cache entry of a generated function holds that code as well.
 #
-# The life of a group's state: xStep asks sqlite3_aggregate_context for 8 bytes, which SQLite allocates and zeroes at
-# the group's first call, and uses them as one intp slot. If the slot holds 0, xStep calls _init and stores the state's
-# MemInfo there with export_meminfo, which takes a reference. Each call borrows the state with borrow_structref.
-# xValue reports the running result and keeps the state; only xFinal releases the reference, with release_meminfo.
-# xFinal, xValue and xInverse ask for 0 bytes, so they receive 0 when no xStep ran for the group. When no xStep ran,
-# or when _init failed in xStep, xFinal and xValue report the result of a new state from _init, and xInverse does
-# nothing.
+# A group's state is handled as follows. xStep requests 8 bytes from sqlite3_aggregate_context, which SQLite allocates
+# and zeroes at the group's first call, and uses them as one intp slot. If the slot holds 0, xStep calls _init and
+# stores the state's MemInfo there with export_meminfo, which takes a reference. Each call borrows the state with
+# borrow_structref. xValue reports the running result and keeps the state; only xFinal releases the reference, with
+# release_meminfo. xFinal, xValue and xInverse request 0 bytes, so they receive 0 when no xStep ran for the group.
+# When no xStep ran, or when _init failed in xStep, xFinal and xValue report the result of a new state from _init, and
+# xInverse does nothing.
 #
-# Each call of a caller's function sits in a try/except that reports the failure with sqlite3_result_error, which
-# sets SQLITE_ERROR. Without it, the cfunc that SQLite calls would catch the exception at its boundary, print
-# "Exception ignored" and return without an error, a silent wrong result. With it, control stays in the generated
-# function after an exception, so numba runs the decrement of the borrowed state's reference count. An exception that
-# left the function would skip that decrement and leak the state.
+# Each call of a caller's function is wrapped in a try/except that reports the failure with sqlite3_result_error,
+# which sets SQLITE_ERROR. Without it, the cfunc that SQLite calls would catch the exception at its boundary, print
+# "Exception ignored" and return without reporting an error. The SQL statement would then succeed with a wrong result.
+# With the try/except, control stays in the generated function after an exception, so numba runs the decrement of the
+# borrowed state's reference count. An exception that left the function would skip that decrement and leak the state.
 _XSTEP_SRC = '''
 @njit(**jit_options)
 def _xstep_impl(ctx, argc, argv_pp):
@@ -171,9 +171,9 @@ def _validate_state_type(state_type):
 
 
 def _prepare_callbacks(**fns):
-    """Return ``fns`` with every callback a numba dispatcher, each plain Python function wrapped with ``njit``.
+    """Return ``fns`` with every callback as a numba dispatcher; a plain Python function is wrapped with ``njit``.
 
-    A jitted callable, such as an ``@njit`` or ``@proxy`` function, is kept as it is. A value that is not callable
+    A jitted callable, such as an ``@njit`` or ``@proxy`` function, is returned unchanged. A value that is not callable
     raises ``TypeError``.
     """
     prepared = {}
@@ -199,19 +199,20 @@ def _compile_callbacks(stem, srcs, state_type, fns):
     """
     # repr(state_type) holds only the class's qualified name and the fields, so two StructRef classes of one qualified
     # name in different modules would share a digest. The subject of the digest therefore adds the defining module and
-    # the qualified name. An @overload_method that code outside this registration attaches to the type is not in the
-    # digest. For a type that make_structref builds, the method's body enters through the method's hash.
+    # the qualified name. The digest does not cover an @overload_method attached to the type, and that includes a
+    # method that make_structref attaches. make_structref puts a method's hash only into the struct's own generated
+    # code, so an edit to the body of such a method does not change this digest.
     state_id = "%s.%s;%r" % (type(state_type).__module__, type(state_type).__qualname__, state_type)
     # The digest covers that subject, numba's and numbox's versions, numbox's jit options and the fingerprint of each
     # callback. A fingerprint covers the callback's code, constants, defaults, closure, the globals it reads and the
     # module attributes it reads that hold data or a dispatcher. An edit to any of these, a numeric literal included,
     # therefore compiles new code. If a callback reads a value without a fingerprint, such as the @intrinsic
     # _cast_int_to_void_p of the usual argv_pp idiom, digest falls back to a weaker fingerprint. It names the type of
-    # such a value instead of the value and leaves out module attributes, so an edit to either keeps the anchor and the
-    # cached code. The utils page describes the case under "If a SQLite function keeps returning old results". A
-    # fingerprint names its function's module, and that name is __main__ in every run of a script, so callbacks and a
-    # state type defined in a script's __main__ get the same digest in each run. test_xprocess_cache_no_growth and
-    # test_invalidation_on_literal_edit run that case in subprocesses.
+    # such a value instead of the value and omits module attributes, so an edit to such a value or to a module
+    # attribute keeps the anchor and the cached code. The utils page describes the case under "If a SQLite function
+    # keeps returning old results". A fingerprint names its function's module, and that name is __main__ in every run
+    # of a script, so callbacks and a state type defined in a script's __main__ get the same digest in each run.
+    # test_xprocess_cache_no_growth and test_invalidation_on_literal_edit run that case in subprocesses.
     udaf_digest = digest(state_id, list(fns.values()))
     # The anchor's name ends in a hash of the code text, which starts with the digest, so a new digest writes a new
     # anchor and compiles new code.
@@ -264,12 +265,13 @@ def register_aggregate(db, name, n_arg, state_type, init, step, finalize,
     :param deterministic: if true, the function is registered with ``SQLITE_DETERMINISTIC``.
 
     If one of the functions raises, the SQL statement fails with an error such as "error in user step callback".
-    numba compiles the generated code and the functions during this call, so a typing error in a function raises
-    here. The generated functions compile under numbox's jit options, and numbox names their cache after a digest of
-    the state type and of the functions. The state type and the functions may be defined in a script's ``__main__``.
-    If a function reads a value without a fingerprint, such as numbox's ``_cast_int_to_void_p``, the digest misses
-    some edits. The registration can then run code compiled before an edit, as the section "If a SQLite function
-    keeps returning old results" of :doc:`numbox.utils` explains.
+    numba compiles the generated code and the functions during this call, so numba raises a typing error in a function
+    from this call. The generated functions compile under numbox's jit options, and numbox names their cache after a
+    digest of the state type and of the functions. The state type and the functions may be defined in a script's
+    ``__main__``. If a function reads a value without a fingerprint, such as numbox's ``_cast_int_to_void_p``, the
+    digest misses some edits, as the section "If a SQLite function keeps returning old results" of
+    :doc:`numbox.utils` explains. The digest also misses an edit to a method of the state type. After an edit that
+    the digest misses, the registration can run code compiled before the edit.
 
     Returns ``None``, and the caller need not keep anything. numba keeps the compiled code of the callbacks for the
     life of the process, although it does not document that behavior. Raises ``TypeError`` when ``state_type`` is not

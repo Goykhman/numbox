@@ -31,8 +31,8 @@ def sqlite3_value_int(value_p):
 
     C reference: `sqlite3_value_int <https://sqlite.org/c3ref/value_blob.html>`_.
 
-    SQLite converts a value of another type, and NULL reads as 0. A value outside the int32 range loses its high bits;
-    :func:`sqlite3_value_int64` reads all 64.
+    SQLite converts a value of another type, and the binding returns 0 for NULL. A value outside the int32 range loses
+    its high bits; :func:`sqlite3_value_int64` reads all 64 bits.
     """
     return _call_lib_func("sqlite3_value_int", (value_p,))
 
@@ -43,7 +43,7 @@ def sqlite3_value_int64(value_p):
 
     C reference: `sqlite3_value_int64 <https://sqlite.org/c3ref/value_blob.html>`_.
 
-    NULL reads as 0. SQLite converts a REAL or a text value as SQL's ``CAST`` to ``INTEGER`` does.
+    The binding returns 0 for NULL. SQLite converts a REAL or a text value as SQL's ``CAST`` to ``INTEGER`` does.
     """
     return _call_lib_func("sqlite3_value_int64", (value_p,))
 
@@ -54,7 +54,7 @@ def sqlite3_value_double(value_p):
 
     C reference: `sqlite3_value_double <https://sqlite.org/c3ref/value_blob.html>`_.
 
-    NULL reads as 0.0. SQLite converts an integer or a text value as SQL's ``CAST`` to ``REAL`` does.
+    The binding returns 0.0 for NULL. SQLite converts an integer or a text value as SQL's ``CAST`` to ``REAL`` does.
     """
     return _call_lib_func("sqlite3_value_double", (value_p,))
 
@@ -110,11 +110,12 @@ def sqlite3_value_type(value_p):
 
 @proxy(signatures.get("sqlite3_value_numeric_type"), jit_options=jit_options)
 def sqlite3_value_numeric_type(value_p):
-    """Convert the ``sqlite3_value`` at ``value_p`` to a number if that loses nothing, and return its type code after.
+    """Apply numeric affinity to the ``sqlite3_value`` at ``value_p``, and return its type code after the conversion.
 
     C reference: `sqlite3_value_numeric_type <https://sqlite.org/c3ref/value_blob.html>`_.
 
-    Text that reads as a number becomes ``SQLITE_INTEGER`` or ``SQLITE_FLOAT``. Any other value keeps its type.
+    SQLite converts the value only if no information is lost. Text that represents a number becomes
+    ``SQLITE_INTEGER`` or ``SQLITE_FLOAT``, and any other value keeps its type.
     """
     return _call_lib_func("sqlite3_value_numeric_type", (value_p,))
 
@@ -125,7 +126,7 @@ def sqlite3_value_nochange(value_p):
 
     C reference: `sqlite3_value_nochange <https://sqlite.org/c3ref/value_blob.html>`_.
 
-    Such a value reads as NULL in every other respect. Outside an ``xUpdate`` call, the result means nothing.
+    In every other respect, such a value appears to be NULL. Outside an ``xUpdate`` call, the result is arbitrary.
     """
     return _call_lib_func("sqlite3_value_nochange", (value_p,))
 
@@ -138,9 +139,9 @@ def sqlite3_value_frombind(value_p):
 
     C reference: `sqlite3_value_frombind <https://sqlite.org/c3ref/value_blob.html>`_.
 
-    A value from a SQL literal, a table column or an expression returns 0. SQLite has the function from version 3.28.
-    If the loaded library is older, this binding is a stub: a call from Python raises ``NotImplementedError``, and a
-    jitted call fails to compile with a ``TypingError``.
+    The binding returns 0 for a value from a SQL literal, a table column or an expression. SQLite has the function from
+    version 3.28. If the loaded library is older, this binding is a stub: a call from Python raises
+    ``NotImplementedError``, and a jitted call fails to compile with a ``TypingError``.
     """
     return _call_lib_func("sqlite3_value_frombind", (value_p,))
 
@@ -170,7 +171,7 @@ def sqlite3_value_dup(value_p):
 
 @proxy(signatures.get("sqlite3_value_free"), jit_options=jit_options)
 def sqlite3_value_free(value_p):
-    """Free a ``sqlite3_value`` that :func:`sqlite3_value_dup` returned; a ``value_p`` of 0 is a no-op.
+    """Free a ``sqlite3_value`` that :func:`sqlite3_value_dup` returned; a call with a ``value_p`` of 0 does nothing.
 
     C reference: `sqlite3_value_free <https://sqlite.org/c3ref/value_dup.html>`_.
     """
