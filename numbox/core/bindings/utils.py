@@ -1,3 +1,10 @@
+"""Library loading and small helpers for the binding modules.
+
+:func:`load_lib` and :func:`load_lib_path` load a C library so that LLVM finds its symbols when it links jitted code
+into the process. :func:`extract_literal_str` reads the value of a numba string literal, such as a format string or a C
+function's name, and :func:`intp_ll_type` returns the LLVM type that numbox uses for ``size_t`` and pointers.
+``platform_`` holds the name of the operating system, as ``platform.system()`` returns it.
+"""
 from ctypes import CDLL
 from ctypes.util import find_library
 from platform import system
@@ -11,12 +18,11 @@ platform_ = system()
 
 
 def extract_literal_str(binding_name, ty, *, field="argument"):
-    """Extract the Python str value of a ``Literal[str]`` type, or raise
-    a clean ``TypingError`` naming the binding and the field.
+    """Return the ``str`` value of a numba string literal type.
 
-    Used by intrinsics that require a compile-time string (e.g. printf
-    format strings, libc function names, stdio handle names). ``field``
-    labels the offending argument in the error message.
+    Intrinsics and overloads use it for an argument that numba must know when it compiles the call, such as a format
+    string, a C function's name or a standard stream's name. It raises ``TypingError`` if ``ty`` is not a literal or if
+    its value is not a ``str``, and the message names ``binding_name`` and the argument, ``field``.
     """
     if not isinstance(ty, Literal):
         raise TypingError(
@@ -31,15 +37,12 @@ def extract_literal_str(binding_name, ty, *, field="argument"):
 
 
 def intp_ll_type(context=None):
-    """LLVM integer type matching numba's ``intp`` on the current platform.
+    """Return the LLVM integer type of numba's ``intp``, which numbox uses for ``size_t`` and pointers.
 
-    Pass the numba codegen ``context`` when available so the type is
-    derived via ``context.get_value_type(intp)`` — the canonical pattern
-    for platform-dependent widths (size_t, ssize_t, ptrdiff_t) in
-    intrinsics. When called outside codegen (test helpers, IR-rendering
-    probes), pass ``None`` for the locked-in fallback
-    ``llir.IntType(intp.bitwidth)``; numba's intp lowering is locked to
-    the same bitwidth, so the two paths produce identical LLVM types.
+    With a codegen ``context``, the type is ``context.get_value_type(intp)``, the way an intrinsic derives a width that
+    depends on the platform, such as that of ``size_t``, ``ssize_t`` or ``ptrdiff_t``. Without one, as in a test or an
+    IR probe, it is ``llir.IntType(intp.bitwidth)``. numba lowers ``intp`` to an integer of that same width, so both
+    calls give the same type.
     """
     if context is not None:
         return context.get_value_type(intp)
@@ -47,15 +50,11 @@ def intp_ll_type(context=None):
 
 
 def _windows_bundled_dll_path(name):
-    """Best-effort: find a DLL bundled with the Python distribution on Windows.
+    """Return the path of the DLL ``name`` that the Python installation bundles on Windows, or None.
 
-    Tries (in order):
-    - <sys.prefix>/DLLs/<name>.dll (CPython, also catches non-venv installs)
-    - <sys.base_prefix>/DLLs/<name>.dll (venv -> base Python)
-    - <sys.base_prefix>/Library/bin/<name>.dll (conda layout)
-
-    Returns the absolute path of the first existing candidate, or None if no
-    bundled DLL is found.
+    The function tries three places in order and returns the first that exists: ``<sys.prefix>/DLLs/<name>.dll``,
+    where CPython keeps its DLLs, outside a virtual environment too; ``<sys.base_prefix>/DLLs/<name>.dll``, the base
+    installation of a virtual environment; and ``<sys.base_prefix>/Library/bin/<name>.dll``, conda's layout.
     """
     import os
     import sys
@@ -72,25 +71,17 @@ def _windows_bundled_dll_path(name):
 
 
 def _resolve_lib_path(name):
-    """Resolve a library name to a CDLL-loadable path.
+    """Return a path or a name that ``ctypes.CDLL`` can load for the library ``name``, or None if none is found.
 
-    Per-platform logic:
-    - Linux / Darwin: ctypes.util.find_library(name)
-    - Windows: for "c"/"m", find_msvcrt(); otherwise prefer
-      _windows_bundled_dll_path(name) (the Python-distribution-bundled
-      DLL in <prefix>/DLLs/ or <prefix>/Library/bin/) over PATH-based
-      find_library(name). PATH lookup goes last because PATH on Windows
-      may contain third-party-shipped copies of common DLLs that are
-      statically configured for that tool's internal use and AV on
-      external calls. The motivating example: GitHub Actions
-      windows-latest runners ship AWS CLI v2, whose
-      C:\\Program Files\\Amazon\\AWSCLIV2\\sqlite3.dll is on PATH,
-      exports the full SQLite symbol surface, but writes to NULL inside
-      sqlite3_open when called from a process other than aws.exe.
-      CPython's bundled sqlite3.dll is the canonical SQLite for the
-      Python ecosystem on Windows, so prefer it whenever it's present.
+    On Linux and macOS the result is ``ctypes.util.find_library(name)``. On Windows, ``"c"`` and ``"m"`` give
+    ``find_msvcrt()``. ``"sqlite3"`` gives only the DLL that Python bundles, from ``_windows_bundled_dll_path``, and any
+    other name prefers that DLL to one that ``find_library`` finds on the ``PATH``.
 
-    Returns the path string, or None if no path can be resolved.
+    The bundled DLL comes first because a directory on the ``PATH`` can hold a copy of a common DLL that another tool
+    ships for its own use, and such a copy can crash an outside caller. On GitHub's windows-latest runners, AWS CLI v2
+    puts ``C:\\Program Files\\Amazon\\AWSCLIV2\\sqlite3.dll`` on the ``PATH``. That DLL exports the full SQLite API, but
+    it writes through a null pointer inside ``sqlite3_open`` when a process other than ``aws.exe`` calls it. CPython's
+    bundled ``sqlite3.dll`` is the SQLite that Python's own ``sqlite3`` module uses on Windows.
     """
     if platform_ in ("Darwin", "Linux"):
         return find_library(name)
@@ -100,11 +91,9 @@ def _resolve_lib_path(name):
             return find_msvcrt()
         bundled = _windows_bundled_dll_path(name)
         if name == "sqlite3":
-            # _sqlite3.pyd is dynamically linked to <prefix>/DLLs/sqlite3.dll,
-            # so that DLL is a hard prerequisite of every working Python on
-            # Windows. Never fall back to find_library — third-party tools
-            # may ship statically-configured sqlite3.dll copies that AV on
-            # external callers (AWS CLI v2 is the motivating example).
+            # _sqlite3.pyd links to <prefix>/DLLs/sqlite3.dll, so every Python on Windows whose sqlite3 module works
+            # has that DLL. find_library is never consulted for sqlite3, because a copy on the PATH can belong to
+            # another tool and crash an outside caller, as AWS CLI v2's copy does.
             return bundled
         if bundled is not None:
             return bundled
@@ -116,26 +105,25 @@ _loaded_libs = {}
 
 
 def load_lib(name):
-    """Load library ``name`` in global symbol mode and return the cached
-    CDLL handle. Loads on first call; subsequent calls return the same
-    handle from ``_loaded_libs``.
+    """Return the ``ctypes.CDLL`` handle of the library whose short name is ``name``, loading it at the first call.
 
-    ``find_library`` is a relatively basic utility that mostly just
-    prefixes ``lib`` and suffixes the platform extension. When binding
-    user-compiled shared libraries that aren't on the system loader's
-    default search path, consider setting ``DYLD_LIBRARY_PATH`` (macOS)
-    or ``LD_LIBRARY_PATH`` (Linux) before the first ``load_lib`` call;
-    the loader consults those env vars before its built-in search. For
-    full control over the path, use :func:`load_lib_path` instead.
+    The first call loads the library so that LLVM finds its symbols, and later calls with the same name return the same
+    handle from the module's cache, ``_loaded_libs``. Each binding module calls it for its own library, and the modules
+    share the handle without importing one another. A caller can test for a symbol with ``hasattr(handle, name)``, as
+    :func:`~numbox.core.proxy.proxy.proxy_if_available` does. ctypes never unloads a library, so the library stays
+    loaded for the life of the process.
 
-    Caching pins the handle for the process lifetime so modules can
-    share it without cross-module imports. It also matters because
-    ``ctypes.CDLL.__del__`` calls ``dlclose`` / ``FreeLibrary``; without
-    retention, the OS-level reference count drops to zero on return and
-    the library can be unloaded — invalidating any extern-ref symbols
-    LLVM's JIT linker already resolved into module IR. Returning the
-    handle also enables ``proxy_if_available`` to query symbol presence
-    via ``hasattr(handle, func_name)``.
+    On Linux and macOS, ``ctypes.util.find_library`` finds the file by the short name, such as ``"m"`` for the C math
+    library, in the system's library search and not in the Python installation. The file is then opened in global
+    symbol mode, ``RTLD_GLOBAL``. On Windows, ``"c"`` and ``"m"`` load the C runtime ``msvcrt.dll``, ``"sqlite3"`` loads
+    only the ``sqlite3.dll`` that comes with Python, and any other name prefers a DLL that comes with Python to one on
+    the ``PATH``.
+
+    If no file is found, the function raises ``RuntimeError: Could not find shared library for <name>``; pass the
+    file's path to :func:`load_lib_path` instead. On Linux, ``find_library`` also looks in the directories of
+    ``LD_LIBRARY_PATH``, but only finds a library built with a SONAME there, and the system's loader reads the variable
+    only when the process starts. On macOS, ``find_library`` looks in the directories of ``DYLD_LIBRARY_PATH`` as
+    ``os.environ`` holds it at the call.
     """
     handle = _loaded_libs.get(name)
     if handle is None:
@@ -145,13 +133,14 @@ def load_lib(name):
 
 
 def _load_lib_with_handle(name):
-    """Internal: resolve ``name`` via :func:`_resolve_lib_path` and load
-    the resulting library in global symbol mode, returning the CDLL
-    handle. Use :func:`load_lib` instead — it caches.
+    """Find the library ``name`` with ``_resolve_lib_path``, open it for LLVM to find its symbols, and return a handle.
+
+    The function raises ``RuntimeError`` if it finds no file, and it does not cache the handle; :func:`load_lib` does.
     """
     path = _resolve_lib_path(name)
     if path is None:
-        # Preserve the historical Windows c/m fallback (msvcrt via ctypes.cdll).
+        # find_msvcrt() returns None on a Python built with Visual Studio 2015 or later, as every supported CPython
+        # is, so on Windows "c" and "m" load msvcrt.dll through ctypes.cdll.
         if platform_ == "Windows" and name in ("c", "m"):
             import ctypes
             return ctypes.cdll.msvcrt
@@ -165,15 +154,13 @@ def _load_lib_with_handle(name):
 
 
 def load_lib_path(path):
-    """Load a shared library by ``ctypes.CDLL``-acceptable identifier
-    and return the handle (uncached).
+    """Load the library at ``path`` so that LLVM finds its symbols, and return a new ``ctypes.CDLL`` handle.
 
-    Accepts any string ``CDLL`` accepts — an absolute path, a soname
-    (e.g. ``libm.so.6`` as returned by ``ctypes.util.find_library``), or
-    a bare filename resolvable by the loader. Linux/Darwin use
-    ``RTLD_GLOBAL`` so symbols reach LLVM's JIT; Windows uses
-    ``winmode=0``. Prefer :func:`load_lib` when the library is
-    referenced by name and across multiple modules in the same process.
+    ``path`` is any string that ``ctypes.CDLL`` accepts: an absolute path, a soname such as ``libm.so.6``, which
+    ``ctypes.util.find_library`` returns, or a file name that the system's loader resolves. The function opens the
+    library with ``RTLD_GLOBAL`` on Linux and macOS and with ``winmode=0`` on Windows, and it raises ``RuntimeError``
+    on any other platform. Each call returns a new handle; use :func:`load_lib` for a library that several modules
+    load by its short name.
     """
     if platform_ in ("Darwin", "Linux"):
         from os import RTLD_GLOBAL
