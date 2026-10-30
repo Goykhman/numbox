@@ -24,7 +24,7 @@ RequestedTy = Node | str | Work
 def add_one(node, sheaf):
     """Add an entry for ``node``, a node or a node name, to ``sheaf``, with an ``Any`` value that holds ``None``.
 
-    A ``node`` whose name is not a string fails an assertion.
+    If the name of ``node`` is not a string, an assertion fails.
     """
     node_name = getattr(node, "name", node)
     assert isinstance(node_name, str), f"Expected node name as string, got {node_name} of type {type(node_name)}"
@@ -52,8 +52,8 @@ def _load_dict_into_array(*args):
     raise NotImplementedError
 
 
-# The generated code has one statement per field of the record, because jitted code reads and writes a record field
-# only under a name known at compile time.
+# The generated code has one statement per field of the record, because jitted code can access a record field only
+# through a name that is known at compile time.
 def _make_load_to_array_code(record_fields):
     code_txt = StringIO()
     fields_names = list(record_fields.keys())
@@ -75,8 +75,8 @@ def _load_to_array_(array_, sheaf_):""")
 def ol_load_array_row_into_dict(array_ty, sheaf_ty):
     """Implement ``load_dict_into_array`` in jitted code: set each field of the array's first row from the sheaf.
 
-    Each field's name must be a key of the sheaf, and the value under it must hold the field's type, because
-    ``get_as`` reads it without a conversion.
+    Each field's name must be a key of the sheaf, and the value stored under that key must hold the field's type,
+    because ``get_as`` reads the value without a conversion.
     """
     record_ty: Record = array_ty.dtype
     record_fields = record_ty.fields

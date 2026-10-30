@@ -10,12 +10,12 @@ from numbox.core.work.work import Work
 
 
 def get_func_code(derive_func_p_):
-    """Return the name and the indented source code of the Python function behind a derive, or ``(None, None)``.
+    """Return the name and the indented source code of a derive's Python function, or ``(None, None)``.
 
     ``derive_func_p_`` is the address of the derive's Python object, the second element of the tuple that
     ``Work.derive`` returns. :func:`~numbox.core.work.builder.make_graph` records the Python function of each derive it
-    compiles under that address. A derive that reached its node another way, through ``make_work`` or ``ll_make_work``
-    for example, has no record, and the result is ``(None, None)``.
+    compiles under that address. A derive passed to its node by other means, such as ``make_work`` or
+    ``ll_make_work``, has no record, and the result is ``(None, None)``.
     """
     derive_func_ = _derive_funcs.get(derive_func_p_)
     if derive_func_ is None:
@@ -51,9 +51,10 @@ def explain(work: Work):
     """Return a text that explains how the value of ``work`` is computed.
 
     The text names the end nodes that ``work`` needs, the nodes without sources, and then lists each node of its graph
-    once, sources first. A derived node is listed with the name of its derive and the names of its sources, followed
-    by the derive's source code when :func:`~numbox.core.work.builder.make_graph` compiled the derive. A derive built
-    another way is shown as a placeholder. A node with sources but no derive raises ``TypeError``.
+    once, after its sources. A derived node is listed with the name of its derive and the names of its sources,
+    followed by the derive's source code when :func:`~numbox.core.work.builder.make_graph` compiled the derive. A derive
+    that ``make_graph`` did not compile is shown as a placeholder. A node with sources but no derive raises
+    ``TypeError``.
     """
     all_end_nodes = work.all_end_nodes()
     derivation = []

@@ -68,9 +68,10 @@ class Work(NodeBase):
         raise NotImplementedError(deleted_work_ctor_error)
 
     # Each jitted method compiles with numbox's jit options, so numba caches it by default. numba compiles and caches
-    # it once for each Work type it is called on. A node whose data is an @njit function has a type that holds a
-    # dispatcher, and numba misses the cache index for such a type in every new process. The cache files of these
-    # methods, and of the overloads below, then grow by one entry per process. No entry is ever stale.
+    # it once for each Work type it is called on. A node whose data is an @njit function has a type that contains a
+    # dispatcher. In every new process, numba finds no entry for such a type in the cache index and adds one. The cache
+    # files of these methods, and of the overloads below, therefore grow by one entry per process. No entry is ever
+    # stale.
     @property
     @njit(**jit_options)
     def inputs(self):
@@ -95,8 +96,8 @@ class Work(NodeBase):
         """The derive's addresses, as a tuple of three integers.
 
         The integers are the derive's C entry point, the address of its Python object and numba's entry point. The
-        third is 0 when the derive has no numba entry point, and then ``calculate`` loses the derive's exception.
-        Reading this property on a node without a derive raises ``TypeError``.
+        third is 0 when the derive has no numba entry point. In that case the derive's exception does not propagate
+        out of ``calculate``. Reading this property on a node without a derive raises ``TypeError``.
         """
         return _get_func_tuple(self.derive)
 
@@ -110,8 +111,8 @@ class Work(NodeBase):
     def as_node(self):
         """Return the node's :class:`~numbox.core.work.node.Node` representation, creating it on the first call.
 
-        The first call also creates the representations of the sources that lack one, and the new ``Node`` takes
-        those as its inputs. Later calls return the stored ``Node``.
+        The first call also creates a representation for each source that lacks one, and these representations become
+        the inputs of the new ``Node``. Later calls return the stored ``Node``.
         """
         return self.as_node()
 
@@ -126,12 +127,12 @@ class Work(NodeBase):
         keeps the references it took. A node whose derive has failed therefore stays in memory, with everything it
         references, until the process ends. Another failure of the same node adds no further reference.
 
-        Three ways of passing a derive lose the exception: from Python into a jitted parameter declared as numba's
-        plain ``FunctionType``; as a ``CompileResultWAP`` built with numba directly that reaches jitted code, where
-        ``make_work`` cannot upgrade it; and as a ``@cfunc``. ``calculate`` then stores a zero-filled result and sets
-        ``derived``. The ``.as_func`` value of a ``@proxy`` function is not such a ``CompileResultWAP``, and its
-        exception propagates. The documentation of ``numbox.core.work`` describes these cases under "When the
-        exception is lost".
+        In three cases the derive's exception does not propagate. The first is a derive passed from Python into a
+        jitted parameter declared as numba's plain ``FunctionType``. The second is a ``CompileResultWAP`` built with
+        numba directly that reaches jitted code, where ``make_work`` cannot upgrade it. The third is a ``@cfunc``. In
+        each case ``calculate`` stores a zero-filled result and sets ``derived``. The ``.as_func`` value of a
+        ``@proxy`` function is not such a ``CompileResultWAP``, and its exception propagates. The documentation of
+        ``numbox.core.work`` describes these cases under "When the exception is lost".
         """
         return self.calculate()
 
@@ -151,10 +152,10 @@ class Work(NodeBase):
     def combine(self, data):
         """Copy the ``data`` of the named nodes of this node's graph into the dictionary ``data``, under their names.
 
-        ``data`` is a typed dictionary from node names to :class:`~numbox.core.any.any_type.Any` values, such as
-        :func:`~numbox.core.work.combine_utils.make_sheaf_dict` makes. The walk covers this node and the nodes it
-        depends on, depth first, and stops once it has found a node for every name. A name that no node of the graph
-        has keeps its value.
+        ``data`` is a typed dictionary from node names to :class:`~numbox.core.any.any_type.Any` values, such as the
+        sheaf that :func:`~numbox.core.work.combine_utils.make_sheaf_dict` returns. The walk covers this node and the
+        nodes it depends on, depth first, and stops once it has found a node for every name. A name that no node of the
+        graph has keeps its value.
         """
         return self.combine(data)
 
@@ -234,35 +235,38 @@ def make_work(name, data, sources=(), derive=None):
     ``data`` is the node's initial value and sets its numba type. ``sources`` is a tuple of ``Work`` nodes, and
     ``derive`` computes the node's value from their ``data``. ``derive`` is ``None`` or a function value compiled for
     one signature, the type of ``data`` over the types of the sources' ``data``, such as a
-    :func:`~numbox.utils.highlevel.cres` function. A ``derive`` of another signature raises ``ValueError``, and a lazily
-    compiled ``@njit`` function fails an assertion.
+    :func:`~numbox.utils.highlevel.cres` function. A ``derive`` of another signature raises ``ValueError``, and for a
+    lazily compiled ``@njit`` function an assertion fails.
 
     Called from Python, ``make_work`` upgrades a ``CompileResultWAP`` built with numba directly to a
     :class:`~numbox.utils.derive_wap.DeriveWAP` with :func:`~numbox.utils.derive_wap.rewrap_derive`, so that an
     exception the derive raises propagates out of ``calculate``. The node then holds the upgraded wrapper. Called from
-    jitted code, ``make_work`` takes ``derive`` as it is: its numba type is already fixed there, and the upgrade depends
-    on the value's Python class, which jitted code cannot see.
+    jitted code, ``make_work`` uses ``derive`` unchanged. The value's numba type is already fixed in jitted code, and
+    the upgrade depends on the value's Python class, which jitted code cannot access.
 
-    ``make_work.py_func`` is the body of the jitted constructor that ``make_work`` calls. Calling it from Python raises
-    ``NotImplementedError``, because that body calls the ``ll_make_work`` intrinsic, and it does not upgrade ``derive``.
+    ``make_work.py_func`` is the Python function from which numba compiles the constructor that ``make_work`` calls.
+    Calling it from Python raises ``NotImplementedError``, because that function calls the ``ll_make_work`` intrinsic.
+    Unlike ``make_work``, that function does not upgrade ``derive``.
     """
-    # rewrap_derive stores the DeriveWAP it makes on the caller's CompileResultWAP and returns it, so the node holds
-    # that wrapper: a jitted function that returns the node's derive gives back the DeriveWAP, not the caller's object.
+    # rewrap_derive creates a DeriveWAP, stores it on the caller's CompileResultWAP and returns it, so the node holds
+    # that wrapper. When a jitted function returns the node's derive, Python receives the DeriveWAP, not the caller's
+    # object.
     return _make_work_jit(name, data, sources, rewrap_derive(derive))
 
 
 @overload(make_work, strict=False, jit_options=jit_options)
 def ol_make_work(name, data, sources=(), derive=None):
-    """Implement ``make_work`` in jitted code with ``ll_make_work``, taking ``derive`` as it is.
+    """Implement ``make_work`` in jitted code with ``ll_make_work``, using ``derive`` unchanged.
 
-    A ``CompileResultWAP`` built with numba directly is not upgraded here, so its exception is lost.
+    A ``CompileResultWAP`` built with numba directly is not upgraded here, so its exception does not propagate.
     """
     def _(name, data, sources=(), derive=None):
         return ll_make_work(name, data, sources, derive)
     return _
 
 
-# Code that treats make_work as a dispatcher reads its py_func, so make_work carries that of the jitted constructor.
+# Code that treats make_work as a dispatcher reads its py_func attribute, so make_work.py_func is set to the py_func
+# of the jitted constructor.
 make_work.py_func = _make_work_jit.py_func
 
 
@@ -272,7 +276,7 @@ def _call_derive(typingctx: Context, derive_ty: FunctionType, sources_ty: Tuple)
 
     An exception that the derive raises propagates to the caller only if the derive's value holds numba's entry point,
     its ``jit_addr``. A ``DeriveFunctionType`` value always holds it. A value of the plain ``FunctionType`` holds it
-    only when numba filled it in, as numba does when it unboxes an ``@njit`` function passed as an argument of that
+    only if numba populated it, as numba does when it unboxes an ``@njit`` function passed as an argument of that
     type. A value without it is called through its C entry point, which discards the exception and returns a
     zero-filled result.
     """
@@ -312,15 +316,15 @@ def _call_derive(typingctx: Context, derive_ty: FunctionType, sources_ty: Tuple)
         if isinstance(derive_ty, DeriveFunctionType):
             return emit_propagating_call(jit_addr)
 
-        # A plain FunctionType value holds jit_addr only if numba filled it in, so the slot is tested at run time.
+        # A plain FunctionType value holds jit_addr only if numba populated it, so the slot is tested at run time.
         res_slot = cgutils.alloca_once(builder, context.get_value_type(fsig.return_type))
         with builder.if_else(cgutils.is_null(builder, jit_addr), likely=False) as (null, populated):
             with null:
-                # Only the C entry point is left. The three ways of passing a derive that lose its exception end
-                # here: from Python into a parameter declared as the plain FunctionType, as a CompileResultWAP built
-                # with numba directly that reached jitted code, and as a @cfunc. The C entry point discards the
-                # exception (numba issue 8246, https://github.com/numba/numba/issues/8246), so calculate stores the
-                # zero-filled result.
+                # Only the C entry point remains. This branch is taken in the three cases in which the derive's
+                # exception does not propagate. They are a derive passed from Python into a parameter declared as the
+                # plain FunctionType, a CompileResultWAP built with numba directly that reached jitted code, and a
+                # @cfunc. The C entry point discards the exception (numba issue 8246,
+                # https://github.com/numba/numba/issues/8246), so calculate stores the zero-filled result.
                 builder.store(emit_c_call(), res_slot)
             with populated:
                 builder.store(emit_propagating_call(jit_addr), res_slot)
@@ -388,7 +392,7 @@ def _codegen_method(num_sources, registry, make_code, exec_name, ns_extras=None)
     """Return the generated implementation of a ``Work`` method for a node with ``num_sources`` sources.
 
     The first call for a number of sources renders the code with ``make_code`` and runs it in the module namespace, or
-    in a copy of that namespace extended by ``ns_extras``. The code must define ``exec_name``, and ``registry`` keeps
+    in a copy of that namespace extended by ``ns_extras``. The code must define ``exec_name``, and ``registry`` stores
     that function for later calls.
     """
     impl = registry.get(num_sources, None)
@@ -512,7 +516,7 @@ def ol_combine(work_ty, data_ty: DictType, harvested_ty=NoneType):
     """Implement ``Work.combine(data)`` in jitted code: store the ``data`` of the named nodes in ``Any`` values.
 
     ``combine`` resets the erased payload ``p`` of each value to the node's ``data``. The optional ``harvested``
-    dictionary records the names found so far, and the walk passes it on to the sources.
+    dictionary records the names found so far, and ``combine`` passes it to the ``combine`` call of each source.
     """
     num_sources = work_ty.field_dict["sources"].count
     return _codegen_method(num_sources, _combine_registry, _make_combine_code, "_combine_",
@@ -620,7 +624,7 @@ def ol_all_end_nodes(self_ty):
 def ol_depends_on(self_ty, obj_ty):
     """Implement ``Work.depends_on(obj)`` in jitted code, for a name or a ``Work`` node.
 
-    An argument of another type fails an assertion when numba compiles the call.
+    For an argument of another type, an assertion fails when numba compiles the call.
     """
     if isinstance(obj_ty, (Literal, UnicodeType,)):
         def _(self, name_):

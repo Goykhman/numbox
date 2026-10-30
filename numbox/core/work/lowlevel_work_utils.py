@@ -1,6 +1,6 @@
-"""The numba side of ``Work`` nodes: their type class :class:`WorkTypeClass`, the intrinsic constructor
-:func:`ll_make_work`, and the code that fills the fields of a new node. :mod:`numbox.core.work.work` builds the Python
-class ``Work`` on top of this module.
+"""The numba implementation of ``Work`` nodes: their type class :class:`WorkTypeClass`, the intrinsic constructor
+:func:`ll_make_work`, and the code that fills the fields of a new node. :mod:`numbox.core.work.work` defines the Python
+class ``Work`` and its jitted methods for the types that this module creates.
 """
 from numba.core.cgutils import get_null_value, int8_t, int32_t, pack_array
 from numba.core.types import FunctionType, int8, NoneType, StructRef, TypeRef, UniTuple
@@ -68,8 +68,8 @@ def _create_work_type(data_ty, sources_ty, derive_ty, inputs_ty):
 def create_uniform_inputs(context, builder, tup_ty, tup):
     """Emit code that casts each node of ``tup`` to ``NodeBaseType`` and packs the results into an array value.
 
-    Each cast value gets a new reference. Every element type of ``tup_ty`` must be a struct type, which an assertion
-    checks.
+    The emitted code increments the reference count of each cast value. Every element type of ``tup_ty`` must be a
+    struct type, which an assertion checks.
     """
     tup_size = tup_ty.count
     for tup_ind in range(tup_size):
@@ -124,12 +124,12 @@ def ll_make_work(typingctx, name_ty, data_ty, sources_ty, derive_ty, data_ty_ref
     The arguments and checks are those of :func:`~numbox.core.work.work.make_work`, without the upgrade of a
     ``CompileResultWAP``: a ``derive`` whose signature does not match the types of ``data`` and of the sources' data
     raises ``ValueError``. The optional ``data_ty_ref``, a numba type, sets the node's data type in place of the type
-    of ``data``, and numba converts ``data`` to it. The new node has ``derived`` unset. Calling the intrinsic from
-    Python raises ``NotImplementedError``.
+    of ``data``, and numba converts ``data`` to it. The ``derived`` field of the new node is 0. Calling the intrinsic
+    from Python raises ``NotImplementedError``.
 
-    ``ll_make_work`` takes much less memory, cache disk space and compilation time than ``make_work`` when one jitted
-    function creates many nodes, as for a large graph. A ``make_work``-like constructor declared with
-    ``inline="always"`` might also save memory and disk space, when numba honors the directive, but it would take much
+    ``ll_make_work`` uses much less memory, cache disk space and compilation time than ``make_work`` when one jitted
+    function creates many nodes, for example to build a large graph. A ``make_work``-like constructor declared with
+    ``inline="always"`` might also save memory and disk space if numba applies the directive, but it would take much
     longer to compile.
     """
     if data_ty_ref != NoneType:

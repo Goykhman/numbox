@@ -15,8 +15,8 @@ def make_work_helper(name, init_data, sources=(), derive_py=None, jit_options=No
     The derive's signature is the numba type of ``init_data`` over the numba types of the sources' current ``data``, as
     numba's ``typeof`` gives them. ``derive_py`` is compiled for that signature with
     :func:`~numbox.utils.highlevel.cres`, which receives ``jit_options``; without them, the derive compiles without a
-    cache. A node with neither ``sources`` nor ``derive_py`` is an end node. ``sources`` without ``derive_py`` raises
-    ``TypeError``, and a ``derive_py`` that is not a plain function fails an assertion.
+    cache. A node with neither ``sources`` nor ``derive_py`` is an end node. Passing ``sources`` without ``derive_py``
+    raises ``TypeError``. If ``derive_py`` is not a plain function, an assertion fails.
     """
     assert isinstance(derive_py, (NoneType, PyFunctionType))
     if sources or derive_py:

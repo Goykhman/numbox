@@ -24,8 +24,8 @@ def load_array_row_into_dict(*args):
     raise NotImplementedError
 
 
-# The generated code has one statement per field of the record, because jitted code reads a record field only under
-# a name known at compile time.
+# The generated code has one statement per field of the record, because jitted code can access a record field only
+# through a name that is known at compile time.
 def _make_load_to_dict_code(fields_names):
     code_txt = StringIO()
     code_txt.write("""

@@ -20,10 +20,11 @@ def infer_sources_dependencies(access_nodes: NamedTuple | Tuple):
     """
     Return a dictionary from the name of each node of the graph of ``access_nodes`` to the names of its dependents.
 
-    A node's dependents are the nodes that read it as a source, directly or through other nodes. ``access_nodes`` holds
-    specs, such as ``End`` and ``Derived``, or the ``Work`` nodes that :func:`~numbox.core.work.builder.make_graph`
-    returns. An access node without sources has no entry. In the graph below, ``m1`` has the sources ``m2`` and
-    ``m4``, ``m2`` has the source ``m3``, and ``m3`` has the source ``m5``::
+    A node's dependents are the nodes that have it as a source, directly or through other nodes. ``access_nodes``
+    holds specs, such as ``End`` and ``Derived``, or the ``Work`` nodes that
+    :func:`~numbox.core.work.builder.make_graph` returns. An access node without sources has no entry in the
+    dictionary. In the graph below, ``m1`` has the sources ``m2`` and ``m4``, ``m2`` has the source ``m3``, and ``m3``
+    has the source ``m5``::
 
         m1 -- m2 -- m3 -- m5
               |

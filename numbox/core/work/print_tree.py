@@ -51,13 +51,14 @@ def make_graph(node):
 
     The grid maps (row, column) pairs to strings. Each item is padded to its column's width, with ``-`` when the next
     cell of its row holds an item and with spaces otherwise; a ``|`` is always padded with spaces. The inputs of a node
-    go two columns to its right, one below another, and a node that the tree reaches along several paths appears once
-    on each path.
+    are placed two columns to its right, one below another, and a node that the tree reaches along several paths
+    appears once on each path.
     """
     graph = ImmutableItemDict()
     _build_graph(node, graph, 0, 0)
     col_widths = calculate_col_widths(graph)
-    # The padding below sets each cell a second time, which ImmutableItemDict refuses, so it works on a plain copy.
+    # The padding below sets each cell a second time, and ImmutableItemDict raises ValueError for a key that is already
+    # set. The padding therefore writes to a plain copy of the grid.
     graph = dict(graph)
     num_rows = 0
     num_columns = 0
@@ -74,9 +75,9 @@ def make_graph(node):
 def make_image(node):
     """Return a text drawing of the tree of ``node`` and of the nodes it depends on.
 
-    ``node`` is a :class:`~numbox.core.work.node.Node` or a :class:`~numbox.core.work.work.Work` node. Depth grows to
-    the right, and the inputs of a node stand one below another. A node that the tree reaches along several paths
-    appears once on each path. The text begins with a newline, and no row ends in a space.
+    ``node`` is a :class:`~numbox.core.work.node.Node` or a :class:`~numbox.core.work.work.Work` node. Deeper nodes are
+    drawn further to the right, and the inputs of a node are drawn one below another. A node that the tree reaches
+    along several paths appears once on each path. The text begins with a newline, and no row ends in a space.
     """
     graph, num_rows, num_columns, col_widths = make_graph(node)
     image = StringIO()

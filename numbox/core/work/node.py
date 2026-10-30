@@ -14,10 +14,10 @@ class Node(NodeBase):
     """A node of a directed acyclic graph that holds its name and the nodes it depends on, its inputs.
 
     :func:`make_node` creates a node, from Python or from jitted code, and so does ``Node(name, inputs)``. The inputs
-    are kept in a typed list of ``NodeBaseType``. ``all_inputs_names``, ``all_end_nodes`` and ``depends_on`` walk the
-    graph by reading each input as a ``Node``, and ``get_input`` returns an input as a ``Node``. An input of another
-    type, such as a :class:`~numbox.core.work.work.Work` node, is then read wrongly, and the process can crash. For a
-    graph of ``Work`` nodes, use the ``Node`` representations that
+    are stored in a typed list of ``NodeBaseType``. ``all_inputs_names``, ``all_end_nodes`` and ``depends_on`` walk the
+    graph by reading each input as a ``Node``, and ``get_input`` returns an input as a ``Node``. For an input of another
+    type, such as a :class:`~numbox.core.work.work.Work` node, these methods read its payload with the wrong layout,
+    and the process can crash. For a graph of ``Work`` nodes, use the ``Node`` representations that
     :meth:`Work.as_node <numbox.core.work.work.Work.as_node>` creates.
     """
     def __new__(cls, name, inputs):
@@ -88,11 +88,11 @@ NodeType = NodeTypeClass(node_attributes)
 def ol_node(name_ty, inputs_ty):
     """Implement ``Node(name, inputs)`` in jitted code, casting the tuple of nodes ``inputs`` to ``NodeBaseType``.
 
-    Each element of ``inputs`` must be a struct node; an element of another type fails an assertion when numba compiles
-    the call.
+    Each element of ``inputs`` must be a struct node. For an element of another type, an assertion fails when numba
+    compiles the call.
     """
     def node_constructor(name, inputs):
-        """Create the node, with its inputs copied into a typed list."""
+        """Create the node and copy its inputs into a typed list."""
         uniform_inputs_tuple = _uniformize_tuple_of_structs(inputs, NodeBaseType)
         uniform_inputs = List.empty_list(NodeBaseType)
         for s in uniform_inputs_tuple:
@@ -185,7 +185,7 @@ def ol_all_end_nodes(self_ty):
 def ol_depends_on(self_ty, obj_ty):
     """Implement ``Node.depends_on(obj)`` in jitted code, for a name or a ``Node``.
 
-    An argument of another type fails an assertion when numba compiles the call.
+    For an argument of another type, an assertion fails when numba compiles the call.
     """
     if isinstance(obj_ty, (Literal, UnicodeType,)):
         def _(self, name_):
@@ -202,7 +202,7 @@ def ol_depends_on(self_ty, obj_ty):
 def make_node(name, inputs=()):
     """Create a ``Node`` named ``name`` whose inputs are the nodes ``inputs``, from Python or from jitted code.
 
-    ``inputs`` is a tuple of ``Node`` nodes; the :class:`Node` class explains why nodes of another type do not belong
-    there.
+    ``inputs`` is a tuple of ``Node`` nodes. The :class:`Node` class explains why a node of another type must not be an
+    input.
     """
     return Node(name, inputs)
