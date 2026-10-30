@@ -390,9 +390,9 @@ def test_tvf_xbestindex_rejects_unbound_arg_despite_duplicate_eq():
     """xBestIndex rejects a plan that leaves an argument unbound, although it has as many EQ constraints as arguments.
 
     The table has 2 visible columns and 3 hidden columns, the columns 2, 3 and 4. ``arg0`` has two usable EQ
-    constraints, ``arg2`` has one, and ``arg1`` has none. A count of usable EQ constraints would reach 3, the number of
-    arguments, and accept the plan. SQLite passes such a duplicate when a query filters an argument that the call binds,
-    as in ``f(1) WHERE arg0 = 1``.
+    constraints, ``arg2`` has one, and ``arg1`` has none. An implementation that counted usable EQ constraints would
+    reach 3, the number of arguments, and accept the plan. SQLite passes such a duplicate when a query filters an
+    argument that the call binds, as in ``f(1) WHERE arg0 = 1``.
     """
     EQ = SQLITE_INDEX_CONSTRAINT_EQ
     rc, _ = _call_xbestindex(2, 3, [(2, EQ, 1), (2, EQ, 1), (4, EQ, 1)])

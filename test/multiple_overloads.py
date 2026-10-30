@@ -53,8 +53,8 @@ def make_entity(x1):
     return Entity(x1)
 
 
-# ol_calculate stores the generated _calculate_ here, so the source is compiled once per process, and ol_calculate
-# returns the same function for every entity type.
+# ol_calculate stores the generated _calculate_ in this dict, so the source is compiled once per process, and
+# ol_calculate returns the same function for every entity type.
 _calculate_registry = {}
 
 

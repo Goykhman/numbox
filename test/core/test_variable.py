@@ -137,7 +137,7 @@ class Storage:
     """A store of the values of a multistep calculation, by step and by name, outside the graph.
 
     The graph holds the store itself as a value. A formula reads the value of the previous step from the store and
-    stores the value of the current step, so the value of each step is available at the next. ``get`` raises
+    stores the value of the current step, so the value of each step is available at the next step. ``get`` raises
     ``ValueError`` for a step or a name without a value. ``set`` raises ``RuntimeError`` for a name that the step
     already holds. ``clean`` deletes the values of the given steps.
     """

@@ -832,7 +832,7 @@ def test_make_graph_uncanonical_jit_flags_drop_the_kernel_cache(monkeypatch):
     With canonical flags and ``cache=True``, the maker is cached. ``_flags_canon`` falls back to
     ``repr(sorted(flags.items(), key=repr))`` for a flag that it cannot fingerprint, such as a ``pipeline_class`` or a
     ``locals`` dictionary of numba types. The ``repr`` of an object with the default ``repr`` differs between
-    processes, and two different values can have the same ``repr``. A maker name built on it could therefore change
+    processes, and two different values can have the same ``repr``. A maker name built from it could therefore change
     from one process to the next, or be the same for two graphs that compile differently. The derive anchor and
     ``compile_kernel`` compile without a cache in this case, and the graph maker compiles without a cache as well.
     """

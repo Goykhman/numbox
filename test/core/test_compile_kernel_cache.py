@@ -256,7 +256,7 @@ def test_plain_formula_unit_stays_cacheable():
     """A formula compiled without ``cache=True`` leaves the kernel cached.
 
     Such a formula has no cache of its own, and the kernel's digest holds its code and options. Compiling the kernel
-    without a cache would add a compilation to every process and would prevent no stale result.
+    without a cache would add a compilation to every process and would not prevent a stale result.
     """
     disp = _compile(_KERNEL_SRC, {"f_x": _plain_formula}, None, None)
     assert not isinstance(disp._cache, NullCache), "plain-formula kernel should cache"

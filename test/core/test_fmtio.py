@@ -302,7 +302,7 @@ def test_snprintf_truncation_detection():
     rc = _snprintf_into(buf, 12345, 67890)
     full_msg = b"[12345:67890]"  # 13 bytes
 
-    # The test rc < 0 or rc >= size detects the truncation on every platform.
+    # The condition rc < 0 or rc >= size detects the truncation on every platform.
     truncated = (rc < 0) or (rc >= buf.size)
     assert truncated, (
         f"expected truncation indicator: rc={rc}, buf.size={buf.size}"

@@ -422,7 +422,7 @@ def test_a_const_reference_caller_serves_a_stale_body_after_an_edit(tmp_path):
     the dispatcher caller, which numbox repaired, and a later run returns the old result without a warning.
 
     If the cache check is extended to a body linked into a caller, ``const_scale`` will return the new result, and the
-    first assertion will fail. Such a failure means that the limitation is gone. It is not a regression.
+    first assertion will fail. Such a failure means that the limitation no longer exists. It is not a regression.
     ``const_offset`` and ``disp_offset`` remain the control: a repair that discarded the whole directory would make
     them compile again.
     """
@@ -686,7 +686,7 @@ def test_a_const_reference_caller_calls_a_binding_that_disappeared(tmp_path):
 
     The defect is in the constant lowering, which links the body into the caller. If that lowering is changed to
     discard such a caller, the cached run will fail as the run with an empty cache does, and the assertions will fail.
-    Such a failure means that the limitation is gone. It is not a regression.
+    Such a failure means that the limitation no longer exists. It is not a regression.
 
     A user may write this form deliberately, in the belief that it is safe. If the binding is absent, an unguarded
     ``scale.as_func`` raises ``AttributeError`` at import, and a caller defined inside an ``if hasattr(...)`` block, as

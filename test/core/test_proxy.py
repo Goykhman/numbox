@@ -386,7 +386,7 @@ def test_proxy_redefinition_keeps_callers_on_their_own_body():
 def test_proxy_absent_binding_caller_gets_loud_diagnostic_not_segfault(tmp_path):
     """A cached caller of a binding whose C symbol disappears fails with a ``TypingError``.
 
-    The process does not crash, and the caller returns no value. numba's cache key for the caller does not cover its
+    The process neither crashes nor prints a wrong result. numba's cache key for the caller does not cover its
     callees, so the second process finds the cached caller. Its code refers to the binding's alias. In that process,
     ``proxy_if_available`` returns the stub and registers a trap under the alias. Without the trap, the unresolved
     symbol would crash the process without a message. The trap raises inside a ``@cfunc``, where numba discards the
@@ -751,12 +751,12 @@ def test_a_retired_alias_stays_retired_when_its_body_is_registered_again():
     later registration does not change that. If the registration removed the alias from the set, a ``cache=True``
     caller cached in another process would load again, although the alias does not identify which of the two bodies
     the caller was compiled against. The other retirement tests read the set at the first publication; this test reads
-    it after the same body registers again.
+    it after the same body is registered again.
 
     The re-registration runs with ``AliasCollisionWarning`` as an error and must return the shared alias, not a name
     of the form ``<alias>_c<N>``. These two checks show that it took the branch for one body registered twice, which
     is the branch under test. An implementation that treated it as a new collision would also leave the alias
-    retired, so without them the test could pass without reaching that branch. The test fails against an
+    retired, so without the two checks the test could pass without reaching that branch. The test fails against an
     implementation that removes the alias from ``_ABSENT_ALIASES`` on that branch.
     """
     import ctypes
