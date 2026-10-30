@@ -1,9 +1,12 @@
-"""Source-anchor machinery for dynamically-exec'd code.
+"""Write the code that numbox generates at run time to files of its own, its cache anchors, so that numba can cache it.
 
-Content-addressed anchors keep numba's per-overload cache correct
-when two exec'd code blocks differ only in ``co_consts``. See the
-"Cache-anchor mechanism" section in ``docs/numbox.utils.rst`` for
-the rationale and references.
+numba caches a function only if it can find the function's source file. Its key for a cache entry covers the
+function's bytecode but not the constants or names that the bytecode refers to. numbox therefore writes each piece of
+generated code to an anchor whose name ends in a digest of the code, and it compiles the code under that file name.
+Two versions of the code that differ only in a literal or a name then have anchors, and cache files, of their own.
+The anchors are under ``NUMBA_CACHE_DIR`` or numba's user cache directory. Before cached code compiles, numbox asks
+numba whether it can cache a function of the anchor. If numba cannot, the code compiles without a cache after one
+warning that names the remedy. The utils page explains the anchors in its section on the cache-anchor mechanism.
 """
 import ast
 import errno
@@ -27,38 +30,51 @@ def _anchor_root(subdir: str = "numbox-structref") -> Path:
     return Path(AppDirs(appname="numba", appauthor=False).user_cache_dir) / subdir
 
 
+# The bound, in bytes, on each name that numbox puts into a file name (bounded_stem). The longest of numba's file
+# names for a struct's code is the cache file of a method's jitted helper. With the bound, that name holds the
+# anchor's stem of at most 57 bytes, the bounded names of the struct and the method, the method's 64-digit hash,
+# numba's line number and its suffixes. That is under 230 bytes for names of any length, and within 255 bytes with
+# the 21 bytes that numba's temporary name adds.
 _STEM_MAX = 40
 
 
 def _longest_cache_file_name(stem: str, code_txt: str) -> int:
-    """The longest name numba writes for a function of the code anchored at a file of this stem, in bytes.
+    """Return the length in bytes of the longest cache file name that numba writes for a function of ``code_txt``.
 
-    numba names a function's cache files after the file's stem and the function's qualified name, with the angle
-    brackets of ``<locals>`` dropped, its line, Python's version and ABI flags, and, for a data file, the overload's
-    number, and writes each through a temporary name 21 bytes longer, ``.tmp.`` and sixteen hex digits: the longest
-    of the functions the code jits, decorated themselves, with ``njit`` or a decorator of the package's own that
-    jits, or defined within a decorated one, as an ``overload``'s constructor is, which numba compiles with the
-    overload's options and writes cache files for under the overload's name and ``locals``; nested ones and
-    methods included, with the digits ``_OVERLOAD_DIGITS`` reserves for the data file's number, three, numba
-    numbering them from one without bound. A plain function at the top or in a
-    class body, a struct's method under its own name, which calls the jitted thunk, gets no cache file, and
-    counted, a method named with two hundred characters put the longest over the file system's 255, and the struct
-    compiled uncached; counted by five decorators' names alone, the builder's derive function, jitted through the
-    package's own decorator, and the constructor overload's inner function were left out, and numba's save died
-    past the check. The anchor's check asks numba's location for a name this long, as the package's asks for its
-    own with ``LONGEST_CACHE_FILE_NAME``, so that a cache directory within that of the path limit answers here,
-    uncached after one warning, where numba's own check passed a name of eight and the first save raised through
-    the struct's making; a bound for any struct, 251, turned caching off on a file system whose name limit is
-    under it, eCryptfs's 143, for a struct whose names were 58.
+    ``code_txt`` is the code anchored at a file whose name without its suffix is ``stem``. numba names a function's
+    cache files after that stem, the function's qualified name without the angle brackets of ``<locals>``, the line of
+    its first decorator and Python's version and ABI flags. A data file's name also holds the overload's number. numba
+    writes each file first under a temporary name that is 21 bytes longer: ``.tmp.`` and sixteen hexadecimal digits.
+    The length counts that temporary name. It counts the overload's number as ``_OVERLOAD_DIGITS`` digits, three,
+    because numba numbers the overloads from one without a bound. The result is 0 if no function of the code is
+    decorated.
+
+    The anchor's check writes a file name of this length in the location that numba picks, as the package's check
+    does with ``LONGEST_CACHE_FILE_NAME`` for numbox's own modules. A cache directory too close to the path limit then
+    fails the check, and the code compiles without a cache after one warning. numba's own test of a location creates a
+    temporary file that is unnamed on Linux and has a short name elsewhere. Such a directory accepts that file, so
+    without this length the first save would fail while the struct is made. A fixed bound for every struct, such as
+    251 bytes, would turn caching off on a file system with a lower name limit, such as the 143 bytes of eCryptfs. It
+    would do so even for a struct whose names need 58.
     """
     names = []
 
     def walk(node, outer, jitted):
+        """Append the qualified name and line of each function under ``node`` that numba caches to ``names``."""
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 qualname = f"{outer}{child.name}"
+                # A function counts if it is decorated, or if it is defined inside a decorated function. numba caches
+                # the constructor that an overload returns under the overload's qualified name and <locals>, with the
+                # overload's options. Any decorator counts, so the work builder's derive, which a numbox decorator
+                # jits, is included. A plain function, at the top or in a class body, gets no cache file and does not
+                # count. A struct's method under its own name is such a function: it only calls the jitted helper.
+                # Counting a method name of two hundred characters would push the length past 255 and turn the
+                # struct's cache off for no reason.
                 counts = jitted or bool(child.decorator_list)
                 if counts:
+                    # child.lineno is the line of def. numba uses the line of the first decorator, which is earlier or
+                    # the same, so the number of digits counted is never too small.
                     names.append((qualname, child.lineno))
                 walk(child, f"{qualname}.<locals>.", counts)
             elif isinstance(child, ast.ClassDef):
@@ -74,10 +90,10 @@ def _longest_cache_file_name(stem: str, code_txt: str) -> int:
          for qualname, lineno in names), default=0)
 
 
-# The options generated code compiles under are the package's unless the caller
-# gave its own, as make_structref, compile_kernel and the builder take, and
-# compile_kernel's cache argument overrides them all; the variable reaches only
-# the package's.
+# The text that ends each remedy in this module's warnings. Generated code compiles under the package's default jit
+# options unless the caller passes options of its own, as make_structref, compile_kernel and the work builder accept,
+# and compile_kernel's cache argument overrides both. NUMBOX_JIT_OPTIONS changes only the package's defaults, so the
+# text names each of the three ways to turn the cache off.
 _SILENCE = (
     "compile without a cache to silence this warning: \"cache\" off in the jit options this code was given, or "
     "in its cache argument where it takes one, or NUMBOX_JIT_OPTIONS='{\"cache\": false}' where the options are "
@@ -86,17 +102,17 @@ _SILENCE = (
 
 
 def bounded_stem(name: str) -> str:
-    """``name`` as the stem of a file name: as it is up to 40 bytes, else whole characters of it within 31 and a digest.
+    """Return ``name`` shortened to at most 40 bytes of UTF-8, for use in a file name.
 
-    An anchor's name, and the names numba gives the cache files of the functions it holds, carry the name of
-    the struct or the function they were generated for, and a file system allows a name 255 bytes long; numba's
-    repeat the stem and the generated function's name, so a struct named with about 93 characters overflowed
-    them. Bounded, the longest of numba's file names, a method thunk's, is the anchor's stem of at most 57 bytes,
-    the struct's and the method's bounded names, the method's 64-character hash, and numba's line number and
-    suffixes: under 230 bytes whatever the names' lengths, and within the 255 with the 21 bytes numba's temporary
-    name adds at the write. A name of 40 bytes or fewer, which is nearly every name, keeps the file names it
-    had. The measure is the name's UTF-8, which is the file system's: a character of another script takes up to
-    four bytes there.
+    A name of 40 bytes or fewer, which nearly every name is, is returned unchanged. A longer name is cut to the whole
+    characters that fit in 31 bytes, followed by an underscore and the first eight hexadecimal digits of the SHA-256 of
+    the whole name. The length is measured in UTF-8, as file systems measure it, so a character of another script
+    counts for up to four bytes.
+
+    numbox puts the names of a struct, its fields and its methods, and of the functions it generates code for, into
+    the names of the anchors and of numba's cache files. Most file systems allow a name of at most 255 bytes, and
+    numba's names repeat the anchor's name and add the function's name. Without this bound, a struct name of about 93
+    characters would make them too long.
     """
     encoded = name.encode("utf-8")
     if len(encoded) <= _STEM_MAX:
@@ -106,11 +122,18 @@ def bounded_stem(name: str) -> str:
 
 
 def _anchor_path(subdir: str, stem: str, code_txt: str) -> Path:
-    """Content-addressed on-disk source anchor for dynamically-exec'd code, its stem bounded.
+    """Return the path of the anchor for ``code_txt``: ``<stem>_<digest>.py`` in the subdirectory ``subdir``.
 
-    See the "Cache-anchor mechanism" section in
-    ``docs/numbox.utils.rst`` for the rationale.
+    The stem is ``stem`` shortened by :func:`bounded_stem`, and the digest is the first 16 hexadecimal digits of the
+    SHA-256 of the code, so each version of the code has a file of its own. The subdirectory is under
+    ``NUMBA_CACHE_DIR`` if it is set, and under numba's user cache directory otherwise. The utils page explains why
+    in its section on the cache-anchor mechanism.
     """
+    # numba's key for a cache entry hashes co_code and the closure values, but not co_consts or co_names (_index_key
+    # in numba/core/caching.py). On Python 3.10 to 3.13, an edit that changes only a literal or a name leaves co_code
+    # unchanged, because the bytecode refers to both by index. Python 3.14 writes the integers 0 to 255 into the
+    # bytecode with LOAD_SMALL_INT, and 3.15 also writes -1, with LOAD_COMMON_CONSTANT; other integers, such as -2
+    # and 256, still go through LOAD_CONST. The digest covers the whole code text, so it separates every version.
     digest = hashlib.sha256(code_txt.encode("utf-8")).hexdigest()[:16]
     return _anchor_root(subdir) / f"{bounded_stem(stem)}_{digest}.py"
 
@@ -120,8 +143,11 @@ def _structref_anchor_path(struct_name: str, code_txt: str) -> Path:
 
 
 def _materialize_anchor(path: Path, code_txt: str) -> None:
+    # An anchor that exists is never written again, because its name holds the digest of its code.
     if path.exists():
         return
+    # The code goes to a temporary file in the same directory, which is then renamed to the anchor's name, so that
+    # another process sees either no anchor or a complete one. The temporary file is removed if the write fails.
     fd, tmp_str = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".tmp-")
     tmp = Path(tmp_str)
     try:
@@ -134,23 +160,25 @@ def _materialize_anchor(path: Path, code_txt: str) -> None:
 
 
 def _anchor_or_error(path: Path, code_txt: str):
-    """Write the anchor at ``path`` and ask numba for its cache location; the error where there is none, else None.
+    """Write the anchor at ``path`` and check that numba can cache a function of it; return the error, or None.
 
-    Any ``OSError`` from making the directory or writing the file means there is no cache here, whatever its
-    cause: ``NUMBA_CACHE_DIR`` pointing into a file, a full disk, a path too long for the file system, whether
-    the directory makes it so or the name numbox made from a struct's or a function's; numba itself passes a
-    location over on any ``OSError``. Then numba is asked, the question the package puts for its own modules,
-    and no locator, or a location it cannot use, is the cache's; the answer may be the user's cache directory
-    where the anchor's own cannot be written. So is numba's ``UnicodeEncodeError`` for the anchor's directory path,
-    which numba hashes as UTF-8 to name its cache directory and raises for where it is not. The question is put
-    with the longest name numba writes for the code's functions, read off the code, so that a location within that
-    of the path limit, which numba's own check passes with a name of eight, answers here.
+    Any ``OSError`` from creating the directory or writing the file is returned, whatever its cause, because numba
+    itself skips a cache location on any ``OSError``. The causes include ``NUMBA_CACHE_DIR`` pointing into a file, a
+    full disk, and a path too long for the file system, through the directory or through a name that numbox made. The
+    check is :func:`~numbox.core.configurations.check_cache_location`, the one that the package runs for its own
+    modules. numba may choose the user's cache directory for the anchor if the anchor's own directory cannot hold its
+    cache. The check's error is returned when it is a cache error, as
+    :func:`~numbox.core.configurations.is_a_cache_error` decides: no locator for the file, a location that numba
+    cannot use, or the ``UnicodeEncodeError`` that numba raises for a directory path that is not valid UTF-8. Any
+    other error propagates.
     """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         _materialize_anchor(path, code_txt)
     except OSError as error:
         return error
+    # The check writes a file name as long as the longest that numba will write for the code's functions
+    # (_longest_cache_file_name), so that a directory too close to the path limit fails here and not at the first save.
     try:
         check_cache_location(path, _longest_cache_file_name(path.stem, code_txt))
     except (RuntimeError, OSError, ValueError) as error:
@@ -161,13 +189,15 @@ def _anchor_or_error(path: Path, code_txt: str):
 
 
 def _anchored_or_uncached(path: Path, code_txt: str, jit_options: dict) -> dict:
-    """``jit_options`` to compile the code anchored at ``path`` under, the anchor written where it can be.
+    """Write the anchor of ``code_txt`` at ``path``, and return the jit options to compile the code under.
 
-    numba reads the anchor to cache the code it names, and quotes the source from it in its messages, a typing
-    error's among them, so it is written whenever it can be: with caching off a write that fails is nothing,
-    the path serving as the code's filename as it did. With caching on the anchor is written and numba asked
-    for its location, by ``_anchor_or_error``; where that gives an error, the code compiles without a cache
-    after one warning naming the remedy, rather than dying at the write or at the first decorated function.
+    numba reads the anchor to cache the code, and it quotes the code from the anchor in its messages, such as a typing
+    error. The anchor is therefore written whether or not caching is enabled. With caching disabled, a failed write is
+    ignored, and the code still compiles under ``path`` as its file name; ``jit_options`` is returned as it is. With
+    caching enabled, :func:`_anchor_or_error` writes the anchor and checks the location. If it reports an error, the
+    function warns once with a ``RuntimeWarning`` that names the remedy, and it returns the options with ``cache`` set
+    to False. The code then compiles without a cache instead of failing at the write or at the first decorated
+    function.
     """
     if not jit_options.get("cache"):
         try:
@@ -180,9 +210,9 @@ def _anchored_or_uncached(path: Path, code_txt: str, jit_options: dict) -> dict:
     if error is None:
         return jit_options
     if isinstance(error, OSError) and getattr(error, "longest_file_name", 0):
-        # The file system takes no name as long as numba's longest for the
-        # anchor's functions, which the check asked for: no shorter path cures
-        # it, and the warning offered one.
+        # The file system that holds the location allows no name as long as the longest that numba writes for the
+        # anchor's functions, which the check tried. A shorter path cannot help, so the remedy asks for another file
+        # system.
         from numbox.core.configurations import _name_limit
         remedy = (
             f"numba's cache files for the functions anchored here have names of up to {error.longest_file_name} "
@@ -190,15 +220,13 @@ def _anchored_or_uncached(path: Path, code_txt: str, jit_options: dict) -> dict:
             f"at a directory on a file system that takes a name that long, or {_SILENCE}"
         )
     elif isinstance(error, OSError) and error.errno == errno.ENAMETOOLONG:
-        # The names numbox makes are bounded, so the long part is the
-        # directory, NUMBA_CACHE_DIR or the user's cache directory; a short
-        # NUMBA_CACHE_DIR moves the anchor out of either.
+        # numbox bounds the names that it makes, so the long part is the directory: NUMBA_CACHE_DIR or the user's
+        # cache directory. A shorter NUMBA_CACHE_DIR moves the anchor out of either.
         remedy = f"The path is too long for the file system: NUMBA_CACHE_DIR at a shorter path, or {_SILENCE}"
     elif isinstance(error, UnicodeEncodeError):
-        # numba hashes the anchor's directory path as UTF-8 to name its cache
-        # directory under NUMBA_CACHE_DIR or the user's cache directory, and
-        # raises for bytes that are not; the warning offered a writable
-        # directory, which the anchor's is.
+        # numba hashes the anchor's directory path as UTF-8 to name its cache directory under NUMBA_CACHE_DIR or the
+        # user's cache directory, and it raises for a path that is not valid UTF-8. The anchor's directory can be
+        # written, since the anchor is there, so the remedy asks for a UTF-8 path rather than a writable directory.
         remedy = (
             f"numba hashes the anchor's directory path as UTF-8 to name its cache directory, and {path.parent} is "
             f"not: NUMBA_CACHE_DIR at a UTF-8 path, or {_SILENCE}"
@@ -213,13 +241,14 @@ def _anchored_or_uncached(path: Path, code_txt: str, jit_options: dict) -> dict:
 
 
 def _cached_at_or_uncached(py_file: str, jit_options: dict) -> dict:
-    """``jit_options`` to compile code anchored to the module file ``py_file`` under: as given where numba can cache
-    a function of that file, else with ``cache`` off after one warning naming the remedy.
+    """Return the jit options to compile code under that numbox compiles as part of the module file ``py_file``.
 
-    ``make_graph``'s kernel is anchored to the builder's own file and cached beside it, and the options a caller
-    gives reach numba as they are, past the package's answer, so the question is put for the file, the way the
-    package puts it for its own, the kernel's name within the package's bound; the remedy is the package's for
-    the placement.
+    ``jit_options`` is returned as it is if caching is disabled or if numba can cache a function of ``py_file``.
+    Otherwise the function warns once, with the remedy that :func:`~numbox.core.configurations.cache_remedy` gives for
+    the file, and returns the options with ``cache`` set to False. ``make_graph`` compiles its kernel as part of
+    ``builder.py``, and numba caches the kernel beside that file. Options that a caller passes reach numba unchanged,
+    without the check that the package's default options get at import, so this function runs the same check for the
+    file. It checks with ``LONGEST_CACHE_FILE_NAME``, which covers the kernel's names.
     """
     if not jit_options.get("cache"):
         return jit_options
@@ -243,16 +272,13 @@ _ORPHAN_AGE_SECONDS = 60
 
 
 def _orphan_anchor_sweep(subdir: str) -> None:
-    """Best-effort cleanup of orphaned ``.tmp-*`` anchor files from SIGKILL'd
-    writers. Called at module import; failures are silent (the orphan is at
-    worst harmless disk usage).
+    """Delete the temporary anchor files, ``*.tmp-*``, that a killed writer left in the anchor subdirectory ``subdir``.
 
-    Only sweeps files whose ``mtime`` is older than ``_ORPHAN_AGE_SECONDS``
-    so a concurrent ``_materialize_anchor`` call in another process --
-    which has the same ``.tmp-*`` shape between ``mkstemp`` and
-    ``replace`` -- isn't unlinked mid-flight (the resulting
-    ``FileNotFoundError`` on the in-progress writer's ``replace`` would
-    abort its caller's import).
+    Each module that writes anchors calls this function at import for its own subdirectory. A leftover file only uses
+    disk space, so every error here is ignored. Only files older than ``_ORPHAN_AGE_SECONDS`` are deleted, because a
+    :func:`_materialize_anchor` in another process holds a file of the same name pattern between ``mkstemp`` and
+    ``replace``. Deleting that file would make its ``replace`` raise ``FileNotFoundError`` and fail the other
+    process's import.
     """
     try:
         root = _anchor_root(subdir)

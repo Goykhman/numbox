@@ -1,29 +1,18 @@
-"""Cross-platform monotonic nanosecond clock callable from @njit code.
+"""A monotonic clock in nanoseconds for jitted code, on Linux, macOS and Windows.
 
-Exposes a single function::
+``monotonic_ns()`` returns an ``int64``, the nanoseconds since an unspecified starting point, so only the difference
+between two values is meaningful. It is an ``@intrinsic``, so only jitted code can call it. The code it generates
+keeps the platform's time structure on the stack, so a call allocates no heap memory and creates no object that
+numba's runtime tracks.
 
-    monotonic_ns() -> int64   # nanoseconds since an unspecified epoch
+On Linux and macOS, the code calls libc's ``clock_gettime(CLOCK_MONOTONIC, &ts)``, where ``ts`` is a
+``struct timespec`` of two ``int64`` fields, ``tv_sec`` and ``tv_nsec``. The code declares ``clock_gettime`` with
+``get_or_insert_function``, and the platform's dynamic symbol lookup resolves it when the JIT links the code; libc
+is always loaded globally.
 
-Implemented as a Numba ``@intrinsic`` that emits an LLVM ``alloca`` for
-the platform's time struct, calls the OS clock function into it, and
-returns the result — all on the stack, with zero heap allocation and no
-NRT liveness concerns.
-
-Platform implementations
-------------------------
-Linux / macOS:
-    Calls libc ``clock_gettime(CLOCK_MONOTONIC, &ts)`` where ``ts`` is a
-    stack-allocated ``struct timespec {int64 tv_sec; int64 tv_nsec}``.
-    The LLVM declaration is emitted with ``get_or_insert_function`` and
-    resolved through the platform's normal dynamic symbol lookup at JIT
-    link time — libc is always globally loaded.
-
-Windows:
-    Calls ``QueryPerformanceCounter`` from ``kernel32.dll``.  The
-    performance-counter frequency is read once at module import via
-    ctypes and baked into the IR as a compile-time constant.
-    ``kernel32`` is registered with LLVM's symbol search via
-    ``load_library_permanently``.
+On Windows, the code calls ``QueryPerformanceCounter`` from ``kernel32.dll``, which this module registers with
+LLVM's symbol search through ``load_library_permanently``. The module reads the counter's frequency once, through
+ctypes, when it is imported, and the generated code holds the frequency as a constant.
 """
 import ctypes
 import platform
@@ -57,23 +46,22 @@ if _SYSTEM == "Windows":
 
     @intrinsic
     def monotonic_ns(typingctx):
-        """Stack-only monotonic clock via QueryPerformanceCounter.
-
-        Converts ticks to nanoseconds without overflow by decomposing::
-
-            ns = (ticks / freq) * 1e9 + (ticks % freq) * 1e9 / freq
-
-        The naive ``ticks * 1e9 / freq`` overflows int64 after ~15 min
-        of uptime at a typical 10 MHz QPC frequency.
-        """
+        """Return the time of the monotonic clock in nanoseconds, from ``QueryPerformanceCounter``."""
         def codegen(context, builder, signature, arguments):
+            """Emit the call of ``QueryPerformanceCounter`` and the conversion of its ticks to nanoseconds."""
             counter_ptr = builder.alloca(_i64)
+            # The status that the call returns is not checked. The counter is zeroed first, so a call that fails
+            # without writing it gives 0.
             builder.store(ir.Constant(_i64, 0), counter_ptr)
             fn_ty = ir.FunctionType(_i32, [_i64.as_pointer()])
             fn = get_or_insert_function(
                 builder.module, fn_ty, "QueryPerformanceCounter")
             builder.call(fn, [counter_ptr])
             ticks = builder.load(counter_ptr)
+            # ns = (ticks // freq) * 10**9 + (ticks % freq) * 10**9 // freq. The direct ticks * 10**9 // freq would
+            # overflow an int64 once ticks passes about 9.2e9, after about 15 minutes of uptime at the usual frequency
+            # of 10 MHz. In the split form, the first product overflows only after about 292 years of uptime, and the
+            # second stays below freq * 10**9.
             sec = builder.sdiv(ticks, _QPC_FREQ_CONST)
             rem = builder.srem(ticks, _QPC_FREQ_CONST)
             sec_ns = builder.mul(sec, _BILLION)
@@ -89,9 +77,12 @@ else:
 
     @intrinsic
     def monotonic_ns(typingctx):
-        """Stack-only monotonic clock via clock_gettime."""
+        """Return the time of the monotonic clock in nanoseconds, from ``clock_gettime(CLOCK_MONOTONIC)``."""
         def codegen(context, builder, signature, arguments):
+            """Emit the call of ``clock_gettime`` and the conversion of its ``timespec`` to nanoseconds."""
             ts_ptr = builder.alloca(_timespec_ty)
+            # The status that the call returns is not checked. The structure is zeroed first, so a call that fails
+            # without writing it gives 0.
             zero_ts = ir.Constant(
                 _timespec_ty, [ir.Constant(_i64, 0), ir.Constant(_i64, 0)])
             builder.store(zero_ts, ts_ptr)

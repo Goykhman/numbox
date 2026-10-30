@@ -1,3 +1,10 @@
+"""Pass a structref through an integer address, and read the reference count of its MemInfo.
+
+A MemInfo is numba's reference-counted header for the memory of a structref or an array. :func:`export_meminfo`
+returns the address of a structref's MemInfo as an ``intp`` and takes a reference, :func:`borrow_structref` builds a
+structref from such an address, and :func:`release_meminfo` releases the reference. :func:`structref_meminfo` returns
+the addresses of a structref's MemInfo and data, and :func:`get_nrt_refcount` reads the reference count.
+"""
 import ctypes
 
 import numba
@@ -16,6 +23,7 @@ return_tuple_type = types.UniTuple(types.intp, 2)
 def _structref_meminfo(typingctx, s_type):
 
     def codegen(context, builder, signature, args):
+        """Emit the conversion of the MemInfo pointer and of its data pointer to ``intp``, returned as a tuple."""
         s = args[0]
         meminfo = context.nrt.get_meminfos(builder, s_type, s)[0]
         type_data, meminfo_p = meminfo
@@ -32,19 +40,21 @@ def _structref_meminfo(typingctx, s_type):
 
 @numba.njit
 def structref_meminfo(s):
-    """
-    :param s: instance of StructRef
-    :return: tuple of pointers (as 64-bit integers) to meminfo member of the StructRef and its data payload.
+    """Return the addresses of the MemInfo of the structref ``s`` and of its data, as a tuple of two ``intp``.
+
+    The addresses take no reference, so they are valid only while ``s`` is alive. numba creates a MemInfo for the call
+    alone when Python passes a NumPy array, so for an array the first address is no longer valid when the call returns.
     """
     return _structref_meminfo(s)
 
 
 def get_nrt_refcount(s):
-    """
-    :param s: instance of an object with payload wrapped in a meminfo
-    :return: NRT reference count, the one which is controllable by nrt context's incref/decref
+    """Return the reference count of the MemInfo of the structref ``s``, which numba's ``incref`` and ``decref`` change.
 
-    Leverages meminfo memory layout::
+    The function reads the first field, ``refct``, of numba's ``MemInfo`` structure from the address that
+    :func:`structref_meminfo` returns, so Python code can call it but jitted code cannot. The count is not meaningful
+    for a NumPy array that Python passes in, because numba creates a MemInfo for the call alone. The layout of the
+    structure is::
 
         struct MemInfo {
             size_t            refct;
@@ -55,7 +65,8 @@ def get_nrt_refcount(s):
             NRT_ExternalAllocator *external_allocator;
         };
 
-    see `nrt <https://github.com/numba/numba/blob/main/numba/core/runtime/nrt.cpp#L17>`_.
+    The structure is defined in numba's
+    `nrt.cpp <https://github.com/numba/numba/blob/main/numba/core/runtime/nrt.cpp#L17>`_.
     """
     meminfo_p, data_p = structref_meminfo(s)
     return ctypes.c_int64.from_address(meminfo_p).value
@@ -65,10 +76,10 @@ _MI_TY = types.MemInfoPointer(types.voidptr)
 
 
 def _require_intp(p_ty, fn_name):
-    """Reject anything other than ``types.intp`` for pointer-as-int args.
+    """Raise ``TypingError``, naming ``fn_name``, unless the type ``p_ty`` of an address argument is ``types.intp``.
 
-    Accepting an arbitrary integer type would emit an ``inttoptr`` of the
-    wrong width on 64-bit hosts (e.g., int32 → i32 → ptr truncates).
+    An address held in a narrower integer type, such as ``int32``, has already lost its upper bits on a 64-bit host, so
+    the ``inttoptr`` of it would give a wrong pointer.
     """
     if p_ty != types.intp:
         raise TypingError(f"{fn_name} expects types.intp, got {p_ty}")
@@ -76,30 +87,30 @@ def _require_intp(p_ty, fn_name):
 
 @intrinsic
 def _incref_meminfo(typingctx, p_ty):
-    """Incref a MemInfo at ``intp`` via NRT.
+    """Increment the reference count of the MemInfo at the ``intp`` address ``p``, in jitted code.
 
-    This intrinsic's signature (``void(intp)``) contains no NRT-tracked types,
-    so a caller of the same shape passes the legality check of numba's
-    ``removerefctpass``, which then deletes every ``NRT_incref`` and
-    ``NRT_decref`` call in that caller by name, this one included. The
-    ``_release_meminfo`` escape (call an NRT function outside the pass's
-    allowlist) is not available for an incref: numba registers no such
-    symbol. Instead the codegen tags the enclosing function with the
-    ``numba_args_may_always_need_nrt`` named metadata, numba's own marker for
-    functions whose references outlive the call, which makes ``_legalize()``
-    refuse the rewrite for that function's module. The tag can only refuse,
-    so it changes nothing where another check already fails, and each
-    function is lowered into a module of its own, so a caller's check never
-    sees the tag. numba 0.66 removed the pass together with every mention of
-    the tag, so from 0.66 on nothing reads it.
+    The increment survives the ``removerefctpass`` of numba 0.65 and earlier, a pass that deletes the reference count
+    changes of a function that seems not to need them.
     """
     _require_intp(p_ty, "_incref_meminfo")
     sig = types.void(p_ty)
 
     def codegen(context, builder, signature, args):
+        """Emit an ``NRT_incref`` of the MemInfo, with the marker that keeps ``removerefctpass`` from deleting it."""
         mi_ll_ty = context.get_value_type(_MI_TY)
         meminfo = builder.inttoptr(args[0], mi_ll_ty)
         context.nrt.incref(builder, _MI_TY, meminfo)
+        # numba 0.65 and earlier run removerefctpass on a function that seems not to need reference counting: its
+        # result, its arguments other than arrays and the results of its calls hold no type that numba counts
+        # references for. export_meminfo called with an array is such a function. The pass deletes every NRT_incref
+        # and NRT_decref call in that function by name, this increment included. _release_meminfo escapes the pass by
+        # calling an NRT function outside the pass's list of accepted functions, but numba registers no such function
+        # for an increment. The code therefore adds the enclosing function to the named metadata
+        # numba_args_may_always_need_nrt, numba's own marker for a function whose references outlive the call, and
+        # _legalize() then refuses the pass for that function's module. The marker can only refuse the pass, so it
+        # changes nothing where another check already refuses it. numba lowers each function into a module of its
+        # own, so the check for a caller of the enclosing function never sees the marker. numba 0.66 removed the pass
+        # together with every use of the marker, so from 0.66 on nothing reads it.
         module = builder.module
         nmd = module.add_named_metadata("numba_args_may_always_need_nrt")
         nmd.add(module.add_metadata([builder.function]))
@@ -108,19 +119,19 @@ def _incref_meminfo(typingctx, p_ty):
 
 @intrinsic
 def _release_meminfo(typingctx, p_ty):
-    """Decref a MemInfo at ``intp`` via ``NRT_MemInfo_release``.
+    """Decrement the reference count of the MemInfo at the ``intp`` address ``p``, in jitted code.
 
-    Uses ``NRT_MemInfo_release`` directly rather than ``context.nrt.decref``
-    because this intrinsic's signature (``void(intp)``) contains no
-    NRT-tracked types, which lets numba's ``removerefctpass`` rewrite strip
-    a plain ``NRT_decref`` as dead code. Calling ``NRT_MemInfo_release``
-    (not in the pass's accepted-nrtfns allowlist) keeps ``_legalize()``
-    from enabling the rewrite at all.
+    The decrement calls ``NRT_MemInfo_release``, which frees the memory when the count reaches zero.
     """
     _require_intp(p_ty, "_release_meminfo")
     sig = types.void(p_ty)
 
     def codegen(context, builder, signature, args):
+        """Emit a call of ``NRT_MemInfo_release`` on the MemInfo at the address."""
+        # The call goes to NRT_MemInfo_release rather than through context.nrt.decref. A signature such as void(intp)
+        # holds no type that numba counts references for, so the removerefctpass of numba 0.65 and earlier would
+        # delete a plain NRT_decref. NRT_MemInfo_release is not among the functions that the pass accepts, NRT_incref
+        # and NRT_decref, so _legalize() refuses the pass for the whole function.
         ptr_ty = llir.IntType(8).as_pointer()
         fnty = llir.FunctionType(llir.VoidType(), [ptr_ty])
         fn = cgutils.get_or_insert_function(
@@ -132,12 +143,17 @@ def _release_meminfo(typingctx, p_ty):
 
 @intrinsic
 def _deref_structref_raw_ptr(typingctx, struct_type_ref, p_ty):
-    """Reconstruct a structref value from an ``intp`` MemInfo pointer."""
+    """Return a structref of the type ``struct_type_ref`` over the MemInfo at the address ``p``, in jitted code.
+
+    The reference count does not change, so the caller must first take the reference that the returned structref holds,
+    as :func:`borrow_structref` does.
+    """
     _require_intp(p_ty, "_deref_structref_raw_ptr")
     inst_type = struct_type_ref.instance_type
     sig = inst_type(struct_type_ref, p_ty)
 
     def codegen(context, builder, signature, args):
+        """Emit a structref whose ``meminfo`` field is the address, converted to a pointer."""
         p_val = args[1]
         mi_ll_ty = context.get_value_type(_MI_TY)
         meminfo = builder.inttoptr(p_val, mi_ll_ty)
@@ -149,11 +165,12 @@ def _deref_structref_raw_ptr(typingctx, struct_type_ref, p_ty):
 
 @numba.njit
 def borrow_structref(struct_type, p):
-    """Incref + reconstruct a structref from an ``intp`` MemInfo pointer.
+    """Return a structref of the type ``struct_type`` over the MemInfo at the address ``p``.
 
-    The caller receives a live structref that participates in normal NRT
-    refcount. Net-zero for the external owner if the caller's scope exits
-    without additional actions (local decref on drop balances the incref).
+    Python code and jitted code can call it. The structref holds a reference of its own, which numba releases when the
+    structref is no longer used, so a borrow leaves the reference count unchanged. ``p`` must come from
+    :func:`export_meminfo` and must not have been released yet. ``struct_type`` must be the type of the exported
+    structref, which is not checked.
     """
     _incref_meminfo(p)
     return _deref_structref_raw_ptr(struct_type, p)
@@ -161,10 +178,10 @@ def borrow_structref(struct_type, p):
 
 @numba.njit
 def export_meminfo(s):
-    """Export a structref as an ``intp`` MemInfo pointer with a +1 incref.
+    """Return the address of the MemInfo of ``s`` as an ``intp``, and take a reference that keeps ``s`` alive.
 
-    The returned ``intp`` keeps the allocation alive until the caller
-    balances it with ``release_meminfo``.
+    Python code and jitted code can call it. ``s`` is a structref or a NumPy array. Pass each address to
+    :func:`release_meminfo` exactly once, and do not use it afterward, because the memory may then be freed.
     """
     meminfo_p, _ = structref_meminfo(s)
     _incref_meminfo(meminfo_p)
@@ -173,9 +190,9 @@ def export_meminfo(s):
 
 @numba.njit
 def release_meminfo(p):
-    """Decref a MemInfo at ``intp`` via NRT_MemInfo_release.
+    """Release the reference that :func:`export_meminfo` took for the address ``p``.
 
-    Public njit wrapper over ``_release_meminfo``. Callable from Python
-    and ``@njit`` contexts.
+    Python code and jitted code can call it. The memory is freed if no other reference remains, so ``p`` must not be
+    used afterward.
     """
     _release_meminfo(p)

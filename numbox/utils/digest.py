@@ -1,16 +1,10 @@
-"""Content-addressed digest for cache keys and anchor identifiers.
+"""A short hash that names generated code after the subject it serves and the user functions it calls.
 
-``digest`` produces a short, stable hash that invalidates when the subject's
-``repr``, the user functions, the resolved ``jit_options``, or the numba/numbox
-versions change. Plain Python functions are fingerprinted with the shared
-closure/global-aware walker (``numbox.utils.fingerprint._fingerprint_function``)
--- so two callbacks with identical source but different captured closure-cell or
-referenced-global values key distinctly, which a bare code-object hash would
-miss. Callables with no canonical fingerprint (a partial, a builtin, a callable
-object, or a function closing over an un-canonicalizable value) fall back to
-cloudpickle of the object/code, which also captures bound state. The SQLite UDAF
-registration anchors are one consumer; any content-addressed cache that mixes a
-type/identifier with user callbacks can reuse it.
+:func:`digest` hashes the ``repr`` of a subject, such as a type, with the fingerprints of a list of functions. It also
+folds numbox's default jit options and the versions of numba and numbox. Two functions with the same source but
+different closure values or globals get different hashes, which a hash of the bare code object would not give. numbox
+names the anchors of the SQLite aggregate, window and table-valued functions with the hash. Any cache that combines a
+type or an identifier with user callbacks can use it the same way.
 """
 import hashlib
 
@@ -30,50 +24,64 @@ from numbox.utils.fingerprint import (
 
 
 def digest(subject, fns):
-    """Content hash that invalidates when ``subject`` (by ``repr``), the user
-    functions (closure/global/const-sensitive via the shared fingerprint walker,
-    with a cloudpickle fallback), the resolved ``jit_options``, or the
-    numba/numbox versions change."""
+    """Return a hash of 16 hexadecimal digits that changes when ``subject`` or one of the functions ``fns`` changes.
+
+    The hash covers ``repr(subject)``, numba's version, numbox's version, numbox's default jit options and each entry
+    of ``fns``. numbox's version is the empty string in a checkout or an editable install, so there the hash does not
+    change with it; a released package carries its version. Each entry of ``fns`` is folded as follows:
+
+    - a dispatcher or a ``@vectorize`` function: the fingerprint of its Python function and the options it compiles
+      under. If the Python function has no fingerprint, the options are folded with the weaker fingerprint below for a
+      dispatcher, and with a cloudpickle of the object for a ``@vectorize`` function;
+    - a Python function: its fingerprint, or the weaker fingerprint if the function reads a value that has none;
+    - any other callable, such as a ``functools.partial``, a builtin or a callable object: a cloudpickle of it.
+
+    For a Python function or a dispatcher, the hash is the same in every process. The weaker fingerprint puts the name
+    of a value's type in place of each value without a fingerprint, and it leaves out module attributes, so an edit to
+    such a value or attribute leaves the hash unchanged. A cloudpickle can differ in every process, as it does for an
+    object whose class is defined in the script that runs.
+    """
     h = hashlib.sha256()
     h.update(repr(subject).encode("utf-8"))
     h.update(numba.__version__.encode("utf-8"))
-    # numbox.__version__ is "" upstream (the package version derives from it via
-    # pyproject's dynamic attr), so this fold is currently inert; it is kept so
-    # digests auto-invalidate should numbox ever set a real __version__.
+    # numbox.__version__ is "" in a checkout and in an editable install, because the packaging takes the version from
+    # this attribute and the repository leaves it empty. The release workflow writes the version into
+    # numbox/__init__.py before it builds the package, so a released package folds its version here.
     h.update((numbox.__version__ or "").encode("utf-8"))
-    # fold the resolved numbox-wide jit_options so flipping NUMBOX_JIT_OPTIONS
-    # (e.g. cache off) re-keys the digest; numba's own cache also keys on flags.
+    # A change of numbox's default jit options, such as NUMBOX_JIT_OPTIONS turning the cache off, changes the digest
+    # and so the name of the anchor. numba's own cache key leaves out the jit options; numbox adds them to the key of
+    # the code it keys (numbox.core.cache_key).
     h.update(repr(sorted(jit_options.items())).encode("utf-8"))
     for fn in fns:
         if isinstance(fn, (Dispatcher, DUFunc)):
-            # Route jitted callables through the shared value canonicalizer,
-            # which folds targetoptions (and honours a @proxy's content-addressed
-            # alias). The py_func shortcut below sees only the Python body, so
-            # dispatchers over one body compiled with different jit flags --
-            # nogil, fastmath, error_model, boundscheck -- all collided.
+            # _canon_value folds the fingerprint of the Python function with the options that the function compiles
+            # under; for a @proxy function it folds the alias, which covers both. The Python function alone would give
+            # one hash for two dispatchers of one body compiled with different options, such as nogil, fastmath,
+            # error_model or boundscheck.
             try:
                 h.update(_canon_value(fn, set()).encode("utf-8"))
                 continue
             except (_Unfingerprintable, RecursionError):
-                # Body not canonicalizable; fold the flags on their own so they
-                # still re-key, then fall through to the best-effort walker.
+                # The body has no fingerprint. The options are folded on their own, so that they still change the
+                # digest. A dispatcher's Python function then gets the weaker fingerprint below, and a @vectorize
+                # function, which has no py_func, is pickled.
                 h.update(repr(sorted((getattr(fn, "targetoptions", None) or {}).items())).encode("utf-8"))
         py = getattr(fn, "py_func", fn)
         if isinstance(py, FunctionType):
             try:
                 h.update(_fingerprint_function(py, set()).encode("utf-8"))
             except (_Unfingerprintable, RecursionError):
-                # An un-canonicalizable closure/global aborts the strict walker;
-                # the best-effort walker still captures the constants, closure
-                # cells, defaults and globals it can (substituting opaque
-                # placeholders for the rest, and sorting sets so it is
-                # PYTHONHASHSEED-stable). A bare __code__ cloudpickle here dropped
-                # exactly the closure/default state that forced the fallback and
-                # leaked str-set iteration order.
+                # A value without a fingerprint makes _fingerprint_function raise. The best-effort fingerprint still
+                # folds the constants, closure values, defaults and globals that have one, and it sorts the elements
+                # of sets, so the result does not depend on PYTHONHASHSEED. It puts the name of the type in place of
+                # each value without a fingerprint, and it leaves out the module attributes that the function reads.
+                # An edit to such a value, or to such an attribute, therefore leaves the digest unchanged, and a
+                # SQLite registration named after the digest loads the code compiled before the edit.
                 h.update(_fingerprint_function_best_effort(py).encode("utf-8"))
             continue
-        # Codeless callable (partial / builtin / callable object): cloudpickle the
-        # object to capture bound state. (Only these remain on the cloudpickle
-        # path, so its uuid4 nondeterminism for __main__ objects is confined here.)
+        # A callable without code, such as a functools.partial, a builtin or a callable object, is hashed as a
+        # cloudpickle of the object, which holds its bound state. cloudpickle gives a class defined in __main__ a
+        # random uuid4 identifier, so the pickle of such an object, and the digest, differ in every process. Only
+        # these callables, and a @vectorize function without a fingerprint, take that path.
         h.update(cloudpickle.dumps(py))
     return h.hexdigest()[:16]

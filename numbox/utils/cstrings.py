@@ -1,24 +1,14 @@
-"""Python-side helpers for passing C strings into the bindings layer.
+"""Create NUL-terminated UTF-8 C strings from Python strings for numbox's bindings.
 
-The bindings layer (``numbox.core.bindings.sqlite.*``, ``numbox.core.bindings.libc``, etc.)
-takes ``intp`` pointers for every text argument. Producing a valid
-NUL-terminated UTF-8 C string from a Python ``str`` is non-trivial:
-``get_unicode_data_p`` in ``lowlevel.py`` returns a pointer to the
-Python string's internal data payload, which CPython stores as
-UCS-1/2/4 depending on contents -- only safe for ASCII inputs.
+numbox's bindings, such as those in ``numbox.core.bindings.libc`` and ``numbox.core.bindings.sqlite``, take every
+text argument as an ``intp`` address of a NUL-terminated C string. :func:`c_string` copies the UTF-8 encoding of a
+``str`` into a new C buffer and yields the buffer's address for the duration of a ``with`` block.
+:func:`numbox.utils.lowlevel.get_unicode_data_p` returns the address of a string's own data without a copy. CPython
+stores one, two or four bytes per character there, so those bytes are the text's UTF-8 only for ASCII text.
 
-This module's :func:`c_string` allocates a real C buffer with the
-UTF-8 encoding of the input and yields the pointer with safe
-lifetime management via the ``with`` statement.
-
-**Python-only.** ``c_string`` is a context manager; numba does not
-support arbitrary context managers inside ``@njit`` (raises
-``UnsupportedBytecodeError``), and ``ctypes`` objects can't be
-manipulated under JIT anyway. For ``@njit`` callers that need a C
-string, pre-allocate a numpy ``uint8`` buffer containing the UTF-8
-bytes + a trailing NUL outside the JIT scope, then pass
-``array_data_p(buf)`` from ``numbox.utils.lowlevel`` into the JIT
-kernel.
+``c_string`` works only in Python: numba raises ``UnsupportedBytecodeError`` for a ``with`` statement over it, and it
+cannot use the ctypes buffer either. For jitted code, encode the text in Python, add a NUL byte, store the bytes in a
+NumPy ``uint8`` array, and take the array's address in the jitted code with :func:`numbox.utils.lowlevel.array_data_p`.
 """
 from contextlib import contextmanager
 from ctypes import addressof, create_string_buffer
@@ -26,39 +16,27 @@ from ctypes import addressof, create_string_buffer
 
 @contextmanager
 def c_string(s):
-    """Yield an ``intp`` pointer to a freshly-allocated NUL-terminated
-    UTF-8 C string for ``s``.
+    """Yield the ``intp`` address of a new NUL-terminated C string that holds the UTF-8 encoding of ``s``.
 
-    Usage::
-
-        from numbox.utils.cstrings import c_string
-        from numbox.core.bindings.sqlite.exec import sqlite3_exec
-
-        with c_string("CREATE TABLE t(x INTEGER)") as sql_p:
-            sqlite3_exec(db_p, sql_p, 0, 0, 0)
-        # buffer freed here
-
-    The underlying ``ctypes`` buffer lives for the duration of the
-    ``with`` block. Once the block exits, the Python reference is
-    dropped and ctypes frees the memory; the pointer is then dangling
-    and must not be used.
-
-    Embedded NULs in ``s`` are rejected with ``ValueError``. Passing a
-    string containing ``"\\x00"`` would silently truncate the C string
-    at the first NUL — a footgun that CPython's own ``sqlite3.connect``
-    rejects similarly on filename inputs.
-
-    For concurrent multi-string needs, nest ``with`` statements or use
-    ``contextlib.ExitStack``::
+    The C buffer exists until the ``with`` block ends. The generator then drops its reference to the buffer and ctypes
+    frees it, so the address must not be used after the block. ``ValueError`` is raised if ``s`` contains a NUL
+    character, because the C string would end there; CPython's ``sqlite3.connect`` refuses such a file name in the same
+    way. Several strings can be open at once, in one ``with`` statement or, when their number is known only at run
+    time, through a ``contextlib.ExitStack``::
 
         from contextlib import ExitStack
-        with ExitStack() as stack:
-            a_p = stack.enter_context(c_string("a"))
-            b_p = stack.enter_context(c_string("b"))
-            # both pointers valid here
 
-    Python-only -- not callable inside ``@njit``. See module docstring
-    for the JIT alternative.
+        from numbox.core.bindings.libc import strlen
+        from numbox.utils.cstrings import c_string
+
+        with c_string("pear") as p:
+            print(strlen(p))   # 4
+
+        with ExitStack() as stack:
+            pointers = [stack.enter_context(c_string(word)) for word in ["pear", "apple"]]
+            print([strlen(p) for p in pointers])   # [4, 5]
+
+    ``c_string`` works only in Python; the module docstring gives the way for jitted code.
     """
     encoded = s.encode("utf-8")
     if b"\x00" in encoded:

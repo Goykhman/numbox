@@ -1,3 +1,10 @@
+"""A growable vector of one numba scalar type for jitted code, stored in a NumPy array.
+
+:func:`make_vector` returns a jitted factory of vectors of one element type, and their numba type. In jitted code,
+``len(v)``, ``v[i]`` and ``v[i] = x`` work on a vector, :func:`vector_push` appends an element and
+:func:`vector_extend` appends the elements of another vector. An append that does not fit replaces the buffer with
+one whose capacity is doubled as often as needed.
+"""
 import numpy
 import operator
 
@@ -12,11 +19,12 @@ from numbox.core.configurations import jit_options
 
 @structref.register
 class VectorTypeClass(nb_types.StructRef):
-    """
-    Single module-level class, parameterized per elem_type via field-tuple
-    instances.
+    """The numba type class of ``Vector``.
+
+    Each element type gives an instance of its own, a structref type with the fields ``buf`` and ``size``.
     """
     def preprocess_fields(self, fields):
+        """Return ``fields`` with each literal field type replaced by its non-literal type."""
         return tuple((n, nb_types.unliteral(t)) for n, t in fields)
 
 
@@ -24,17 +32,27 @@ deleted_vector_ctor_error = "Use the factory returned by make_vector(elem_type)"
 
 
 class Vector(StructRefProxy):
+    """The Python object for a vector of one numba scalar type, whose buffer grows as elements are appended.
+
+    Create one with the ``create`` function that :func:`make_vector` returns. Calling the class raises
+    ``NotImplementedError`` in Python, and jitted code that calls it fails to compile.
+    """
     def __new__(cls, *args, **kwargs):
         raise NotImplementedError(deleted_vector_ctor_error)
 
     @property
     @njit(**jit_options)
     def size(self):
+        """The number of elements in the vector."""
         return self.size
 
     @property
     @njit(**jit_options)
     def buf(self):
+        """The NumPy array that holds the elements.
+
+        Its length is the capacity of the vector, and only its first ``size`` elements are set.
+        """
         return self.buf
 
 
@@ -50,24 +68,17 @@ _vector_cache = {}
 
 
 def make_vector(elem_type):
-    """Return ``(create, type_instance)`` for ``Vector[elem_type]``.
+    """Return ``(create, vector_type)``: a jitted factory of vectors of ``elem_type``, and their numba type.
 
-    - ``create``: an ``@njit`` factory taking a single ``capacity`` argument.
-      Dtype is locked by the type — callers cannot pass a mismatched buffer.
-    - ``type_instance``: the ``VectorType`` instance with resolved field
-      types.
+    ``create(capacity)`` returns an empty vector whose buffer holds ``capacity`` elements. It takes no buffer, so the
+    buffer's dtype always follows from ``elem_type``. A capacity below 1 fails an ``assert`` in ``create``. A buffer of
+    capacity 0 would never grow, because each growth doubles it: ``vector_extend`` would loop forever, and
+    ``vector_push`` would write past the end of the buffer. A vector grows and never shrinks, so a positive capacity
+    stays positive.
 
-    Results are memoized in ``_vector_cache`` keyed by ``elem_type.key``.
-
-    The numpy dtype is derived from ``str(elem_type)`` at build time. Works
-    for standard scalar numba types (float64, int64, etc.). Exotic types
-    where ``str()`` does not match a numpy dtype name are unsupported.
-
-    Initial ``capacity`` must be ``>= 1``. The ``create`` factory asserts
-    this. Zero-capacity construction is rejected because the geometric
-    growth in ``vector_push`` / ``vector_extend`` would produce ``0 * 2 = 0``
-    and either OOB or infinite-loop. Vectors only grow, never shrink, so a
-    positive initial capacity guarantees a positive capacity for all time.
+    The buffer's dtype is ``numpy.dtype(str(elem_type))``, so ``elem_type`` must be a scalar type whose name NumPy
+    accepts, such as ``float64`` or ``int64``. For another type, such as ``unicode_type``, NumPy raises ``TypeError``.
+    The pair is kept in ``_vector_cache`` under ``elem_type.key``, and a later call with the same key returns it.
     """
     key = elem_type.key
     if key in _vector_cache:
@@ -82,6 +93,7 @@ def make_vector(elem_type):
 
     @njit
     def create(capacity):
+        """Return an empty vector whose buffer holds ``capacity`` elements; a capacity below 1 fails the ``assert``."""
         assert capacity >= 1
         v = new(type_inst)
         v.buf = numpy.empty(capacity, dtype=np_dtype)
@@ -97,6 +109,7 @@ def make_vector(elem_type):
 def _vector_len(v):
     if isinstance(v, VectorTypeClass):
         def impl(v):
+            """Return the number of elements in the vector ``v``, for ``len(v)`` in jitted code."""
             return v.size
         return impl
 
@@ -105,6 +118,10 @@ def _vector_len(v):
 def _vector_getitem(v, i):
     if isinstance(v, VectorTypeClass):
         def impl(v, i):
+            """Return ``v.buf[i]``, for ``v[i]`` in jitted code; ``i`` is not checked against ``len(v)``.
+
+            A negative ``i`` counts from the end of the buffer, not from the last element.
+            """
             return v.buf[i]
         return impl
 
@@ -113,12 +130,21 @@ def _vector_getitem(v, i):
 def _vector_setitem(v, i, val):
     if isinstance(v, VectorTypeClass):
         def impl(v, i, val):
+            """Set ``v.buf[i]`` to ``val``, for ``v[i] = val`` in jitted code.
+
+            ``i`` is not checked against ``len(v)``, and ``len(v)`` does not change.
+            """
             v.buf[i] = val
         return impl
 
 
 @njit(**jit_options)
 def vector_push(v, val):
+    """Append ``val`` to the vector ``v``, doubling the buffer's capacity first if the buffer is full.
+
+    numba converts ``val`` to the element type as it does for an array assignment, so a float appended to an integer
+    vector is truncated.
+    """
     if v.size == v.buf.shape[0]:
         new_buf = numpy.empty(v.buf.shape[0] * 2, v.buf.dtype)
         new_buf[:v.size] = v.buf[:v.size]
@@ -129,6 +155,10 @@ def vector_push(v, val):
 
 @njit(**jit_options)
 def vector_extend(dst, src):
+    """Append the elements of the vector ``src`` to the vector ``dst``, doubling the capacity of ``dst`` until they fit.
+
+    numba converts the elements to the element type of ``dst`` as it does for an array assignment.
+    """
     needed = dst.size + src.size
     cap = dst.buf.shape[0]
     if needed > cap:
