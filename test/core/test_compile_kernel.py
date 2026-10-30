@@ -1,14 +1,14 @@
 """Tests of compile_kernel, which compiles a graph of variables into one numba function, the kernel.
 
 The tests cover the identifiers and the source that compile_kernel generates, the fingerprints of the formulas, and the
-digest that names a kernel. They cover the cache on disk: which setting decides it, a directory that numbox cannot
-write, and kernels and segments that a second process loads. They cover the formulas that leave a kernel uncached, the
-checks of the request and of the formulas, and the search for the formulas that numba cannot compile, with the segments
-around them. The recompute tests compare the kernel's results with those of CompiledGraph. Several tests run a probe
-script in a child process with a NUMBA_CACHE_DIR under the test's temporary directory, and check the files that it
-leaves there; some run a second child, which loads what the first one cached. test_compile_kernel_cache.py tests that
-the digest leaves numba no stale code to load, and test_params_jitability.py tests the kernels built from declared
-types.
+digest that names a kernel. They cover the cache on disk: the precedence of the settings that enable it, a directory
+that numbox cannot write, and kernels and segments that a second process loads. They cover the formulas that leave a
+kernel uncached, the checks of the request and of the formulas, and the search for the formulas that numba cannot
+compile, with the segments around them. The recompute tests compare the kernel's results with those of CompiledGraph.
+Several tests run a probe script in a child process with a NUMBA_CACHE_DIR under the test's temporary directory, and
+check the files that it writes there. Some run a second child, which loads what the first child cached.
+test_compile_kernel_cache.py tests that numba never loads stale code for a kernel from its cache, and
+test_params_jitability.py tests the kernels built from declared types.
 """
 import json
 import os
@@ -36,8 +36,8 @@ from test.auxiliary_utils import assert_njit_cache_survives_subprocess_roundtrip
 def test_sanitize_basic():
     """_sanitize turns a qualified name into an identifier that the kernel's source can use.
 
-    Each run of characters that an identifier cannot hold becomes one underscore, and a name that is empty or starts
-    with a digit gets the prefix ``v_``.
+    Each run of characters that an identifier cannot contain becomes one underscore, and _sanitize adds the prefix
+    ``v_`` to a name that is empty or starts with a digit.
     """
     assert _sanitize("variables.a") == "variables_a"
     assert _sanitize("first-name") == "first_name"
@@ -47,7 +47,7 @@ def test_sanitize_basic():
 
 
 def test_assign_identifiers_unique_and_valid():
-    """a_b.c and a.b_c both sanitize to a_b_c, and _assign_identifiers gives them distinct valid identifiers."""
+    """a_b.c and a.b_c both sanitize to a_b_c, and _assign_identifiers assigns them distinct valid identifiers."""
     v1 = Variable(name="c", source="a_b")
     v2 = Variable(name="b_c", source="a")
     idents = _assign_identifiers([v1, v2])
@@ -58,8 +58,8 @@ def test_assign_identifiers_unique_and_valid():
 def test_assign_identifiers_formula_prefix_collision():
     """No identifier equals the global through which the kernel calls another variable's formula.
 
-    f.variables_x sanitizes to f_variables_x, the global of the formula of variables.x, so _assign_identifiers gives
-    it a suffix.
+    f.variables_x sanitizes to f_variables_x, the name of the global through which the kernel calls the formula of
+    variables.x, so _assign_identifiers adds a suffix to it.
     """
     node = Variable(name="x", source="variables")
     clash = Variable(name="variables_x", source="f")
@@ -70,7 +70,7 @@ def test_assign_identifiers_formula_prefix_collision():
 
 
 def test_assign_identifiers_deterministic():
-    """_assign_identifiers gives the same identifiers on every call for the same variables in the same order.
+    """_assign_identifiers returns the same identifiers on every call for the same variables in the same order.
 
     The identifiers are part of the kernel's source and so of its digest, which must be the same in every process.
     """
@@ -80,7 +80,10 @@ def test_assign_identifiers_deterministic():
 
 
 def test_assign_identifiers_invalid_char_and_leading_digit():
-    """A name with a hyphen, first-name, and a name with a leading digit, 3m, get distinct valid identifiers."""
+    """_assign_identifiers assigns distinct valid identifiers to two names that are not Python identifiers.
+
+    first-name contains a hyphen, and 3m starts with a digit.
+    """
     v1 = Variable(name="first-name", source="ext")
     v2 = Variable(name="3m", source="ext")
     idents = _assign_identifiers([v1, v2])
@@ -106,7 +109,7 @@ def _diamond_graph():
 
 
 def test_wrap_formula_passthrough_and_wrap():
-    """_wrap_formula returns a dispatcher as it is and decorates a plain Python function with @njit."""
+    """_wrap_formula returns a dispatcher unchanged and decorates a plain Python function with @njit."""
     d = njit(lambda x: x)
     assert _wrap_formula(d) is d
 
@@ -159,7 +162,7 @@ def test_generate_body_errors():
 
 
 def test_generate_body_external_as_only_output():
-    """A request of an external variable alone gives a kernel without formulas, which returns its parameter."""
+    """A request that names only an external variable produces a kernel without formulas, which returns its argument."""
     g = _diamond_graph()
     compiled = g.compile(["basket.y"])
     idents = _assign_identifiers([n.variable for n in compiled.ordered_nodes])
@@ -217,7 +220,7 @@ def test_compile_anchor_is_content_addressed(tmp_path, monkeypatch):
 
 
 def test_compile_cache_survives_fresh_process(tmp_path):
-    """A cached kernel returns the right result in a second process, which loads it from the first process's cache."""
+    """A cached kernel returns the correct result in a second process, which loads it from the first process's cache."""
     script = textwrap.dedent('''
         from numba import njit
         from numbox.core.variable.compile_kernel import _compile
@@ -367,8 +370,8 @@ def test_cres_formula():
 def test_a_raising_cres_formula_propagates():
     """An exception in a cres formula propagates to the caller of execute, and the next call computes its result.
 
-    cres is a general utility, so compile_kernel relies on it to propagate exceptions as much as Work does. If the
-    exception did not propagate, the kernel would return a zero-filled result and no error.
+    cres is a general utility, so compile_kernel relies on it to propagate exceptions, as Work does. If the exception
+    did not propagate, the kernel would return a zero-filled result and no error.
     """
     def blow_up(a, b):
         if a > b:
@@ -391,9 +394,9 @@ def test_a_raising_cres_formula_propagates():
 
 
 def test_non_jittable_formula_demotes_at_first_call():
-    """compile_kernel accepts a formula that numba cannot compile, because nothing compiles before the first call.
+    """compile_kernel accepts a formula that numba cannot compile, because numba compiles nothing before the first call.
 
-    The first call runs the formula in Python, and the partition records the reason.
+    The first call runs the formula in Python, and the partition records numba's error as the reason.
     """
     def bad(y):
         return json.dumps({"y": y}) and y + 100.0
@@ -415,7 +418,7 @@ def test_cache_no_skeleton_collision(tmp_path):
     """Two cached kernels with one source and formulas that differ only in a closure value do not share code.
 
     The same lambda closes over 10 in one kernel and over 1000 in the other. The probe runs twice, so the second run
-    reads both kernels from the cache that the first wrote.
+    reads both kernels from the cache that the first run wrote.
     """
     script = textwrap.dedent('''
         from numba import njit
@@ -449,7 +452,10 @@ def test_cache_no_skeleton_collision(tmp_path):
 
 
 def test_assign_identifiers_avoids_python_keyword():
-    """An identifier that would be a Python keyword gets a suffix: the qualified name .for sanitizes to for."""
+    """_assign_identifiers adds a suffix to an identifier that would be a Python keyword.
+
+    The qualified name .for sanitizes to the keyword for.
+    """
     v = Variable(name="for", source="")
     ident = _assign_identifiers([v])[v]
     import keyword as _kw
@@ -481,7 +487,7 @@ def test_compile_kernel_newline_in_name_is_safe():
         external_source_names=["e"],
     )
     ck = compile_kernel(g, ["v.o"])
-    # A raw newline would end the comment and turn the rest of the name into a line of code.
+    # A raw newline would end the comment, and the rest of the name would become a line of code.
     assert "e.a\nx" not in ck.source
     assert ck.execute({"e": {"a\nx": 10}}) == {"v.o": 11}
 
@@ -494,9 +500,9 @@ def test_compile_kernel_duplicate_required_raises():
 
 
 def test_fingerprint_fallback_is_per_object():
-    """Two callables without a fingerprint and with the same repr get different texts, because each text holds an id.
+    """Two callables without a fingerprint and with the same repr have different texts, because each text holds an id.
 
-    A text built from the repr alone would give two different formulas one digest.
+    A text built from the repr alone would assign one digest to two different formulas.
     """
     from numbox.core.variable.compile_kernel import _formula_fingerprint
 
@@ -583,7 +589,10 @@ def test_cache_false_writes_nothing(tmp_path):
 
 
 def test_cache_precedence_env_knob(tmp_path):
-    """``NUMBOX_JIT_OPTIONS='{"cache": false}'`` disables the kernel's cache when no other setting decides it."""
+    """``NUMBOX_JIT_OPTIONS='{"cache": false}'`` disables the kernel's cache.
+
+    The setting applies because neither the cache argument nor jit_options sets ``cache``.
+    """
     files, _ = _run_cache_probe(
         tmp_path, "{}", extra_env={"NUMBOX_JIT_OPTIONS": '{"cache": false}'})
     assert files == []
@@ -632,7 +641,7 @@ def test_fingerprint_same_line_lambdas_distinct():
 def test_fingerprint_covers_globals_helpers_defaults():
     """The fingerprint changes with the value of a global, the code of a helper and the value of a default argument.
 
-    A formula and three variants, each with one of the three changed, give four fingerprints.
+    A formula and three variants, each of which changes one of the three, have four fingerprints.
     """
     from numbox.core.variable.compile_kernel import _formula_fingerprint
     src = textwrap.dedent("""
@@ -660,7 +669,7 @@ def test_fingerprint_covers_globals_helpers_defaults():
 def test_fingerprint_large_array_cells_distinct():
     """The fingerprint of a closure over a 2000-element array holds the array's bytes.
 
-    Two arrays that differ in one element give two fingerprints, although NumPy abbreviates both to the same repr.
+    Two arrays that differ in one element have two fingerprints, although NumPy abbreviates both to the same repr.
     """
     from numbox.core.variable.compile_kernel import _formula_fingerprint
 
@@ -676,7 +685,7 @@ def test_fingerprint_large_array_cells_distinct():
 
 
 def test_fingerprint_set_cells_order_stable():
-    """Two sets of the same strings, built in different orders, give one fingerprint, which sorts the elements.
+    """Two sets of the same strings, built in different orders, have one fingerprint, which sorts the elements.
 
     The iteration order of a set of strings changes from process to process with string hash randomization.
     """
@@ -710,7 +719,11 @@ def test_fingerprint_recursive_helpers_terminate():
 
 
 def test_fingerprint_fallback_paths():
-    """A closure value without a fingerprint and a cres formula each give a text that leaves the kernel uncached."""
+    """A formula over a closure value without a fingerprint, and a cres formula, each leave the kernel uncached.
+
+    For both, _formula_fingerprint returns a text and the flag False. The text for the closure names the formula by its
+    id.
+    """
     from numbox.core.variable.compile_kernel import _formula_fingerprint
 
     class Boom:
@@ -736,7 +749,7 @@ def test_fingerprint_fallback_paths():
 def test_fingerprint_wrapped_decorator_uses_executing_callable():
     """The fingerprint of a functools.wraps wrapper is that of the wrapper, not of the function in ``__wrapped__``.
 
-    Two wrappers of one function with different rates compute different values, so they need different digests.
+    Two wrappers of one function with different rates compute different values, so their digests must differ.
     """
     import functools
     from numbox.core.variable.compile_kernel import _formula_fingerprint
@@ -759,7 +772,7 @@ def test_fingerprint_wrapped_decorator_uses_executing_callable():
 
 
 def test_fingerprint_zero_d_vs_one_d_array_distinct():
-    """A 0-d and a 1-d array with the same bytes give two fingerprints, because the fingerprint holds the shape.
+    """A 0-d and a 1-d array with the same bytes have two fingerprints, because the fingerprint holds the shape.
 
     numba compiles a 0-d and a 1-d array into different code.
     """
@@ -775,7 +788,7 @@ def test_fingerprint_zero_d_vs_one_d_array_distinct():
 
 
 def test_fingerprint_deep_nesting_downgrades_not_crashes():
-    """A closure value nested 5000 lists deep leaves the kernel uncached instead of raising RecursionError.
+    """A closure value nested in 5000 levels of lists leaves the kernel uncached instead of raising RecursionError.
 
     _formula_fingerprint catches the RecursionError and returns the text that names the formula by its id.
     """
@@ -816,9 +829,9 @@ def test_digest_global_change_invalidates_cache(tmp_path):
     mod = moddir / "formulas_mod.py"
     runner = tmp_path / "run.py"
     runner.write_text(textwrap.dedent(_DIGEST_PROBE.format(moddir=str(moddir))))
-    # PYTHONDONTWRITEBYTECODE keeps the first process from writing a .pyc of formulas_mod. Python accepts a .pyc whose
-    # recorded source size and modification time, in whole seconds, match the source. The two versions of the module
-    # have the same size and can be written in the same second, so the second process would load SCALE = 2.0.
+    # PYTHONDONTWRITEBYTECODE prevents the first process from writing a .pyc of formulas_mod. Python accepts a .pyc
+    # whose recorded source size and modification time, in whole seconds, match the source. The two versions of the
+    # module have the same size and can be written in the same second, so the second process would load SCALE = 2.0.
     env = {**os.environ, "NUMBA_CACHE_DIR": str(tmp_path / "nbcache"),
            "PYTHONDONTWRITEBYTECODE": "1"}
 
@@ -858,7 +871,7 @@ def test_digest_same_line_lambdas_no_collision():
 
 
 def test_digest_includes_jit_flags():
-    """Two kernels of one formula under two error models each behave as their own error model says.
+    """Two kernels of one formula, under two error models, each behave according to their own error model.
 
     Under numba's default error model, "python", 1.0 / 0.0 raises ZeroDivisionError, and under "numpy" it returns inf.
     The digest holds the jit options, so the two kernels compile under two names.
@@ -1023,7 +1036,7 @@ def test_dufunc_only_kernel_caches_cleanly(tmp_path):
 
 
 def test_dufunc_cfunc_fingerprints_cacheable_and_distinct():
-    """One function as a plain formula, as a @vectorize function and as a @cfunc gets three different fingerprints.
+    """One function has three different fingerprints as a plain formula, as a @vectorize function and as a @cfunc.
 
     Only the @cfunc leaves the kernel uncached.
     """
@@ -1121,7 +1134,10 @@ def test_external_typo_compiles_to_phantom_input():
 
 
 def test_deep_chain_recursion_error_is_contextual():
-    """compile_kernel raises RecursionError for a chain deeper than the limit, with a message that says to raise it."""
+    """compile_kernel raises RecursionError for a chain deeper than the recursion limit.
+
+    The error's message suggests raising the limit.
+    """
     depth = sys.getrecursionlimit() + 100
 
     def step(x):
@@ -1163,7 +1179,7 @@ def test_compile_kernel_cache_save_side(tmp_path):
 
 
 def test_external_only_output_end_to_end():
-    """A request of one external variable alone gives a kernel that returns the external value."""
+    """A request that names only one external variable produces a kernel that returns the external value."""
     g = Graph({"calc": []}, ["ext"])
     ck = compile_kernel(g, "ext.x")
     assert ck.params == ["ext.x"]
@@ -1229,7 +1245,7 @@ def test_object_array_closure_kernel_uncached(tmp_path):
 def test_fingerprint_numpy_scalar_cells_cacheable_and_distinct():
     """NumPy scalars in a closure have fingerprints that allow caching.
 
-    np.int64(5), np.int64(6) and np.float32(2.5) give three fingerprints, because each holds the scalar's type and
+    np.int64(5), np.int64(6) and np.float32(2.5) have three fingerprints, because each holds the scalar's type and
     bytes.
     """
     from numbox.core.variable.compile_kernel import _formula_fingerprint
@@ -1260,7 +1276,7 @@ def test_fingerprint_dispatcher_bad_targetoption_downgrades_not_crashes():
 
 
 def test_compile_self_referential_jit_option_no_recursionerror(tmp_path):
-    """A jit option that holds itself does not make the digest raise RecursionError.
+    """A jit option whose value contains itself does not make the digest raise RecursionError.
 
     numbox finds no canonical form for the option, so it warns and compiles without a cache. numba then raises its
     own KeyError for the unknown option at the first call.
@@ -1278,7 +1294,10 @@ def test_compile_self_referential_jit_option_no_recursionerror(tmp_path):
 
 
 def test_fingerprint_raising_repr_callable_degrades_not_crashes():
-    """A callable formula whose __repr__ raises gets a text that names it as repr-failed, instead of an error."""
+    """_formula_fingerprint returns a text for a callable formula whose __repr__ raises, instead of an error.
+
+    The text names the formula as repr-failed.
+    """
     from numbox.core.variable.compile_kernel import _formula_fingerprint
 
     class BoomRepr:
@@ -1340,7 +1359,7 @@ def test_linearize_minimizes_runs_on_parallel_chains():
 def test_linearize_deterministic():
     """linearize returns the same order on two calls, because it breaks ties by qualified name.
 
-    The order decides the segments and their sources, and so the digests that name them.
+    The order determines the segments and their sources, and therefore the digests in the segments' names.
     """
     from numbox.core.variable._kernel_partition import linearize
     g = _parallel_chains_graph()
@@ -1407,7 +1426,7 @@ def test_partition_report_str_and_python_nodes():
 def test_fused_source_golden():
     """compile_kernel generates exactly this source for the diamond graph.
 
-    The source is part of the digest, so a change to the generated text gives every kernel a new name, and numba
+    The source is part of the digest, so a change to the generated text changes every kernel's name, and numba
     compiles every cached kernel again.
     """
     g = _diamond_graph()
@@ -1425,7 +1444,7 @@ def test_fused_source_golden():
 
 
 def test_generate_segment_body():
-    """_generate_segment_body gives a run of two formulas its source, parameters, outputs and bindings.
+    """_generate_segment_body returns the source, parameters, outputs and bindings of a run of two formulas.
 
     The source returns the outputs in the order given, which the callers sort by qualified name.
     """
@@ -1453,7 +1472,7 @@ def test_generate_segment_body():
 
 
 def test_generate_segment_body_empty_run():
-    """A run without formulas gives a source that returns its input, and no bindings."""
+    """For a run without formulas, _generate_segment_body returns a source that returns its input, and no bindings."""
     from numbox.core.variable.compile_kernel import _generate_segment_body
     g = _diamond_graph()
     compiled = g.compile(["variables.u"])
@@ -1532,8 +1551,8 @@ def test_discover_demotes_unjittable_and_keeps_values():
 def test_discover_demotes_object_chain():
     """The search runs calc.a and calc.b in Python, and computes calc.c with numba.
 
-    numba cannot compile calc.a, which creates an _Opaque, and cannot type the input of calc.b, so the reason for
-    calc.b says that the input is not numba-typeable.
+    numba cannot compile calc.a, which creates an _Opaque, and cannot type the input of calc.b, so the reason recorded
+    for calc.b is that the input is not numba-typeable.
     """
     from numbox.core.variable._kernel_partition import discover
     g = Graph(
@@ -1555,7 +1574,7 @@ def test_discover_demotes_object_chain():
 
 
 def test_discover_runtime_error_propagates():
-    """An exception that a compiled formula raises during the search propagates; the formula does not move to Python."""
+    """An exception that a compiled formula raises during the search propagates; the formula does not run in Python."""
     from numbox.core.variable._kernel_partition import discover
     g = Graph(
         variables_lists={"calc": [
@@ -1639,7 +1658,7 @@ def test_discover_exotic_untypeable_input_raises():
 
 
 def test_fused_mode_resolution():
-    """The first call makes a kernel fused: partition becomes a fused report, and kernel becomes numba's dispatcher.
+    """After the first call, the kernel is fused: partition is a fused report, and kernel is numba's dispatcher.
 
     A reference to kernel taken before the first call still computes the result afterwards.
     """
@@ -1774,7 +1793,7 @@ def test_segmented_jit_run_inputs_exclude_values_made_inside_the_run():
 
 
 def test_segmented_all_python():
-    """A graph whose only formula runs in Python gives a partition of Python segments alone."""
+    """A graph whose only formula runs in Python has a partition of Python segments alone."""
     def f(x):
         json.dumps({"k": 1})
         return x + 2.0
@@ -1792,8 +1811,8 @@ def test_segmented_all_python():
 def test_plan_replacement_on_new_signature():
     """A segmented kernel searches again when a call's argument makes a compiled segment fail.
 
-    An _Opaque argument moves every formula to Python, and the plan of Python formulas also computes the result for a
-    float.
+    For an _Opaque argument, the new search runs every formula in Python, and the resulting plan of Python formulas
+    also computes the result for a float.
     """
     g = _chain_graph_with_python_middle()
     ck = compile_kernel(g, "calc.n5", cache=False)
@@ -1849,8 +1868,8 @@ def test_segment_cache_survives_subprocess_roundtrip(tmp_path):
 def test_identical_shape_segments_compile_and_run():
     """A segmented kernel runs when its two compiled segments have the same structure and formulas of the same code.
 
-    The two formulas, ``lambda x: x * 2.0``, have one fingerprint, so the digests of the two segments differ only
-    through the segments' sources.
+    The two formulas, ``lambda x: x * 2.0``, have one fingerprint, so only the segments' sources make their digests
+    differ.
     """
     def n3(v):
         json.dumps({"k": 1})
@@ -2065,7 +2084,7 @@ def test_cone_liveness_single_run_uses_required_and_boundary():
 def test_cone_liveness_cross_segment_handoff():
     """A run of a recompute plan returns a variable that a later step reads, even if the variable is not requested.
 
-    m is neither requested nor in the boundary, but the next run, of n, reads it.
+    m is neither requested nor in the boundary, but the next run computes n from it.
     """
     g = _chain_graph()
     cg, by_qual, _, _ = _compiled_parts(g, ["variables.p"])
@@ -2128,7 +2147,7 @@ def _kernel_recompute_sequence(g, req, ext, changes):
      [{"basket": {"a": 5.0}}, {"basket": {"b": 7.0}}, {"basket": {"a": 9.0, "b": 1.0}}]),
 ])
 def test_recompute_equiv_external(factory, req, ext, changes):
-    """A kernel's recompute returns what CompiledGraph.recompute returns, step by step, for external changes."""
+    """After each external change, a kernel's recompute returns what CompiledGraph.recompute returns."""
     g = factory()
     assert _kernel_recompute_sequence(g, req, ext, changes) == \
         _interp_recompute_sequence(g, req, ext, changes)
@@ -2150,7 +2169,7 @@ def test_recompute_equiv_mixed_cone():
 def test_recompute_runtime_error_propagates():
     """An exception that a formula raises in a recompute plan propagates without a retry.
 
-    recompute retries only after an error of numba's own, and 1.0 / 0.0 raises ZeroDivisionError.
+    recompute retries only after a NumbaError, and 1.0 / 0.0 raises ZeroDivisionError.
     """
     g = Graph(
         variables_lists={"variables": [
@@ -2190,10 +2209,10 @@ def test_recompute_cache_cap_evicts():
 
 
 def test_recompute_typechange_flushes_and_recovers():
-    """recompute returns the right value after basket.y changes from float64 to int64.
+    """recompute returns the correct value after basket.y changes from float64 to int64.
 
-    No retry runs: the kernel reuses the plan compiled for float64, and numba compiles the plan's segment again for
-    int64.
+    recompute does not retry: the kernel reuses the plan compiled for float64, and numba compiles the plan's segment
+    again for int64.
     """
     g = _chain_graph()
     ck = compile_kernel(g, ["variables.p"])
@@ -2205,7 +2224,10 @@ def test_recompute_typechange_flushes_and_recovers():
 
 
 def test_recompute_interior_override_matches_interpreted():
-    """Overrides of the calculated variable variables.x, between changes of basket.y, give what CompiledGraph gives."""
+    """Overrides of the calculated variable variables.x produce the values that CompiledGraph produces.
+
+    The changes override variables.x, change basket.y, and override variables.x again.
+    """
     g = _diamond_graph()
     req, ext = ["variables.u"], {"basket": {"y": 100}}
     changes = [{"variables": {"x": 5.0}}, {"basket": {"y": 101}}, {"variables": {"x": 9.0}}]
@@ -2237,7 +2259,7 @@ def test_recompute_external_and_interior_yield_distinct_keys():
     """
     g = _diamond_graph()
     req, ext = ["variables.u"], {"basket": {"y": 100}}
-    # The override comes first, because the first override of a calculated variable discards every cached plan.
+    # The override is the first change, because the first override of a calculated variable discards every cached plan.
     changes = [{"variables": {"x": 5.0}}, {"basket": {"y": 101}}]
     ck = compile_kernel(g, req)
     out = [tuple(ck.execute(ext)[q] for q in req)]
@@ -2266,7 +2288,7 @@ def test_recompute_graph_priority_over_co_changed_interior_override():
     b = g.registry["vars_"]["b"]
     c = g.registry["vars_"]["c"]
     assert ck.execute({"ext": {"a": 1}}) == {"vars_.b": 10, "vars_.c": 11}
-    # The call gives b the value 999 and changes ext.a to 2. b depends on ext.a, so recompute calculates b = 20.
+    # The call sets b to 999 and changes ext.a to 2. b depends on ext.a, so recompute calculates b = 20.
     ck.recompute({"ext": {"a": 2}, "vars_": {"b": 999}})
     assert ck._store[b] == 20
     assert ck._store[c] == 21

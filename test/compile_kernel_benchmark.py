@@ -24,8 +24,8 @@ Run it from the repository root, with numbox installed::
     python test/compile_kernel_benchmark.py --help
 
 ``--profile`` selects the cost of the formulas, so that the hot-path results below can be reproduced with this file.
-``cheap`` gives the regime in which dispatch dominates and fusion gains the most. ``mixed``, the default, gives the
-results reported here, and ``expensive`` gives the regime in which computation dominates.
+``cheap`` selects the regime in which dispatch dominates and the speedup of fusion is largest. ``mixed``, the default,
+produces the results reported here, and ``expensive`` selects the regime in which computation dominates.
 
 ``--nodes`` sets the length of the chain. Graph.compile orders the chain with a recursive walk, so main raises Python's
 recursion limit to 20000 before it builds the graph. The results below use chains of 1000 nodes. A cold compile of the
@@ -33,23 +33,24 @@ fused kernel takes a long time, so each mode prints a notice before it compiles.
 
 ----------------------------------------------------------------------------
 The sample results below were measured on an AMD Ryzen 5 7640HS under Linux x86-64, with CPython 3.12, numba 0.65.1
-and the default profile, mixed; other machines give other numbers. The hot path's times are in microseconds per call,
-the best of 30::
+and the default profile, mixed; the numbers differ on other machines. The hot path's times are in microseconds per
+call, the best of 30::
 
     N=1000, S=1000    fused 3311   cg_execute 6192 (1.9x)   iter-only 5689 (1.7x)   numpy 4829 (1.5x)
     N=1000, S=10000   fused 32737  cg_execute 62589 (1.9x)  iter-only 38155 (1.2x)  numpy 31135 (0.95x)
 
 Here CompiledGraph.execute takes 1.9 times as long as the fused kernel, while with --profile cheap it takes more than
 10 times as long. A third of the mixed profile's nodes compute transcendental functions, so the work inside the
-formulas outweighs the Python dispatch between them, which fusion removes. The iteration alone, iter-only, shows the
-same: it takes 1.7 times as long as the fused kernel at S=1000 and 1.2 times at S=10000, where the fused kernel is about
-as fast as NumPy (0.95). Compiling the iteration therefore gains much on a graph of cheap formulas, in which dispatch
-dominates, and little on a graph of expensive ones. --profile cheap and --profile expensive show the two ends.
+formulas outweighs the Python dispatch between them, which fusion removes. The iteration-only row shows the same
+pattern: it takes 1.7 times as long as the fused kernel at S=1000 and 1.2 times at S=10000, where the fused kernel is
+about as fast as NumPy (0.95). Compiling the iteration therefore yields a large gain on a graph of cheap formulas, in
+which dispatch dominates, and a small gain on a graph of expensive ones. --profile cheap and --profile expensive show
+the two extremes.
 
 The compile report (--compile-report) at N=1000 measured a cold run and then a new process with a warm cache. ``total``
 is the comparable cold cost, because the njit formulas compile inside kernel_compile, at the kernel's first call, and
-the proxy formulas compile inside build, when proxy decorates them. The report's proxy rows raise ValueError, as
-run_compile_report explains, so this file cannot reproduce the proxy numbers below::
+the proxy formulas compile inside build, when proxy decorates them. The child processes of the report's proxy rows
+raise ValueError, as run_compile_report explains, so this file cannot reproduce the proxy numbers below::
 
     bindings        total cold   warm restart   on-disk cache
     CPUDispatcher   ~155 s       ~0.8 s         ~23 MiB   (1 kernel file)
@@ -305,8 +306,8 @@ def run_perf(n_nodes, size, repeats, profile):
     """Print the hot-path times of the fused kernel, CompiledGraph and NumPy on a chain of ``n_nodes`` formulas.
 
     The rows are the fused kernel, CompiledGraph.execute, CompiledGraph's loop over the nodes alone (iter-only) and the
-    NumPy evaluation. Each row gives the best and the median time of ``repeats`` calls on arrays of ``size`` values.
-    The function first checks that the fused kernel and CompiledGraph match the NumPy evaluation.
+    NumPy evaluation. Each row shows the best and the median time of ``repeats`` calls on arrays of ``size`` values.
+    The function first checks that the fused kernel and CompiledGraph compute the same values as the NumPy evaluation.
     """
     formulas = load_formulas(n_nodes, profile)
     a, b = make_externals(size)
@@ -327,7 +328,7 @@ def run_perf(n_nodes, size, repeats, profile):
     last_var = {n.variable.qual_name(): n.variable
                 for n in compiled.ordered_nodes}[required]
 
-    # The fused kernel and CompiledGraph must match the NumPy evaluation.
+    # The fused kernel and CompiledGraph must compute the same values as the NumPy evaluation.
     fused_out = ck.kernel(a, b)[0]
     vs0 = Values()
     compiled.execute({"ext": {"a": a, "b": b}}, vs0)
@@ -391,7 +392,7 @@ def run_python_nodes_mode(n_nodes, size, repeats, profile, k):
     n_seg = len([s for s in rep.segments if s.kind == "jit"])
     n_py = len(rep.python_nodes)
 
-    # The segmented kernel and CompiledGraph must match the NumPy evaluation.
+    # The segmented kernel and CompiledGraph must compute the same values as the NumPy evaluation.
     compiled = graph.compile([required])
     last_var = {n.variable.qual_name(): n.variable
                 for n in compiled.ordered_nodes}[required]
@@ -433,7 +434,7 @@ def _cache_size(cache_dir):
 def _compile_worker(n_nodes, kind, profile):
     """Build, compile and call the kernel once in this process, and print one line of the compile report.
 
-    make_formula wraps the formulas as ``kind`` names. The line gives the time to build the graph, the time of
+    make_formula wraps the formulas as ``kind`` names. The line reports the time to build the graph, the time of
     compile_kernel and the first call, their total, the size and number of the cache files under NUMBA_CACHE_DIR, and
     whether numba warned that it cannot cache a function.
     """
@@ -468,12 +469,12 @@ def _compile_worker(n_nodes, kind, profile):
 def run_compile_report(n_nodes, profile):
     """Print the cold and the warm compile of the kernel for each kind of formula: njit, proxy and proxy_cached.
 
-    Each kind gets a NUMBA_CACHE_DIR of its own, which the function deletes afterwards. A first child process compiles
-    into the empty cache (COLD), and a second child process runs with the cache that the first wrote (WARM). Each child
-    prints one line.
+    The function creates a NUMBA_CACHE_DIR for each kind and deletes it afterwards. A first child process compiles
+    into the empty cache (COLD), and a second child process runs with the cache that the first child wrote (WARM). Each
+    child prints one line.
 
-    The proxy and proxy_cached rows raise ValueError. proxy anchors its wrapper at the first line of the decorated
-    function, which must be line 8 or later of its file, and load_formulas writes ``f0`` at line 4.
+    The child processes of the proxy and proxy_cached rows raise ValueError. proxy anchors its wrapper at the first line
+    of the decorated function, which must be line 8 or later of its file, and load_formulas writes ``f0`` at line 4.
     """
     repo_root = pathlib.Path(__file__).resolve().parent.parent
     print(f"\ncompile / cache report, profile={profile}, N={n_nodes} nodes (COLD "
@@ -597,14 +598,15 @@ def run_recompute_mode(size, repeats, chain_n, fan_width, fan_depth):
     with CompiledGraph.recompute:
 
     - deep chain: a chain of ``chain_n`` nodes with one input. A change of the input affects the whole chain, so
-      recompute cannot beat a full call there. The regime therefore overrides a node late in the chain, whose
+      recompute cannot be faster than a full call there. The regime therefore overrides a node late in the chain, whose
       dependents are about the last 50 nodes. recompute runs only those, while a full call computes every node, so the
       gain grows with the length of the chain.
     - diamond: a and b read x, and u reads a and b. A change of x affects the whole small graph, so the regime measures
       the cost of the values that the plan writes back into the store at a join, not a gain of fusion.
     - fan-out: ``fan_width`` independent columns of ``fan_depth`` nodes. Each recompute changes the input of the next
       column, in turn, so the kernel uses its cache of plans for every column. recompute runs one column, while a full
-      call computes all of them. Above 64 columns, the cap of that cache, every recompute builds its plan again.
+      call computes all of them. If there are more columns than the cache's cap of 64 plans, every recompute builds its
+      plan again.
     """
     a, _ = make_externals(size)
 
@@ -637,7 +639,7 @@ def run_recompute_mode(size, repeats, chain_n, fan_width, fan_depth):
     ck.recompute(nxt())
     steady = best_median(lambda: ck.recompute(nxt()), repeats)[0]
     # The baseline is a call of the kernel, which computes the whole chain from the external value: the work that
-    # recompute avoids by running the suffix alone. A kernel that took the overridden node as an external value would
+    # recompute avoids by running only the suffix. A kernel that took the overridden node as an external value would
     # compute a smaller graph, so it would not be a fair baseline.
     full = best_median(lambda: ck.kernel(a), repeats)[0]
     interp = best_median(
@@ -674,9 +676,10 @@ def run_recompute_mode(size, repeats, chain_n, fan_width, fan_depth):
     col_changes = [{src: {name: a * (1.0 + 0.01 * k)}}
                    for k, (src, name) in enumerate(col_inputs)]
     nxt = cyclic(col_changes)
-    # One recompute per column compiles and caches every column's plan before the timing. If fan_width is at most the
-    # cap, every timed recompute reuses a plan. If fan_width exceeds the cap, the kernel discards the plan used least
-    # recently, every timed recompute builds its plan again, and the steady-state time is slow.
+    # One recompute per column compiles and caches every column's plan before the timed calls. If fan_width is at most
+    # the cap of 64 plans, every timed recompute reuses a plan. If fan_width exceeds the cap, the kernel discards the
+    # plan used least recently. Every timed recompute then builds its plan again, which makes the steady-state time
+    # larger.
     for _ in range(fan_width):
         ck.recompute(nxt())
     steady = best_median(lambda: ck.recompute(nxt()), repeats)[0]

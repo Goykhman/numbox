@@ -1,4 +1,4 @@
-"""Tests of the declarations that Params gives to variables, and of what compile_kernel does with them.
+"""Tests of Params, the declaration of a variable for compile_kernel, and of how compile_kernel uses the declarations.
 
 compile_kernel uses the declarations only when every calculated variable in the requested part of the graph, and every
 external variable that a formula reads, has a declared type. _classify then assigns case A, one fused kernel, or case
@@ -6,8 +6,8 @@ B, compiled segments around the formulas declared ``jitable=False``. Any other g
 determines its mode at the first call. The tests cover the classification and the return-type check, for each kind of
 formula: a plain function, a dispatcher, a @vectorize function, a @cfunc and a cres function. They check that
 compile_kernel compiles a declared kernel or its segments before the first call, and that recompute refuses a value
-that numba cannot convert to the declared type. They also check that a kernel built from declared types raises instead
-of searching again. test_compile_kernel.py tests kernels without declarations.
+that numba cannot convert to the declared type. They also check that a kernel built from declared types raises an error
+instead of searching again. test_compile_kernel.py tests kernels without declarations.
 """
 import numpy as np
 import pytest
@@ -35,9 +35,9 @@ def test_params_frozen_defaults():
 
 
 def test_variable_params_roundtrip_and_identity_unchanged():
-    """A variable keeps its declaration, which takes no part in the variable's equality or hash.
+    """A variable keeps its declaration, which the variable's equality and hash ignore.
 
-    A variable with a declaration therefore equals the same variable without one, and a set holds one of the two.
+    A variable with a declaration therefore equals the same variable without one, and a set of the two has one element.
     """
     a = Variable(name="a", source="m", params=Params(type=float64))
     assert a.params.type is float64
@@ -135,7 +135,7 @@ def test_njit_probe_reads_natural_return_type():
 def test_validate_rejects_coercible_wrong_scalar_type():
     """The return-type check refuses an int64 declaration for x * 1.5, which numba infers as float64 for int64 input.
 
-    Compiled for the declared signature, the formula would return its result converted to int64.
+    If numba compiled the formula for the declared signature, the formula would return its result converted to int64.
     """
     with pytest.raises(ValueError, match="declared .* but formula yields"):
         _validate_declared_return(lambda x: x * 1.5, (int64,), int64, flags={})
@@ -285,7 +285,7 @@ def test_undeclared_graph_stays_virgin_with_no_partition():
 
 
 def test_undeclared_external_only_graph_stays_undiscovered():
-    """A request of an external variable alone is case C, the case of a graph without declarations.
+    """A request that names only an external variable is case C, the case of a graph without declarations.
 
     _classify finds no calculated variable to classify, so compile_kernel compiles nothing before the first call and
     partition stays None.
@@ -356,8 +356,8 @@ def test_case_b_no_probing_declared_python_honored():
     assert "c.b" in ck.partition.python_nodes
     assert ck.kernel(3.0) == (9.0,)
     # The search, in _discover_and_run, and the first recompute, in _ensure_store, fill _store. After a kernel call
-    # alone, _store is still None, so no search ran. _run_segmented records the arguments of the first call in
-    # _last_args, from which a later recompute fills the store.
+    # without a recompute, _store is still None, so no search ran. _run_segmented records the arguments of the first
+    # call in _last_args, from which a later recompute fills the store.
     assert ck._store is None
     assert ck._last_args == (3.0,)
 
@@ -394,9 +394,10 @@ def test_declared_return_validation_is_memoized(monkeypatch):
 
 
 def test_declared_type_variants_get_distinct_anchors():
-    """The same graph declared int64 and declared float64 gives one source, which holds no types, and two kernel names.
+    """A graph declared int64 and the same graph declared float64 compile from one source under two kernel names.
 
-    The digest holds the declared types, so numba compiles and caches each version under a name of its own.
+    The source holds no types, and the digest holds the declared types, so numba compiles and caches each version under
+    a name of its own.
     """
     def make(t):
         g = Graph({"c": [{"name": "a", "inputs": {"x": "e"},
@@ -506,7 +507,7 @@ def test_failed_first_segmented_call_leaves_kernel_unseeded():
 def test_case_a_fused_recompute_still_works():
     """recompute on a fused kernel built from declared types computes 10.0 for 4.0 after a first call with 3.0.
 
-    _ensure_store fills the store with _evaluate, from the declared set of Python formulas and without a search.
+    _ensure_store fills the store with _evaluate, which uses the declared set of Python formulas instead of a search.
     """
     ck = compile_kernel(_graph_all_jittable(), "c.b")
     assert ck.kernel(3.0) == (8.0,)
@@ -554,8 +555,9 @@ def test_eager_kernel_no_silent_rediscover_off_contract():
 def test_shared_dispatcher_multi_overload_validation():
     """compile_kernel accepts three declared variables that share one dispatcher with an int64 and a float64 overload.
 
-    The memo of passed checks skips c.d, which has the fingerprint, types and options of c.a. The test therefore does
-    not detect a check that reads the overload compiled last instead of the overload for the variable's own input types.
+    compile_kernel skips the check of c.d, because c.d has the fingerprint, types and options of c.a, whose check has
+    passed. The test therefore does not detect a check that reads the overload compiled last instead of the overload
+    for the variable's own input types.
     """
     shared = _njit(lambda x: x + 1)
     g = Graph({"c": [
@@ -601,8 +603,8 @@ def test_declared_exotic_node_wrong_declaration_raises_at_build():
 def test_declared_segmented_throughput_off_contract_reraises():
     """A segmented kernel built from declared types raises numba's error for a call that a segment cannot compile for.
 
-    Here a string reaches x + 1.0 in the first segment. The kernel does not search again, so its set of Python formulas
-    stays as the declarations define it.
+    Here the call passes a string to the first segment, which computes x + 1.0. The kernel does not search again, so
+    the declarations still define its set of Python formulas.
     """
     ck = compile_kernel(_declared_mix(), "c.d")
     assert ck.partition.mode == "segmented"

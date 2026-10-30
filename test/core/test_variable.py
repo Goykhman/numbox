@@ -2,10 +2,11 @@
 
 The tests build graphs from variable specifications and compile them into a CompiledGraph. They check the namespaces,
 the external variables, the values that execute and recompute write, the text of Graph.explain, the result of
-Graph.dependents_of and the tree that make_image draws for a node. One test carries a quantity from one step to the
-next through an external Storage object. Another checks that recompute calculates a variable from its formula when the
-same call changes one of the variable's inputs. The last checks that Variable refuses a dot in a variable's name and
-accepts one in a namespace's name. test_compile_kernel.py tests graphs compiled into one kernel.
+Graph.dependents_of and the text drawing that make_image returns for a node's tree. In one test, the formulas store a
+quantity in an external Storage object at each step and read it at the next step. Another test checks that recompute
+calculates a variable from its formula when the same call changes one of the variable's inputs. The last test checks
+that Variable refuses a dot in a variable's name and accepts one in a namespace's name. test_compile_kernel.py tests
+graphs compiled into one kernel.
 """
 from inspect import getsource
 from textwrap import dedent
@@ -136,9 +137,9 @@ class Storage:
     """A store of the values of a multistep calculation, by step and by name, outside the graph.
 
     The graph holds the store itself as a value. A formula reads the value of the previous step from the store and
-    stores the value of the current step, so a value carries from one step to the next. ``get`` raises ``ValueError``
-    for a step or a name without a value. ``set`` raises ``RuntimeError`` for a name that the step already holds.
-    ``clean`` deletes the values of the given steps.
+    stores the value of the current step, so the value of each step is available at the next. ``get`` raises
+    ``ValueError`` for a step or a name without a value. ``set`` raises ``RuntimeError`` for a name that the step
+    already holds. ``clean`` deletes the values of the given steps.
     """
     def __init__(self, start_step: int = 1):
         self._data: dict[int, dict[str, Any]] = {start_step - 1: {}}
@@ -219,11 +220,11 @@ buffer = {"storage": storage}
 
 
 def test_storage():
-    """A graph carries a quantity from step to step through an external Storage object.
+    """The formulas of a graph store a quantity in an external Storage object at each step and read it at the next step.
 
     execute runs step 1. Each later step is a recompute with a new configs.s, in which vars_.quantity multiplies the
     quantity of the previous step by configs.f. After each step, the test deletes the stored steps older than the
-    previous one, and at the end it checks the steps left and the tree of vars_.output.
+    previous one, and at the end it checks the remaining steps and the tree of vars_.output.
     """
     g = Graph(specs_, ["buffer", "configs"])
     compiled = g.compile(["vars_.output"])
@@ -298,8 +299,8 @@ def test_recompute_graph_priority_over_co_changed_override():
     assert values.get(b).value == 10
     assert values.get(c).value == 11
 
-    # The call gives b the value 999 and changes a to 2. b depends on a, so recompute discards 999 and calculates
-    # b = 20 and c = 21.
+    # The call sets b to 999 and changes a to 2. b depends on a, so recompute discards 999 and calculates b = 20 and
+    # c = 21.
     compiled.recompute({"ext": {"a": 2}, "vars_": {"b": 999}}, values)
     assert values.get(b).value == 20
     assert values.get(c).value == 21
@@ -308,8 +309,8 @@ def test_recompute_graph_priority_over_co_changed_override():
 def test_variable_name_rejects_qual_sep_but_source_allows_it():
     """A variable's name must not contain a dot, the qualified-name separator, while a namespace's name may.
 
-    numbox splits a qualified name at its last dot. A dot in a namespace's name therefore leaves the split correct,
-    while a dot in a variable's name would split the qualified name in the wrong place.
+    numbox splits a qualified name at its last dot. The split is therefore correct when a namespace's name contains a
+    dot, and wrong when a variable's name contains one.
     """
     with pytest.raises(ValueError, match="reserved"):
         Variable(name="a.b", source="s")
