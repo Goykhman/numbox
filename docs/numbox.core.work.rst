@@ -528,7 +528,8 @@ Exception handling
 A node's ``derive`` is the function that computes the node's ``data`` from the ``data`` of its sources. If the
 ``derive`` raises an exception, :meth:`~numbox.core.work.work.Work.calculate` raises the same exception, with its type
 and message. The node keeps its ``data``. Its ``derived`` flag, which ``calculate`` sets once the node is calculated,
-stays unset, so a later ``calculate`` runs the ``derive`` again.
+stays unset, so a later ``calculate`` runs the ``derive`` again. Three ways of passing a ``derive`` lose the exception
+instead, as `When the exception is lost`_ describes.
 
 In the example below, :func:`~numbox.core.work.work_utils.make_work_helper` builds the nodes. Its ``derive_py``
 argument takes the ``derive`` as a plain Python function, which the helper compiles with

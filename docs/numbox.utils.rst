@@ -175,7 +175,8 @@ functions. numbox assigns a ``DeriveWAP`` the numba type :class:`~numbox.utils.d
 subclass of numba's own ``FunctionType``. This page calls numba's type the plain ``FunctionType``.
 
 An exception raised in the body of a ``DeriveWAP`` propagates out of a call in jitted code, as it does out of a call to
-a dispatcher. The file ``ops.py`` defines a ``cres`` value whose body raises ``ValueError`` for a negative input:
+an ordinary ``@njit`` function. The file ``ops.py`` defines a ``cres`` value whose body raises ``ValueError`` for a
+negative input:
 
 .. code-block:: python
 
