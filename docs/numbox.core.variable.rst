@@ -411,10 +411,12 @@ numbox warns, here for a formula named ``double``:
 The warning means that a formula is, or calls, a dispatcher made with ``@njit(cache=True)``, and that numbox has
 disabled the kernel's cache. Such a dispatcher has a cache entry of its own, and numba's key for that entry leaves out
 the globals that the dispatcher reads and the jit options that it compiles under. The entry can therefore be stale, and
-a kernel cached with it would contain the stale code. The remedy is to remove ``cache=True`` from the formula's
-decorator, or to pass as the formula the plain function that the dispatcher keeps as its `py_func
+a kernel cached with it would contain the stale code. A kernel that compiles without a cache still calls the
+dispatcher's cached code, so a stale entry gives a stale result either way. The remedy is to remove ``cache=True``
+from the formula's decorator, or to pass as the formula the plain function that the dispatcher keeps as its `py_func
 <https://numba.readthedocs.io/en/stable/reference/jit-compilation.html#Dispatcher.py_func>`_, here ``double.py_func``.
-The kernel's cache then holds the formula's code.
+The kernel's cache then holds the formula's code. A ``@vectorize`` function compiled with ``cache=True`` gets no such
+warning, and a kernel cached with it can run the function's stale code as well; the same remedy applies.
 
 If numba warns of dynamic globals
 *********************************
@@ -529,10 +531,11 @@ computed variable that no earlier ``recompute`` overrode, numbox discards all of
 the override changes which intermediate values the plans must keep in the store.
 
 A ``recompute`` raises numba's ``TypingError`` when numba cannot compile its plan for a changed value, such as a string
-where a formula adds numbers. The value that failed stays in the store, so every later ``recompute`` that reads it
-fails as well, until a ``recompute`` passes a new value for it. A changed value of another type that numba can
-compile, such as an ``int`` where the first call passed a ``float``, causes no failure: numba compiles the plan again
-for that type.
+where a formula adds numbers. The values of that call stay in the store. A later ``recompute`` that builds a new plan
+and reads the failed value fails in the same way, until a ``recompute`` passes a new value for it. A later
+``recompute`` that reuses an earlier plan retries instead, as the next paragraph describes, and the retry refills the
+store. A changed value of another type that numba can compile, such as an ``int`` where the first call passed a
+``float``, causes no failure: numba compiles the plan again for that type.
 
 When a ``recompute`` reuses a plan that an earlier ``recompute`` built, and that plan fails on the new values, numbox
 retries once, and the retry reverts the changes of earlier ``recompute`` calls. numbox discards every recompute plan,
