@@ -1,3 +1,12 @@
+"""Tests of numbox.core.variable.variable, the framework that builds a graph of variables and evaluates it in Python.
+
+The tests build graphs from variable specifications and compile them into a CompiledGraph. They check the namespaces,
+the external variables, the values that execute and recompute write, the text of Graph.explain, the result of
+Graph.dependents_of and the tree that make_image draws for a node. One test carries a quantity from one step to the
+next through an external Storage object. Another checks that recompute calculates a variable from its formula when the
+same call changes one of the variable's inputs. The last checks that Variable refuses a dot in a variable's name and
+accepts one in a namespace's name. test_compile_kernel.py tests graphs compiled into one kernel.
+"""
 from inspect import getsource
 from textwrap import dedent
 from typing import Any
@@ -12,6 +21,12 @@ from test.auxiliary_utils import collect_and_run_tests
 
 
 def test_basic():
+    """CompiledGraph evaluates the first example of the numbox.core.variable documentation as the documentation shows.
+
+    The section "Building and evaluating a graph" holds the example and its values after execute and after recompute.
+    The test also checks the order of the compiled nodes, the text of explain, the dependents of basket.y and the tree
+    of variables2.u.
+    """
 
     def derive_x(y_):
         return 2 * y_
@@ -118,11 +133,13 @@ variables2.u--variables1.a--variables1.x--basket.y"""
 
 
 class Storage:
-    """ External storage for graph calculation outputs, serving
-     as an intra-step link for multistep calculations.
-     This storage will own all the calculation outputs, which
-     can in turn be referenced by values on the graph.
-     """
+    """A store of the values of a multistep calculation, by step and by name, outside the graph.
+
+    The graph holds the store itself as a value. A formula reads the value of the previous step from the store and
+    stores the value of the current step, so a value carries from one step to the next. ``get`` raises ``ValueError``
+    for a step or a name without a value. ``set`` raises ``RuntimeError`` for a name that the step already holds.
+    ``clean`` deletes the values of the given steps.
+    """
     def __init__(self, start_step: int = 1):
         self._data: dict[int, dict[str, Any]] = {start_step - 1: {}}
 
@@ -149,15 +166,14 @@ class Storage:
 def initialiaze_storage(
     s_: int, init_quantity_: float, storage_: Storage
 ) -> Storage:
-    """ Anything that needs to be initialized.
-     Returns reference to the original instance of
-     `Storage`, modified in-place. """
+    """Store ``init_quantity_`` as the quantity of step 0 if ``s_`` is 1, and return ``storage_`` itself."""
     if s_ == 1:
         storage_.set(0, "quantity", init_quantity_)
     return storage_
 
 
 def calculate_quantity(s_: int, f_: float, storage_: Storage):
+    """Store and return the quantity of step ``s_``: the quantity of the previous step times ``f_``."""
     quantity_ = storage_.get(s_ - 1, "quantity")
     quantity_ *= f_
     storage_.set(s_, "quantity", quantity_)
@@ -203,6 +219,12 @@ buffer = {"storage": storage}
 
 
 def test_storage():
+    """A graph carries a quantity from step to step through an external Storage object.
+
+    execute runs step 1. Each later step is a recompute with a new configs.s, in which vars_.quantity multiplies the
+    quantity of the previous step by configs.f. After each step, the test deletes the stored steps older than the
+    previous one, and at the end it checks the steps left and the tree of vars_.output.
+    """
     g = Graph(specs_, ["buffer", "configs"])
     compiled = g.compile(["vars_.output"])
     values = Values()
@@ -246,8 +268,10 @@ vars_.output--vars_.quantity--configs.s
 
 
 def test_recompute_graph_priority_over_co_changed_override():
-    """Recompute takes priority: a supplied Variables-source value that is downstream of a
-    co-changed external input is recomputed from the graph, not held at the supplied value."""
+    """recompute discards a given value of a calculated variable when the same call changes one of its inputs.
+
+    CompiledGraph.recompute then calculates the variable from its formula, so the formulas determine the final values.
+    """
     def derive_b(a_):
         return 10 * a_
 
@@ -274,17 +298,19 @@ def test_recompute_graph_priority_over_co_changed_override():
     assert values.get(b).value == 10
     assert values.get(c).value == 11
 
-    # b is supplied 999 but is downstream of the co-changed external a; graph priority
-    # recomputes b from a (=2), so b=20 and c=21 -- the supplied 999 is discarded.
+    # The call gives b the value 999 and changes a to 2. b depends on a, so recompute discards 999 and calculates
+    # b = 20 and c = 21.
     compiled.recompute({"ext": {"a": 2}, "vars_": {"b": 999}}, values)
     assert values.get(b).value == 20
     assert values.get(c).value == 21
 
 
 def test_variable_name_rejects_qual_sep_but_source_allows_it():
-    # '.' is the qualified-name separator (source.name), decomposed via rsplit('.', 1).
-    # A '.' in the name breaks that round-trip, so a dotted name is rejected; a '.' in
-    # the source/namespace round-trips (rsplit binds only the final '.') and is allowed.
+    """A variable's name must not contain a dot, the qualified-name separator, while a namespace's name may.
+
+    numbox splits a qualified name at its last dot. A dot in a namespace's name therefore leaves the split correct,
+    while a dot in a variable's name would split the qualified name in the wrong place.
+    """
     with pytest.raises(ValueError, match="reserved"):
         Variable(name="a.b", source="s")
     v = Variable(name="b", source="a.b")
