@@ -5,12 +5,12 @@ function produces new code. ``_fingerprint_function`` folds a function's module 
 objects with their bytecode, constants and names. It also folds the function's default values and closure values, the
 values of the globals that it reads, and the data and dispatchers that it reads as module attributes. It descends into
 the functions and dispatchers among those values, and it stops at a cycle. Two functions with the same source but
-different captured values therefore get different fingerprints, which a hash of the bare code object would not give.
-``_canon_value`` gives the text for one value and raises ``_Unfingerprintable`` for a value that has no text that
-means the same thing in another process. Each caller decides what to do then: some compile the code without a cache,
-and ``@proxy`` and ``digest`` name it with ``_fingerprint_function_best_effort``, which never raises.
-``make_structref``, ``compile_kernel``, the work builder, ``@proxy`` and ``digest`` use the module, which also
-resolves the jit options that their names fold.
+different captured values therefore have different fingerprints, whereas a hash of the bare code object would be the
+same for both. ``_canon_value`` returns the text for one value and raises ``_Unfingerprintable`` for a value that has
+no text that means the same thing in another process. The caller decides how to proceed in that case: some callers
+compile the code without a cache, and ``@proxy`` and ``digest`` name the code with
+``_fingerprint_function_best_effort``, which never raises. ``make_structref``, ``compile_kernel``, the work builder,
+``@proxy`` and ``digest`` use the module, which also resolves the jit options that their names fold.
 """
 import ctypes
 import dis
@@ -32,7 +32,7 @@ from numbox.core.configurations import jit_options as _default_jit_options
 class _Unfingerprintable(Exception):
     """The error for a value that has no fingerprint, no text that means the same thing in every process.
 
-    The caller decides what to do then.
+    The caller decides how to proceed.
     """
 
 
@@ -40,7 +40,8 @@ def _safe_repr(obj: object) -> str:
     """Return ``repr(obj)``, or ``<TypeName repr-failed>`` if ``repr`` raises.
 
     The fallbacks for a value without a fingerprint use it. ``compile_kernel``, for example, names a formula without a
-    fingerprint by its ``repr`` and compiles it without a cache; a ``__repr__`` that raises must not make that fail.
+    fingerprint by its ``repr`` and compiles it without a cache; a ``__repr__`` that raises must not make
+    ``compile_kernel`` fail.
     """
     try:
         return repr(obj)
@@ -49,11 +50,11 @@ def _safe_repr(obj: object) -> str:
 
 
 def _dtype_key(dtype: np.dtype) -> str:
-    """Return a text for the NumPy dtype ``dtype`` that keeps the layout of a structured dtype.
+    """Return a text for the NumPy dtype ``dtype`` that preserves the layout of a structured dtype.
 
     For a plain dtype the text is ``dtype.str``. ``dtype.str`` gives ``|V<itemsize>`` for every structured dtype and
-    drops the names, types, order and offsets of the fields, so two arrays of one size and different layouts would get
-    one text. The text of a structured dtype therefore holds its ``str``, its ``descr`` and its itemsize.
+    drops the names, types, order and offsets of the fields, so two arrays of one size and different layouts would have
+    the same text. The text of a structured dtype therefore holds its ``str``, its ``descr`` and its itemsize.
     """
     if dtype.names is not None:
         return f"struct({dtype!s};descr={dtype.descr};itemsize={dtype.itemsize})"
@@ -62,18 +63,19 @@ def _dtype_key(dtype: np.dtype) -> str:
 
 # The @proxy aliases that no longer identify the body they were created for. numbox.core.proxy.proxy adds them. The
 # set is defined here, because proxy imports this module, so that _canon_value can read it without importing proxy.
-# It holds both aliases of a collision, the shared alias and the process-local one that the second body gets, and the
-# alias that an absent-binding trap answers to.
+# It holds both aliases of a collision, the shared alias and the process-local alias assigned to the second body, and
+# the alias under which an absent-binding trap is registered.
 #
-# _canon_value does not fold a retired alias, and that keeps a collision from spreading. The order in which a process
-# builds two colliding bodies decides the alias that each body gets. A third body that captures one of them would fold
-# proxy(<alias>), and in a process that built the pair in the other order, that alias names the other body. The
-# colliding bodies are protected, because their own aliases are retired and the cache guard discards a cached caller
-# of a retired alias. A body derived from one of them is not. It is published under a new alias that resolves and is
-# in no set of retired aliases, so its cache entries in other processes can be wrong, and the collision would affect
-# every body that captures a colliding one. Because the retired alias is not folded, the walk of the derived body
-# reaches the captured dispatcher, which has no fingerprint. The derived body is then compared with
-# _opaque_values_match, like any other pair that the fingerprint cannot separate, and its own alias is retired in turn.
+# _canon_value does not fold a retired alias, so that a collision does not make the caches of other bodies wrong. The
+# order in which a process builds two colliding bodies determines the alias assigned to each body. A third body that
+# captures one of them would fold proxy(<alias>), and in a process that built the pair in the other order, that alias
+# names the other body. The colliding bodies are protected, because their own aliases are retired and the cache guard
+# discards a cached caller of a retired alias. A body derived from one of them is not protected. It is published under
+# a new alias that resolves and is in no set of retired aliases, so its cache entries in other processes can be wrong,
+# and the collision would affect every body that captures a colliding one. Because the retired alias is not folded, the
+# walk of the derived body reaches the captured dispatcher, which has no fingerprint. The derived body is then compared
+# with _opaque_values_match, like any other pair that the fingerprint cannot separate, and its own alias is retired in
+# turn.
 #
 # A derived body fingerprinted before the collision that retires its dependency is not covered. It folded an alias
 # that still identified a body, and it is already published under an alias of its own. Covering it would require
@@ -132,7 +134,7 @@ def _canon_value(value: Any, seen: set[int]) -> str:
         # A first-class function value. numbox tags the two kinds that it creates, cres values and the .as_func of a
         # @proxy function, with what identifies them across processes. The wrapper itself holds only an address and a
         # mangled name with a per-process counter. A value built with numba directly has no tag and falls through to
-        # the _Unfingerprintable at the end.
+        # the raise of _Unfingerprintable at the end of the function.
         proxy_alias = getattr(value, "_numbox_proxy_alias", None)
         if proxy_alias is not None and proxy_alias not in _ABSENT_ALIASES:
             return f"proxyfunc({proxy_alias})"
@@ -152,21 +154,21 @@ def _ctypes_func_key(value: Any) -> str:
     A pointer that is reached as an attribute of a loaded library carries the library and the symbol name, and both
     mean the same thing in the next process. The text holds the string with which the library was opened, not the file
     that the loader resolved. Two handles on one library, opened under a soname and under an absolute path, therefore
-    give different texts. The difference costs at most a recompile, never a wrong result; for a ``@proxy`` body, the
-    cache guard discards a cached caller of the old alias when it loads.
+    give different texts. The difference can cause a recompile but never a wrong result; for a ``@proxy`` body, the
+    cache guard discards a cached caller of the old alias when numba loads that caller.
 
     ``_Unfingerprintable`` is raised for a pointer without a library or a symbol name, because nothing else about it
-    means the same thing in the next run. A pointer built from a raw address is the common case: two of them differ
-    only by an address that ASLR moves. A prototype built over a library, as in ``proto(("floor", lib))``, and a
-    Windows lookup by ordinal raise as well, because ctypes names neither. A text with the address would differ in
-    every process, which the fingerprint exists to avoid, so the caller decides what to do with such a pointer. The
-    call shape comes from :func:`_ctypes_call_shape`.
+    means the same thing in the next run. A pointer built from a raw address is the common case: two such pointers
+    differ only in an address, which ASLR randomizes in each process. A prototype built over a library, as in
+    ``proto(("floor", lib))``, and a Windows lookup by ordinal raise as well, because ctypes names neither. A text that
+    held the address would differ in every process, which the fingerprint exists to prevent, so the function raises and
+    the caller decides how to treat such a pointer. The call shape comes from :func:`_ctypes_call_shape`.
     """
     name = getattr(value, "__name__", None)
     objects = getattr(value, "_objects", None)
     lib = objects.get("0") if isinstance(objects, dict) else None
     # Only a library has _name. For a Python callback, _objects["0"] is its CThunkObject, which has none; folding None
-    # would give every callback with the same __name__ the same text.
+    # would assign the same text to every callback with the same __name__.
     lib_name = getattr(lib, "_name", None)
     if name is None or not isinstance(lib_name, str) or not lib_name:
         raise _Unfingerprintable("ctypes function pointer with no library and symbol name")
@@ -179,12 +181,12 @@ def _ctypes_call_shape(value: Any) -> str:
     numba types and lowers a call through the pointer from these three, so two pointers that agree on the symbol or
     the address but differ in them describe two calls and compile to two bodies. Every part is a type name or a flag
     word, so the text means the same thing in the next process. :func:`_ctypes_func_key` folds it with the symbol.
-    :func:`_opaque_values_match` compares it, with the address, for a pointer that has no process-stable identity;
-    there the shape says whether the same address is called the same way. An unset ``argtypes`` gives ``<unset>`` and
-    an empty one an empty list, because numba rejects a call through the first and accepts the second. The flags are
-    folded because numba selects the calling convention from them on Windows. A symbol reached through ``CDLL`` and the
-    same symbol reached through ``WinDLL`` are two calls, and one alias for both would pair a caller with a body of the
-    wrong convention.
+    :func:`_opaque_values_match` compares it, with the address, for a pointer that has no process-stable identity, to
+    determine whether the same address is called in the same way. An unset ``argtypes`` gives ``<unset>`` and an empty
+    one gives an empty list, because numba rejects a call through the first and accepts a call through the second. The
+    flags are folded because numba selects the calling convention from them on Windows. A symbol reached through
+    ``CDLL`` and the same symbol reached through ``WinDLL`` describe two different calls, and an alias shared by both
+    would pair a caller with a body compiled for the wrong convention.
     """
     restype = getattr(getattr(value, "restype", None), "__name__", None)
     argtypes = getattr(value, "argtypes", None)
@@ -227,8 +229,8 @@ def _loaded_global_names(code: CodeType) -> set[str]:
     :func:`_referenced_global_names` reads, also holds attribute names: ``a.c1`` and ``cfg.SCALE`` put ``c1`` and
     ``SCALE`` in ``co_names`` through ``LOAD_ATTR``, though neither is a global. A caller that folded the values of the
     globals named in ``co_names`` would fold a module global that only shares its name with a record field or an
-    attribute. That would change the fingerprint for no reason or, if the value has no fingerprint, make the
-    fingerprint fail; the work builder would then compile the derive without a cache. Module attributes such as
+    attribute. That would change the fingerprint when only that global changes or, if the value has no fingerprint,
+    make the fingerprint fail; the work builder would then compile the derive without a cache. Module attributes such as
     ``cfg.SCALE`` are still folded, through the full ``co_names``, and ``cfg`` itself is a global here.
     """
     names: set[str] = set()
@@ -349,15 +351,16 @@ def _opaque_values_match(old: Sequence[Any], new: Sequence[Any]) -> bool:
     if len(old) != len(new):
         return False
     for a, b in zip(old, new):
-        # Identity decides the usual case: a reloaded module binds the same @intrinsic object again, and a factory
-        # called twice captures the same one. Equality is tried next, for values that define it.
+        # The two values are usually the same object: a reloaded module binds the same @intrinsic object again, and a
+        # factory called twice captures the same object. Equality is tried next, for values that define it.
         if a is b:
             continue
-        # A ctypes function pointer defines neither, so the address it holds is compared together with its call shape.
-        # The address alone does not identify the body: one symbol reached through two prototypes is two calls that
-        # numba types and lowers differently. Taken as one value, the second body would silently get the alias under
-        # which the first was published, and no collision would be reported. _ctypes_call_shape is also what the
-        # fingerprint folds for a pointer that it can name, so both paths agree on what makes two pointers two calls.
+        # A ctypes function pointer defines no equality beyond identity, so the address that it holds is compared
+        # together with its call shape. The address alone does not identify the body: one symbol reached through two
+        # prototypes describes two calls that numba types and lowers differently. If the two pointers were taken as one
+        # value, the second body would receive the alias of the first body, and no collision would be reported.
+        # _ctypes_call_shape is also what the fingerprint folds for a pointer that it can name, so both paths agree on
+        # what makes two pointers two calls.
         if isinstance(a, ctypes._CFuncPtr) and isinstance(b, ctypes._CFuncPtr):
             if (ctypes.cast(a, ctypes.c_void_p).value == ctypes.cast(b, ctypes.c_void_p).value
                     and _ctypes_call_shape(a) == _ctypes_call_shape(b)):
@@ -376,17 +379,18 @@ def _fingerprint_function_best_effort(func: FunctionType, opaque: Optional[list]
     """Return a fingerprint of ``func`` that never raises: a placeholder stands for each value without a fingerprint.
 
     ``_fingerprint_function`` raises at the first value without a fingerprint, so a body that only reads such a
-    global, such as an ``@intrinsic``, gets no fingerprint at all. This function puts ``<opaque:TypeName>`` in place of
-    each such value instead. Bodies that differ in a constant, a closure value, a default or a global that has a
-    fingerprint therefore still get different fingerprints. Every placeholder comes from a type name, never from an
-    address, so the result is the same in every process. Unlike ``_fingerprint_function``, it leaves out the module
-    attributes that the function reads, so a change to one leaves the result unchanged.
+    global, such as an ``@intrinsic``, has no fingerprint. This function substitutes ``<opaque:TypeName>`` for each
+    such value. Bodies that differ in a constant, a closure value, a default or a global that has a fingerprint
+    therefore still have different fingerprints. Every placeholder comes from a type name, never from an address, so
+    the result is the same in every process. Unlike ``_fingerprint_function``, it leaves out the module attributes that
+    the function reads, so a change to one leaves the result unchanged.
 
     ``@proxy`` names a body without a fingerprint with this function, and ``digest`` hashes such a function with it.
-    ``make_structref`` and the work builder use it too, but they compile such code without a cache. A placeholder is
-    where two different bodies can still get one fingerprint. If ``opaque`` is a list, the values that got a
-    placeholder are appended to it in the order of the walk. A caller with two equal fingerprints can then ask
-    :func:`_opaque_values_match` whether they come from one body or from two that the fingerprint cannot separate.
+    ``make_structref`` and the work builder use it too, but they compile such code without a cache. Two different
+    bodies that differ only in values without a fingerprint have the same result. If ``opaque`` is a list, the values
+    replaced by a placeholder are appended to it in the order of the walk. A caller with two equal fingerprints can then
+    call :func:`_opaque_values_match` to determine whether they come from one body or from two that the fingerprint
+    cannot separate.
     """
     seen: set[int] = set()
 
@@ -420,8 +424,9 @@ def _fingerprint_function_best_effort(func: FunctionType, opaque: Optional[list]
         if name in func.__globals__
     ]
     # Unlike _fingerprint_function, this walk does not call _fingerprint_module_attrs, so the module attributes that
-    # the function reads are not folded. A SQLite registration whose callback gets this fingerprint from digest
-    # therefore keeps its anchor's name after such an attribute changes, and it loads the code compiled before.
+    # the function reads are not folded. If digest uses this fingerprint for the callback of a SQLite registration, the
+    # name of the registration's anchor does not change when such an attribute changes, and the registration loads the
+    # code compiled before the change.
     return (
         f"besteffort({func.__module__}:{func.__qualname__};"
         f"code({code.co_code.hex()};flags={code.co_flags};argc={code.co_argcount};"
@@ -435,16 +440,16 @@ def _fingerprint_function_best_effort(func: FunctionType, opaque: Optional[list]
 # ---- Effective jit flags ----
 #
 # The compile_kernel digest and the make_graph kernel fingerprint fold the jit options, so that a change of an option
-# changes the name of the compiled code. The two functions below live here rather than in compile_kernel, so that
+# changes the name of the compiled code. The two functions below are defined here rather than in compile_kernel, so that
 # builder can use them without importing compile_kernel, whose import sweeps orphaned anchors. The NUMBA_* settings
 # that those names fold come from numbox.core.cache_key.
 
 def _effective_flags(jit_options: dict | None) -> dict:
     """Return numbox's default jit options updated with ``jit_options``, without ``cache``.
 
-    ``cache`` decides only whether the code is written to disk, not what numba emits, so a name that folded it would
-    separate identical binaries. Every other option, such as ``fastmath``, ``error_model`` or ``boundscheck``, can
-    change the code and is kept.
+    ``cache`` determines only whether the code is written to disk, not what numba emits, so a name that folded it would
+    give identical binaries different names. Every other option, such as ``fastmath``, ``error_model`` or
+    ``boundscheck``, can change the code and is kept.
     """
     opts = {**_default_jit_options, **(jit_options or {})}
     return {k: v for k, v in opts.items() if k != "cache"}
@@ -455,7 +460,7 @@ def _flags_canon(flags: dict) -> tuple[str, bool]:
 
     ``canonical`` is False if the value of an option has no fingerprint, such as a ``pipeline_class`` or ``locals``
     that hold numba types; the text is then the ``repr`` of the sorted items. The caller must then compile without a
-    cache, because a name that cannot see an option cannot keep apart the binaries that the option produces.
+    cache, because a name that does not include an option cannot distinguish the binaries that the option produces.
     """
     try:
         return _canon_value(flags, set()), True

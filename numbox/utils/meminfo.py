@@ -1,4 +1,4 @@
-"""Pass a structref through an integer address, and read the reference count of its MemInfo.
+"""Helpers that pass a structref through an integer address and read the reference count of its MemInfo.
 
 A MemInfo is numba's reference-counted header for the memory of a structref or an array. :func:`export_meminfo`
 returns the address of a structref's MemInfo as an ``intp`` and takes a reference, :func:`borrow_structref` builds a
@@ -23,7 +23,7 @@ return_tuple_type = types.UniTuple(types.intp, 2)
 def _structref_meminfo(typingctx, s_type):
 
     def codegen(context, builder, signature, args):
-        """Emit the conversion of the MemInfo pointer and of its data pointer to ``intp``, returned as a tuple."""
+        """Emit the conversion of the MemInfo pointer and its data pointer to ``intp``, and return both as a tuple."""
         s = args[0]
         meminfo = context.nrt.get_meminfos(builder, s_type, s)[0]
         type_data, meminfo_p = meminfo
@@ -79,7 +79,7 @@ def _require_intp(p_ty, fn_name):
     """Raise ``TypingError``, naming ``fn_name``, unless the type ``p_ty`` of an address argument is ``types.intp``.
 
     An address held in a narrower integer type, such as ``int32``, has already lost its upper bits on a 64-bit host, so
-    the ``inttoptr`` of it would give a wrong pointer.
+    converting it with ``inttoptr`` would produce a wrong pointer.
     """
     if p_ty != types.intp:
         raise TypingError(f"{fn_name} expects types.intp, got {p_ty}")
@@ -89,28 +89,28 @@ def _require_intp(p_ty, fn_name):
 def _incref_meminfo(typingctx, p_ty):
     """Increment the reference count of the MemInfo at the ``intp`` address ``p``, in jitted code.
 
-    The increment survives the ``removerefctpass`` of numba 0.65 and earlier, a pass that deletes the reference count
-    changes of a function that seems not to need them.
+    The ``removerefctpass`` of numba 0.65 and earlier, a pass that deletes the reference count changes of a function
+    that seems not to need them, does not remove this increment.
     """
     _require_intp(p_ty, "_incref_meminfo")
     sig = types.void(p_ty)
 
     def codegen(context, builder, signature, args):
-        """Emit an ``NRT_incref`` of the MemInfo, with the marker that keeps ``removerefctpass`` from deleting it."""
+        """Emit an ``NRT_incref`` of the MemInfo, with the marker that prevents ``removerefctpass`` from deleting it."""
         mi_ll_ty = context.get_value_type(_MI_TY)
         meminfo = builder.inttoptr(args[0], mi_ll_ty)
         context.nrt.incref(builder, _MI_TY, meminfo)
         # numba 0.65 and earlier run removerefctpass on a function that seems not to need reference counting: its
         # result, its arguments other than arrays and the results of its calls hold no type that numba counts
         # references for. export_meminfo called with an array is such a function. The pass deletes every NRT_incref
-        # and NRT_decref call in that function by name, this increment included. _release_meminfo escapes the pass by
-        # calling an NRT function outside the pass's list of accepted functions, but numba registers no such function
-        # for an increment. The code therefore adds the enclosing function to the named metadata
-        # numba_args_may_always_need_nrt, numba's own marker for a function whose references outlive the call, and
-        # _legalize() then refuses the pass for that function's module. The marker can only refuse the pass, so it
-        # changes nothing where another check already refuses it. numba lowers each function into a module of its
-        # own, so the check for a caller of the enclosing function never sees the marker. numba 0.66 removed the pass
-        # together with every use of the marker, so from 0.66 on nothing reads it.
+        # and NRT_decref call in that function by name, including this increment. _release_meminfo makes _legalize()
+        # return False by calling an NRT function outside the pass's list of accepted functions, but numba registers
+        # no such function for an increment. The code therefore adds the enclosing function to the named metadata
+        # numba_args_may_always_need_nrt, numba's own marker for a function whose references outlive the call. For
+        # that function's module, _legalize() then returns False, and the pass does not run. The marker can only stop
+        # the pass, so it changes nothing where another check already stops it. numba lowers each function into a
+        # module of its own, so the check for a caller of the enclosing function never finds the marker. numba 0.66
+        # removed the pass together with every use of the marker, so nothing in numba 0.66 or later reads it.
         module = builder.module
         nmd = module.add_named_metadata("numba_args_may_always_need_nrt")
         nmd.add(module.add_metadata([builder.function]))
@@ -128,10 +128,10 @@ def _release_meminfo(typingctx, p_ty):
 
     def codegen(context, builder, signature, args):
         """Emit a call of ``NRT_MemInfo_release`` on the MemInfo at the address."""
-        # The call goes to NRT_MemInfo_release rather than through context.nrt.decref. A signature such as void(intp)
-        # holds no type that numba counts references for, so the removerefctpass of numba 0.65 and earlier would
-        # delete a plain NRT_decref. NRT_MemInfo_release is not among the functions that the pass accepts, NRT_incref
-        # and NRT_decref, so _legalize() refuses the pass for the whole function.
+        # The code calls NRT_MemInfo_release rather than context.nrt.decref. A signature such as void(intp) holds no
+        # type that numba counts references for, so the removerefctpass of numba 0.65 and earlier would delete a plain
+        # NRT_decref. NRT_MemInfo_release is not among the functions that the pass accepts, NRT_incref and NRT_decref,
+        # so _legalize() returns False and the pass does not run on the function.
         ptr_ty = llir.IntType(8).as_pointer()
         fnty = llir.FunctionType(llir.VoidType(), [ptr_ty])
         fn = cgutils.get_or_insert_function(

@@ -1,8 +1,9 @@
-"""Wrap a value of any numba type in a structref of its own type, for :mod:`numbox.core.any.any_type`.
+"""A wrapper that puts a value of any numba type in a structref of the value's own type, for ``any_type``.
 
 In jitted code, ``_Content(x)`` returns a new structref with one field, ``x``, that holds the value. Its type is
-``ContentTypeClass([("x", <the type of x>)])``, so each value type gives a structref type of its own. ``any_type``
-casts that structref to ``ErasedType`` to store it in an ``Any``. Only jitted code can call ``_Content`` with a value.
+``ContentTypeClass([("x", <the type of x>)])``, so values of different types are wrapped in structrefs of different
+types. :mod:`numbox.core.any.any_type` casts that structref to ``ErasedType`` to store it in an ``Any``. Only jitted
+code can call ``_Content`` with a value.
 """
 from numba.core.types import StructRef
 from numba.experimental.structref import new, register

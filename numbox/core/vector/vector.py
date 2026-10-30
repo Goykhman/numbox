@@ -2,8 +2,8 @@
 
 :func:`make_vector` returns a jitted factory of vectors of one element type, and their numba type. In jitted code,
 ``len(v)``, ``v[i]`` and ``v[i] = x`` work on a vector, :func:`vector_push` appends an element and
-:func:`vector_extend` appends the elements of another vector. An append that does not fit replaces the buffer with
-one whose capacity is doubled as often as needed.
+:func:`vector_extend` appends the elements of another vector. If the elements to append do not fit, the buffer is
+replaced by one whose capacity is the old capacity doubled until they fit.
 """
 import numpy
 import operator
@@ -21,7 +21,7 @@ from numbox.core.configurations import jit_options
 class VectorTypeClass(nb_types.StructRef):
     """The numba type class of ``Vector``.
 
-    Each element type gives an instance of its own, a structref type with the fields ``buf`` and ``size``.
+    Each element type has an instance of its own, a structref type with the fields ``buf`` and ``size``.
     """
     def preprocess_fields(self, fields):
         """Return ``fields`` with each literal field type replaced by its non-literal type."""
@@ -78,7 +78,7 @@ def make_vector(elem_type):
 
     The buffer's dtype is ``numpy.dtype(str(elem_type))``, so ``elem_type`` must be a scalar type whose name NumPy
     accepts, such as ``float64`` or ``int64``. For another type, such as ``unicode_type``, NumPy raises ``TypeError``.
-    The pair is kept in ``_vector_cache`` under ``elem_type.key``, and a later call with the same key returns it.
+    The pair is stored in ``_vector_cache`` under ``elem_type.key``, and a later call with the same key returns it.
     """
     key = elem_type.key
     if key in _vector_cache:

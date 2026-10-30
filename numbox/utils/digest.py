@@ -2,9 +2,9 @@
 
 :func:`digest` hashes the ``repr`` of a subject, such as a type, with the fingerprints of a list of functions. It also
 folds numbox's default jit options and the versions of numba and numbox. Two functions with the same source but
-different closure values or globals get different hashes, which a hash of the bare code object would not give. numbox
-names the anchors of the SQLite aggregate, window and table-valued functions with the hash. Any cache that combines a
-type or an identifier with user callbacks can use it the same way.
+different closure values or globals have different hashes, whereas a hash of the bare code object would be the same for
+both. numbox names the anchors of the SQLite aggregate, window and table-valued functions with the hash. Any cache that
+combines a type or an identifier with user callbacks can use it the same way.
 """
 import hashlib
 
@@ -27,8 +27,9 @@ def digest(subject, fns):
     """Return a hash of 16 hexadecimal digits that changes when ``subject`` or one of the functions ``fns`` changes.
 
     The hash covers ``repr(subject)``, numba's version, numbox's version, numbox's default jit options and each entry
-    of ``fns``. numbox's version is the empty string in a checkout or an editable install, so there the hash does not
-    change with it; a released package carries its version. Each entry of ``fns`` is folded as follows:
+    of ``fns``. numbox's version is the empty string in a checkout or an editable install, so in those cases the hash
+    does not change with the version. A released package holds its version, and the hash folds it. Each entry of ``fns``
+    is folded as follows:
 
     - a dispatcher or a ``@vectorize`` function: the fingerprint of its Python function and the options it compiles
       under. If the Python function has no fingerprint, the options are folded with the weaker fingerprint below for a
@@ -62,9 +63,9 @@ def digest(subject, fns):
                 h.update(_canon_value(fn, set()).encode("utf-8"))
                 continue
             except (_Unfingerprintable, RecursionError):
-                # The body has no fingerprint. The options are folded on their own, so that they still change the
-                # digest. A dispatcher's Python function then gets the weaker fingerprint below, and a @vectorize
-                # function, which has no py_func, is pickled.
+                # The body has no fingerprint. The options are folded separately, so that a change of an option still
+                # changes the digest. The weaker fingerprint below is then computed for a dispatcher's Python
+                # function, and a @vectorize function, which has no py_func, is pickled.
                 h.update(repr(sorted((getattr(fn, "targetoptions", None) or {}).items())).encode("utf-8"))
         py = getattr(fn, "py_func", fn)
         if isinstance(py, FunctionType):
@@ -80,8 +81,8 @@ def digest(subject, fns):
                 h.update(_fingerprint_function_best_effort(py).encode("utf-8"))
             continue
         # A callable without code, such as a functools.partial, a builtin or a callable object, is hashed as a
-        # cloudpickle of the object, which holds its bound state. cloudpickle gives a class defined in __main__ a
-        # random uuid4 identifier, so the pickle of such an object, and the digest, differ in every process. Only
+        # cloudpickle of the object, which holds its bound state. cloudpickle assigns a random uuid4 identifier to a
+        # class defined in __main__, so the pickle of such an object, and the digest, differ in every process. Only
         # these callables, and a @vectorize function without a fingerprint, take that path.
         h.update(cloudpickle.dumps(py))
     return h.hexdigest()[:16]

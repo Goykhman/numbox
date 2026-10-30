@@ -8,8 +8,8 @@ such as :func:`extract_struct_member`, are for code inside an ``@intrinsic``.
 
 None of the jitted helpers has a fingerprint, because each one calls an ``@intrinsic`` or reads a numba type. If a
 struct method, a ``compile_kernel`` formula or a derive calls one of them by its name, the code that numbox generates
-for it compiles without an on-disk cache. A SQLite callback that calls one gets the weaker fingerprint that the utils
-page describes.
+for it compiles without an on-disk cache. ``digest`` computes the weaker fingerprint that the utils page describes for
+a SQLite callback that calls one of them.
 """
 from llvmlite import ir
 from llvmlite.ir.builder import IRBuilder
@@ -125,10 +125,11 @@ def _store_at(typingctx: Context, p_ty, v_ty):
 def store_at(p, v):
     """Store ``v`` at the address ``p``, an ``intp`` or a ``uintp``, in the LLVM layout of the numba type of ``v``.
 
-    The numba type of ``v`` decides how many bytes are written. A Python ``int`` is an ``int64`` and writes eight bytes,
-    so convert ``v`` first to write fewer, as ``store_at(p, int32(value))`` writes four. The caller must ensure that
-    ``p`` points to writable memory with room for the value, aligned for its type; :func:`store_unaligned` writes to an
-    address that may be misaligned. An address of another integer type raises ``TypingError``.
+    The numba type of ``v`` determines how many bytes are written. A Python ``int`` is an ``int64``, so the function
+    writes eight bytes for it. To write fewer, convert ``v`` first: ``store_at(p, int32(value))`` writes four bytes.
+    The caller must ensure that ``p`` points to writable memory with room for the value, aligned for its type;
+    :func:`store_unaligned` writes to an address that may be misaligned. An address of another integer type raises
+    ``TypingError``.
     """
     return _store_at(p, v)
 
@@ -227,8 +228,8 @@ def extract_struct_member(
 
     The function is for code inside an ``@intrinsic``. ``member_name`` is a Python string known when the code is
     generated, and a name that is not a field raises ``KeyError``. The loaded value is borrowed from the structref and
-    must not outlive it. It holds a new reference instead if ``incref`` is True, as a value that an intrinsic returns
-    must.
+    must not outlive it. If ``incref`` is True, it holds a new reference instead, as a value that an intrinsic returns
+    must hold.
     """
     member_ty = struct_fe_ty.field_dict[member_name]
     payload_ty = struct_fe_ty.get_data_type()
@@ -276,7 +277,7 @@ def _get_func_tuple(typingctx, func_ty):
     sig = return_tuple_type(func_ty)
 
     def codegen(context, builder, signature, args):
-        """Emit the ``ptrtoint`` of each address in the function value, returned as a tuple."""
+        """Emit the ``ptrtoint`` of each address in the function value, and return the results as a tuple."""
         func_struct = args[0]
         lst = []
         for i in range(function_struct_size):
@@ -313,9 +314,9 @@ def get_str_from_p_as_int(p):
     """Return a copy of the NUL-terminated C string at the address ``p`` as a ``str``, with one character per byte.
 
     Each byte becomes the character of the same code, 0 to 255, as Latin-1 decoding gives. The UTF-8 bytes of a
-    non-ASCII text therefore come back undecoded; for a returned string ``s``, ``s.encode("latin-1").decode("utf-8")``
-    gives the text. The function reads at most ``MAX_STR_LENGTH`` bytes, ``2**31 - 1``, and returns what it has read
-    if it finds no NUL before that.
+    non-ASCII text are therefore returned undecoded; for a returned string ``s``,
+    ``s.encode("latin-1").decode("utf-8")`` gives the text. The function reads at most ``MAX_STR_LENGTH`` bytes,
+    ``2**31 - 1``, and returns what it has read if it finds no NUL before that.
     """
     void_p = _cast_int_to_void_p(p)
     s = ""
@@ -430,7 +431,7 @@ def _tuple_of_struct_ptrs_as_int(typingctx: Context, tup_ty: Tuple):
     tup_size = tup_ty.count
 
     def codegen(context, builder, signature, arguments):
-        """Emit the ``ptrtoint`` of each element's MemInfo pointer, returned as a tuple."""
+        """Emit the ``ptrtoint`` of each element's MemInfo pointer, and return the results as a tuple."""
         array_values = []
         tup = arguments[0]
         for tup_ind in range(tup_size):
@@ -464,7 +465,7 @@ def _uniformize_tuple_of_structs(typingctx: Context, tup_ty: Tuple, uniform_ty_r
     ret_type = UniTuple(uniform_ty, tup_size)
 
     def codegen(context, builder, signature, arguments):
-        """Emit the cast of each element to the uniform type, with a new reference, returned as a tuple."""
+        """Emit the cast of each element to the uniform type, with a new reference, and return the casts as a tuple."""
         array_values = []
         tup = arguments[0]
         for tup_ind in range(tup_size):
@@ -483,8 +484,8 @@ def _uniformize_tuple_of_structs(typingctx: Context, tup_ty: Tuple, uniform_ty_r
 def uniformize_tuple_of_structs(tup, uniform_ty=VoidType):
     """Return the structrefs of ``tup`` as a tuple of the one structref type ``uniform_ty``, by default ``VoidType``.
 
-    Each element is cast as :func:`cast` casts, over the same memory, and holds a reference of its own. An element that
-    is not a structref raises ``AssertionError`` when the function is compiled.
+    The function casts each element as :func:`cast` does, over the same memory, and each result holds a reference of
+    its own. An element that is not a structref raises ``AssertionError`` when the function is compiled.
     """
     return _uniformize_tuple_of_structs(tup, uniform_ty)
 

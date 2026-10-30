@@ -1,9 +1,9 @@
 """``Any``, a structref that holds one value of any numba type, the counterpart of C++'s ``std::any``.
 
 :func:`make_any` wraps a value in a structref of the value's own type, casts that structref to ``ErasedType`` and
-stores it in the field ``p`` of a new ``AnyType`` value, so every ``Any`` has the same numba type, whatever it holds.
-``get_as(ty)`` reads the value back as the type ``ty``, and ``reset(x)`` replaces it with ``x``. ``get_as`` does not
-check ``ty``: reading a value as another type reinterprets its bytes.
+stores it in the field ``p`` of a new ``AnyType`` value. Every ``Any`` therefore has the same numba type, regardless
+of the value that it holds. ``get_as(ty)`` reads the value back as the type ``ty``, and ``reset(x)`` replaces it with
+``x``. ``get_as`` does not check ``ty``: reading a value as another type reinterprets its bytes.
 """
 from numba import njit
 from numba.core.errors import NumbaError
@@ -39,8 +39,8 @@ class Any(StructRefProxy):
     def get_as(self, ty):
         """Return the value that the ``Any`` holds, read as the numba type ``ty``.
 
-        ``ty`` must be the type of the stored value. The type is not checked, and another type reinterprets the value's
-        bytes.
+        ``ty`` must be the type of the stored value. The type is not checked, and reading the value as another type
+        reinterprets its bytes.
         """
         return self.get_as(ty)
 

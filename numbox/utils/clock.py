@@ -2,7 +2,7 @@
 
 ``monotonic_ns()`` returns an ``int64``, the nanoseconds since an unspecified starting point, so only the difference
 between two values is meaningful. It is an ``@intrinsic``, so only jitted code can call it. The code it generates
-keeps the platform's time structure on the stack, so a call allocates no heap memory and creates no object that
+places the platform's time structure on the stack, so a call allocates no heap memory and creates no object that
 numba's runtime tracks.
 
 On Linux and macOS, the code calls libc's ``clock_gettime(CLOCK_MONOTONIC, &ts)``, where ``ts`` is a
@@ -50,8 +50,8 @@ if _SYSTEM == "Windows":
         def codegen(context, builder, signature, arguments):
             """Emit the call of ``QueryPerformanceCounter`` and the conversion of its ticks to nanoseconds."""
             counter_ptr = builder.alloca(_i64)
-            # The status that the call returns is not checked. The counter is zeroed first, so a call that fails
-            # without writing it gives 0.
+            # The status that the call returns is not checked. The counter is zeroed first, so monotonic_ns returns 0
+            # if the call fails without writing the counter.
             builder.store(ir.Constant(_i64, 0), counter_ptr)
             fn_ty = ir.FunctionType(_i32, [_i64.as_pointer()])
             fn = get_or_insert_function(
@@ -81,8 +81,8 @@ else:
         def codegen(context, builder, signature, arguments):
             """Emit the call of ``clock_gettime`` and the conversion of its ``timespec`` to nanoseconds."""
             ts_ptr = builder.alloca(_timespec_ty)
-            # The status that the call returns is not checked. The structure is zeroed first, so a call that fails
-            # without writing it gives 0.
+            # The status that the call returns is not checked. The structure is zeroed first, so monotonic_ns returns 0
+            # if the call fails without writing the structure.
             zero_ts = ir.Constant(
                 _timespec_ty, [ir.Constant(_i64, 0), ir.Constant(_i64, 0)])
             builder.store(zero_ts, ts_ptr)

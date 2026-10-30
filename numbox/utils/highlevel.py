@@ -1,4 +1,4 @@
-"""Define numba StructRef types in one call, and compile functions into first-class function values.
+"""Functions that define numba StructRef types in one call and compile functions into first-class function values.
 
 :func:`make_structref` generates the code of a StructRef type with its constructor, field getters and methods, writes
 the code to a cache anchor and compiles it, so that numba can cache the struct. :func:`cres` compiles a function for
@@ -41,9 +41,10 @@ def _method_identity(method, user_ns) -> tuple[str, bool]:
 
     The text joins the method's fingerprint with the values of the ``ns`` entries that the method reads as globals.
     ``make_structref`` copies the method's source into generated code that runs in a namespace holding ``ns``. Those
-    values therefore reach the compiled method, but the method's own fingerprint cannot see them. Two methods with the
-    same source and different ``ns`` values get different texts, and so different helper names and anchors; numba then
-    compiles the second instead of loading the binary of the first. ``cacheable`` is False if the method has no
+    values therefore reach the compiled method, but the method's own fingerprint does not include them. Two methods
+    with the same source and different ``ns`` values have different texts, so their helpers have different names and
+    their code is written to different anchors. numba then compiles the second method instead of loading the binary of
+    the first. ``cacheable`` is False if the method has no
     fingerprint or reads an ``ns`` value that has none. The struct then compiles without an on-disk cache, so it is
     never loaded stale.
     """
@@ -72,7 +73,7 @@ def cres(sig, **kwargs):
     """Compile the decorated function for the signature ``sig`` and return it as a first-class function value.
 
     ``sig`` must be one numba ``Signature``, such as ``float64(float64)``; anything else raises ``ValueError``. The
-    keyword arguments go to ``njit``, and the function compiles when it is decorated. The result is a
+    keyword arguments are passed to ``njit``, and the function compiles when it is decorated. The result is a
     :class:`~numbox.utils.derive_wap.DeriveWAP`, not a dispatcher, so a cached jitted function that takes it as an
     argument loads from the cache in the next process. An exception raised in its body propagates to a jitted caller,
     as :mod:`numbox.utils.derive_wap` explains.
@@ -87,23 +88,23 @@ def cres(sig, **kwargs):
         assert len(sigs) == 1, f"Ambiguous signature, {sigs}"
         func_cres = func_jit.get_compile_result(sigs[0])
         wrapper = DeriveWAP(func_cres)
-        # The wrapper keeps the Python function, because the compile result identifies the body only by an address and
+        # The wrapper stores the Python function, because the compile result identifies the body only by an address and
         # by a mangled name with a per-process counter. A function that captures the wrapper is fingerprinted through
         # this attribute (_canon_value in numbox.utils.fingerprint).
         wrapper._numbox_py_func = func
-        # The wrapper also keeps the dispatcher, whose cache numbox.core.cache_key.explain_cache_key reads.
+        # The wrapper also stores the dispatcher, whose cache numbox.core.cache_key.explain_cache_key reads.
         wrapper._numbox_dispatcher = func_jit
         return wrapper
     return _
 
 
 def cres_if_available(lib, sig, **kwargs):
-    """Return what ``cres(sig, **kwargs)`` returns if ``lib`` has a symbol named after the function, else a stub.
+    """Return what ``cres(sig, **kwargs)`` returns if ``lib`` has a symbol named after the function; else return a stub.
 
     ``lib`` is the ``ctypes.CDLL`` handle of a C library, as ``numbox.core.bindings.utils.load_lib`` returns it. Use the
     decorator for a binding of a C function that older versions of the library lack. The stub is a plain Python function
-    with the decorated function's name that raises ``NotImplementedError`` when Python calls it, instead of an LLVM link
-    error; jitted code that calls the stub fails to compile.
+    with the decorated function's name. A call of the stub from Python raises ``NotImplementedError`` instead of failing
+    with an LLVM link error, and jitted code that calls the stub fails to compile.
     """
     def _(func):
         if hasattr(lib, func.__name__):
@@ -167,7 +168,7 @@ def hash_type(ty: Type) -> str:
 
 def _signature_identity(sig: Signature) -> tuple[str, bool]:
     """Return ``(text, cacheable)`` for the numba signature ``sig``: the digests of its return and argument types, and
-    whether all of them are cacheable, as :func:`_type_identity` gives them."""
+    whether all of them are cacheable, as :func:`_type_identity` returns them."""
     ret_hash, ret_ok = _type_identity(sig.return_type)
     arg_ids = [_type_identity(a) for a in sig.args]
     text = ret_hash + "(" + ",".join(h for h, _ok in arg_ids) + ")"
@@ -185,7 +186,7 @@ def make_structref_code_txt(
     """Return ``(code, fields_types, cacheable)``: the source that :func:`make_structref` compiles for a struct.
 
     The arguments are those of :func:`make_structref`, with ``user_ns`` for its ``ns``. ``fields_types`` is the list of
-    the field types, or None if ``struct_fields`` gives only names. ``cacheable`` is False if a method, or an ``ns``
+    the field types, or None if ``struct_fields`` holds only names. ``cacheable`` is False if a method, or an ``ns``
     value that a method reads, has no fingerprint.
     """
     cacheable = True
@@ -198,7 +199,8 @@ def make_structref_code_txt(
     # numba puts the qualified names of the generated functions into the names of its cache files. Those qualified
     # names include the name of the class whose body defines the jitted getters and method helpers. The names are
     # bounded, so that a struct name of any length keeps the file names within the file system's limit. After the
-    # class body runs, the class takes the struct's full name back, and the struct's name is bound to the class.
+    # class body runs, the generated code sets the class's __name__ and __qualname__ to the struct's full name and
+    # binds the struct's name to the class.
     class_name = bounded_stem(struct_name)
     make_name = f"make_{class_name.lower()}"
     new_returns = f"{make_name}({struct_fields_str})"
@@ -213,9 +215,9 @@ class {class_name}(StructRefProxy):
         return {repr_str}
 """)
     # The getter of a field with a long name is defined under the field's bounded name, then assigned to the field's
-    # own name and deleted. The bounded name must not be the name of another field or of a method in the class body,
-    # because the assignment and the del would then take that field's property or that method. A leading underscore
-    # is added until the name is free.
+    # own name and deleted. If an earlier field had the bounded name as its own name, the getter's definition would
+    # replace that field's property. The del would then remove that name from the class. numbox adds a leading
+    # underscore until the bounded name differs from every field name and method name.
     taken = set(struct_fields) | set(struct_methods or ())
     for field in struct_fields:
         getter_name = bounded_stem(field)
@@ -247,9 +249,9 @@ class {class_name}(StructRefProxy):
             cacheable = cacheable and method_cacheable
             thunk_name = f"{bounded_stem(method_name)}_{method_hash}"
             # Python code calls the method of the class, which calls a jitted helper named after the method and the
-            # hash of its identity; the helper calls the method that the overload below defines for jitted code. The
-            # hash in the helper's name puts the method's identity, ns values included, into the generated code, and
-            # so into the anchor's digest.
+            # hash of its identity; the helper calls the method that the overload below defines for jitted code.
+            # Through the hash in the helper's name, the method's identity, including its ns values, becomes part of the
+            # generated code and therefore of the anchor's digest.
             code_txt.write(f"""
     def {method_name}({params_str}):
         return {self_name}.{thunk_name}({names_params_str_wo_self})
@@ -339,24 +341,24 @@ def make_structref(
 
     ``struct_methods`` maps method names to functions. Each function becomes a method that Python code and jitted code
     can call, and it receives the struct as its first argument. A method must not define a nested function, because
-    numbox renames every ``def`` in the method's source. numba may inline a method into a jitted caller even if
-    ``jit_options`` says otherwise, and a cached caller holds the method's compiled code either way. After an edit to a
-    method, a cached caller in another file can therefore keep running the old code, as it would with a StructRef
-    written out by hand.
+    numbox renames every ``def`` in the method's source. numba may inline a method into a jitted caller regardless of
+    what ``jit_options`` specifies about inlining, and a cached caller holds the method's compiled code in either case.
+    After an edit to a method, a cached caller in another file can therefore continue to run the old code, as it would
+    with a StructRef written out by hand.
 
     ``ns`` maps names to the globals that the methods read, such as a module or a jitted helper, because the methods run
-    in a namespace of their own. A name in ``ns`` is replaced if it is also a global of this module or one of the names
-    that the generated code uses, such as ``fields`` or ``jit_options``. ``jit_options`` defaults to numbox's default
-    jit options.
+    in a namespace of their own. numbox overrides an entry of ``ns`` whose name is also a global of this module or one
+    of the names that the generated code uses, such as ``fields`` or ``jit_options``. ``jit_options`` defaults to
+    numbox's default jit options.
 
     numbox writes the generated code to a cache anchor under numba's cache directory, not to ``highlevel.py``, and
     compiles it under the anchor's file name. numba quotes code from the anchor in its messages, so numbox writes the
-    anchor even with caching disabled, and it ignores a failed write then. With caching enabled, numbox writes the
-    anchor and then asks numba whether it can cache a function of it, a question that needs the file on disk. If the
-    write fails or numba cannot cache there, the struct compiles without a cache after one warning, and an anchor that
-    was written stays. If a method, or an ``ns`` value that a method reads, has no fingerprint, the struct compiles
-    without a cache and without a warning. The utils page explains the anchors in its section on the cache-anchor
-    mechanism.
+    anchor even with caching disabled, and in that case it ignores a failed write. With caching enabled, numbox writes
+    the anchor and then asks numba whether it can cache a function of the anchor; numba can answer only when the file
+    exists on disk. If the write fails or numba cannot cache in that location, the struct compiles without a cache
+    after one warning, and an anchor that was written remains on disk. If a method, or an ``ns`` value that a method
+    reads, has no fingerprint, the struct compiles without a cache and without a warning. The utils page explains the
+    anchors in its section on the cache-anchor mechanism.
     """
     code_txt, fields_types, cacheable = make_structref_code_txt(
         struct_name, struct_fields, struct_type_class, struct_methods, user_ns=ns

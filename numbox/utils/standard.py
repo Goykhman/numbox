@@ -1,4 +1,4 @@
-"""Format a function's parameters for the source code that numbox generates.
+"""A helper that formats a function's parameters for the source code that numbox generates.
 
 :func:`make_params_strings` returns the text of a function's parameters for a generated ``def`` line and for a call.
 ``make_structref`` and ``@proxy`` use it to write the methods and wrappers that they generate.
@@ -19,7 +19,7 @@ def make_params_strings(func):
     ``**kwargs`` parameter raises ``ValueError``. The generated code cannot reproduce the ``*`` or ``**`` marker, so it
     would bind such a parameter as a plain positional one and change how the function is called.
 
-    A keyword-only marker (``*,``) or a positional-only marker (``/``) is dropped on purpose, and every parameter
+    A keyword-only marker (``*,``) or a positional-only marker (``/``) is dropped deliberately, and every parameter
     becomes positional-or-keyword. ``@proxy`` relies on this for a function with a defaulted keyword-only parameter,
     such as ``def f(x, *, y=default)``, whose further signatures type an omitted ``y`` as ``Omitted``. Its wrapper
     takes ``f(x, y=default)``, so a caller can also pass ``y`` by position (:func:`numbox.core.proxy.proxy.proxy`).
@@ -27,8 +27,8 @@ def make_params_strings(func):
     Each default is written as its ``repr``. A default whose ``repr`` is a valid expression, such as an int, a finite
     float, a string, ``None``, a bool or a tuple of these, is written correctly. ``float('nan')`` and ``float('inf')``
     become the names ``nan`` and ``inf``, which raise ``NameError`` when the generated code runs. An object whose
-    ``repr`` looks like ``<MyClass object at 0x...>`` gives invalid source, which raises ``SyntaxError`` or
-    ``NameError``. Each of these failures raises an error, so none of them compiles wrong code silently.
+    ``repr`` has the form ``<MyClass object at 0x...>`` produces invalid source, which raises ``SyntaxError`` or
+    ``NameError``. Each of these cases fails with an error instead of producing wrongly compiled code.
     """
     func_params = inspect.signature(func).parameters
     for name, p in func_params.items():

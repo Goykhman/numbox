@@ -1,4 +1,4 @@
-"""Create NUL-terminated UTF-8 C strings from Python strings for numbox's bindings.
+"""NUL-terminated UTF-8 C strings, created from Python strings, for numbox's bindings.
 
 numbox's bindings, such as those in ``numbox.core.bindings.libc`` and ``numbox.core.bindings.sqlite``, take every
 text argument as an ``intp`` address of a NUL-terminated C string. :func:`c_string` copies the UTF-8 encoding of a
@@ -6,9 +6,10 @@ text argument as an ``intp`` address of a NUL-terminated C string. :func:`c_stri
 :func:`numbox.utils.lowlevel.get_unicode_data_p` returns the address of a string's own data without a copy. CPython
 stores one, two or four bytes per character there, so those bytes are the text's UTF-8 only for ASCII text.
 
-``c_string`` works only in Python: numba raises ``UnsupportedBytecodeError`` for a ``with`` statement over it, and it
-cannot use the ctypes buffer either. For jitted code, encode the text in Python, add a NUL byte, store the bytes in a
-NumPy ``uint8`` array, and take the array's address in the jitted code with :func:`numbox.utils.lowlevel.array_data_p`.
+``c_string`` works only in Python: numba raises ``UnsupportedBytecodeError`` for a ``with`` statement that uses it as
+the context manager, and numba cannot use the ctypes buffer either. For jitted code, encode the text in Python, add a
+NUL byte, store the bytes in a NumPy ``uint8`` array, and take the array's address in the jitted code with
+:func:`numbox.utils.lowlevel.array_data_p`.
 """
 from contextlib import contextmanager
 from ctypes import addressof, create_string_buffer
@@ -36,7 +37,7 @@ def c_string(s):
             pointers = [stack.enter_context(c_string(word)) for word in ["pear", "apple"]]
             print([strlen(p) for p in pointers])   # [4, 5]
 
-    ``c_string`` works only in Python; the module docstring gives the way for jitted code.
+    ``c_string`` works only in Python; the module docstring describes how to pass a string to jitted code.
     """
     encoded = s.encode("utf-8")
     if b"\x00" in encoded:
