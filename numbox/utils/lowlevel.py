@@ -401,7 +401,7 @@ def populate_structref(
     The function is for code inside an ``@intrinsic``. ``structref_type_`` is the structref's numba type, and each
     argument is cast from its type in ``signature.args`` to the type of its field, which takes a new reference to it.
     With ``decref_old=True``, the old value of each field is released after the new value is referenced. Leave it False
-    for a structref that :func:`_new` has just allocated, because its fields hold no values to release. The code follows
+    for a structref that ``_new`` has just allocated, because its fields hold no values to release. The code follows
     numba's ``struct_setattr_impl`` in ``numba.experimental.structref.define_attributes``.
     """
     field_dict = structref_type_.field_dict
