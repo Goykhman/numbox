@@ -63,7 +63,7 @@ def test_utf32_emoji_4byte():
 
 
 def test_utf32_stops_at_nul():
-    """``utf32_to_utf8`` leaves out the zero code points that pad a value to its width."""
+    """``utf32_to_utf8`` omits the zero code points that pad a value to its width."""
     assert _encode("hi", 6) == b"hi"
 
 
@@ -330,7 +330,7 @@ def test_uint64_roundtrip_and_signed_wrap():
     db = _open_memory()
     a = np.array([[1], [2 ** 63], [2 ** 64 - 1]], dtype=np.uint64)
     h = register_table(db, "t", a, columns=["a"])  # noqa: F841
-    # SQLite stores an INTEGER as a signed int64, so a uint64 of 2**63 or more reads back as a negative value.
+    # SQLite stores an INTEGER as a signed int64, so a query returns a negative value for a uint64 of 2**63 or more.
     assert _fetchall(db, "SELECT a FROM t") == [(1,), (-(2 ** 63),), (-1,)]
     sqlite3_close(db)
 
@@ -386,8 +386,8 @@ def test_two_unicode_columns_single_cursor():
     """Two ``'U'`` columns of one row keep their own values, although _emit_cell converts both in one scratch buffer.
 
     _emit_cell passes a ``'U'`` result as ``SQLITE_TRANSIENT``, so SQLite copies it before the next xColumn call
-    overwrites the buffer. ``'S'`` and BLOB results are ``SQLITE_STATIC``, and a ``'U'`` result passed the same way
-    would point into the overwritten buffer.
+    overwrites the buffer. ``'S'`` and BLOB results are ``SQLITE_STATIC``, and a ``'U'`` result passed as
+    ``SQLITE_STATIC`` would point into the overwritten buffer.
     """
     db = _open_memory()
     dt = np.dtype([("u1", "U4"), ("u2", "U4")])
@@ -442,8 +442,8 @@ def test_text_and_blob_cells_point_into_the_registered_array(text_as_blob):
 def test_a_column_tag_without_a_branch_fails_the_query(tag):
     """A column tag without a branch in ``_emit_cell`` fails the query with the message ``_UNSUPPORTED_TAG_MSG``.
 
-    Without that error, the cell would read back as NULL or as a value of another type. Every tag that ``_col_tag``
-    returns has a branch, so the test writes a tag above that range and one below it into the descriptor.
+    Without that error, a query would return NULL or a value of another type for the cell. Every tag that ``_col_tag``
+    returns has a branch, so the test writes a tag above that range and a tag below it into the descriptor.
     """
     from numbox.core.bindings.sqlite import vtable as v
     from numbox.core.bindings.sqlite.conn import sqlite3_errmsg
@@ -527,7 +527,7 @@ def test_join_two_tables():
 
 
 def test_join_refilters_inner_cursor_per_outer_row():
-    """A nested-loop join, which runs xFilter again for each outer row, returns the rows that a Python loop finds.
+    """A nested-loop join, which runs xFilter again for each outer row, returns the same rows as a Python loop.
 
     Each call of xFilter on the inner cursor receives another value of the join key, frees and allocates the cursor's
     predicates and resets its rowid.
@@ -548,15 +548,15 @@ def test_self_join_unicode_two_cursors():
     dt = np.dtype([("k", "i8"), ("u", "U4")])
     a = np.array([(1, "wörd"), (2, "café"), (3, "ab")], dtype=dt)
     h = register_table(db, "t", a)  # noqa: F841
-    # The self-join keeps two cursors open on the table at once, and each cursor converts its 'U' cells in a scratch
-    # buffer of its own.
+    # The self-join keeps two cursors open on the table at the same time, and each cursor converts its 'U' cells in its
+    # own scratch buffer.
     got = _fetchall(db, "SELECT a.u, b.u FROM t a JOIN t b ON a.k = b.k ORDER BY a.k")
     assert got == [("wörd", "wörd"), ("café", "café"), ("ab", "ab")]
     sqlite3_close(db)
 
 
 def test_registration_survives_gc():
-    """A table stays queryable after a garbage collection, although ``register_table`` returns None.
+    """A query still reads the table after a garbage collection, although ``register_table`` returns None.
 
     ``_DATA_ANCHOR``, a dict at module level, keeps the registration's data alive.
     """
@@ -645,7 +645,8 @@ def test_xprocess_cache_no_growth(tmp_path):
 def test_pushdown_element_dtype_itemsizes():
     """The element dtypes of the arrays of ``sqlite3_index_info`` have the sizes of their C structs.
 
-    ``_SPEC_DTYPE``, the (col, op) pair that xBestIndex writes into idxStr, takes 8 bytes, with col first.
+    ``_SPEC_DTYPE``, the (col, op) pair that xBestIndex writes into idxStr, has 8 bytes, and it stores col at offset 0
+    and op at offset 4.
     """
     from numbox.core.bindings.sqlite.vtable import (
         _CONSTRAINT_DTYPE, _USAGE_DTYPE, _ORDERBY_DTYPE,
@@ -771,7 +772,7 @@ def test_xdestroy_three_tables():
 
 
 def test_xdestroy_reregister_drops_first():
-    """Registering a name again removes the first entry at once, and closing the connection removes the second."""
+    """Registering a name again removes the first entry immediately, and closing the connection removes the second."""
     from numbox.core.bindings.sqlite import vtable as v
     db = c_int64(0)
     with c_string(":memory:") as p:
@@ -884,7 +885,7 @@ def test_rowid_constraint_not_pushed_down():
     """xBestIndex claims no constraint on the rowid, and the query still returns the matching rows.
 
     SQLite gives a rowid constraint the column index -1, which the check ``0 <= col < ncols`` excludes. The rowid is the
-    position of the row in the scan, from 0.
+    position of the row in the scan, counted from 0.
     """
     db = _open_memory()
     a = np.array([[10], [20], [30]], dtype=np.int64)
@@ -927,8 +928,9 @@ def test_pushdown_bool_range_ops_match_stdlib():
     """Range constraints on a bool column return the rows that Python's ``sqlite3`` module returns for 0 and 1.
 
     The values of the constraints include fractions and a negative value. xFilter compares a bool cell as a float64,
-    because ``_is_int_tag`` excludes the bool tag. A value truncated to int64 would turn ``c > -0.5`` into ``c > 0`` and
-    skip the rows of 0, and SQLite checks the constraint only on the rows that the cursor returns.
+    because ``_is_int_tag`` excludes the bool tag. A value truncated to int64 would change ``c > -0.5`` to ``c > 0`` and
+    skip the rows whose value is 0. SQLite checks the constraint only on the rows that the cursor returns, so it cannot
+    restore them.
     """
     import sqlite3 as pysqlite
     rows = [True, False, True, False, True]
@@ -970,13 +972,13 @@ def test_pushdown_int64_above_2_53_range():
         got = sorted(_select_col0(db, "SELECT c FROM t WHERE c %s %d" % (op, threshold)))
         exp = sorted(v for v in vals if pred(v))
         assert got == exp, (op, got, exp)
-    # float64 rounds 2**53 + 1 to 2**53, so a comparison in float64 would leave the row 2**53 + 1 out of c > 2**53.
+    # float64 rounds 2**53 + 1 to 2**53, so a comparison in float64 would exclude the row 2**53 + 1 from c > 2**53.
     assert sorted(_select_col0(db, "SELECT c FROM t WHERE c > %d" % base)) == sorted(vals[1:])
     sqlite3_close(db)
 
 
 def test_pushdown_int_column_fractional_rhs_match_stdlib():
-    """Range constraints with a fractional REAL value on a signed integer column match Python's ``sqlite3`` module.
+    """Fractional REAL constraints on a signed integer column return the rows that Python's ``sqlite3`` module returns.
 
     xFilter compares an integer cell with a REAL value exactly, in its mode 2. ``sqlite3_value_int64`` would truncate
     the value toward zero, 4.5 to 4 and -4.5 to -4, and the scan would skip rows that match. SQLite checks the
@@ -1013,10 +1015,10 @@ def test_pushdown_int_column_fractional_rhs_match_stdlib():
 
 
 def test_pushdown_int64_out_of_range_real_rhs_match_stdlib():
-    """A constraint with a REAL value above the int64 range keeps the row of INT64_MAX in an int64 column.
+    """A constraint with a REAL value above the int64 range keeps the row whose value is INT64_MAX in an int64 column.
 
-    The rows of ``c < 99999999999999999999999`` match those of Python's ``sqlite3`` module. ``sqlite3_value_int64``
-    would clamp the value to INT64_MAX and turn the constraint into ``c < INT64_MAX``.
+    The rows that ``c < 99999999999999999999999`` selects match the rows that Python's ``sqlite3`` module returns.
+    ``sqlite3_value_int64`` would clamp the value to INT64_MAX and change the constraint to ``c < INT64_MAX``.
     """
     import sqlite3 as pysqlite
     INT64_MAX = (1 << 63) - 1
@@ -1035,10 +1037,10 @@ def test_pushdown_int64_out_of_range_real_rhs_match_stdlib():
 
 
 def test_pushdown_int64_integer_valued_real_rhs_match_stdlib():
-    """Constraints with an integer-valued REAL beyond 2**53 on an int64 column return the rows of Python's ``sqlite3``.
+    """Integer-valued REAL constraints beyond 2**53 on an int64 column select the rows that Python's ``sqlite3`` does.
 
     xFilter compares the int64 cell with the REAL value exactly. In float64, 2**53 + 1 would round to 2**53, and
-    ``c > 9007199254740992.0`` would leave out the row 2**53 + 1. The cases cover values above 2**53 and below -2**53.
+    ``c > 9007199254740992.0`` would exclude the row 2**53 + 1. The cases cover values above 2**53 and below -2**53.
     """
     import sqlite3 as pysqlite
     base = 1 << 53

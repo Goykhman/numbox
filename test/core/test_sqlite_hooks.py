@@ -47,7 +47,7 @@ def _busy_abort_cb(ctx, n):
 
 @cfunc(types.int32(types.voidptr))
 def _commit_veto_cb(ctx):
-    return 1  # A nonzero return value turns the commit into a rollback.
+    return 1  # A nonzero return value converts the commit into a rollback.
 
 
 @cfunc(types.void(types.voidptr))
@@ -115,8 +115,8 @@ def test_commit_hook_vetoes(populated_db):
     sqlite3_commit_hook(populated_db, _commit_veto_cb.address, 0)
     with c_string("INSERT INTO t VALUES (42)") as sql_p:
         rc = sqlite3_exec(populated_db, sql_p, 0, 0, 0)
-    # The commit hook turns the commit into a rollback, and sqlite3_exec returns SQLITE_CONSTRAINT, whose extended code
-    # is SQLITE_CONSTRAINT_COMMITHOOK.
+    # The commit hook converts the commit into a rollback, and sqlite3_exec returns SQLITE_CONSTRAINT, whose extended
+    # code is SQLITE_CONSTRAINT_COMMITHOOK.
     assert rc != SQLITE_OK
 
 

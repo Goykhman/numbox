@@ -1,8 +1,8 @@
 """Tests of the bindings of :mod:`~numbox.core.bindings.sqlite.value`.
 
 Each test registers a scalar SQL function whose callback reads its argument with one accessor and writes the result into
-a NumPy array. The array's address is the function's user data, so the callback finds the array with
-``sqlite3_user_data``, and the test reads it after the query. The tests of ``sqlite3_value_numeric_type`` and
+a NumPy array. The array's address is the function's user data, so the callback obtains the address with
+``sqlite3_user_data``, and the test reads the array after the query. The tests of ``sqlite3_value_numeric_type`` and
 ``sqlite3_value_subtype`` are in test_sqlite_result.py, where a second function produces the value that each one reads.
 No test covers ``sqlite3_value_nochange`` or ``sqlite3_value_frombind``.
 """
@@ -50,8 +50,10 @@ def _register(db_p, name, narg, cb_address, ud_ptr):
 
 
 # ---------------------------------------------------------------------------
-# Callbacks of the scalar functions. Each one reads its first argument with one accessor, writes the result into the
-# array at the function's user data, and sets 0 as its SQL result.
+# Callbacks of the scalar functions
+#
+# Each callback reads its first argument with one accessor, writes the result into the array at the function's user
+# data, and sets 0 as its SQL result.
 # ---------------------------------------------------------------------------
 
 @njit
@@ -101,7 +103,7 @@ _cap_double_cb = cfunc(
 
 @njit
 def _cap_text_impl(ctx, argc, argv_pp):
-    """Write the byte count of the first argument's text into byte 0 of the user data, and the bytes after it."""
+    """Write the byte count of the first argument's text at byte 0 of the user data, followed by the text's bytes."""
     ud = sqlite3_user_data(ctx)
     meta = carray(_cast_int_to_void_p(ud), (64,), dtype=np.uint8)
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
@@ -121,7 +123,7 @@ _cap_text_cb = cfunc(
 
 @njit
 def _cap_blob_impl(ctx, argc, argv_pp):
-    """Write the byte count of the first argument's BLOB into byte 0 of the user data, and the bytes after it."""
+    """Write the byte count of the first argument's BLOB at byte 0 of the user data, followed by the BLOB's bytes."""
     ud = sqlite3_user_data(ctx)
     meta = carray(_cast_int_to_void_p(ud), (64,), dtype=np.uint8)
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)

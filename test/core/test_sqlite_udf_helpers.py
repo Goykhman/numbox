@@ -2,10 +2,10 @@
 
 The tests check the results of ``register_aggregate`` and ``register_window`` for groups of rows, for an empty group,
 for plain Python callbacks and for a state with two fields, and the flag that ``deterministic=True`` sets. An exception
-in a callback must fail the query: the tests raise one in each callback, read the error message, and count MemInfo
-allocations and frees. A registration that SQLite refuses raises ``RuntimeError``. Tests in subprocesses check that a
-second process loads the generated code from numba's cache, that a changed literal compiles new code, and that numbox's
-jit options can disable the cache.
+in a callback must fail the query: the tests raise an exception in each callback, read the error message, and count
+MemInfo allocations and frees. A registration that SQLite refuses raises ``RuntimeError``. Tests in subprocesses check
+that a second process loads the generated code from numba's cache, that a changed literal compiles new code, and that
+numbox's jit options can disable the cache.
 """
 import gc
 from ctypes import addressof, c_char_p, c_int64
@@ -105,11 +105,14 @@ def _read1_int64(db, select_sql):
 
 
 def test_aggregate_sum():
-    """The aggregate sums 1 to 5 after a garbage collection, although ``register_aggregate`` returns nothing to keep."""
+    """The aggregate sums 1 to 5 after a garbage collection, although ``register_aggregate`` returns None.
+
+    The caller therefore holds no reference to the callbacks.
+    """
     db = _open_memory()
     _make_table(db, [1, 2, 3, 4, 5])
     register_aggregate(db, "my_sum", 1, sum_state_type, sum_init, sum_step, sum_finalize)
-    gc.collect()  # The query below runs after a collection, because numba keeps the callbacks' compiled code.
+    gc.collect()  # The query below runs after a garbage collection, because numba keeps the callbacks' compiled code.
     val, _cap = _read1_int64(db, "SELECT __cap(my_sum(v)) FROM t")
     sqlite3_close(db)
     assert val == 15
@@ -142,7 +145,7 @@ import textwrap                                      # noqa: E402
 
 # The driver script defines a state type and a sum aggregate in its __main__ and registers the aggregate. It runs
 # SELECT cap(f(v)) over the values 1 to 5 and prints the result. {MULT} is the factor of the step function: 1 for the
-# sum, and 3 in the test that changes the literal and expects new code.
+# sum, and 3 in the test that changes the literal and checks that the registration compiles new code.
 _DRIVER = textwrap.dedent('''
     from ctypes import addressof, c_int64
     import numpy as np
@@ -246,8 +249,8 @@ def test_invalidation_on_literal_edit(tmp_path):
 def test_jit_options_cache_disabled_honored(tmp_path):
     """The generated functions compile under numbox's jit options.
 
-    With ``NUMBOX_JIT_OPTIONS='{"cache": false}'``, the aggregate returns the right sum, and numba writes no data file
-    for the generated functions.
+    With ``NUMBOX_JIT_OPTIONS='{"cache": false}'``, the aggregate returns the sum 15, and numba writes no data file for
+    the generated functions.
     """
     cache = tmp_path / "nbcache_nocache"
     cache.mkdir()
@@ -310,7 +313,7 @@ def test_window_running_sum():
 
 
 @njit
-def sum2_step(state, ctx, argc, argv_pp):  # A body other than sum_step's gives the registration a digest of its own.
+def sum2_step(state, ctx, argc, argv_pp):  # This body differs from sum_step's, so the registration has its own digest.
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
     state.total += 2 * sqlite3_value_int64(args[0])
 
@@ -328,7 +331,7 @@ def test_two_distinct_aggregates_no_collision():
 
 
 def test_deterministic_flag():
-    """An aggregate registered with ``deterministic=True`` returns the right sum."""
+    """An aggregate registered with ``deterministic=True`` returns the sum 15."""
     db = _open_memory()
     _make_table(db, [1, 2, 3, 4, 5])
     register_aggregate(db, "my_sum_det", 1, sum_state_type, sum_init, sum_step, sum_finalize, deterministic=True)
@@ -361,14 +364,18 @@ def test_deterministic_flag_ors_bit(monkeypatch):
 
 
 def test_no_meminfo_leak():
-    """The generated callbacks release every state: ten runs after the first allocate as many MemInfos as they free."""
+    """The generated callbacks release every state.
+
+    After a first run of the tests, ten more runs allocate as many MemInfos as they free.
+    """
     from numba.core.runtime import nrt
     _nrt = nrt._nrt
     if not hasattr(_nrt, "memsys_enable_stats"):
         import pytest
         pytest.skip("NRT allocation stats unavailable")
     _nrt.memsys_enable_stats()
-    test_aggregate_sum()          # A first run comes before the measurement, so one-time allocations do not count.
+    # Both tests run once before the measurement, so the measured counts exclude one-time allocations.
+    test_aggregate_sum()
     test_window_running_sum()
     before = nrt.rtsys.get_allocation_stats()
     for _ in range(10):
@@ -432,7 +439,7 @@ def test_plain_python_callbacks_accepted():
         sqlite3_result_int64(ctx, state.total)
 
     register_aggregate(db, "plain_sum", 1, sum_state_type, plain_init, plain_step, plain_finalize)
-    gc.collect()  # The query runs after a collection, because numba keeps the compiled code of the wrapped callbacks.
+    gc.collect()  # The query runs after a garbage collection, because numba keeps the wrapped callbacks' compiled code.
     val, _cap = _read1_int64(db, "SELECT __cap(plain_sum(v)) FROM t")
     sqlite3_close(db)
     assert val == 15
@@ -502,7 +509,7 @@ def raising_finalize(state, ctx):
 def test_finalize_exception_surfaces_error_and_no_leak():
     """An exception in finalize fails the query with "error in user finalize callback" and leaks no state.
 
-    The generated xFinal catches the exception, so it still reaches the release of the state.
+    The generated xFinal catches the exception, so it still releases the state.
     """
     from numba.core.runtime import nrt
     _nrt = nrt._nrt
@@ -671,7 +678,7 @@ def test_finalize_exception_empty_group_surfaces_error():
 @njit
 def init_raise():
     s = SumState(np.int64(0))
-    if s.total >= 0:  # The condition always holds; the return after it gives init the state's return type.
+    if s.total >= 0:  # The condition always holds; numba infers the return type of init from the return after it.
         raise ValueError("boom from init")
     return s
 

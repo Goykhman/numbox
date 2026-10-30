@@ -3,8 +3,8 @@
 Each test registers a scalar SQL function, the producer, that sets its result with one binding, and a second function,
 the probe, that receives the result as its argument. The probe reads the value with an accessor of
 :mod:`~numbox.core.bindings.sqlite.value` and writes it into a NumPy array at its user data, so the test checks the
-value that SQLite passed on. A test of an error setter checks the result code of ``sqlite3_exec`` instead. The file also
-tests ``sqlite3_value_numeric_type`` and ``sqlite3_value_subtype`` on values that a producer sets.
+value that SQLite passed to the probe. A test of an error setter checks the result code of ``sqlite3_exec`` instead. The
+file also tests ``sqlite3_value_numeric_type`` and ``sqlite3_value_subtype`` on values that a producer sets.
 """
 from ctypes import addressof, c_int64
 
@@ -66,9 +66,11 @@ def _register_and_exec(db_p, name, cb, sql, n_arg=0):
 
 
 # ---------------------------------------------------------------------------
-# Probes, which read their first argument and write it into the array at their user data. The probes and the producers
-# below are cfuncs at module level, so each compiles once. numba keeps a cfunc's compiled code after the object is
-# collected, so the module-level reference is a precaution.
+# Probes
+#
+# Each probe reads its first argument and writes it into the array at its user data. The probes and the producers below
+# are cfuncs at module level, so each compiles once. numba keeps a cfunc's compiled code after the object is collected,
+# so the module-level reference is a precaution.
 # ---------------------------------------------------------------------------
 
 @njit
@@ -103,7 +105,7 @@ _cap_double_cb = cfunc(
 
 @njit
 def _cap_text_impl(ctx, argc, argv_pp):
-    """Write the byte count of the first argument's text into byte 0 of the user data, and the bytes after it."""
+    """Write the byte count of the first argument's text at byte 0 of the user data, followed by the text's bytes."""
     ud = sqlite3_user_data(ctx)
     meta = carray(_cast_int_to_void_p(ud), (64,), dtype=np.uint8)
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
@@ -138,7 +140,7 @@ _cap_type_cb = cfunc(
 
 @njit
 def _cap_blob_impl(ctx, argc, argv_pp):
-    """Write the byte count of the first argument's BLOB into byte 0 of the user data, and the bytes after it."""
+    """Write the byte count of the first argument's BLOB at byte 0 of the user data, followed by the BLOB's bytes."""
     ud = sqlite3_user_data(ctx)
     meta = carray(_cast_int_to_void_p(ud), (64,), dtype=np.uint8)
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
@@ -187,7 +189,9 @@ _cap_numeric_type_cb = cfunc(
 
 
 # ---------------------------------------------------------------------------
-# Producers, each of which sets its result with one binding of the result module
+# Producers
+#
+# Each producer sets its result with one binding of the result module.
 # ---------------------------------------------------------------------------
 
 @cfunc(types.void(types.intp, types.int32, types.intp))
@@ -517,7 +521,7 @@ def test_result_subtype():
     db_p = _open_memory()
     out = np.zeros(1, dtype=np.int64)
     # A SQLite of version 3.45 or later built with -DSQLITE_STRICT_SUBTYPE=1, such as the conda-forge build, makes the
-    # producer fail at its call of sqlite3_result_subtype unless the producer is registered with SQLITE_RESULT_SUBTYPE.
+    # producer fail when it calls sqlite3_result_subtype, unless the producer is registered with SQLITE_RESULT_SUBTYPE.
     # sqlite3_value_subtype checks no flag, but without SQLITE_SUBTYPE the probe may read 0 for an argument that has a
     # subtype. The test sets each flag only on a version that defines it: 3.45.0 for SQLITE_RESULT_SUBTYPE and 3.30.0
     # for SQLITE_SUBTYPE.

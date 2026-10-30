@@ -1,8 +1,8 @@
 """Tests of the values of :mod:`~numbox.core.bindings.sqlite.constants`.
 
 The test compares the constraint operators of a virtual table's ``xBestIndex``, the ``SQLITE_INDEX_CONSTRAINT_*``
-constants, with their values in SQLite's ``sqlite3.h``. The other constants of the module have no test of their own
-here; the tests of the bindings use them.
+constants, with their values in SQLite's ``sqlite3.h``. The other constants of the module have no separate test here;
+the tests of the bindings use them.
 """
 from test.auxiliary_utils import collect_and_run_tests
 

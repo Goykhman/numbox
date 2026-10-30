@@ -83,7 +83,7 @@ def test_query_numeric_roundtrip():
 
 
 def test_query_null_coercion():
-    """A NULL reads as 0 in an integer field and as NaN in a float field."""
+    """A NULL becomes 0 in an integer field and NaN in a float field."""
     db = _open_mem()
     _exec(db, "CREATE TABLE t(i INTEGER, x REAL)")
     _exec(db, "INSERT INTO t VALUES (NULL, NULL)")
@@ -95,7 +95,10 @@ def test_query_null_coercion():
 
 
 def test_query_growth_boundary():
-    """query_to_array returns all 5000 rows in order, although its buffer starts with room for 16 rows and doubles."""
+    """query_to_array returns all 5000 rows in order.
+
+    Its buffer starts with a capacity of 16 rows and doubles the capacity whenever it is full.
+    """
     db = _open_mem()
     _exec(db, "CREATE TABLE t(i INTEGER)")
     _exec(db, "WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c WHERE n<5000) INSERT INTO t SELECT n FROM c")
@@ -137,9 +140,10 @@ def test_query_bad_sql_raises():
 
 
 def test_query_two_dtypes_no_stale_cache():
-    """Two calls with different dtypes return arrays of their own layouts, although both run the same compiled code.
+    """Each of two calls with different dtypes returns an array with the layout of its dtype.
 
-    The compiled code receives the layout as arrays of offsets, tags and widths, not as a type.
+    Both calls run the same compiled code, which receives the layout as arrays of offsets, tags and widths, not as a
+    type.
     """
     db = _open_mem()
     _exec(db, "CREATE TABLE t(a INTEGER, b INTEGER)")
@@ -192,14 +196,14 @@ def test_query_packed_misaligned_dtype():
 
 
 def test_query_blob_into_S_field():
-    """A BLOB read into an ``'S'`` field keeps its bytes, a NUL byte included."""
+    """A BLOB read into an ``'S'`` field keeps all its bytes, including a NUL byte."""
     db = _open_mem()
     _exec(db, "CREATE TABLE t(b BLOB)")
     _exec(db, "INSERT INTO t VALUES (x'00ff10'), (x'4142')")
     with c_string("SELECT b FROM t") as sql:
         out = query_to_array(db, sql, np.dtype([("b", "S3")]))
     # query_to_array reads an 'S' field with sqlite3_column_text, which returns the BLOB's bytes unchanged. NumPy drops
-    # the trailing NUL padding when it reads an 'S' value, so the 2-byte BLOB reads back as b"AB".
+    # the trailing NUL padding when it reads an 'S' value, so it returns b"AB" for the 2-byte BLOB.
     assert out["b"][0] == b"\x00\xff\x10"
     assert out["b"][1] == b"AB"
     sqlite3_close(db)

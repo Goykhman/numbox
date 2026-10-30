@@ -385,8 +385,8 @@ def test_window_running_sum():
             _wsum_value_cb.address, _wsum_inverse_cb.address, 0)
     assert rc == SQLITE_OK
 
-    # The frame ROWS BETWEEN 1 PRECEDING AND CURRENT ROW holds each row and the row before it. my_wsum therefore
-    # returns 1, 1 + 2, 2 + 3, 3 + 4 and 4 + 5.
+    # For each row, the frame ROWS BETWEEN 1 PRECEDING AND CURRENT ROW consists of that row and the row before it, if
+    # any. my_wsum therefore returns 1, 1 + 2, 2 + 3, 3 + 4 and 4 + 5.
     expected = [1, 3, 5, 7, 9]
 
     @njit
@@ -428,9 +428,9 @@ def test_udaf_no_meminfo_leak():
 
     After a first run of their tests, ten more runs allocate as many MemInfos as they free. The aggregate keeps its
     state alive with the reference that ``export_meminfo`` takes. The window function keeps its state alive with the
-    reference that ``_incref_meminfo`` takes. In both, xFinal releases the reference once with ``release_meminfo``. A
-    missing release leaks the state and makes the counts differ, and a missing reference frees the state while SQLite
-    still uses it.
+    reference that ``_incref_meminfo`` takes. In both functions, xFinal releases the reference once with
+    ``release_meminfo``. A missing release leaks the state and makes the counts differ, and a missing reference frees
+    the state while SQLite still uses it.
     """
     from numba.core.runtime import nrt
     _nrt = nrt._nrt
@@ -438,7 +438,7 @@ def test_udaf_no_meminfo_leak():
         import pytest
         pytest.skip("NRT allocation stats unavailable")
     _nrt.memsys_enable_stats()
-    # A first run of each test comes before the measurement, so one-time allocations do not count.
+    # Each test runs once before the measurement, so the measured counts exclude one-time allocations.
     test_udaf_sum_structref()
     test_window_running_sum()
     test_udaf_empty_group()

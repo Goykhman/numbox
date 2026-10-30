@@ -3,8 +3,8 @@
 The tests register a function ``fn`` with ``register_tvf`` and query it with integer and float arguments, up to 64 of
 them, and with one or two calls in a statement. ``fn`` returns full, sliced, strided or empty arrays. The tests also
 check the hidden argument columns, the error of a query whose ``fn`` raises, and every column type of the output. Other
-tests check that SQLite copies text cells, which plans xBestIndex accepts or rejects, and that the outer xFilter writes
-no cache entry. test_sqlite_vtable.py tests the release of a registration when its connection closes.
+tests check that SQLite copies text cells and that the outer xFilter writes no cache entry. The xBestIndex tests check
+which plans it accepts or rejects. test_sqlite_vtable.py tests the release of a registration when its connection closes.
 """
 import os
 import pickle
@@ -113,7 +113,7 @@ def test_tvf_two_calls_same_process():
 
 
 def test_tvf_two_calls_one_query_plan():
-    """Two calls of one function in one statement have cursors of their own, so each call returns its own rows."""
+    """Two calls of one function in one statement have separate cursors, so each call returns its own rows."""
     db = _open()
     h = register_tvf(db.value, "series", (np.int64, np.int64), _OUT, _series)
     stmt = c_int64(0)
@@ -147,7 +147,7 @@ def test_tvf_multi_column_and_float_arg():
 def test_tvf_hidden_columns_read_back_their_arguments():
     """A query can select the hidden columns ``arg0``, ``arg1`` and ``arg2``, which return the arguments of the call.
 
-    xColumn returns the value that fn received, an INTEGER for an integer argument and a REAL for a float one, as
+    xColumn returns the value that fn received, an INTEGER for an integer argument and a REAL for a float argument, as
     SQLite's own table-valued functions do.
     """
     db = _open()
@@ -169,8 +169,9 @@ def test_tvf_hidden_columns_read_back_their_arguments():
 
 def test_tvf_where_on_an_argument_column_is_checked_against_the_argument():
     """SQLite checks a WHERE constraint on an argument column, such as ``arg0 = 2``, against the call's argument."""
-    # The call binds arg0 and arg1, so an EQ constraint on either one in WHERE is a second EQ on that argument.
-    # xBestIndex binds the first usable EQ of each argument, and SQLite checks the other one against the hidden column.
+    # The call binds arg0 and arg1, so an EQ constraint on either argument in the WHERE clause is a second EQ on that
+    # argument. xBestIndex binds the first usable EQ constraint of each argument, and SQLite checks the other EQ
+    # constraint against the hidden column.
     db = _open()
     h = register_tvf(db.value, "series", (np.int64, np.int64), _OUT, _series)
     assert _select_int(db, "SELECT n FROM series(2, 5) WHERE arg0 = 2") == (SQLITE_OK, [(2,), (3,), (4,)])
@@ -218,7 +219,10 @@ def test_tvf_missing_hidden_arg():
 
 
 def test_tvf_no_meminfo_leak():
-    """Queries release every array that fn returns: after one query, ten more allocate as many MemInfos as they free."""
+    """Queries release every array that fn returns.
+
+    After one query, ten more queries allocate as many MemInfos as they free.
+    """
     from numba.core.runtime import nrt
     _nrt = nrt._nrt
     if not hasattr(_nrt, "memsys_enable_stats"):
@@ -385,10 +389,10 @@ def _call_xbestindex(ncols, n_hidden, constraints):
 def test_tvf_xbestindex_rejects_unbound_arg_despite_duplicate_eq():
     """xBestIndex rejects a plan that leaves an argument unbound, although it has as many EQ constraints as arguments.
 
-    The table has 2 visible columns and 3 hidden ones, the columns 2, 3 and 4. ``arg0`` has two usable EQ constraints,
-    ``arg2`` has one, and ``arg1`` has none. A count of usable EQ constraints would reach 3, the number of arguments,
-    and accept the plan. SQLite passes such a duplicate when a query filters an argument that the call binds, as in
-    ``f(1) WHERE arg0 = 1``.
+    The table has 2 visible columns and 3 hidden columns, the columns 2, 3 and 4. ``arg0`` has two usable EQ
+    constraints, ``arg2`` has one, and ``arg1`` has none. A count of usable EQ constraints would reach 3, the number of
+    arguments, and accept the plan. SQLite passes such a duplicate when a query filters an argument that the call binds,
+    as in ``f(1) WHERE arg0 = 1``.
     """
     EQ = SQLITE_INDEX_CONSTRAINT_EQ
     rc, _ = _call_xbestindex(2, 3, [(2, EQ, 1), (2, EQ, 1), (4, EQ, 1)])
@@ -396,11 +400,11 @@ def test_tvf_xbestindex_rejects_unbound_arg_despite_duplicate_eq():
 
 
 def test_tvf_xbestindex_accepts_all_args_bound_with_duplicate_eq():
-    """xBestIndex accepts a plan that binds every argument, a duplicate EQ on one argument included.
+    """xBestIndex accepts a plan that binds every argument, even when one argument has a duplicate EQ constraint.
 
-    Every hidden argument, the columns 2, 3 and 4, has a usable EQ constraint, and ``arg0`` has a second one. SQLite
-    refuses a plan in which two constraints share an argvIndex. The duplicate therefore receives no argvIndex and is not
-    omitted, so SQLite checks it against the hidden column.
+    Every hidden argument, the columns 2, 3 and 4, has a usable EQ constraint, and ``arg0`` has a second EQ constraint.
+    SQLite refuses a plan in which two constraints share an argvIndex. The duplicate therefore receives no argvIndex and
+    is not omitted, so SQLite checks it against the hidden column.
     """
     EQ = SQLITE_INDEX_CONSTRAINT_EQ
     rc, usage = _call_xbestindex(2, 3, [(2, EQ, 1), (2, EQ, 1), (3, EQ, 1), (4, EQ, 1)])
@@ -411,7 +415,7 @@ def test_tvf_xbestindex_accepts_all_args_bound_with_duplicate_eq():
 def test_tvf_xbestindex_checks_every_arg_past_64():
     """xBestIndex binds each of 64 or 65 arguments, and it rejects the plan when the first or the last is unbound.
 
-    The table has 1 visible column and n hidden ones. xBestIndex checks each argument separately, so the limit of a
+    The table has 1 visible column and n hidden columns. xBestIndex checks each argument separately, so the limit of a
     64-bit mask of bound arguments does not apply.
     """
     EQ = SQLITE_INDEX_CONSTRAINT_EQ
@@ -470,10 +474,11 @@ def _str_series(start, stop):
 
 
 def test_tvf_string_and_unicode_output_columns():
-    """A query reads a ``'U'`` and an ``'S'`` column of fn's array as TEXT, ``'U'`` values outside ASCII included."""
-    # _emit_cell converts a 'U' cell to UTF-8 with utf32_to_utf8, in the cursor's scratch buffer. The 'U' values of the
-    # test need 2-byte and 4-byte UTF-8 forms. _emit_cell passes an 'S' cell as TEXT. register_tvf has no text_as_blob
-    # parameter, so an 'S' column is always TEXT, and the BLOB branch of _emit_cell is unreachable through register_tvf.
+    """A query reads a ``'U'`` and an ``'S'`` column of fn's array as TEXT, including ``'U'`` values outside ASCII."""
+    # _emit_cell converts a 'U' cell to UTF-8 with utf32_to_utf8, in the cursor's scratch buffer. The UTF-8 encoding of
+    # the test's 'U' values contains 2-byte and 4-byte forms. _emit_cell passes an 'S' cell as TEXT. register_tvf has no
+    # text_as_blob parameter, so an 'S' column is always TEXT, and the BLOB branch of _emit_cell is unreachable through
+    # register_tvf.
     db = _open()
     h = register_tvf(db.value, "strs", (np.int64, np.int64), _STR_OUT, _str_series)
     rows = _fetchall_text(db, "SELECT n, u, s FROM strs(0, 2)")
@@ -511,9 +516,9 @@ def _num_series(start, stop):
 
 
 def test_tvf_every_numeric_and_bool_output_column():
-    """A query reads each integer, float and bool column of fn's array with the right value and storage class."""
-    # SQLite stores an integer as an int64, so the largest uint64 reads back as -1, and a bool reads back as the INTEGER
-    # 0 or 1. The test compares the type codes as well, because -128.0 == -128 is true in Python.
+    """A query reads each integer, float and bool column of fn's array with the expected value and storage class."""
+    # SQLite stores an integer as an int64, so a query returns -1 for the largest uint64 and the INTEGER 0 or 1 for a
+    # bool. The test compares the type codes as well, because -128.0 == -128 is true in Python.
     db = _open()
     h = register_tvf(db.value, "nums", (np.int64, np.int64), _NUM_OUT, _num_series)
     stmt = c_int64(0)

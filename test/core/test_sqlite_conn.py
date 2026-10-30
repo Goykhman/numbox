@@ -1,9 +1,9 @@
 """Tests of the bindings of :mod:`~numbox.core.bindings.sqlite.conn`.
 
-The tests read the library's version and threading mode, open and close connections, and read the error codes and
-the message after a failed open. They also read a database's file name and read-only state, and the 64-bit change
-counts of a new connection. The tests of ``sqlite3_changes64`` and ``sqlite3_total_changes64`` skip with a SQLite
-older than 3.37, where the two bindings are stubs.
+The tests read the library's version and threading mode, open and close connections, and read the error codes and the
+message after a failed open. They also read a database's file name and read-only state, and the 64-bit change counts of
+a new connection. The tests of ``sqlite3_changes64`` and ``sqlite3_total_changes64`` skip when the loaded SQLite is
+older than 3.37, because the two bindings are then stubs.
 """
 from ctypes import addressof, c_int64
 
