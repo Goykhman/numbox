@@ -35,15 +35,15 @@ def test_errno_per_thread_isolation():
     """Check that two threads that set ``errno`` to different values each read back their own value.
 
     Each thread calls ``set_busy_get`` 200 times with its own sentinel. ``set_busy_get`` sets ``errno`` and then reads
-    it, with the GIL released and with no system call between the two calls. The C library keeps ``errno`` per
-    thread, so each read returns the thread's own sentinel. A process-wide ``errno`` would return the other sentinel
-    whenever the other thread set it between the two calls. The source places a loop between the set and the get, but
-    LLVM removes it, as the comment in ``set_busy_get`` explains. The two calls therefore run back to back, and the
-    test detects a shared ``errno`` only if the other thread sets it in that short interval.
+    it, with the GIL released and with no system call between the two calls. The C library stores a separate
+    ``errno`` for each thread, so each read returns the thread's own sentinel. A process-wide ``errno`` would return
+    the other sentinel whenever the other thread set it between the two calls. The source places a loop between the
+    set and the get, but LLVM removes it, as the comment in ``set_busy_get`` explains. The two calls therefore run
+    consecutively, and the test detects a shared ``errno`` only if the other thread sets it in that short interval.
 
     The test puts no lock, barrier or event between the set and the get, because a wait on one can change ``errno``.
-    On Linux, a timed wait on a ``threading.Event`` or a ``threading.Lock`` leaves ``errno`` at ``ETIMEDOUT``, so a
-    read after it would return that value instead of the sentinel.
+    On Linux, a timed wait on a ``threading.Event`` or a ``threading.Lock`` sets ``errno`` to ``ETIMEDOUT``, so a
+    read after the wait would return that value instead of the sentinel.
     """
     SENTINEL_A = 0xABCD
     SENTINEL_B = 0xBEEF
@@ -57,7 +57,7 @@ def test_errno_per_thread_isolation():
         for i in range(busy):
             s += (i * 7) & 0xff
         # LLVM folds s & 0 to 0, so nothing uses the result of the loop, and LLVM removes the loop as dead code. The
-        # compiled function calls errno_set and errno_get back to back, whatever the value of busy.
+        # compiled function calls errno_set and errno_get consecutively, for any value of busy.
         return errno_get() + (s & 0)
 
     bad = {"A": 0, "B": 0, "first_bad_A": None, "first_bad_B": None}
@@ -92,12 +92,12 @@ def test_errno_per_thread_isolation():
 def test_errno_set_get_observable_in_parallel_iterations():
     """Check that each iteration of a ``prange`` loop reads back the ``errno`` value that it set.
 
-    The bindings page tells a caller to read ``errno`` in the iteration that made the C call, and this test checks
-    that a read there returns the value set there. The loop calls the proxied ``errno_set`` and ``errno_get`` by name,
-    so the compiled loop holds no call of ``__errno_location`` that LLVM could move out of an iteration. The test does
-    not show that ``errno`` is per thread: an iteration runs its set and its get on one thread, and a process-wide
-    ``errno`` would differ only if another thread set it between them. ``test_errno_per_thread_isolation`` checks
-    the isolation.
+    The bindings page instructs a caller to read ``errno`` in the iteration that made the C call. This test checks that
+    a read in an iteration returns the value that the same iteration set. The loop calls the proxied ``errno_set`` and
+    ``errno_get`` by name, so the compiled loop contains no call of ``__errno_location`` that LLVM could move out of an
+    iteration. The test does not show that ``errno`` is per thread: an iteration runs its set and its get on one
+    thread, and a process-wide ``errno`` would differ only if another thread set it between them.
+    ``test_errno_per_thread_isolation`` checks that each thread has its own ``errno``.
     """
     @njit(parallel=True, cache=True)
     def f(n):

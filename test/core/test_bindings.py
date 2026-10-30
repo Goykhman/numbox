@@ -72,9 +72,9 @@ def test_load_lib_path_returns_handle_with_known_symbol():
 
     On Linux and macOS, the test passes the result of ``find_library("m")``, a soname such as ``libm.so.6`` on Linux,
     and looks for ``cos``. On Windows, ``find_msvcrt()`` returns None on every CPython built with Visual Studio 2015
-    or later, so the C runtime has no path to pass. The test passes the ``sqlite3.dll`` bundled with Python instead
-    and looks for ``sqlite3_libversion``. Every Windows Python whose ``sqlite3`` module works has that DLL, because
-    ``_sqlite3.pyd`` links to it, so the test runs the ``winmode=0`` branch of ``load_lib_path`` there.
+    or later, so the test has no path of the C runtime to pass. It passes the ``sqlite3.dll`` bundled with Python
+    instead and looks for ``sqlite3_libversion``. Every Windows Python whose ``sqlite3`` module works has that DLL,
+    because ``_sqlite3.pyd`` links to it, so the test runs the ``winmode=0`` branch of ``load_lib_path`` there.
     """
     from numbox.core.bindings.utils import _windows_bundled_dll_path, load_lib_path
 
@@ -232,8 +232,8 @@ def _getenv_test_var(monkeypatch):
 
     On Linux and macOS, ``monkeypatch.setenv`` is enough. On Windows, ``load_lib("c")`` loads ``msvcrt.dll``, the
     legacy C runtime that ``ctypes.cdll.msvcrt`` returns, while CPython links the Universal C Runtime (UCRT) and sets
-    ``os.environ`` through it. Each C runtime keeps an environment table of its own, so the binding does not see a
-    variable that Python sets. The fixture therefore sets the variable with ``_putenv_s`` of the same ``msvcrt.dll``
+    ``os.environ`` through it. Each C runtime has its own environment table, so the binding does not see a variable
+    that Python sets. The fixture therefore sets the variable with ``_putenv_s`` of the same ``msvcrt.dll``
     that the binding calls.
     """
     var_name = "NUMBOX_TEST_GETENV_VAR_7d4f1c"
@@ -278,9 +278,9 @@ def test_resolve_lib_path_windows_sqlite3_never_falls_back(monkeypatch):
     """Check that ``_resolve_lib_path("sqlite3")`` on Windows returns only the DLL bundled with Python.
 
     The function never calls ``find_library`` for ``"sqlite3"``, so it returns None when no bundled DLL exists. A
-    ``sqlite3.dll`` on the ``PATH`` can belong to another tool: AWS CLI v2 installs one that writes through a null
-    pointer inside ``sqlite3_open`` when a process other than ``aws.exe`` calls it. The test patches the platform,
-    ``find_library`` and the lookup of the bundled DLL, so it runs on any host.
+    ``sqlite3.dll`` on the ``PATH`` can be a copy that another tool installs for its own use: AWS CLI v2 installs one
+    that writes through a null pointer inside ``sqlite3_open`` when a process other than ``aws.exe`` calls it. The
+    test patches the platform, ``find_library`` and the lookup of the bundled DLL, so it runs on any host.
     """
     import ctypes.util as _ctypes_util
     from numbox.core.bindings import utils
@@ -328,8 +328,9 @@ def test_import_one_binding_stays_lazy(tmp_path):
 
     ``numbox/core/bindings/__init__.py`` imports none of its modules, so numbox never compiles a binding module that a
     program does not import. If ``__init__.py`` re-exported the bindings, or ``call.py`` or ``utils.py`` imported a
-    binding module at its top, importing libm would compile the SQLite bindings as well, and no other test would fail.
-    The test imports libm in a subprocess, because pytest has already imported every binding in its own process.
+    binding module at module level, importing libm would compile the SQLite bindings as well, and no other test
+    would fail. The test imports libm in a subprocess, because pytest has already imported every binding in its own
+    process.
     """
     probe = tmp_path / "lazy_probe.py"
     probe.write_text(textwrap.dedent('''

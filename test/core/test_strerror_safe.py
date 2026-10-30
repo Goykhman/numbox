@@ -39,7 +39,7 @@ def _strerror(errnum, buflen=128):
 
 
 def test_strerror_safe_enoent_roundtrip():
-    """Check that ENOENT and EACCES each get a message of their own, and that neither message is a fallback.
+    """Check that ENOENT and EACCES have distinct messages and that neither message is a fallback.
 
     The test does not set LANG or LC_MESSAGES, so it does not compare the text with the English "No such file or
     directory". It checks properties that hold in every locale: both calls return 0, both messages are non-empty, the
@@ -57,7 +57,7 @@ def test_strerror_safe_enoent_roundtrip():
         f"ENOENT and EACCES produced identical messages "
         f"({msg_enoent!r}) — likely both fell through to a fallback"
     )
-    # glibc writes "Unknown error N" for a number that it does not know, and macOS writes "Unknown error: N". The
+    # glibc writes "Unknown error N" for a number that it does not define, and macOS writes "Unknown error: N". The
     # check refuses a message that starts with "unknown error" in any letter case.
     for errnum, msg in [(errno.ENOENT, msg_enoent), (errno.EACCES, msg_eacces)]:
         assert not msg.lower().startswith("unknown error"), (
@@ -68,11 +68,11 @@ def test_strerror_safe_enoent_roundtrip():
 def test_strerror_safe_invalid_errno_uses_fallback():
     """Check that strerror_safe reports an unknown error number, through its result or through its message.
 
-    The C libraries differ for a number that they do not know. glibc returns ``EINVAL`` and writes "Unknown error N",
-    and macOS returns ``EINVAL`` and writes "Unknown error: N". musl returns 0 and writes "No error information".
-    Microsoft does not document the result of ``strerror_s`` for such a number. The test therefore accepts a nonzero
-    result or a message that contains "unknown", "unrecognized" or "no error information", and it checks that the
-    message is not empty. The ``strerror_safe`` docstring states the glibc behavior.
+    The C libraries differ for an error number that they do not define. glibc returns ``EINVAL`` and writes
+    "Unknown error N", and macOS returns ``EINVAL`` and writes "Unknown error: N". musl returns 0 and writes
+    "No error information". Microsoft does not document the result of ``strerror_s`` for such a number. The test
+    therefore accepts a nonzero result or a message that contains "unknown", "unrecognized" or "no error information",
+    and it checks that the message is not empty. The ``strerror_safe`` docstring states the glibc behavior.
     """
     rc, msg = _strerror(INVALID_ERRNO)
     assert msg, "invalid errno produced empty message"
@@ -89,8 +89,8 @@ def test_strerror_safe_invalid_errno_uses_fallback():
 
 def test_strerror_safe_short_buffer():
     """Check that strerror_safe ends the text with a NUL inside a 2-byte buffer, which is too short for the message."""
-    # The buffer starts as 0xFF bytes, so a NUL in its last byte can come only from strerror_safe. A buffer of zeros
-    # would pass the check if the function wrote nothing.
+    # The buffer starts as 0xFF bytes, so only strerror_safe can have written a NUL to its last byte. A buffer of
+    # zeros would pass the check if the function wrote nothing.
     buf = np.full(2, 0xFF, dtype=np.uint8)
     rc, _ = _describe(errno.ENOENT, buf, buf.size)
     # POSIX's strerror_r returns ERANGE for a buffer too short for the message. Microsoft documents that strerror_s
@@ -101,7 +101,7 @@ def test_strerror_safe_short_buffer():
 
 
 def test_strerror_safe_two_threads_no_contamination():
-    """Check that two threads that call strerror_safe at the same time each get the message for their own number.
+    """Check that two threads that call strerror_safe at once, for ENOENT and EACCES, receive different messages.
 
     A barrier releases both threads together. strerror_safe writes into the caller's buffer and keeps no buffer of its
     own, unlike libc's ``strerror``, whose result a later call may overwrite.

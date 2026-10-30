@@ -54,9 +54,9 @@ def open_libm():
 
     The callers bind ``ceil``, ``cos`` and ``floor``, and they skip their tests when the function returns None, so a
     platform without a usable C runtime skips those tests instead of failing them. The function checks all three
-    symbols. A check of fewer would admit a library that lacks one, and a caller that binds the missing symbol would
-    then fail instead of skipping. Each call opens a new handle, so attributes such as ``floor`` taken from two
-    handles are two distinct objects.
+    symbols. A check of fewer symbols would accept a library that lacks one of them, and a caller that binds the
+    missing symbol would then fail instead of skipping. Each call opens a new handle, so attributes such as ``floor``
+    taken from two handles are two distinct objects.
     """
     import ctypes
     from ctypes.util import find_library
@@ -153,11 +153,12 @@ def assert_njit_cache_survives_subprocess_roundtrip(
     later process loads it, and the tests check that property with this helper.
     """
     import pathlib
-    # The probe is a file because numba refuses to cache a function whose source file is "<string>", as for code
-    # run with python -c: it raises "RuntimeError: cannot cache function ...: no locator available".
+    # The probe is a file because numba refuses to cache a function whose source file is "<string>", the file name
+    # that Python gives to code run with python -c. numba then raises
+    # "RuntimeError: cannot cache function ...: no locator available".
     probe = pathlib.Path(tmp_path) / "probe.py"
-    # Without encoding=, Path.write_text uses the locale's preferred encoding, which is cp1252 on Windows runners
-    # and raises UnicodeEncodeError for a character of the probe that cp1252 lacks, such as the arrow U+2192.
+    # Without the encoding argument, Path.write_text uses the locale's preferred encoding, which is cp1252 on Windows
+    # runners and raises UnicodeEncodeError for a character in the probe that cp1252 lacks, such as the arrow U+2192.
     probe.write_text(textwrap.dedent(probe_source), encoding="utf-8")
     cache_dir = pathlib.Path(tmp_path) / "numba-cache"
     env = {**os.environ, "NUMBA_CACHE_DIR": str(cache_dir)}
@@ -196,9 +197,9 @@ def assert_njit_cache_survives_subprocess_roundtrip(
 
     _run("warm")
 
-    # The set of paths catches a file that the second run added or removed, such as one for a new specialization.
-    # The modification times catch a file that it rewrote in place, as numba does when a cache miss compiles the same
-    # signature again.
+    # The set of paths detects a file that the second run added or removed, such as one for a new specialization.
+    # The modification times detect a file that it rewrote in place, as numba does when a cache miss compiles the
+    # same signature again.
     cache_after_warm = sorted(cache_dir.rglob("*.nb[ci]"))
     assert cache_after_warm == cache_after_cold, (
         f"warm run added or removed cache files; "

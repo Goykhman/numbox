@@ -21,8 +21,9 @@ from test.auxiliary_utils import assert_njit_cache_survives_subprocess_roundtrip
 
 
 # C buffers its stdout when the stream goes to a file or a pipe, as it does under pytest's capfd, so each helper
-# flushes the stream after printf, and capfd sees the text before the test reads it. C writes stderr without a buffer
-# on Linux, but on Windows it buffers a stderr that goes to a file or a pipe, so the helpers flush stderr as well.
+# flushes the stream after printf, and capfd captures the text before the test reads it. C writes stderr without a
+# buffer on Linux, but on Windows it buffers a stderr that goes to a file or a pipe, so the helpers flush stderr as
+# well.
 
 
 @njit(cache=True)
@@ -63,7 +64,7 @@ def _printf_int8():
 
 @njit(cache=True)
 def _printf_bool():
-    # _promote_for_varargs zero-extends each bool to 64 bits; test_printf_bool_is_promoted_to_int32 says why.
+    # _promote_for_varargs zero-extends each bool to 64 bits; test_printf_bool_is_promoted_to_int32 explains why.
     rc = printf("[%d %d]\n", True, False)
     fflush(stdout())
     return rc
@@ -176,8 +177,8 @@ def test_printf_float64(capfd):
 def test_printf_float32_is_promoted_to_double(capfd):
     """Check that a ``float32`` given to ``%f`` reaches C as a double.
 
-    C's default argument promotion makes a ``float`` a ``double`` in a variadic call, and ``%f`` reads 8 bytes. If
-    numbox passed the 4-byte value without its ``fpext`` instruction, C would print an unrelated number.
+    C's default argument promotion converts a ``float`` to a ``double`` in a variadic call, and ``%f`` reads 8 bytes.
+    If numbox passed the 4-byte value without its ``fpext`` instruction, C would print an unrelated number.
     """
     _printf_float32(3.14159)
     out, _ = capfd.readouterr()
@@ -195,7 +196,7 @@ def test_printf_int8_is_promoted_to_int32(capfd):
 
     ``_promote_for_varargs`` sign-extends a signed integer narrower than 64 bits to 64 bits, which covers C's
     promotion to ``int``. If it passed the 8-bit value unextended, the upper bits that C reads for ``%d`` would be
-    undefined, and C could print another number for -7.
+    undefined, and C could print a number other than -7.
     """
     _printf_int8()
     out, _ = capfd.readouterr()
@@ -210,8 +211,8 @@ def test_printf_bool_is_promoted_to_int32(capfd):
     """Check that ``True`` and ``False`` print as 1 and 0 with ``%d``.
 
     numba represents a ``bool`` value as a 1-bit LLVM integer, and ``_promote_for_varargs`` zero-extends it to 64
-    bits. numba's ``Boolean`` type is not a subclass of ``Integer`` or even of ``Number``, so the function handles it
-    in a branch of its own. Without the extension, the upper bits that C reads for ``%d`` would be undefined.
+    bits. numba's ``Boolean`` type is a subclass of neither ``Integer`` nor ``Number``, so the function handles it in
+    a separate branch. Without the extension, the upper bits that C reads for ``%d`` would be undefined.
     """
     _printf_bool()
     out, _ = capfd.readouterr()
@@ -235,7 +236,7 @@ def test_printf_string_via_pointer(capfd):
     reason="capfd does not reliably capture C-level stdio writes on Windows",
 )
 def test_printf_string_native(capfd):
-    """Check that ``%s`` prints a ``str`` that the caller passes as it is.
+    """Check that ``%s`` prints a ``str`` that the caller passes without converting it to an address.
 
     The overload passes C the address of the string's characters through ``get_unicode_data_p``, so the caller does
     not call that function. The same call also runs under Python, where ``%`` formats the ``str``.
@@ -294,14 +295,14 @@ def test_snprintf_truncation_detection():
 
     On Linux and macOS, jitted code calls C99's ``snprintf``, which returns the length of the whole text and ends the
     buffer with a NUL. On Windows, fmtio calls the ``_snprintf`` of ``msvcrt.dll`` instead, which returns -1 and does
-    not end the buffer with a NUL, so the caller cannot learn the length of the whole text. The ``snprintf``
+    not end the buffer with a NUL, so the caller cannot determine the length of the whole text. The ``snprintf``
     docstring in ``numbox/core/bindings/fmtio.py`` states both rules.
     """
     buf = np.full(5, 0xFF, dtype=np.uint8)  # The 0xFF bytes show whether snprintf wrote the buffer.
     rc = _snprintf_into(buf, 12345, 67890)
     full_msg = b"[12345:67890]"  # 13 bytes
 
-    # This test of the result holds on every platform.
+    # The test rc < 0 or rc >= size detects the truncation on every platform.
     truncated = (rc < 0) or (rc >= buf.size)
     assert truncated, (
         f"expected truncation indicator: rc={rc}, buf.size={buf.size}"
@@ -327,8 +328,8 @@ def test_printf_non_literal_format_raises():
     """Check that a format passed as an argument fails to compile with a ``TypingError`` that names ``printf``.
 
     numba must read the format as a constant, such as a string literal, a module-level string or a closure variable.
-    A format passed as an argument is a ``unicode_type`` value, whose text numba does not know when it compiles the
-    call.
+    A format passed as an argument is a ``unicode_type`` value, which numba cannot read as a constant when it compiles
+    the call.
     """
     @njit
     def caller(fmt):
@@ -548,7 +549,7 @@ def test_sscanf_rejects_non_intp_buf():
 
 
 # ============================================================================
-# The same source under Python and in jitted code: each test runs one function both ways and compares the results.
+# The same source under Python and in jitted code: each test runs one function in both modes and compares the results.
 # ============================================================================
 
 
@@ -598,7 +599,8 @@ def test_dual_mode_fprintf_stderr_runs_same_source(capfd):
     """Check that ``fprintf(stderr(), ...)`` writes to standard error in both modes.
 
     Under Python, ``fprintf`` writes to ``sys.stderr``, which it finds by the address of C's ``stderr``. In jitted
-    code, C's ``fprintf`` writes to the stream. Text on standard output would mean swapped handles.
+    code, C's ``fprintf`` writes to the stream. Text on standard output would mean that the module swapped the handles
+    of the two streams.
     """
     _dual_kernel_fprintf_to_stderr(7, "disk")
     py_out, py_err = capfd.readouterr()
@@ -743,9 +745,9 @@ def test_fmtio_caller_survives_subprocess_round_trip(tmp_path):
     """Check that a cached jitted caller of ``snprintf`` works in a second process without a recompile.
 
     The caller's compiled code names C's ``snprintf`` and holds the format as a UTF-8 constant, with no address from
-    the compiling process. The second process therefore loads the cached code, and the cache files keep their
-    modification times. ``assert_njit_cache_survives_subprocess_roundtrip`` in ``test/auxiliary_utils.py`` states
-    what the helper asserts.
+    the compiling process. The second process therefore loads the cached code, and the modification times of the
+    cache files do not change. ``assert_njit_cache_survives_subprocess_roundtrip`` in ``test/auxiliary_utils.py``
+    states what the helper asserts.
     """
     assert_njit_cache_survives_subprocess_roundtrip(
         tmp_path,
@@ -775,7 +777,7 @@ def test_all_binding_families_survive_subprocess_round_trip(tmp_path):
     The families are errno, the stdio handles, ``strerror_safe``, libc strings (``strcmp`` and ``strchr``), libc memory
     (``memset``, ``memcpy`` and ``memcmp``), the environment (``getenv``) and formatted I/O (``snprintf`` and
     ``printf``). The probe prints "OK <family>" or "FAIL <family>" with ``printf`` for each check, and both processes
-    must print the expected lines, with the cache files unchanged by the second run.
+    must print the expected lines, and the second run must leave the cache files unchanged.
     ``test_proxy_caller_survives_subprocess_round_trip`` and ``test_fmtio_caller_survives_subprocess_round_trip`` each
     run a single binding in the same way.
     """
@@ -879,9 +881,9 @@ def test_all_binding_families_survive_subprocess_round_trip(tmp_path):
 def test_njit_writer_rejects_array_arg(fn_name):
     """Check that ``printf``, ``fprintf`` and ``snprintf`` refuse an array argument when numba compiles the call.
 
-    ``_validate_writer_arg_type`` accepts only a float, an integer, a ``bool`` or a ``str``, and a pointer passes as an
-    ``intp`` integer. Its error message says "unsupported type". The overload runs the check, and the intrinsic runs
-    it again.
+    ``_validate_writer_arg_type`` accepts only a float, an integer, a ``bool`` or a ``str``, and it accepts a pointer
+    as an ``intp`` integer. Its error message contains "unsupported type". The overload runs the check, and the
+    intrinsic runs it again.
     """
     src = {
         "printf": "from numbox.core.bindings.fmtio import printf\n"
@@ -1120,7 +1122,7 @@ def test_python_printf_rejects_positional_percent_n(fmt):
     """Check that ``printf`` under Python refuses ``%n`` with a POSIX position, such as ``%1$n`` or ``%1$*2$n``.
 
     glibc supports positional conversions, and ``%1$n`` writes through a pointer as ``%n`` does. A pattern that
-    matched only a plain ``%n`` would let such a format through, so ``_PERCENT_N_RE`` also matches a position in the
+    matched only a plain ``%n`` would not refuse such a format, so ``_PERCENT_N_RE`` also matches a position in the
     conversion, in its width and in its precision.
     """
     with pytest.raises(ValueError, match="%n.*not allowed"):

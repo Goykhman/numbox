@@ -128,8 +128,8 @@ def test_classify_eightbytes_mixed_lo_eightbyte_is_integer():
 def test_classify_eightbytes_mixed_both_eightbytes_integer():
     """Check that ``Tuple([float32, int32, float32, int32])`` has two INTEGER halves.
 
-    Each half holds a ``float32`` and an ``int32``, so the SysV merge rule makes it INTEGER. GCC passes the two halves
-    of the matching C struct in the general-purpose registers ``%rdi`` and ``%rsi``.
+    Each half holds a ``float32`` and an ``int32``, so the SysV merge rule classifies it as INTEGER. GCC passes the two
+    halves of the matching C struct in the general-purpose registers ``%rdi`` and ``%rsi``.
     """
     from numba.core import types
     from numbox.core.bindings.abi import (
@@ -143,7 +143,7 @@ def test_classify_eightbytes_mixed_both_eightbytes_integer():
 
 
 def test_mixed_int_float_eightbyte_triggers_repack():
-    """Check that ``_needs_int_int_eightbyte_repack`` asks for the repack of a struct whose halves mix ints and floats.
+    """Check that ``_needs_int_int_eightbyte_repack`` returns True for a struct whose halves mix ints and floats.
 
     By the SysV merge rule, each such half is INTEGER, so ``_call_lib_func`` passes the struct as ``{i64, i64}`` on
     SysV x86-64 and AAPCS64. Without the repack, LLVM passes each field in a register of its own. On x86-64 Linux, a C
@@ -173,8 +173,8 @@ def test_classify_padded_tuple_double_is_aligned_not_spanning():
     """Check that a ``float64`` after an ``int32`` starts at offset 8, so it never spans the boundary between halves.
 
     ``Tuple([int32, float64, int32])`` has 4 bytes of padding after the first ``int32``, and the struct is 24 bytes.
-    ``_classify`` therefore returns LARGE, and the struct never reaches the classification of halves. A scalar field
-    at its natural alignment never spans the 8-byte boundary.
+    ``_classify`` therefore returns LARGE, and ``_call_lib_func`` never classifies the halves of such a struct. A
+    scalar field at its natural alignment never spans the 8-byte boundary.
     """
     from numba.core import types
     from numbox.core.bindings.abi import (
@@ -324,7 +324,7 @@ def test_struct_bytes_tuple_matches_record_with_padding():
 def test_classify_padded_tuple_is_struct_large():
     """Check that ``Tuple([int32, float64, int32])`` is LARGE, the class whose results return through ``sret``.
 
-    The widths of the fields add up to 16 bytes, but with C's padding the struct is 24 bytes: an ``int32``, 4 bytes of
+    The widths of the fields sum to 16 bytes, but with C's padding the struct is 24 bytes: an ``int32``, 4 bytes of
     padding, a ``float64``, an ``int32`` and 4 more bytes of padding.
     """
     from numba.core import types
@@ -361,9 +361,10 @@ def test_struct_bytes_rejects_non_struct_type():
 
 
 def test_struct_bytes_rejects_tuple_with_non_bitwidth_field():
-    """Check that a tuple field of no fixed bit width, such as a ``voidptr``, raises ``TypingError``.
+    """Check that ``_struct_bytes`` raises ``TypingError`` for a tuple field of no fixed bit width.
 
-    The error is a ``TypingError``, not the ``AttributeError`` that a missing ``bitwidth`` attribute would raise.
+    The test uses a ``voidptr`` field. The error is a ``TypingError``, not the ``AttributeError`` that a missing
+    ``bitwidth`` attribute would raise.
     """
     from numba.core import types
     from numba.core.errors import TypingError
@@ -376,9 +377,9 @@ def test_struct_bytes_rejects_tuple_with_non_bitwidth_field():
 def test_call_lib_func_lldiv_via_unified():
     """Check that ``_call_lib_func`` returns libc's ``lldiv(10, 3)``, a 16-byte ``lldiv_t``, as the tuple ``(3, 1)``.
 
-    The result comes back in two general-purpose registers on SysV x86-64 and AAPCS64, and through ``sret``, a result
-    slot that the caller allocates, on Windows x64. An error in the return path of any of the three conventions gives
-    a wrong quotient or remainder.
+    The result is returned in two general-purpose registers on SysV x86-64 and AAPCS64, and through ``sret``, a result
+    slot that the caller allocates, on Windows x64. An error in the return path of any of the three conventions
+    results in a wrong quotient or remainder.
     """
     from numba import njit
     from numbox.core.bindings.call import _call_lib_func
@@ -485,9 +486,10 @@ def _platform_str():
 def test_call_lib_func_byval_attribute_in_ir_for_large_struct(patch_signature):
     """Check the attributes of a call that passes a 24-byte struct on SysV x86-64: ``byval``, ``optnone``, ``noinline``.
 
-    The argument gets ``byval``, so LLVM copies the struct onto the stack, as the convention requires. The function
-    that makes the call gets ``optnone`` and ``noinline``, which keep LLVM's optimizer from removing the stack copy
-    before C reads it. The test compiles the call and reads the IR; it never runs the C function.
+    The argument has the ``byval`` attribute, so LLVM copies the struct onto the stack, as the convention requires.
+    The function that makes the call has the ``optnone`` and ``noinline`` attributes, which keep LLVM's optimizer from
+    removing the stack copy before C reads it. The test compiles the call and reads the IR; it never runs the C
+    function.
     """
     from numba import njit, types as nb_types
     from numbox.core.bindings.call import _call_lib_func
@@ -524,7 +526,7 @@ def test_call_lib_func_byval_attribute_in_ir_for_large_struct(patch_signature):
 def test_call_lib_func_no_byval_attribute_for_small_struct(patch_signature):
     """Check that a 16-byte struct argument on SysV x86-64 is passed by value, without ``byval`` or ``optnone``.
 
-    The function that makes the call is therefore optimized as usual. The test reads only the IR.
+    LLVM therefore optimizes the function that makes the call. The test reads only the IR.
     """
     from numba import njit, types as nb_types
     from numbox.core.bindings.call import _call_lib_func
@@ -737,8 +739,8 @@ def test_call_lib_func_int_int_return_uses_i64_pair_in_ir(patch_signature):
     assert declare_line is not None, (
         f"could not find declare line for {name} in IR:\n{ir_text}"
     )
-    # The return type is the text between "declare" and the function's name. The repack makes it { i64, i64 }; the
-    # struct's own type, { i32, i32, i64 }, would mean that the repack was not applied.
+    # The return type is the text between "declare" and the function's name. After the repack, it is { i64, i64 };
+    # the struct's own type, { i32, i32, i64 }, would mean that the repack was not applied.
     decl_prefix = declare_line.split('@' + name)[0]
     assert "i64, i64" in decl_prefix, (
         f"expected return type to be repacked to '{{i64, i64}}'; "
@@ -811,7 +813,7 @@ def test_call_lib_func_sse_eightbyte_arg_not_repacked(patch_signature):
     """Check that a 16-byte struct of two ``float64`` fields is not repacked to ``{i64, i64}`` on SysV x86-64.
 
     The convention passes such a struct in XMM0 and XMM1, while LLVM would pass ``{i64, i64}`` in the general-purpose
-    registers RDI and RSI. The declaration in the IR therefore keeps the ``double`` fields.
+    registers RDI and RSI. The declaration in the IR therefore has ``double`` fields and no ``i64``.
     """
     from numba import njit, types as nb_types
     from numbox.core.bindings.call import _call_lib_func
@@ -852,9 +854,10 @@ def test_call_lib_func_canonical_int64_pair_round_trip(patch_signature):
     """Check that ``UniTuple(int64, 2)``, which needs no repack, reaches a C callback intact on every convention.
 
     ``_needs_int_int_eightbyte_repack`` skips this layout, because LLVM already passes two ``int64`` fields in two
-    general-purpose registers. The test covers that by-value path on SysV x86-64 and AAPCS64, and the pointer to a
-    copy on Windows x64. ``test_call_lib_func_lldiv_via_unified`` covers a result of the same layout. numbduck passes
-    DuckDB's ``duckdb_hugeint`` and ``duckdb_uhugeint`` as tuples of two 64-bit integers, which take this path.
+    general-purpose registers. The test covers that by-value path on SysV x86-64 and AAPCS64, and the path that passes
+    a pointer to a copy on Windows x64. ``test_call_lib_func_lldiv_via_unified`` covers a result of the same layout.
+    numbduck passes DuckDB's ``duckdb_hugeint`` and ``duckdb_uhugeint`` as tuples of two 64-bit integers, which take
+    this path.
     """
     import ctypes
     import llvmlite.binding as ll
@@ -1117,7 +1120,7 @@ def test_call_lib_func_large_return_decimal_shaped_uses_sret_in_ir(patch_signatu
     The tuple is numbduck's result type for ``duckdb_get_decimal``. numba places the two ``uint8`` fields at offsets 0
     and 1, the ``uint64`` at 8 and the ``int64`` at 16, as a C compiler does, so the tuple is 24 bytes, and
     ``_classify`` returns LARGE. The test reads only the IR;
-    ``test_call_lib_func_large_return_round_trip_varint_shaped`` runs a large result through a C callback.
+    ``test_call_lib_func_large_return_round_trip_varint_shaped`` checks a large result that a C callback returns.
     """
     from numba import njit, types as nb_types
     from numbox.core.bindings.call import _call_lib_func

@@ -5,7 +5,7 @@ compares them with Python's ``math`` module where ``math`` has the function, and
 The cases are typical arguments, NaN and the infinities, the sign of a zero result, and the halfway cases of the
 rounding functions. Further cases are poles, such as ``log(0.0)``, where C returns an infinity, and arguments outside
 a function's domain, where C returns NaN; Python's ``math`` raises ``ValueError`` for both. ``test_abi.py`` tests how
-the call helper behind the bindings passes structs.
+the call helper that the bindings use passes structs.
 """
 import math
 import numpy as np
