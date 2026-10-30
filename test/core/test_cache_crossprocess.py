@@ -5,8 +5,8 @@ the fallback fingerprint of ``digest``. Most tests run a probe in two or three c
 ``NUMBA_CACHE_DIR``. The input that changes between the runs is one that numba's cache key does not cover: a module
 global, an ``ns`` value, a jit option, or a global that a node's dispatcher reads. The tests assert that a later process
 computes the new result instead of loading a stale entry, and that a graph compiled without a cache leaves no cache
-files behind. The digest test compares two hash seeds instead. numbox's own part of the cache key is tested in
-``test_cache_key.py``.
+files behind. The digest test instead compares the digests computed under two hash seeds. numbox's own part of the
+cache key is tested in ``test_cache_key.py``.
 """
 import os
 import subprocess
@@ -187,8 +187,8 @@ def test_make_graph_kernel_is_not_stale_across_jit_flags(tmp_path):
         f"got {got}, expected 0.0"
     )
 
-    # A third run of the same configuration must add no index file, so the graph maker and the derive keep the names
-    # under which the second run cached them.
+    # A third run of the same configuration must add no index file. A new index file would mean that the graph maker
+    # or the derive received a name other than the one under which the second run cached it.
     cache_root = tmp_path / "nbcache"
     before = sorted(p.name for p in cache_root.rglob("*.nbi"))
     assert _run_probe(probe, env) == "0.0"
@@ -367,7 +367,7 @@ def test_dispatcher_typed_component_is_uncached_no_growth(tmp_path):
     The test covers only the code that numbox names. numba's own cache of the ``Work`` methods, such as
     ``work.Work.calculate``, ``work.Work.data`` and ``work._calculate_``, still grows by one entry per process for such
     a node, because those ``@njit(cache=True)`` methods are specialized on a ``Work`` type that holds the dispatcher
-    type. That growth is a limitation of numba, outside this test, and it never loads a stale binary.
+    type. That growth is a limitation of numba that this test does not cover, and it never loads a stale binary.
     """
     probe = tmp_path / "disp_component_probe.py"
     probe.write_text(textwrap.dedent('''
@@ -461,8 +461,8 @@ def test_module_state_derive_keeps_kernel_cacheable(tmp_path):
     """A derive that reads a module global compiles without a cache, but the graph maker stays cacheable.
 
     The maker's name folds the global's value, so an unchanged second run loads the maker from the cache instead of
-    adding an entry. The derive has a strict fingerprint, and ``_derive_fingerprint`` returns ``kernel_safe`` True for
-    it, so the uncached path of a derive without a fingerprint does not apply.
+    adding an entry. The derive has a strict fingerprint, and ``_derive_fingerprint`` returns True for ``kernel_safe``,
+    so the uncached path of a derive without a fingerprint does not apply.
     """
     probe = tmp_path / "modstate_probe.py"
     probe.write_text(textwrap.dedent('''

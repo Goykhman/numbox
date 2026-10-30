@@ -2,7 +2,8 @@
 
 ``test/test_multiple_overloads.py`` uses it. ``ol_entity`` is the ``@overload`` of ``Entity``: when numba types a call
 to ``Entity``, it creates an ``EntityTypeClass`` instance for the type of ``x1``. ``ol_calculate`` generates the source
-of ``_calculate_``, compiles it under this file's name, and returns it as ``calculate`` for every entity type.
+of ``_calculate_``, compiles it under this file's name, and returns it as the implementation of ``calculate`` for every
+entity type.
 """
 from io import StringIO
 from inspect import getfile, getmodule
@@ -15,7 +16,7 @@ from numbox.core.configurations import jit_options
 
 
 def _file_anchor():
-    """Give ``getmodule`` and ``getfile`` an object defined in this file. The function is never called."""
+    """``getmodule`` and ``getfile`` find this module and this file through this function, which is never called."""
     raise NotImplementedError
 
 
@@ -52,8 +53,8 @@ def make_entity(x1):
     return Entity(x1)
 
 
-# ol_calculate stores the generated _calculate_ here, so the source is compiled once per process, and every entity
-# type receives the same function.
+# ol_calculate stores the generated _calculate_ here, so the source is compiled once per process, and ol_calculate
+# returns the same function for every entity type.
 _calculate_registry = {}
 
 

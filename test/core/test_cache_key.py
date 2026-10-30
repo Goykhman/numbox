@@ -82,8 +82,8 @@ def test_every_setting_numba_reads_is_classified():
     """Every ``NUMBA_*`` setting that the installed numba reads is in ``KEYED_SETTINGS`` or in ``UNKEYED_SETTINGS``.
 
     A numba release that reads a new setting fails this test in the CI cell that runs it, because the setting may change
-    the code numba emits and then belongs in the key. numba reads most settings in ``config.py`` and a few through
-    ``os.environ`` in other modules, so the test scans both, numba's own tests excluded. It also checks that no setting
+    the code numba emits, and the key must then hold it. numba reads most settings in ``config.py`` and a few through
+    ``os.environ`` in other modules, so the test scans both and skips numba's own tests. It also checks that no setting
     is in both tables.
     """
     read = set(re.findall(r'"(NUMBA_[A-Z0-9_]+)"', inspect.getsource(numba_config)))
@@ -306,8 +306,8 @@ def test_every_keyed_setting_misses_when_flipped_and_hits_when_flipped_back(tmp_
     A first child compiles and caches under numba's defaults. For each setting, a child with the setting changed must
     miss the cache. It must also show the setting's effect if the probe can observe it: ``NUMBA_BOUNDSCHECK`` makes an
     index past the end raise ``IndexError``, and ``NUMBA_PARFOR_MAX_TUPLE_SIZE`` makes the parallel function fail to
-    compile. A child back under the defaults must then load the first entry. Each setting runs on its own copy of the
-    first cache, so the settings run in parallel threads.
+    compile. A later child that runs under numba's defaults again must then load the first entry. The test gives each
+    setting its own copy of the first cache, so it can check the settings in parallel threads.
     """
     (tmp_path / "sweep_module.py").write_text(_SWEEP_MODULE, encoding="utf-8")
     script = tmp_path / "sweep_run.py"
@@ -506,8 +506,8 @@ def _recompiled(x):
 def test_a_recompile_after_a_setting_changed_in_code_saves_the_new_value(monkeypatch):
     """A recompile after a setting changed in ``numba.config`` saves its entry under the new value.
 
-    numbox computes its part again at each lookup and each save, so the entry does not keep the value of the first
-    compile.
+    numbox computes its part again at each lookup and at each save, so the key of the saved entry holds the new value,
+    not the value of the first compile.
     """
     recompiled = numbox_njit(cache=True)(_recompiled)
     recompiled._cache.flush()
@@ -530,7 +530,7 @@ def _counts(n):
 
 
 def test_a_flag_with_no_stable_form_compiles_uncached_with_a_warning():
-    """A jitclass instance type in ``locals`` makes the function compile without a cache, after one warning.
+    """A jitclass instance type in ``locals`` makes the function compile without a cache, and numbox warns once.
 
     numba's text for the type holds an address that differs in every process, so the key cannot hold it.
     ``explain_cache_key`` raises ``ValueError`` for such a function.
@@ -602,8 +602,8 @@ def _sums_with_a_typed_local(n):
 
 
 def test_a_compile_saves_the_flags_a_later_lookup_reads():
-    """numba's SSA pass adds names to ``locals`` during a compile, and the key leaves them out, so the entry a compile
-    saves is the one a later lookup asks for."""
+    """numba's SSA pass adds names to ``locals`` during a compile, and the key leaves them out, so the entry that a
+    compile saves has the key that a later lookup computes."""
     typed = numbox_njit(cache=True, locals={"acc": numba.float64})(_sums_with_a_typed_local)
     typed._cache.flush()
     before = explain_cache_key(typed)["flags"]
@@ -728,7 +728,7 @@ def test_numboxs_own_functions_are_keyed_and_a_module_named_alike_is_not():
     """numbox keys every function of a numbox module, whatever decorator compiles it.
 
     ``vector_push``, which numba's plain ``njit`` decorates, is keyed. A function of a module whose name only starts
-    with ``numbox``, such as ``numboxer``, is not.
+    with ``numbox``, such as ``numboxer``, is not keyed.
     """
     from numbox.core.vector.vector import vector_push
     assert vector_push._cache._numbox_keyed[0] == "njit"
@@ -929,8 +929,8 @@ with open(sys.argv[1], "w", encoding="utf-8") as out:
 def test_a_failed_install_leaves_numba_as_it_was_and_the_next_import_installs(tmp_path, refused):
     """A failed install leaves numba unchanged and warns once, and a fresh import of numbox then installs every hook.
 
-    The child refuses the last of the five hook assignments, or the assignment of the install marker after them.
-    numbox restores the hooks that it assigned and sets no marker. The child then removes numbox's modules from
+    The child process makes the last of the five hook assignments fail, or the assignment of the install marker after
+    them. numbox restores the hooks that it assigned and sets no marker. The child then removes numbox's modules from
     ``sys.modules`` and imports numbox again, which installs all five hooks.
     """
     script = tmp_path / "failed_install.py"

@@ -1,8 +1,9 @@
-"""Tests that a ``NUMBOX_JIT_OPTIONS`` value of the wrong shape fails the import with a message naming the variable.
+"""Tests that an invalid ``NUMBOX_JIT_OPTIONS`` value fails the import with a message that names the variable.
 
-``numbox.core.configurations`` reads the variable once, when it is first imported, so each test imports the module in a
-child process with the variable set. Each test checks that the import fails and that the message shows the expected
-form. The cache check that runs for valid options is tested in ``test_no_cache_location.py``.
+The tests cover a value that is valid JSON but not an object, and an object whose ``"cache"`` is not ``true`` or
+``false``. ``numbox.core.configurations`` reads the variable once, when it is first imported, so each test imports the
+module in a child process with the variable set. Each test checks that the import fails and that the message shows the
+expected form. The cache check that runs for valid options is tested in ``test_no_cache_location.py``.
 """
 import os
 import subprocess

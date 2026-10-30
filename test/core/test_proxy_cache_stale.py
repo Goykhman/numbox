@@ -5,11 +5,11 @@ alias. numba's cache key for a ``cache=True`` caller does not cover its callees,
 still loads and refers to an alias that the new process does not register. Without numbox's cache check, the process
 then crashes, as ``test_stale_proxy_alias_is_discarded_and_recompiled`` describes. The tests check that numbox discards
 such an entry with a warning and that numba compiles the caller again, for ``@njit`` and ``@guvectorize`` callers, for a
-binding whose C symbol disappears, and in strict mode. Each scenario also holds a binding that is never edited, with a
-caller in the same file and cache directory. That caller must load from the cache without a warning, so a fix that
-disabled caching or discarded the whole directory fails. Other tests record a known limitation: a caller that reads
-``.as_func`` as a module-level constant holds the body's code instead of the alias, so the check cannot see it. The
-in-process behavior of aliases, collisions and traps is tested in ``test_proxy.py``.
+binding whose C symbol disappears, and in strict mode. Each scenario also includes a binding that is never edited,
+with a caller in the same file and cache directory. That caller must load from the cache without a warning, so a fix
+that disabled caching or discarded the whole directory fails. Other tests record a known limitation: a caller that
+reads ``.as_func`` as a module-level constant holds the body's code instead of the alias, so the cache check cannot
+detect it. The in-process behavior of aliases, collisions and traps is tested in ``test_proxy.py``.
 """
 import os
 import subprocess
@@ -32,9 +32,9 @@ def _write_binding(path, name, expr):
     A rewrite of an existing file moves its modification time 10 seconds forward instead of relying on the clock. The
     new body has the same length as the old one. numba's source stamp is ``(st_mtime, st_size)``, and CPython
     validates a ``.pyc`` file by the same pair. On a file system with coarse timestamps, a rewrite within the same
-    second would otherwise look unchanged, and numba would not see the edit. If the stamp still matches after the
-    rewrite, the function raises ``RuntimeError``, because the scenario would then test nothing. ``proxy`` requires the
-    decorator line to be on line 8 or later, and the generated module puts it on line 11.
+    second would otherwise leave the stamp unchanged, and numba would not detect the edit. If the stamp still matches
+    after the rewrite, the function raises ``RuntimeError``, because the scenario would then test nothing. ``proxy``
+    requires the decorator line to be on line 8 or later, and the generated module puts it on line 11.
     """
     before = path.stat() if path.exists() else None
     path.write_text(textwrap.dedent(f'''
@@ -66,10 +66,10 @@ def _write_scenario(tmp_path):
     """Write the bindings, their cached callers and the probe script into ``tmp_path``, and return the probe's path.
 
     The two bindings are in separate files, so an edit to one changes neither the alias nor the source stamp of the
-    other. The four cached callers share one file, so the controls have the same module, cache directory and run as
-    the stale callers. ``call_scale`` and ``call_scale2`` both call the edited binding, so the test can check that
-    numbox discards every stale entry, not only the first one that numba loads. ``plain`` refers to no alias, so the
-    cache check returns early for it, and it must load from the cache as before.
+    other. The four cached callers share one file, so the controls share the module, the cache directory and the probe
+    run with the stale callers. ``call_scale`` and ``call_scale2`` both call the edited binding, so the test can check
+    that numbox discards every stale entry, not only the first one that numba loads. ``plain`` refers to no alias, so
+    the cache check returns early for it, and it must load from the cache as before.
     """
     _write_binding(tmp_path / _EDITED, "scale", "x * 2.0")
     _write_binding(tmp_path / "proxied_binding_stable.py", "offset", "x + 100.0")
@@ -155,11 +155,11 @@ def _probe_env(tmp_path, cache_name, precompile=False):
     script's directory from the path. Bytecode writing is disabled, because CPython also checks a ``.pyc`` file by
     ``(st_mtime, st_size)`` and could miss a same-length edit.
 
-    The function removes inherited variables that could defeat the scenario. ``PYTHONWARNINGS`` and ``PYTHONDEVMODE``
-    change the warning filters, and ``PYTHONWARNINGS=error`` would let an unrelated warning end the probe.
-    ``NUMBA_DISABLE_JIT`` would disable compilation. Under ``NUMBA_OPT=0``, numba does not cache a caller of a proxied
-    function and warns that the caller uses dynamic globals. ``NUMBOX_PROXY_CACHE_STRICT`` would turn every repair
-    below into an error, so a strict run sets it explicitly.
+    The function removes inherited variables that would change what the scenario tests. ``PYTHONWARNINGS`` and
+    ``PYTHONDEVMODE`` change the warning filters, and ``PYTHONWARNINGS=error`` would turn an unrelated warning into an
+    error that ends the probe. ``NUMBA_DISABLE_JIT`` would disable compilation. Under ``NUMBA_OPT=0``, numba does not
+    cache a caller of a proxied function and warns that the caller uses dynamic globals. ``NUMBOX_PROXY_CACHE_STRICT``
+    would turn every repair below into an error, so a strict run sets it explicitly.
     """
     env = dict(os.environ)
     for hostile in ("PYTHONWARNINGS", "PYTHONDEVMODE", "NUMBA_DISABLE_JIT", "NUMBA_OPT", "NUMBOX_PROXY_CACHE_STRICT"):
@@ -174,8 +174,9 @@ def _probe_env(tmp_path, cache_name, precompile=False):
 def _run_probe(probe, env):
     """Run a probe to completion and return the ``CompletedProcess``.
 
-    Some scenarios expect the child to crash, so the caller decides which return code is acceptable. The timeout of
-    300 seconds ends a crashed child that does not exit, as when a crash reporter holds the process.
+    Some scenarios expect the child to crash, so the caller decides which return code is acceptable. With a timeout
+    of 300 seconds, ``subprocess.run`` kills a child that crashed but does not exit, for example because a crash
+    reporter keeps the process alive.
     """
     return subprocess.run(
         [sys.executable, str(probe)],
@@ -263,7 +264,7 @@ def test_stale_proxy_alias_is_discarded_and_recompiled(tmp_path, precompile):
     an object's external symbols in one batch, so the one missing alias zeroes every external relocation in the loaded
     object. In the ``compile`` case, the stale load itself succeeds, because no code in the object has run yet. The
     next cached load of any object then aborts the process with ``LLVM ERROR: Symbol not found`` and the old alias,
-    because the execution engine keeps the first failure.
+    because the execution engine retains the error of the first load.
 
     With the check, both callers of the edited body compile again, the caller of the other binding loads from the
     cache, and a ``StaleProxyCacheWarning`` names the old alias. A third run loads every caller from the cache without
@@ -412,7 +413,7 @@ def test_a_const_reference_caller_becomes_cacheable(tmp_path):
 
 
 def test_a_const_reference_caller_serves_a_stale_body_after_an_edit(tmp_path):
-    """After an edit, a caller that reads ``.as_func`` as a constant keeps the old result, and numbox gives no warning.
+    """After an edit, a caller that reads ``.as_func`` as a constant still returns the old result, without a warning.
 
     The test records a known limitation. When numbox lowers the constant, it links the body's machine code into the
     caller's object, so the object does not contain the ``numbox_pxy_`` prefix, and the cache check returns early. If
@@ -421,8 +422,9 @@ def test_a_const_reference_caller_serves_a_stale_body_after_an_edit(tmp_path):
     the dispatcher caller, which numbox repaired, and a later run returns the old result without a warning.
 
     If the cache check is extended to a body linked into a caller, ``const_scale`` will return the new result, and the
-    first assertion will fail. That failure reports that the limitation is gone, not a regression. ``const_offset`` and
-    ``disp_offset`` remain the control: a repair that discarded the whole directory would make them compile again.
+    first assertion will fail. Such a failure means that the limitation is gone. It is not a regression.
+    ``const_offset`` and ``disp_offset`` remain the control: a repair that discarded the whole directory would make
+    them compile again.
     """
     probe = _write_const_caller_scenario(tmp_path)
     env = _probe_env(tmp_path, "nbcache")
@@ -464,7 +466,7 @@ def test_a_const_reference_caller_serves_a_stale_body_after_an_edit(tmp_path):
 def _rewrite(path, old, new):
     """Replace ``old`` with ``new`` in ``path``, and move the file's modification time 10 seconds forward.
 
-    ``_write_binding`` moves the time in the same way, so that numba sees the edit.
+    ``_write_binding`` moves the time in the same way, so that numba detects the edit.
     """
     before = path.stat()
     path.write_text(path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
@@ -680,17 +682,17 @@ def test_a_const_reference_caller_calls_a_binding_that_disappeared(tmp_path):
     caller's object, so the object refers to no ``numbox_pxy_`` alias. The cache check returns early, and the cached
     entry loads in a process without the binding. The caller returns the vanished binding's result, while the same
     source with an empty cache fails with the ``TypingError`` of the test above. Strict mode does not detect the case
-    either, because the check never sees the entry.
+    either, because the cache check finds no alias in the entry.
 
     The defect is in the constant lowering, which links the body into the caller. If that lowering is changed to
     discard such a caller, the cached run will fail as the run with an empty cache does, and the assertions will fail.
-    That failure reports that the limitation is gone, not a regression.
+    Such a failure means that the limitation is gone. It is not a regression.
 
-    A user may write this form on purpose, believing it safe. If the binding is absent, an unguarded ``scale.as_func``
-    raises ``AttributeError`` at import, and a caller defined inside an ``if hasattr(...)`` block, as the proxy page
-    shows, is not defined; both forms are safe. A guard written as a conditional expression turns that import failure
-    into a wrong result. A body that called a real C symbol would crash the process with a segmentation fault and an
-    empty stderr, so this body calls none, and the test can assert on the result.
+    A user may write this form deliberately, in the belief that it is safe. If the binding is absent, an unguarded
+    ``scale.as_func`` raises ``AttributeError`` at import, and a caller defined inside an ``if hasattr(...)`` block, as
+    the proxy page shows, is not defined; both forms are safe. A guard written as a conditional expression turns that
+    import failure into a wrong result. A body that called a real C symbol would crash the process with a segmentation
+    fault and an empty stderr, so this body calls no C symbol, and the test can assert on the result.
     """
     _write_optional_binding(tmp_path)
     (tmp_path / "const_optional_caller.py").write_text(textwrap.dedent('''
@@ -755,8 +757,8 @@ def test_the_mach_o_reader_strips_the_leading_underscore(tmp_path):
 
     The scenarios above reach the Mach-O reader only on macOS, so this test calls it on a Mach-O object that llvmlite's
     LLVM emits on any platform. A reader that kept the underscore would compare ``_numbox_pxy_...`` with the prefix,
-    match nothing, and pass every stale object. That result looks the same as an object with no alias to check. The
-    test skips if llvmlite cannot emit Mach-O here.
+    match nothing, and pass every stale object. That result cannot be distinguished from the result for an object
+    with no alias to check. The test skips if llvmlite cannot emit Mach-O here.
     """
     emit = tmp_path / "emit_macho.py"
     emit.write_text(textwrap.dedent('''
@@ -813,9 +815,9 @@ def test_the_reader_recognises_the_objects_numba_actually_caches(tmp_path):
     stopped matching, with no message that names the cause.
 
     The format is not obvious from the platform. On Windows the ELF reader matches, because numba's JIT emits ELF
-    objects there as well, so a ``get_object_format`` of COFF says nothing about the bytes. The test therefore records
-    what the reader receives during a warm run. It needs no stale entry and no edit, so it holds even if the crash
-    scenario stops reproducing.
+    objects there as well, so a ``get_object_format`` result of COFF does not describe the bytes of the object. The
+    test therefore records what the reader receives during a warm run. It needs no stale entry and no edit, so it
+    still tests the reader if the crash scenario no longer occurs.
     """
     probe = _write_scenario(tmp_path)
     env = _probe_env(tmp_path, "nbcache")
@@ -861,11 +863,11 @@ def test_the_reader_recognises_the_objects_numba_actually_caches(tmp_path):
 def test_strict_mode_raises_on_a_stale_alias_before_healing(tmp_path):
     """In strict mode, loading an entry with a stale alias raises ``StaleProxyCacheError``, and the entry stays on disk.
 
-    By default, numbox discards a stale entry, warns and compiles again. A user who investigates a cache problem wants
-    the process to stop at the first stale entry, name it, and leave it on disk. The strict run must therefore exit
-    with ``StaleProxyCacheError`` on stderr. A second run without strict mode then finds the same entry stale and
-    repairs it with a warning. If strict mode had compiled the entry again, that run would load the new body without a
-    warning.
+    By default, numbox discards a stale entry and warns, and numba compiles the caller again. A user who investigates
+    a cache problem needs the process to stop at the first stale entry, name it, and leave it on disk. The strict run
+    must therefore exit with ``StaleProxyCacheError`` on stderr. A second run without strict mode then finds the same
+    entry stale and repairs it with a warning. If strict mode had compiled the entry again, that run would load the
+    new body without a warning.
     """
     probe = _write_scenario(tmp_path)
     _warm(probe, _probe_env(tmp_path, "nbcache"))
@@ -929,10 +931,11 @@ def test_strict_mode_raises_when_a_payload_cannot_be_read(tmp_path, monkeypatch)
 def test_strict_mode_still_loads_a_well_formed_object_with_no_stale_alias(tmp_path, monkeypatch):
     """An object that parses, holds the alias prefix and imports no alias loads with and without strict mode.
 
-    Such an object looks the same as a valid function with no proxied callee that holds an alias-like string, as in
-    ``test_strict_mode_does_not_abort_on_a_healthy_object_embedding_the_prefix`` below. Strict mode therefore raises
-    only for a payload whose read raises. ``test_the_reader_recognises_the_objects_numba_actually_caches`` checks
-    instead that the reader parses the objects that numba emits.
+    Such an object cannot be distinguished from a valid function with no proxied callee that holds an alias-like
+    string, as in ``test_strict_mode_does_not_abort_on_a_healthy_object_embedding_the_prefix`` below. Strict mode
+    therefore raises only for a payload whose read raises.
+    ``test_the_reader_recognises_the_objects_numba_actually_caches`` checks instead that the reader parses the objects
+    that numba emits.
     """
     from numbox.core.proxy.proxy import _guarded_rebuild
 
@@ -996,7 +999,7 @@ def test_strict_mode_does_not_abort_on_a_healthy_object_embedding_the_prefix(tmp
 def test_strict_cache_mode_reads_the_env_truthily(value, expected, monkeypatch):
     """``_strict_cache_mode`` is off for an unset or empty value and for ``0``, ``false``, ``no`` and ``off``.
 
-    Any other value turns it on, and letter case and surrounding white space do not matter. The off values are
+    Any other value turns it on, and letter case and surrounding white space are ignored. The off values are
     documented, and a user relies on them to disable strict mode for one run with ``=0``. If a change dropped one of
     them, ``export NUMBOX_PROXY_CACHE_STRICT=0`` could enable strict mode, and stale entries would raise errors instead
     of being repaired. The rest of the suite sets the variable only to ``1``, so this test checks each off value.

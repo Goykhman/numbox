@@ -26,7 +26,7 @@ def test_1():
     type, and caches them when numbox's jit options enable caching.
     """
     e1 = Entity(3.141)
-    e2 = Entity(int16(137))  # A plain int is typed as int64, so int16 gives this entity a type of its own.
+    e2 = Entity(int16(137))  # A plain int is typed as int64, so this int16 value yields a distinct entity type.
     e3 = Entity(2012)
     e4_x1 = "a string"
     e4 = Entity(e4_x1)

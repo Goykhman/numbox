@@ -177,8 +177,8 @@ def test_proxy_referenced_symbol_is_process_stable(tmp_path):
     referred to that name, two processes that compiled different numbers of functions first would write different
     symbols into otherwise equal cache entries. A cache that both processes filled could then pair a body that defines
     one name with a caller that refers to the other, and the load would abort with ``LLVM ERROR: Symbol not found``.
-    The probe runs twice, after no other compile and after five, and the test asserts that the caller refers to the
-    same alias both times.
+    The probe runs twice: first with no function compiled before the caller, then with five functions compiled before
+    it. The test asserts that the caller refers to the same alias both times.
     """
     probe = tmp_path / "probe.py"
     probe.write_text(textwrap.dedent('''
@@ -254,7 +254,7 @@ def test_proxy_if_available_missing_symbol_returns_stub():
 
     The stub has no ``.as_func``, because a function value needs a compiled body. Its ``__name__`` is the name that
     :func:`make_proxy_name` gives the dispatcher of a present binding, so a log or a ``repr`` shows the same name
-    either way. Its ``__qualname__`` and ``__doc__`` are those of the decorated function.
+    whether the symbol is present or absent. Its ``__qualname__`` and ``__doc__`` are those of the decorated function.
     """
     lib = open_libm()
     if lib is None:
@@ -302,8 +302,9 @@ def test_proxy_factory_closures_dispatch_to_their_own_body():
     """Closures of one factory over different values have different aliases, and each caller reaches its own body.
 
     The closures share a module, a qualified name and a signature, so only the body's fingerprint, which holds the
-    closure cell, separates their aliases. If they shared an alias, ``llvmlite.binding.add_symbol`` would keep the
-    address registered last, and the caller of the first closure would run the second body.
+    closure cell, separates their aliases. If they shared an alias, the second registration with
+    ``llvmlite.binding.add_symbol`` would replace the first, and the caller of the first closure would run the second
+    body.
     """
     def mk(c):
         @proxy(float64(float64))
@@ -328,7 +329,7 @@ def test_proxy_factory_closures_dispatch_to_their_own_body():
 
 
 def test_proxy_factory_over_c_symbols_dispatch_distinctly():
-    """Bindings of one factory over different C symbol names have different aliases, and each caller reaches its own.
+    """One factory's bindings over different C symbol names have different aliases, so each caller reaches its own body.
 
     Each body calls the ``@intrinsic`` ``_call_lib_func``, which the strict fingerprint cannot canonicalize. The
     best-effort fingerprint still holds the closure cell with the symbol name. A fingerprint of the bytecode alone would
@@ -383,14 +384,15 @@ def test_proxy_redefinition_keeps_callers_on_their_own_body():
 
 
 def test_proxy_absent_binding_caller_gets_loud_diagnostic_not_segfault(tmp_path):
-    """A cached caller of a binding whose C symbol disappears fails with a ``TypingError``, without a crash or a value.
+    """A cached caller of a binding whose C symbol disappears fails with a ``TypingError``.
 
-    numba's cache key for the caller does not cover its callees, so the second process finds the cached caller. Its
-    code refers to the binding's alias. In that process, ``proxy_if_available`` returns the stub and registers a trap
-    under the alias. Without the trap, the unresolved symbol would crash the process without a message. The trap
-    raises inside a ``@cfunc``, where numba discards the exception and returns zero, so a call through it would print
-    a wrong result and exit with status 0. The cache check therefore discards an entry that refers to a trap's alias,
-    and the recompile fails with the stub's ``TypingError``, as it does with an empty cache.
+    The process does not crash, and the caller returns no value. numba's cache key for the caller does not cover its
+    callees, so the second process finds the cached caller. Its code refers to the binding's alias. In that process,
+    ``proxy_if_available`` returns the stub and registers a trap under the alias. Without the trap, the unresolved
+    symbol would crash the process without a message. The trap raises inside a ``@cfunc``, where numba discards the
+    exception and returns zero, so a call through it would print a wrong result and exit with status 0. The cache check
+    therefore discards an entry that refers to a trap's alias, and the recompile fails with the stub's ``TypingError``,
+    as it does with an empty cache.
     """
     pkg = tmp_path / "flip_pkg"
     pkg.mkdir()
@@ -530,9 +532,9 @@ def test_proxy_as_func_as_a_jitted_constant_propagates_a_raising_body():
     """An exception raised in the body also propagates when the jitted caller reads ``.as_func`` as a constant.
 
     numba unboxes an argument at the call, but it lowers a constant at compile time with ``lower_constant``. The two
-    paths set the numba entry point in different code, so either could break alone. The constant path also decides
-    caching: the lowering declares the entry point as a symbol instead of writing its address into the code. numba can
-    therefore cache a ``cache=True`` caller of the constant.
+    paths set the numba entry point in different code, so a defect can affect one path and not the other. The constant
+    path also decides caching: the lowering declares the entry point as a symbol instead of writing its address into
+    the code. numba can therefore cache a ``cache=True`` caller of the constant.
     """
     as_func = aux_raises.as_func
 
@@ -573,8 +575,8 @@ def test_proxy_as_func_declared_as_a_plain_function_type_still_discards():
 
     The test first asserts that ``.as_func`` is a ``DeriveWAP``. Both later assertions also hold for a plain
     ``CompileResultWAP``, which never reaches ``can_convert_to``, so without the first assertion the test could pass
-    for the wrong reason. As in the dispatcher test above, the discarded exception is reported as unraisable, and the
-    test asserts only the returned value.
+    even if ``.as_func`` were not a ``DeriveWAP``. As in the dispatcher test above, the discarded exception is reported
+    as unraisable, and the test asserts only the returned value.
     """
     as_func = aux_raises.as_func
     assert isinstance(as_func, DeriveWAP), (
@@ -630,9 +632,10 @@ def test_proxy_jit_flags_dispatch_to_their_own_body():
     """Two decorations of one body that differ only in ``error_model`` have different aliases.
 
     The jit options change the machine code but not the module, the qualified name, the signature or the body's
-    fingerprint, so the alias hashes the options as well. With one alias for both, ``add_symbol`` would keep the body
-    compiled last. A caller of the ``numpy`` binding would then run the ``python`` one, whose C entry point discards
-    the ``ZeroDivisionError`` and returns 0.0 instead of inf.
+    fingerprint, so the alias hashes the options as well. With one alias for both, the later registration with
+    ``add_symbol`` would replace the earlier one, and every caller would call the body compiled last. A caller of the
+    ``numpy`` binding would then run the ``python`` one, whose C entry point discards the ``ZeroDivisionError`` and
+    returns 0.0 instead of inf.
     """
     def mk(error_model):
         @proxy(float64(float64), jit_options={"error_model": error_model})
@@ -672,8 +675,8 @@ def test_two_factory_bindings_over_different_symbols_get_different_aliases():
     """Two bodies that a factory makes over different ``ExternalFunction`` symbols have different aliases.
 
     The bodies share a code object and a qualified name, so only the captured value separates their aliases. With one
-    alias for both, ``add_symbol`` would keep the second registration, and the callers of the first body would return
-    the second body's result without a warning.
+    alias for both, the second registration with ``add_symbol`` would replace the first, and the callers of the first
+    body would return the second body's result without a warning.
     """
     floor_b = _make_extfn_binding("floor")
     ceil_b = _make_extfn_binding("ceil")
@@ -699,8 +702,8 @@ def test_bodies_the_fingerprint_cannot_separate_are_detected_rather_than_rebound
     Such a pointer names no library and no symbol, and its address differs between processes, so no fingerprint that
     is the same in every process can separate the two bodies. numbox publishes the second body under a name of its
     own, valid only in this process, and warns with ``AliasCollisionWarning``. It also retires the shared alias, so the
-    cache check discards a cached caller of either body instead of loading it against the wrong one. Each caller in
-    this process reaches its own body.
+    cache check discards a cached caller of either body, which could otherwise run the wrong body. Each caller in this
+    process reaches its own body.
     """
     import ctypes
     from numbox.core.proxy.proxy import AliasCollisionWarning, _ABSENT_ALIASES
@@ -746,16 +749,15 @@ def test_a_retired_alias_stays_retired_when_its_body_is_registered_again():
 
     numbox retires the alias of a collision because another process may build the two bodies in the other order, and a
     later registration does not change that. If the registration removed the alias from the set, a ``cache=True``
-    caller cached in another process would load again, although nothing tells which of the two bodies it was compiled
-    against. The other retirement tests read the set at the first publication; this test reads it after the same body
-    registers again.
+    caller cached in another process would load again, although the alias does not identify which of the two bodies
+    the caller was compiled against. The other retirement tests read the set at the first publication; this test reads
+    it after the same body registers again.
 
     The re-registration runs with ``AliasCollisionWarning`` as an error and must return the shared alias, not a name
     of the form ``<alias>_c<N>``. These two checks show that it took the branch for one body registered twice, which
-    is the branch under test.
-    An implementation that read it as a new collision would also leave the alias retired, so without them the test
-    could pass without reaching that branch. The test fails against an implementation that removes the alias from
-    ``_ABSENT_ALIASES`` on that branch.
+    is the branch under test. An implementation that treated it as a new collision would also leave the alias
+    retired, so without them the test could pass without reaching that branch. The test fails against an
+    implementation that removes the alias from ``_ABSENT_ALIASES`` on that branch.
     """
     import ctypes
     from numbox.core.proxy.proxy import AliasCollisionWarning, _ABSENT_ALIASES
@@ -836,8 +838,8 @@ def test_one_body_registered_twice_keeps_its_alias():
 
     A factory called twice with equal arguments builds one body twice, and so does a module reload. Both registrations
     compute the alias that the first one published and compile the same code, so pointing the alias at the new address
-    is correct. If numbox read the second registration as a collision, it would retire the alias, and the cache check
-    would discard every cached caller of the binding in every later process.
+    is correct. If numbox treated the second registration as a collision, it would retire the alias, and the cache
+    check would discard every cached caller of the binding in every later process.
     """
     from numbox.core.proxy.proxy import AliasCollisionWarning, _ABSENT_ALIASES
 
@@ -896,8 +898,9 @@ def test_a_trap_keeps_its_hands_off_an_alias_a_present_binding_holds():
     alias, because the alias covers the body, the signature and the jit options but not the handle. A trap under that
     alias would raise inside its ``@cfunc`` wrapper, which discards the exception and returns zero. Every call through
     the alias would then return a wrong result without a warning. ``_PUBLISHED_ALIASES`` exists to prevent that.
-    numbox keeps the body under the alias and warns with ``AliasCollisionWarning``, because a caller compiled in this
-    process calls a binding that is present. A process that sees only the absent handle registers the trap.
+    The trap is not registered: the body remains published under the alias, and numbox warns with
+    ``AliasCollisionWarning``, because a caller compiled in this process calls a binding that is present. A process
+    that binds only the absent handle registers the trap.
     """
     from llvmlite import binding as ll
     from numbox.core.proxy.proxy import AliasCollisionWarning, _ABSENT_ALIASES
@@ -1004,8 +1007,8 @@ def test_open_libm_refuses_a_handle_a_caller_would_reach_past(monkeypatch):
     The callers skip on ``None``, so a platform without a usable C runtime skips those tests instead of failing them.
     That holds only if ``open_libm`` tests every symbol that the callers bind: a library with ``ceil`` and ``floor``
     but without ``cos`` must give ``None``, because several callers bind ``cos``. Every runtime in the test matrix
-    exports all three symbols, so the rest of the suite cannot detect a narrower test. This test hides each symbol in
-    turn from a real handle, so it checks ``open_libm`` and not the platform.
+    exports all three symbols, so the rest of the suite cannot detect an ``open_libm`` that tests fewer symbols. This
+    test hides each symbol in turn from a real handle, so it checks ``open_libm`` and not the platform.
     """
     import ctypes
 
@@ -1041,13 +1044,13 @@ def test_one_symbol_reached_through_two_prototypes_is_not_one_body():
     compiles a call that returns a double and the ``c_float`` prototype one that returns a float. The two bodies are
     different machine code. Their fingerprints are equal, because a pointer built from a raw address has no
     fingerprint, and both bodies hold one placeholder for it. An implementation that compared only the addresses would
-    read the second registration as the same body. It would point the alias at the second body without a warning, and
-    a caller of the first body compiled afterwards would run the second.
+    treat the second registration as the same body. It would point the alias at the second body without a warning,
+    and a caller of the first body compiled afterwards would run the second.
 
     The last assertion checks that caller, and the assertions before it establish its premise. The caller compiled
     before the second registration returns 2.0 in either case, because numba linked it before any change, so the pair
-    of callers shows the effect of the registration. The alias keeps the first body's address, so a fix that gives the
-    second body a new name but still points the alias at it fails.
+    of callers shows the effect of the registration. The alias must still resolve to the first body's address, so a
+    fix that gives the second body a new name but still points the alias at it fails.
     """
     import ctypes
 
@@ -1103,16 +1106,16 @@ def test_a_body_that_lost_a_collision_does_not_serve_a_warm_caller(tmp_path):
     numbox names the losing body after the number of aliases that this process has published, so the same name can
     belong to the other body in another process. The two processes here share one numba cache and build the pair in
     opposite orders. The first caches a caller of the ceil binding, which loses the collision there and receives the
-    process-local name. The second builds ceil first, so ceil keeps the shared alias and floor receives the
-    process-local name. numba's cache key does not cover the callees, so the second process finds the cached caller.
-    numbox retires the process-local name together with the shared alias, so the cache check discards the entry, and
-    the caller computes ``ceil(2.5)``. Without the retirement, it would compute ``floor(2.5)`` and print 2.0 instead
-    of 3.0, without a warning.
+    process-local name. The second builds ceil first, so the ceil binding is published under the shared alias and the
+    floor binding receives the process-local name. numba's cache key does not cover the callees, so the second process
+    finds the cached caller. numbox retires the process-local name together with the shared alias, so the cache check
+    discards the entry, and the caller computes ``ceil(2.5)``. Without the retirement, it would compute ``floor(2.5)``
+    and print 2.0 instead of 3.0, without a warning.
 
     The ``STALE`` counts show that the result comes from the discard. The second process must report that it found and
     discarded a cached entry, because a process that compiled the caller again for another reason would also print
-    3.0. The first process must report no discard, because a cache that was stale before the test would make the
-    second process's discard say nothing about the order.
+    3.0. The first process must report no discard. If the cache were already stale before the test, the discard in the
+    second process would not depend on the order.
     """
     if open_libm() is None:
         pytest.skip("No math library discoverable to take two distinct symbol addresses from")
@@ -1200,14 +1203,14 @@ def test_a_body_that_lost_a_collision_does_not_serve_a_warm_caller(tmp_path):
 def test_a_body_deriving_from_a_collision_does_not_serve_a_warm_caller(tmp_path):
     """A cached caller of a proxied body that calls a colliding binding is also discarded when the order changes.
 
-    The previous test covers a caller of a colliding body, and this test covers a body one step further.
-    ``wrapped_ceil`` and ``wrapped_floor`` are proxied bodies that call the colliding bindings and capture their
-    dispatchers. If the fingerprint folded such a dispatcher by its alias, the alias of the calling body would depend
-    on the order in which the process built the pair. ``wrapped_ceil`` would fold the process-local name in a process
-    that built floor first, and ``wrapped_floor`` would fold it in a process that built ceil first. The two would then
-    exchange aliases between the runs. Neither alias would be retired, so the second process would load the cached
-    caller and compute ``floor(2.5)`` instead of ``ceil(2.5)``. The only warning would be the collision warning of
-    the pair.
+    The previous test covers a caller of a colliding body, and this test covers a caller of a proxied body that calls a
+    colliding binding. ``wrapped_ceil`` and ``wrapped_floor`` are such bodies: they call the colliding bindings and
+    capture their dispatchers. If the fingerprint folded such a dispatcher by its alias, the alias of the calling body
+    would depend on the order in which the process built the pair. ``wrapped_ceil`` would fold the process-local name
+    in a process that built floor first, and ``wrapped_floor`` would fold it in a process that built ceil first. The
+    two would then exchange aliases between the runs. Neither alias would be retired, so the second process would load
+    the cached caller and compute ``floor(2.5)`` instead of ``ceil(2.5)``. The only warning would be the
+    ``AliasCollisionWarning`` about the two bindings.
 
     The fingerprint walker therefore does not fold a retired alias. The two calling bodies then have equal
     fingerprints and collide with each other, and that collision retires their aliases, as the first collision
@@ -1317,9 +1320,9 @@ class _AliasLockProbe:
     """A probe that records, from a second thread, whether the alias lock is held at a point of the publication.
 
     A ``threading.Lock`` is not reentrant, and the publishing thread holds the lock, so the probe cannot try to
-    acquire it from that thread. The second thread tries with a timeout of 0.25 seconds, so a held lock gives an
-    answer instead of a deadlock, and each probe of a held lock costs the timeout once. The probe stays disarmed until
-    the publication under test, so the registrations before it do not pay that cost.
+    acquire it from that thread. The second thread tries with a timeout of 0.25 seconds, so an attempt on a held lock
+    times out instead of deadlocking, and each probe of a held lock costs the timeout once. The probe stays disarmed
+    until the publication under test, so the registrations before it do not pay that cost.
     """
 
     def __init__(self, lock):
@@ -1342,8 +1345,8 @@ class _AliasLockProbe:
 class _EntryCountingLock:
     """A wrapper of the alias lock that counts how many times a thread acquires it.
 
-    A probe that finds the lock held at two points cannot tell one critical section from two. A lock acquired and
-    released around each point separately gives the same answers, and between the two points another thread could
+    A probe that finds the lock held at two points cannot distinguish one critical section from two. A lock acquired
+    and released around each point separately gives the same answers, and between the two points another thread could
     assign the same name. The count separates the cases, because a publication that releases the lock between the two
     points acquires it twice.
     """
@@ -1385,9 +1388,10 @@ def test_a_colliding_body_takes_its_name_under_the_registry_lock(monkeypatch):
     """The losing body of a collision reads the count of aliases and publishes its new name in one critical section.
 
     ``len(_PUBLISHED_ALIASES)`` decides the name, and the store that follows takes it. If two threads read the count
-    before either stored, they would assign one name to two bodies. ``add_symbol`` would keep the address stored last,
-    and the other body's callers would run it without a warning. ``_publish_cfunc_alias`` runs in plain Python at
-    decoration, after numba has released its compiler lock, so nothing else serializes it.
+    before either stored its name, they would assign one name to two bodies. The second registration with
+    ``add_symbol`` would replace the first, and the callers of the first body would run the second without a warning.
+    ``_publish_cfunc_alias`` runs in plain Python at decoration, after numba has released its compiler lock, so
+    nothing else serializes it.
 
     The interval between the read and the store is short, and timing decides which thread loses, so the test checks
     the exclusion instead of provoking a race. It probes the lock at both ends of the region: at the comparison that
@@ -1458,9 +1462,9 @@ class _TrapCompileHeld:
     """A replacement for ``cfunc`` in ``proxy.py`` that holds the trap's compile until the present binding publishes.
 
     ``proxy.py`` compiles a cfunc only for the trap, so the replacement stops the absent registration between the read
-    that decides it and the write that depends on it. The present binding then publishes in that interval by design,
-    not by chance. The replacement holds only a function named ``_trap``, so a cfunc that ``proxy.py`` might compile
-    for a present binding could not block the test.
+    that decides it and the write that depends on it. The present binding therefore publishes in that interval on
+    every run, not only when the timing allows it. The replacement holds only a function named ``_trap``, so a cfunc
+    that ``proxy.py`` might compile for a present binding could not block the test.
     """
 
     def __init__(self, real_cfunc):
@@ -1485,8 +1489,9 @@ def test_a_trap_does_not_take_an_alias_a_body_won_while_the_trap_was_compiling(m
     check and the write that depends on it, so another thread can publish a body during the compile, after the read
     that found no body. The trap raises inside a cfunc wrapper, which discards the exception and returns zero. A
     caller of the alias would then receive a wrong result without a warning, the same failure that
-    :func:`_publish_cfunc_alias` prevents for two bodies. The test blocks instead of racing, so the interleaving
-    happens on every run: the absent side waits inside its compile until the present side has published.
+    :func:`_publish_cfunc_alias` prevents for two bodies. The test blocks the absent side instead of relying on a race,
+    so the interleaving happens on every run: the absent side waits inside its compile until the present side has
+    published.
     """
     from llvmlite import binding as ll
 
