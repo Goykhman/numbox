@@ -1,3 +1,9 @@
+"""Tests of ``Any``, which holds one value of any numba type.
+
+The tests store scalars, a string, arrays, a function value and structrefs with ``make_any``, read them back with
+``get_as`` and replace them with ``reset``, from Python and from jitted code. They also count the references that an
+``Any`` takes to a structref that it holds, and check that ``get_as`` returns the stored object rather than a copy.
+"""
 import numpy
 
 from numba import float64, int32, int64, njit, typeof
@@ -11,12 +17,17 @@ from test.common_structrefs import S1, S1Type, S3, S3Type
 
 
 def test_1():
+    """``make_any`` stores a negative integer, and ``get_as`` reads it back as an int64."""
     x = -65
     any1 = make_any(x)
     assert any1.get_as(int64) == x
 
 
 def test_2():
+    """``Any`` values of different types can share a typed dictionary, and ``get_as`` reads each with its own type.
+
+    An array is returned without a copy.
+    """
     x1 = 217
     any1 = make_any(x1)
     x2 = 2.17
@@ -40,18 +51,24 @@ def test_2():
 
 @njit
 def aux(x):
+    """Return an ``Any`` that holds a new ``S1`` whose field ``x2`` is ``x``, created in jitted code."""
     s1 = S1(81, x, 2.17)
     any1 = make_any(s1)
     return any1
 
 
 def test_3():
+    """An ``Any`` that jitted code creates and returns to Python holds a ``StructRef`` that ``get_as`` reads."""
     x = 137
     val = aux(x).get_as(S1Type)
     assert val.x2 == x
 
 
 def test_4():
+    """An ``Any`` holds a ``cres`` function value, and ``get_as`` returns the same Python object, which can be called.
+
+    The test reads the value from Python and from jitted code.
+    """
     aux1_sig = float64(float64)
     aux1_ty = aux1_sig.as_type()
 
@@ -74,8 +91,11 @@ def test_4():
 
 
 def test_5():
-    """ Tests that `Any` type increments NRT ref count of MemInfo-wrapped object it holds.
-    Specifically, the `_Content` object holds it, while `Any` holds the `(Erased*)_Content` """
+    """``make_any`` takes a reference to a structref that it stores, and deleting the ``Any`` releases it.
+
+    The ``_Content`` wrapper holds the reference, and the ``Any`` holds the wrapper cast to ``ErasedType``. ``get_as``
+    returns a proxy of the same MemInfo, which takes a reference of its own.
+    """
     s1 = S1(81, 67, 2.17)
     assert get_nrt_refcount(s1) == 1
     any1 = make_any(s1)
@@ -95,7 +115,7 @@ def test_5():
 
 
 def test_6():
-    """ Roundtrip returns the original structref's MemInfo """
+    """``get_as`` returns the structref that ``make_any`` received, with the same MemInfo, not a copy."""
     s1 = S1(81, 67, 2.17)
     s1_meminfo_p = structref_meminfo(s1)[0]
     any1 = make_any(s1)
@@ -105,7 +125,7 @@ def test_6():
 
 
 def test_7():
-    """ Tests `(Erased*)_Content` object refcount. """
+    """In jitted code, the ``ErasedType`` wrapper in the field ``p`` of an ``Any`` has a reference count of 1."""
 
     @njit
     def aux():
@@ -120,6 +140,7 @@ def test_7():
 
 
 def test_8():
+    """``get_as`` returns the record array that an ``Any`` holds, with the data address of the original array."""
     rec1 = numpy.dtype([("x", numpy.int16), ("y", numpy.float64)])
     a1 = numpy.array([(137, 2.17)], dtype=rec1)
     a1_ty = typeof(a1)
@@ -128,6 +149,7 @@ def test_8():
 
 
 def test_9():
+    """An ``Any`` holds a ``StructRef`` whose field is another ``StructRef``, and ``get_as`` reads the nested fields."""
     s1 = S1(81, 67, 2.17)
     s3 = S3(s1, 2.17)
     any1 = make_any(s3)
@@ -139,6 +161,10 @@ def test_9():
 
 
 def test_10():
+    """``reset`` replaces the value of an ``Any`` with a value of another type.
+
+    ``reset`` takes a reference to a structref that it stores, and a later ``reset`` releases that reference once.
+    """
     any = make_any(3.14)
     assert abs(any.get_as(float64) - 3.14) < 1e-15
     any.reset("hello")

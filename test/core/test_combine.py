@@ -1,3 +1,10 @@
+"""Tests of ``Work.combine`` and of the helpers in ``combine_utils``.
+
+``combine`` copies the data of the requested nodes of a graph into a sheaf, a typed dictionary of ``Any`` values keyed
+by node name. ``load_dict_into_array`` copies a sheaf into the first row of a structured array, whose dtype
+``make_requested_dtype`` makes. The requests name nodes by ``Work`` node or by name, and one node holds a byte string.
+The last test checks that ``combine`` stops once it has found a node for every requested name.
+"""
 import numpy
 
 from numba import njit, typeof
@@ -13,6 +20,10 @@ from test.auxiliary_utils import collect_and_run_tests
 
 
 def test_combine_1():
+    """``combine`` copies the data of a single node into the sheaf.
+
+    ``load_dict_into_array`` then copies the sheaf into the first row of a structured array.
+    """
     w1 = make_work_helper("w1", 3.14)
 
     requested = {"w1": numpy.float64}
@@ -29,6 +40,7 @@ def test_combine_1():
 
 
 def test_combine_2():
+    """A request names nodes by ``Work`` node or by name, and ``combine`` collects a source and the node itself."""
     w1 = make_work_helper("w1", 1.41)
     w2 = make_work_helper("w2", 1.72)
     w3 = make_work_helper("w3", 0.0, sources=(w1, w2), derive_py=lambda w1_, w2_: w1_ + 2 * w2_)
@@ -53,6 +65,7 @@ w2_t = CharSeq(8)
 
 @njit
 def make_w2():
+    """Create the node ``w2``, whose data is the byte string ``b"double"`` of numba type ``CharSeq(8)``."""
     return ll_make_work("w2", b"double", (), None, data_ty_ref=w2_t)
 
 
@@ -69,6 +82,10 @@ def derive_w3(w0_, w1_, w2_):
 
 
 def test_combine_3():
+    """``combine`` collects a byte string of numba type ``CharSeq(8)`` together with float values.
+
+    ``load_dict_into_array`` writes the byte string to a field of dtype ``|S8``.
+    """
     w0 = make_work_helper("w0", 1.72)
     w1 = make_work_helper("w1", 1.41)
     w2 = make_w2()
@@ -94,6 +111,11 @@ def test_combine_3():
 
 
 def test_combine_4():
+    """``combine`` stops once it has found a node for every requested name.
+
+    The graph holds two nodes named ``w1``. ``combine`` reaches the first through ``w2`` and stops before it reaches the
+    second through ``w3``, so the sheaf holds the value of the first.
+    """
     w1 = make_work_helper("w1", 1.41)
     w1_pretend = make_work_helper("w1", 1.72)
     w2 = make_work_helper("w2", 0.0, sources=(w1,), derive_py=lambda w1_: w1_)

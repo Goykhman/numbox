@@ -1,3 +1,9 @@
+"""Tests of ``load_array_row_into_dict``, which stores the fields of a row of a structured array in ``Any`` values.
+
+The function runs in jitted code and fills a typed dictionary keyed by field name. The array has an int16, a float64
+and a 10-byte string field, with random values from a fixed seed. The second test loads each row into the end nodes of
+a graph that ``ll_make_work`` creates, calculates the graph in jitted code, and compares the totals with NumPy's.
+"""
 import numpy
 from numba import njit, typeof
 from numba.core.types import Array, DictType, float64, int16, int64, unicode_type, void
@@ -39,6 +45,7 @@ def aux_load_array_row_into_dict(data, row_ind, loader_dict):
 
 
 def test_load_array_row_into_dict(num_of_entities=NUM_OF_ENTITIES):
+    """Each value in the dictionary equals its field in the row, read with the type from ``np_struct_member_type``."""
     loader_dict = Dict.empty(unicode_type, AnyType)
     data = prepare_input_data()
     for i in range(num_of_entities):
@@ -72,6 +79,7 @@ state_ty = np_struct_member_type(data_ty, "state")
 
 @njit(**jit_options)
 def make_graph(derive_total_):
+    """Create the graph of this file in jitted code: an end node for each field of a row and the node ``total``."""
     quantity = ll_make_work("quantity", int16(0), (), None)
     value = ll_make_work("value", 0.0, (), None)
     state = ll_make_work("state", b"", (), None, data_ty_ref=state_ty)
@@ -97,6 +105,10 @@ def run(total, data, loader_dict, num_of_entities=NUM_OF_ENTITIES):
 
 
 def test_loader_utils_1():
+    """For each row, jitted code loads the fields into the end nodes of the graph and calculates ``total``.
+
+    The totals equal NumPy's result, and the total of a row whose state has no factor is NaN.
+    """
     total = make_graph(derive_total)
     data = prepare_input_data()
     loader_dict = Dict.empty(unicode_type, AnyType)

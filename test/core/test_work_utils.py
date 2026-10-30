@@ -1,3 +1,9 @@
+"""Tests of ``make_work_helper`` and ``make_init_data``, which build ``Work`` nodes from Python with plain derives.
+
+The nodes hold scalars, NumPy arrays, a typed dictionary, a typed list, a ``StructRef`` and a structured array. The
+tests check the calculated values, the refusal of a derive whose parameters do not match the sources, the drawing of a
+graph, and the graph queries ``depends_on``, ``all_inputs_names``, ``all_end_nodes`` and ``as_node``.
+"""
 import numpy
 import numpy as np
 import pytest
@@ -15,6 +21,10 @@ from test.common_structrefs import S1
 
 
 def test_make_work_helper():
+    """``make_work_helper`` compiles a plain function as the derive of a node without sources.
+
+    The node holds its initial value until ``calculate`` stores the derive's result.
+    """
     w = make_work_helper("", 0.0, sources=(), derive_py=lambda: 3.14)
     assert w.data == 0
     w.calculate()
@@ -22,6 +32,10 @@ def test_make_work_helper():
 
 
 def test_bad_make_work_helper():
+    """``make_work_helper`` raises numba's ``TypeError`` for a derive of one parameter on a node without sources.
+
+    The derive compiles for a signature without arguments, which does not match its parameter.
+    """
     with pytest.raises(TypeError):
         _ = make_work_helper("", 0.0, sources=(), derive_py=lambda x: 2 * x)
 
@@ -42,6 +56,10 @@ def calc_val_py(time_array):
 
 
 def test_simple_time_1():
+    """A derive computes a float64 array from a source that holds an int16 array.
+
+    The derive compiles with numbox's jit options, which enable caching.
+    """
     val_init_data = make_init_data(shape=(h,), ty=numpy.float64)
     val = make_work_helper("val", val_init_data, (time,), calc_val_py, jit_options)
 
@@ -52,6 +70,11 @@ def test_simple_time_1():
 
 
 def test_simple_time_2():
+    """A derive receives the array of its source itself, not a copy.
+
+    The derive returns the address of its argument's data, and that address is the address of the array with which
+    the source was created.
+    """
     def calc_ptr(data_):
         return data_.ctypes.data
 
@@ -61,6 +84,12 @@ def test_simple_time_2():
 
 
 def test_simple_time_3():
+    """``make_work_helper`` builds a graph of scalar and array nodes, which one ``calculate`` of ``y2`` computes.
+
+    The test also checks the drawing, ``depends_on`` with a name and with a node, ``all_inputs_names``,
+    ``all_end_nodes`` and ``as_node``. ``all_end_nodes`` counts ``x0``, a node with a derive but no sources, as an end
+    node.
+    """
     tau = make_work_helper("tau", h // 2)
 
     def initialize_x0():
@@ -120,6 +149,7 @@ y2--y0--x0
 
 
 def test_dict_data():
+    """A node's data can be a typed dictionary, and a derive reads its values."""
     d1_ = {"pi": 3.14, "e": 2.17}
     d1 = Dict.empty(key_type=unicode_type, value_type=float64)
     for k, v in d1_.items():
@@ -137,6 +167,7 @@ def test_dict_data():
 
 
 def test_list_data():
+    """A node's data can be a typed list, and a derive reads its items."""
     l1_ = [3.14, 2.17]
     l1 = List.empty_list(item_type=float64)
     for item in l1_:
@@ -154,6 +185,7 @@ def test_list_data():
 
 
 def test_structref_data_1():
+    """A node's data can be a ``StructRef``, and a derive reads its fields and calls its method."""
     w1_data = S1(12, 137, 1.41)
     w1 = make_work_helper("w1", init_data=w1_data)
 
@@ -168,6 +200,7 @@ def test_structref_data_1():
 
 
 def test_structref_data_2():
+    """A derive reads a ``StructRef`` source together with a float source."""
     w1_data = S1(12, 137, 1.41)
     w1 = make_work_helper("w1", init_data=w1_data)
     w2 = make_work_helper("w2", init_data=2.31)
@@ -183,8 +216,10 @@ def test_structref_data_2():
 
 
 def test_struct_array_data():
+    """A node's data can be a zero-dimensional structured array, and a derive reads its fields."""
     w1_data_ty = numpy.dtype([("name", "|S16"), ("x", numpy.int32), ("y", numpy.float64)])
-    w1_data = numpy.array(("fine_euler", 137, 2.17), dtype=w1_data_ty)  # structured scalar
+    # numpy.array of one tuple returns a zero-dimensional structured array, not a numpy.void scalar.
+    w1_data = numpy.array(("fine_euler", 137, 2.17), dtype=w1_data_ty)
     w1 = make_work_helper("w1", init_data=w1_data)
 
     def derive_w2(w1_struct):

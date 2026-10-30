@@ -1,3 +1,16 @@
+"""Tests of the builder: the specs ``End`` and ``Derived``, ``make_graph``, and the cache of the graph maker.
+
+The first tests build graphs from specs, among them the graph of the builder overview on the work page. They check the
+values, the drawings of ``make_image``, the text of ``explain``, ``combine``, ``load``, local registries and the refusal
+of a repeated name. The later tests check the name under which numba caches the graph maker. The name changes with a
+node's declared type and with the jit flags. It stays the same for a new ``init_value`` of the same type, and it is the
+same in every process for a graph with a record type or with a derive that reads an attribute named like a module
+global. A derive defined by ``exec`` compiles through an anchor file of its own. A derive whose anchor cannot be built
+compiles without a cache, and the maker compiles without a cache when a jit flag has no canonical form. The tests that
+count cache files run a script in fresh processes against one cache directory under ``tmp_path``.
+``test_cache_crossprocess`` covers more cases of the maker's cache across processes, ``test_builder_utils`` covers
+``infer_sources_dependencies``, and ``test_derive_wap`` covers the exceptions of derives.
+"""
 import os
 import subprocess
 import sys
@@ -66,6 +79,10 @@ w10_ = Derived(name="w10", init_value=0.0, derive=derive_w10, sources=(w3_, w4_,
 
 
 def test_1():
+    """``make_graph`` returns the access node ``w3`` as a ``Work`` node, and ``calculate`` computes its value.
+
+    The value is 0 until ``calculate`` runs, and ``make_image`` draws ``w3`` with its sources ``w1`` and ``w2``.
+    """
     access = make_graph(w3_)
     w3 = access.w3
     assert isinstance(w3, Work)
@@ -80,6 +97,10 @@ w3--w1
 
 
 def test_2():
+    """One ``make_graph`` call returns the access nodes ``w3`` and ``w4``, which share the source ``w1``.
+
+    Each node calculates its own value, and ``make_image`` draws ``w4`` with its one source.
+    """
     access = make_graph(w3_, w4_)
     w3 = access.w3
     w4 = access.w4
@@ -94,6 +115,12 @@ w4--w1"""
 
 
 def test_3():
+    """The graph of the builder overview on the work page gives the values and the ``explain`` text that the page shows.
+
+    The test also checks the drawings of ``w9`` and ``w10``, lists the inputs of ``w7``, and reads the fourth input of
+    ``w10`` with ``get_input``. Through ``w10``, it collects values with ``combine`` and loads a new value of ``w1``
+    with ``load``. The next ``calculate`` computes ``w4`` from the new value.
+    """
     access_ = make_graph(w7_, w9_, w10_)
     w7 = access_.w7
     w9 = access_.w9
@@ -155,6 +182,8 @@ w10--w3--w1
     assert isclose(sheaf["w8"].get_as(float64), 23.55)
 
     load_data = Dict.empty(key_type=unicode_type, value_type=AnyType)
+    # make_any(12) holds an int64, while w1 is an int16 node. load reads the value as an int16 without a conversion,
+    # so w1 receives the two low-order bytes of the int64, which hold 12 on a little-endian machine.
     load_data["w1"] = make_any(12)
     assert sheaf["w1"].get_as(int16) == 137
     w10.load(load_data)
@@ -224,6 +253,11 @@ c2 = Derived(name="c2", init_value=1, derive=derive_c2, sources=(tau, a, e2, c1)
 
 
 def test_4():
+    """Derives can fill an array that an end node holds, in place.
+
+    ``c1`` and ``c2`` write the two fields of the record array ``a`` and return 0 as their own value. ``c2`` reads the
+    field that ``c1`` wrote, because ``c1`` is one of its sources and ``calculate`` computes it first.
+    """
     access_ = make_graph(c1, c2, a)
     c1_ = access_.c1
     c2_ = access_.c2
@@ -251,6 +285,7 @@ c2--tau
 
 
 def test_5():
+    """An end node's ``init_value`` can be a ``StructRef``, and the node's data then has the struct's fields."""
     from test.common_structrefs import S1
     e1 = End(name="test_5_e1", init_value=S1(141, 137, 3.14))
     access_ = make_graph(e1)
@@ -343,6 +378,11 @@ output_ = Derived(
 
 
 def test_6():
+    """A graph of arrays and float32 scalars, whose derives call NumPy functions, calculates the expected value.
+
+    ``all_end_nodes`` lists the end nodes in the order in which a depth-first walk from ``output`` reaches them, and
+    ``explain`` lists each node after its sources. The test also checks the drawing of the graph.
+    """
     output = make_graph(output_).output
     assert output.data == 0
     assert output.all_end_nodes() == ["x", "y", "threshold", "alpha", "beta"]
@@ -421,6 +461,7 @@ output--interaction---running_avg--x
 
 
 def test_7():
+    """A second ``End`` spec with a name that the default registry already holds raises ``ValueError``."""
     node1 = End(name="node1", init_value=3.14)  # noqa: F841
     with pytest.raises(ValueError) as e:
         node1_double = End(name="node1", init_value=3.14)  # noqa: F841
@@ -428,6 +469,10 @@ def test_7():
 
 
 def test_8():
+    """Two local registries can hold specs of the same names, and ``make_graph`` builds each graph from its registry.
+
+    Each registry holds its specs in the order of their creation, and the default registry holds none of them.
+    """
     reg_1 = {}
     end_1 = End(name="end_1", init_value=0.0, registry=reg_1)
     assert reg_1["end_1"] == end_1
@@ -455,6 +500,7 @@ def test_8():
 
 
 def test_9():
+    """A derived node can have no sources, and its derive then takes no arguments."""
 
     def calc1():
         return 3.14
@@ -487,12 +533,18 @@ def _run_graph_driver(tmp_path, cache, probe_val):
 
 
 def test_make_graph_cache_key_content_independent(tmp_path):
+    """A new value of the same type for an ``init_value`` reuses the cached graph maker.
+
+    The maker receives the initial values as arguments, so only their numba types are part of the maker's name. The
+    first process compiles and caches the maker. The second builds the graph with another value of the same type and
+    writes no new maker cache file.
+    """
     cache = tmp_path / "nbcache"
     cache.mkdir()
-    _run_graph_driver(tmp_path, cache, "1.0")        # cold: compiles + caches
+    _run_graph_driver(tmp_path, cache, "1.0")
     n_cold = sum(1 for _ in cache.rglob("builder._make*.nbc"))
     assert n_cold > 0
-    _run_graph_driver(tmp_path, cache, "2.0")        # warm: same TYPE, different value
+    _run_graph_driver(tmp_path, cache, "2.0")
     n_warm = sum(1 for _ in cache.rglob("builder._make*.nbc"))
     assert n_warm == n_cold, (
         "make_graph wrote a new _make .nbc for a same-typed init with different "
@@ -522,11 +574,14 @@ _ATTR_COLLIDE_DRIVER = textwrap.dedent('''
 
 
 def test_attribute_named_global_does_not_grow_the_cache(tmp_path):
-    """A derive whose attribute access (``a_.size``) shares a name with an un-fingerprintable module global
-    must still fingerprint stably, so its graph kernel caches once and hits thereafter -- not a fresh
-    ``_make_<hash>`` per process. Uses a plain float64 array (no record dtype) to isolate the ``co_names``
-    vs ``LOAD_ATTR`` distinction from any type-mangling concern; running three fresh processes against one
-    cache dir must add zero kernels after the first."""
+    """The graph maker is cached once when a module global has the name of an attribute that the derive reads.
+
+    The derive reads ``a_.size``, and the module global ``size`` holds an object array, which has no fingerprint.
+    numbox finds the globals that a derive reads in its instructions rather than in ``co_names``, which also holds
+    attribute names, so numbox does not fingerprint the global. The node holds a plain float64 array rather than a
+    record array, so the result does not depend on how numba names a record type, which the next test covers. Three
+    fresh processes run against one cache directory. The first caches the maker, and the other two add no maker.
+    """
     cache = tmp_path / "nbcache"
     cache.mkdir()
     script = tmp_path / "attr_collide_drv.py"
@@ -569,11 +624,13 @@ _RECORD_GRAPH_DRIVER = textwrap.dedent('''
 
 
 def test_record_typed_graph_kernel_is_process_stable(tmp_path):
-    """A graph node typed as an ``Array`` of a numpy record must produce the same ``_make_<hash>`` kernel in
-    every process. A ``Record`` mangles by a creation-order ``_code``, so its hash -- and the kernel name
-    folding it -- differed between a cold process (which compiles, hence creates, many types before this one)
-    and a warm one, reminting the kernel on the first warm run. Three fresh processes against one cache dir
-    must add zero kernels after the first."""
+    """A graph with a node of a record array type gives the graph maker the same name in every process.
+
+    numba names a ``Record`` type with a counter of the order in which the process creates types. The counter differs
+    between a process that compiles the graph, and so creates many types first, and a process that loads the graph from
+    the cache. numbox therefore hashes the record's ``str``, which describes its fields. Three fresh processes run
+    against one cache directory. The first caches the maker, and the other two add no maker.
+    """
     cache = tmp_path / "nbcache"
     cache.mkdir()
     script = tmp_path / "record_graph_drv.py"
@@ -618,19 +675,26 @@ def _run_typed_driver(tmp_path, cache, t):
 
 
 def test_make_graph_distinct_types_dispatch(tmp_path):
+    """Two processes that share a cache directory build the same graph, first with float64 and then with int64 nodes.
+
+    Each process gets a result of its own type. The node types are part of the hash that names the graph maker, so the
+    int64 graph has a maker of its own and does not load the maker cached for the float64 graph.
+    """
     cache = tmp_path / "nbcache_types"
     cache.mkdir()
-    rf = _run_typed_driver(tmp_path, cache, "f")     # cold: float overload
-    ri = _run_typed_driver(tmp_path, cache, "i")     # warm dir: int overload, same _make name
+    rf = _run_typed_driver(tmp_path, cache, "f")
+    ri = _run_typed_driver(tmp_path, cache, "i")
     assert rf == ["RESULT", "f", "3.0", "float"]
     assert ri == ["RESULT", "i", "3", "int"]
 
 
 def test_make_graph_kernel_name_depends_on_declared_type(monkeypatch):
-    # Two graphs identical except an explicit End ty must produce different
-    # _make_<hash> kernel names; otherwise cache=True reuses a stale cached
-    # kernel that builds Work nodes of the wrong data type. The kernel name
-    # folds each node's declared type via _kernel_fingerprint.
+    """Two graphs that differ only in the declared ``ty`` of an ``End`` get different graph maker names.
+
+    The maker's code names the declared type only through a global, so ``_kernel_fingerprint`` hashes each node's
+    type. If the two makers had one name, numba could load the maker cached for one graph when the other is built, and
+    that maker would create nodes of the wrong data type.
+    """
     import numbox.core.work.builder as builder_mod
     captured = []
     orig = builder_mod._kernel_fingerprint
@@ -650,20 +714,17 @@ def test_make_graph_kernel_name_depends_on_declared_type(monkeypatch):
 
 
 def test_make_graph_kernel_name_depends_on_jit_flags(monkeypatch):
-    """Two graphs identical except a jit flag must produce different
-    _make_<hash> kernel names.
+    """A change to a jit flag gives the graph maker a new name, and a change to ``cache`` alone does not.
 
-    numba caches the whole library, including the generated CPython wrapper,
-    and the wrapper is flag-sensitive independently of the body: nogil=True
-    emits PyEval_SaveThread/PyEval_RestoreThread around the call, nogil=False
-    does not. The derive anchor does not re-key the kernel. The flag fold in
-    _kernel_fingerprint gives the two different names, beside the flags
-    numbox's cache key holds for each.
+    numba caches the maker together with its CPython wrapper, and ``nogil`` changes the wrapper even when the maker's
+    body stays the same. With ``nogil=True``, the wrapper calls ``PyEval_SaveThread`` and ``PyEval_RestoreThread``
+    around the call. The anchor of a derive includes the flags, but the maker's hash includes only each derive's
+    fingerprint, so ``_kernel_fingerprint`` adds the flags itself. numbox's cache key for the maker includes the flags
+    as well.
 
-    nogil is used rather than error_model/fastmath/boundscheck precisely because
-    those three only affect arithmetic, of which the generated kernel body (a
-    sequence of ll_make_work calls and a tuple build) has none. `cache` itself
-    must NOT re-key: it does not change the emitted binary.
+    The test varies ``nogil`` because ``error_model``, ``fastmath`` and ``boundscheck`` change only arithmetic and
+    array indexing. The maker's body, a sequence of ``ll_make_work`` calls and a tuple, has neither. ``cache`` does not
+    change the compiled code, so it must not change the name.
     """
     import numbox.core.work.builder as builder_mod
     captured = []
@@ -675,8 +736,8 @@ def test_make_graph_kernel_name_depends_on_jit_flags(monkeypatch):
         return h, ok
     monkeypatch.setattr(builder_mod, "_kernel_fingerprint", spy)
 
-    # Identical graph every time -- only the jit flags vary, so the node name
-    # must stay constant or the body text alone would move the fingerprint.
+    # Each iteration builds the same graph, and only the jit flags vary. The node keeps one name, because the name is
+    # part of the maker's code, and another name would change the hash by itself.
     for opts in ({"cache": False, "nogil": True},
                  {"cache": False, "nogil": False},
                  {"cache": True, "nogil": False}):
@@ -693,11 +754,12 @@ def test_make_graph_kernel_name_depends_on_jit_flags(monkeypatch):
 
 
 def test_make_graph_exec_defined_derive_is_cached_through_its_anchor():
-    """A derive defined via exec has co_filename '<string>', which numba cannot
-    locate for caching. It used to degrade to uncached rather than raise; it is
-    now compiled through its own on-disk anchor, which gives
-    numba a real source file, so it caches instead of degrading -- and the anchor
-    digest folds the derive fingerprint, so two exec'd bodies never collide.
+    """Derives defined by ``exec`` compute their values, also when two of them differ only in a constant.
+
+    numba has no cache locator for ``<string>``, the file name of a function defined by ``exec``. ``make_graph``
+    compiles such a derive through a wrapper in an anchor file that numbox writes, so numba can cache it. The anchor's
+    name includes a digest of the derive's fingerprint. The second derive, which differs from the first only in a
+    constant, therefore gets an anchor of its own and computes its own value.
     """
     reg = {}
     exec_ns = {}
@@ -708,8 +770,8 @@ def test_make_graph_exec_defined_derive_is_cached_through_its_anchor():
     access.exec_y.calculate()
     assert isclose(access.exec_y.data, 3.0)
 
-    # A second exec'd body differing only in a constant must get its own anchor,
-    # not the first one's binary.
+    # This derive differs from the first only in a constant. Its fingerprint differs, so its anchor has another name,
+    # and numba does not load the code compiled for the first derive.
     reg2 = {}
     exec_ns2 = {}
     exec("def d(x):\n    return x + 100.0\n", exec_ns2)  # nosec B102 - test fixture
@@ -721,15 +783,14 @@ def test_make_graph_exec_defined_derive_is_cached_through_its_anchor():
 
 
 def test_derive_anchor_degrade_drops_the_cache(monkeypatch):
-    """When the derive anchor cannot be built, the fallback compile must drop
-    `cache`.
+    """If the anchor of a derive cannot be built, the derive compiles without a cache.
 
-    The anchor is what keys a cached derive on what it reads. numba names a
-    plain `cres(..., cache=True)` cache file after the derive's own source file
-    and qualname, and numbox's key on it holds the flags but not the derive's
-    globals and callees. Falling back to that on the degrade paths -- flags with
-    no canonical form, or an unwritable anchor -- would restore the staleness
-    the anchor exists to prevent, so the degrade compiles uncached instead.
+    Only the anchor keys a cached derive on what the derive reads. A plain ``cres(..., cache=True)`` compile names its
+    cache file after the derive's source file and qualified name, and numbox's key for it includes the flags but not
+    the values of the derive's globals or the code of its callees. Without the anchor, numba could therefore load a
+    stale derive from the cache after one of those changes. ``_derive_anchor_cres`` returns ``None`` when a flag has no
+    canonical form, when no anchor file can be written, or when numba has no cache location for the anchor. The test
+    replaces it with a function that always returns ``None``.
     """
     from numbox.core.work import builder as builder_mod
 
@@ -763,15 +824,13 @@ def test_derive_anchor_degrade_drops_the_cache(monkeypatch):
 
 
 def test_make_graph_uncanonical_jit_flags_drop_the_kernel_cache(monkeypatch):
-    """A jit flag with no canonical form must compile the outer kernel uncached.
+    """A jit flag without a canonical form makes the graph maker compile without a cache, and canonical flags keep it.
 
-    `_flags_canon` degrades to `repr(sorted(flags.items(), key=repr))` for a
-    value it cannot canonicalize -- a `pipeline_class`, a numba-typed `locals`.
-    That repr is neither process-stable for a default-repr object nor guaranteed
-    to separate two behaviourally different values, so a `_make_<hash>` name
-    built on it can collide across variants or churn across processes. The derive
-    anchor and `compile_kernel` both already drop the cache on this flag; the
-    generated kernel is the third caller and must do the same.
+    ``_flags_canon`` falls back to ``repr(sorted(flags.items(), key=repr))`` for a flag that it cannot fingerprint,
+    such as a ``pipeline_class`` or a ``locals`` dictionary of numba types. The ``repr`` of an object with the default
+    ``repr`` differs between processes, and two different values can have the same ``repr``. A maker name built on it
+    could therefore change from one process to the next, or be the same for two graphs that compile differently. The
+    derive anchor and ``compile_kernel`` compile without a cache in this case, and the graph maker does the same.
     """
     from numba.core.compiler import Compiler
     from numbox.core.work import builder as builder_mod
@@ -785,8 +844,8 @@ def test_make_graph_uncanonical_jit_flags_drop_the_kernel_cache(monkeypatch):
 
     monkeypatch.setattr(builder_mod, "njit", recording_njit)
 
-    # Compiler is numba's own default pipeline, so the graph still compiles; it
-    # is passed explicitly to make the flag effective and un-canonicalizable.
+    # Compiler is numba's default pipeline, so the graph compiles as usual. Passing it explicitly gives the jit options
+    # a flag that has no canonical form.
     reg = {}
     make_graph(
         End(name="uncanon_x", init_value=7, ty=int64, registry=reg),

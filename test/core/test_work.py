@@ -1,3 +1,12 @@
+"""Tests of ``make_work`` and of the methods of ``Work`` nodes created without the builder.
+
+The tests create nodes from Python and from jitted code, calculate graphs of scalars and arrays, and read the names of a
+node's sources. They check the refusals: a derive whose signature does not match the node's types, a bare type in place
+of a signature for ``cres``, an ``@njit`` dispatcher as a derive, and a negative input index. They also check the
+placeholder that ``explain`` shows for a derive that ``make_graph`` did not compile, the ``py_func`` attribute of
+``make_work`` and the generation of the source getters. ``test_builder`` covers graphs built from specs,
+``test_lowlevel_work_utils`` covers ``ll_make_work``, and ``test_derive_wap`` covers the exceptions of derives.
+"""
 import numpy
 import pytest
 from numba import njit
@@ -11,6 +20,11 @@ from test.auxiliary_utils import collect_and_run_tests
 
 
 def test_make_work():
+    """``make_work`` creates a node that holds an array and a node derived from it, in each of a thousand iterations.
+
+    The arrays are 100 by 100. In each iteration, ``calculate`` stores the array that the derive returns in the derived
+    node.
+    """
     @cres(Array(float64, 2, "C")(Array(float64, 2, "C")))
     def derive_p2(data_):
         ret = numpy.ones((100, 100), dtype=numpy.float64)
@@ -97,6 +111,11 @@ def derive_p(p0_, tr_):
 
 
 def test_work():
+    """A derive computes the state probabilities of a Markov chain over five time steps, for three entities.
+
+    The results match the reference values. Each column of a transition matrix sums to 1, so the probabilities at each
+    step sum to 1 as well, and the test checks that sum.
+    """
     for transition in transitions:
         assert numpy.allclose(transition.sum(axis=0), 1.0), """complete set of states at `t`
 conditional on state at `t-1`"""
@@ -121,6 +140,7 @@ conditional on state at `t-1`"""
 
 
 def test_work_sources():
+    """``get_inputs_names`` returns the names of a node's sources in the order of ``sources``."""
     w1 = make_work("w1", 3.14)
     w2 = make_work("w2", 2)
 
@@ -163,6 +183,10 @@ def derive_w5(w3_, w4_):
 
 
 def run_test_work_calculate(derive_w1_, derive_w2_, derive_w3_, derive_w4_, derive_w5_):
+    """Create a graph of five nodes with ``make_work``, calculate ``w5``, and return the initial values and the nodes.
+
+    ``test_work_calculate`` calls it from Python, and ``test_work_calculate_jitted`` compiles it with ``njit``.
+    """
     w1 = make_work("w1", 0.0, derive=derive_w1_)
     w2 = make_work("w2", 0.0, derive=derive_w2_)
     w3 = make_work("w3", 0.0, sources=(w1, w2), derive=derive_w3_)
@@ -181,6 +205,10 @@ def run_test_work_calculate(derive_w1_, derive_w2_, derive_w3_, derive_w4_, deri
 
 
 def test_work_calculate():
+    """One ``calculate`` of ``w5`` calculates every node that ``w5`` depends on, each from its own sources.
+
+    ``w1``, ``w2`` and ``w4`` have derives but no sources. Every node holds 0 until the call.
+    """
     (
         w1_init_data, w2_init_data, w3_init_data, w4_init_data, w5_init_data,
         w1, w2, w3, w4, w5
@@ -198,6 +226,7 @@ def test_work_calculate():
 
 
 def test_work_calculate_jitted():
+    """``make_work`` and ``calculate`` called from cached jitted code give the values of ``test_work_calculate``."""
     (
         w1_init_data, w2_init_data, w3_init_data, w4_init_data, w5_init_data,
         w1, w2, w3, w4, w5
@@ -215,6 +244,10 @@ def test_work_calculate_jitted():
 
 
 def test_bad_signature_make_work():
+    """``make_work`` raises ``ValueError`` for a derive of two arguments on a node without sources.
+
+    The message names the derive's signature and the signature that the node's data and sources imply.
+    """
     with pytest.raises(ValueError) as e:
         _ = make_work("", 0.0, sources=(), derive=derive_w3)
     assert str(e.value) == """Signatures do not match, derive defines (float64, float64) -> float64
@@ -222,8 +255,7 @@ but data and sources imply () -> float64"""
 
 
 def test_get_input_rejects_negative_index():
-    # a negative index must be out-of-range, not silently honored as Python
-    # negative indexing into the inputs vector (which would return a wrong work).
+    """``get_input(-1)`` raises ``NumbaError`` instead of returning the last source, as Python's indexing would."""
     w1 = make_work("w1", 3.14)
     w2 = make_work("w2", 2)
 
@@ -236,9 +268,12 @@ def test_get_input_rejects_negative_index():
 
 
 def test_explain_on_make_work_graph_uses_fallback():
-    # a derive built via make_work (not builder.make_graph) is not registered in
-    # _derive_funcs, so explain() can't recover its source. It must degrade to a
-    # defined fallback line, not raise AttributeError on None.__name__.
+    """``explain`` shows a placeholder line for a derive that ``make_graph`` did not compile.
+
+    ``make_graph`` records the Python function of each derive that it compiles in ``_derive_funcs``. A derive passed to
+    ``make_work`` has no record, so ``explain`` cannot show its name or its source. The text still lists the end nodes
+    and the derived node.
+    """
     w1 = make_work("w1", 3.14)
     w2 = make_work("w2", 2)
 
@@ -253,9 +288,11 @@ def test_explain_on_make_work_graph_uses_fallback():
 
 
 def test_cres_requires_explicit_signature():
-    # cres pins the compiled return type to the declared one. Were a bare type
-    # accepted, the return could infer as a Literal and be delivered as a zero
-    # through the first-class call.
+    """``cres`` raises ``ValueError`` for a bare type, such as ``float64``, in place of a signature.
+
+    A signature, such as ``float64()``, sets the return type of the compiled function. A function that numba compiles
+    without a signature returns the type that numba infers, such as ``Literal[int](3)`` for ``return 3``.
+    """
     with pytest.raises(ValueError) as e:
         @cres(float64)
         def derive_no_sig():
@@ -265,8 +302,12 @@ def test_cres_requires_explicit_signature():
 
 @pytest.mark.parametrize("eager", [True, False])
 def test_make_work_rejects_bare_dispatcher(eager):
-    # a CPUDispatcher derive is the lazily-typed path that loses a Literal return
-    # value; make_work must refuse it rather than cast it to a FunctionType.
+    """``make_work`` raises ``AssertionError`` for an ``@njit`` dispatcher as a derive, compiled eagerly or lazily.
+
+    ``ll_make_work`` accepts ``None`` or a function value compiled for one signature, such as a ``cres`` function, and
+    checks that signature against the node's types. A dispatcher is not such a value. A lazily compiled function also
+    returns the type that numba infers, such as ``Literal[int](3)`` for ``return 3``, rather than the node's data type.
+    """
     def derive_pi():
         return 3.14
     derive_jit = njit(float64())(derive_pi) if eager else njit(derive_pi)
@@ -276,16 +317,20 @@ def test_make_work_rejects_bare_dispatcher(eager):
 
 
 def test_make_work_exposes_py_func():
-    """`make_work` stopped being a dispatcher; the attribute callers introspected
-    survives as the undecorated implementation."""
+    """``make_work.py_func`` is the Python function of the jitted constructor that ``make_work`` calls.
+
+    ``make_work`` is a plain Python function, and code that treats it as a dispatcher reads this attribute.
+    """
     assert make_work.py_func is _make_work_jit.py_func
 
 
 def test_source_getters_are_generated_once_per_namespace():
-    # _codegen_method hands the getters either work.py's own namespace or a copy
-    # of it extended by ns_extras, so presence is a question for the namespace: a
-    # getter generated into the copy is absent from the original, and a getter
-    # already present is kept rather than generated again.
+    """``ensure_presence_of_source_getters_in_ns`` keeps a getter that the namespace holds and defines a missing one.
+
+    ``_codegen_method`` passes either the module namespace of ``work.py`` or a copy of that namespace extended by
+    ``ns_extras``. The function therefore checks the namespace that it receives. A getter defined in the copy is absent
+    from the module namespace, and a getter that the namespace already holds is not defined again.
+    """
     from numbox.core.work import work
     ns = {k: v for k, v in vars(work).items() if not k.startswith("_get_source_")}
     extended = {**ns, "extra": None}

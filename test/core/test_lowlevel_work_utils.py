@@ -1,3 +1,9 @@
+"""Tests of ``ll_make_work``, which creates ``Work`` nodes in jitted code, and of ``create_uniform_inputs``.
+
+``create_uniform_inputs`` casts the sources of a node to ``NodeBaseType``, and the first test counts the references to
+the cast nodes. The other tests check the fields of a new node, the calculation of a graph that a cached jitted function
+creates, and the drawing of a graph of nodes without derives. ``test_work`` covers ``make_work``.
+"""
 from numba import njit
 from numba.core.types import float64, UniTuple
 from numba.extending import intrinsic
@@ -12,8 +18,12 @@ from test.auxiliary_utils import collect_and_run_tests, _deref_int64_intp
 
 
 def test_create_uniform_inputs():
-    """ Ascertain that reference count of memory regions managed by the uniform
-     tuple created by `create_uniform_inputs` agree with expectations. """
+    """``create_uniform_inputs`` casts the nodes of a tuple to ``NodeBaseType`` and takes a reference to each.
+
+    Each new node has one reference, and it has three once the cast tuple is built and its elements are read back.
+    Each element read back points at the payload of the original node. The first MemInfo of the cast tuple is that of
+    ``w1``, which has three references as well.
+    """
 
     @intrinsic
     def _create_uniform_inputs(typingctx, tup_ty):
@@ -77,6 +87,10 @@ def test_create_uniform_inputs():
 
 
 def test_make_work_ll():
+    """A node that ``ll_make_work`` creates in a cached jitted function has the given name and data and no inputs.
+
+    ``derived`` is 0 until ``calculate`` runs the node's derive.
+    """
 
     @cres(float64())
     def derive_v0():
@@ -122,6 +136,7 @@ def derive_w5(w3_, w4_):
 
 @njit(cache=True)
 def run_test_work_calculate(derive_w1_, derive_w2_, derive_w3_, derive_w4_, derive_w5_):
+    """Create five nodes with ``ll_make_work``, calculate ``w5``, and return the initial values and the nodes."""
     w1 = ll_make_work("w1", 0.0, (), derive_w1_)
     w2 = ll_make_work("w2", 0.0, (), derive_w2_)
     w3 = ll_make_work("w3", 0.0, (w1, w2), derive_w3_)
@@ -140,6 +155,10 @@ def run_test_work_calculate(derive_w1_, derive_w2_, derive_w3_, derive_w4_, deri
 
 
 def test_make_work_ll_sources():
+    """``ll_make_work`` creates a graph with sources in a cached jitted function, and ``calculate`` computes it.
+
+    Every node holds 0 until the call, and the values are those that ``test_work_calculate`` in ``test_work`` checks.
+    """
     (
         w1_init_data, w2_init_data, w3_init_data, w4_init_data, w5_init_data,
         w1, w2, w3, w4, w5
@@ -157,6 +176,10 @@ def test_make_work_ll_sources():
 
 
 def test_make_work_ll_graph():
+    """Nodes without derives that ``ll_make_work`` creates in jitted code form a graph that ``make_image`` draws.
+
+    ``get_inputs_names`` lists the sources of the last node.
+    """
     @njit
     def aux():
         w1_ = ll_make_work("first", 0.0, (), None)
