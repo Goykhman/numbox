@@ -1,3 +1,9 @@
+"""Reading and setting the calling thread's ``errno``, from jitted code and from Python.
+
+:func:`~numbox.core.bindings.errno.errno_get` returns the current thread's ``errno`` and
+:func:`~numbox.core.bindings.errno.errno_set` sets it. Both call the C library's accessor on every use, so each reads or
+writes the ``errno`` of the thread that runs it.
+"""
 from llvmlite import ir as llir
 from numba.core.cgutils import get_or_insert_function
 from numba.core.errors import TypingError

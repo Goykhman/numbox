@@ -1,3 +1,8 @@
+"""The base node type ``NodeBaseType``, whose only field is the name, and its Python proxy ``NodeBase``.
+
+Every ``Node`` and ``Work`` payload begins with the ``name`` field, so a node of either kind can be cast to
+``NodeBaseType``; the inputs of a ``Node`` are stored that way.
+"""
 from numba import njit
 from numba.core.errors import NumbaError
 from numba.core.types import StructRef, unicode_type

@@ -1,3 +1,10 @@
+"""The ``Node`` type: a named node and its inputs, the structure of a graph without values or functions.
+
+:class:`~numbox.core.work.node.Node` is the Python proxy, :func:`~numbox.core.work.node.make_node` creates a node from
+Python or from jitted code, and the overloads below implement the node's methods in jitted code. A
+:class:`~numbox.core.work.work.Work` node creates a ``Node`` representation of itself with ``as_node`` and answers
+``all_inputs_names`` and ``all_end_nodes`` through it.
+"""
 from numba import njit, typeof
 from numba.core.errors import NumbaError
 from numba.core.types import ListType, Literal, unicode_type, UnicodeType

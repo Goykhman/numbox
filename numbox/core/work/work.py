@@ -1,3 +1,10 @@
+"""The ``Work`` node of a jitted calculation graph: a value, its sources, and the function that computes the value.
+
+:class:`~numbox.core.work.work.Work` is the Python proxy of the numba type that
+:mod:`numbox.core.work.lowlevel_work_utils` defines, and :func:`~numbox.core.work.work.make_work` creates a node from
+Python or from jitted code. The overloads below implement the node's methods in jitted code; ``calculate``, ``load``,
+``combine`` and ``make_inputs_vector`` run code generated for the node's number of sources.
+"""
 from inspect import getfile, getmodule
 from io import StringIO
 from numba import njit

@@ -1,3 +1,9 @@
+"""A text drawing of a node and the nodes it depends on.
+
+:func:`~numbox.core.work.print_tree.make_image` returns the drawing for a :class:`~numbox.core.work.node.Node` or a
+:class:`~numbox.core.work.work.Work` node; :func:`~numbox.core.work.print_tree.make_graph` lays the tree out on a grid
+first.
+"""
 from io import StringIO
 
 VERTICAL_SEP = "|"
