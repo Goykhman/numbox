@@ -4,12 +4,12 @@ The four public functions are ordinary Python functions that take C's arguments 
 format as separate arguments, not in a tuple. In jitted code, numba compiles each call, through an ``@overload``, into a
 call of the C function of the same name, with the format embedded as a constant. :func:`printf`, :func:`fprintf` and
 :func:`snprintf` run from the same source under Python and in jitted code: Python's ``%`` operator formats the text
-under Python, and C formats it in jitted code. :func:`sscanf` runs in jitted code only. A jitted call compiles into its
-caller, so a caller cached with ``cache=True`` keeps the fmtio code of the numbox version that compiled it, as the
-section "Caching callers of the formatted I/O functions" of the bindings page explains. The section "Formatted output
-and input" there describes the conversions, where Python's output and C's differ, ``snprintf``'s truncation and
-``sscanf``'s storage. The rest of the module is private: the intrinsics that emit the C calls, and the checks that
-numbox runs on a format when numba compiles a call.
+under Python, and C formats it in jitted code. :func:`sscanf` runs in jitted code only. numba compiles a jitted call
+into its caller's code. A caller cached with ``cache=True`` therefore runs the fmtio code of the numbox version that
+compiled it, as the section "Caching callers of the formatted I/O functions" of the bindings page explains. The section
+"Formatted output and input" there describes the conversions, where Python's output and C's differ, ``snprintf``'s
+truncation and ``sscanf``'s storage. The rest of the module is private: the intrinsics that emit the C calls, and the
+checks that numbox runs on a format when numba compiles a call.
 """
 import ctypes
 import re
@@ -76,9 +76,9 @@ def _promote_for_varargs(builder, arg_ty, arg_val):
     pointer held as ``intp`` and a ``float64`` pass unchanged. Any other type raises ``TypingError``.
 
     C promotes a narrow integer only to ``int``, so the widening to 64 bits goes beyond C's rule. It lets ``%lld`` read
-    an ``int32`` correctly, where C would read 8 bytes from a 4-byte argument and print garbage in the high bits. It
-    also matches the Python path, which prints each value at its full width. The cost is one LLVM ``sext``, ``zext``
-    or ``fpext`` instruction per argument, which is free at run time.
+    an ``int32`` correctly; without it, C would read 8 bytes from a 4-byte argument, and the high 4 bytes would hold
+    indeterminate data. It also matches the Python path, which prints each value at its full width. The cost is one LLVM
+    ``sext``, ``zext`` or ``fpext`` instruction per argument, which is free at run time.
     """
     i64_ll = llir.IntType(64)
     if isinstance(arg_ty, Float):
@@ -94,8 +94,8 @@ def _promote_for_varargs(builder, arg_ty, arg_val):
             return builder.zext(arg_val, i64_ll)
         return arg_val
     # The overloads reject any other argument type when numba types the call (_validate_writer_arg_type), so this
-    # raise is a second guard. It stops the codegen, instead of passing such a value to C, if a change in numba, such
-    # as in how it flattens tuples, lets another type through.
+    # raise is a second guard. It stops the code generation, instead of passing such a value to C, if a change in numba,
+    # such as in the way numba flattens tuples, admits another type.
     raise TypingError(
         f"variadic arg of type {arg_ty!r} is not supported by printf-family "
         f"bindings; allowed: Float, Integer, Boolean, or intp pointer"
@@ -135,7 +135,7 @@ def _reject_percent_n_or_raise(name, fmt_str):
     ``_FORTIFY_SOURCE`` makes a program abort on ``%n`` in a format held in writable memory. A literal ``%%`` followed
     by ``n``, ``%%n``, is allowed.
     """
-    # Each %% escape becomes two NULs, on which the pattern cannot match, so the n of %%n is not taken for a
+    # Each %% escape becomes two NULs, on which the pattern cannot match, so the pattern does not read the n of %%n as a
     # conversion. _reject_grouping_flag_or_raise and _validate_format_vs_args mask the format the same way.
     stripped = fmt_str.replace('%%', '\x00\x00')
     if _PERCENT_N_RE.search(stripped):
@@ -157,8 +157,8 @@ def _reject_grouping_flag_or_raise(name, fmt_str):
     POSIX defines the flag, and glibc implements it, but C99 and Python's ``%`` operator lack it, so honoring it would
     make jitted code and Python print differently. ``_FMT_SPEC_RE`` does not recognize the flag either: a ``%'d``
     conversion would not be counted, and the conversion after it would read an argument slot that the call never filled.
-    The result is garbage, a leak of other memory, or a crash, the hazard that ``_validate_format_vs_args`` exists to
-    prevent. The flag is therefore refused in both modes, as ``%n`` is.
+    The result is indeterminate output, a leak of other memory, or a crash, which is the hazard that
+    ``_validate_format_vs_args`` exists to prevent. The flag is therefore refused in both modes, as ``%n`` is.
     """
     stripped = fmt_str.replace('%%', '\x00\x00')
     if _GROUPING_FLAG_RE.search(stripped):
@@ -184,18 +184,19 @@ _CONV_FLOAT = set("eEfFgGaA")
 def _validate_format_vs_args(name, fmt_str, args_ty):
     """Raise ``TypingError`` unless the conversions of the literal format match the argument types.
 
-    The check is the one that GCC's ``-Wformat`` makes. The number of arguments must equal the number of conversions,
+    The check is the one that GCC's ``-Wformat`` performs. The number of arguments must equal the number of conversions,
     plus one integer for each ``*`` width or precision, which comes before the conversion's own argument. Each
-    conversion must get the kind of argument it takes. ``%d``, ``%i``, ``%u``, ``%o``, ``%x``, ``%X`` and ``%c`` take
-    an integer or a ``bool``, and ``%e``, ``%f``, ``%g``, ``%a`` and their capitals take a float. ``%s`` takes a
-    unicode string or a pointer, and ``%p`` a pointer, which is an ``intp`` or a ``uintp``.
+    conversion must get the kind of argument it takes. ``%d``, ``%i``, ``%u``, ``%o``, ``%x``, ``%X`` and ``%c`` take an
+    integer or a ``bool``, and ``%e``, ``%f``, ``%g``, ``%a`` and their capitals take a float. ``%s`` takes a unicode
+    string or a pointer, and ``%p`` a pointer, which is an ``intp`` or a ``uintp``.
 
-    Without the check, ``printf('%d %d', x)`` would read an argument slot that the call never filled, which prints
-    garbage, leaks other memory or crashes. ``printf('%s', 5)`` would make C read the integer as a ``char *``, and
-    ``printf('%d', 3.5)`` would print a wrong value, because C would read an integer where the call passed a double.
-    numba's ``intp`` is ``int64``, so the check cannot tell a pointer from an ``int64`` given for ``%s`` or ``%p``; it
-    refuses narrower integers, floats and booleans there. The intrinsics run the check on the types after the overload
-    has replaced each ``str`` with its address, so a ``str`` also passes for an integer conversion or ``%p``.
+    Without the check, ``printf('%d %d', x)`` would read an argument slot that the call never filled, and the result
+    would be indeterminate output, a leak of other memory or a crash. ``printf('%s', 5)`` would make C read the integer
+    as a ``char *``, and ``printf('%d', 3.5)`` would print a wrong value, because C would read an integer where the call
+    passed a double. numba's ``intp`` is ``int64``, so the check cannot distinguish a pointer from an ``int64`` given
+    for ``%s`` or ``%p``; it refuses narrower integers, floats and booleans there. The intrinsics run the check on the
+    types after the overload has replaced each ``str`` with its address, so a ``str`` also passes for an integer
+    conversion or ``%p``.
     """
     stripped = fmt_str.replace('%%', '\x00\x00')
     expected = []
@@ -259,7 +260,7 @@ def _emit_variadic_call(builder, symbol, fmt_str, leading_vals, args_ty, args_pa
     # or the buffer as UTF-8.
     fmt_bytes = cgutils.make_bytearray((fmt_str + '\x00').encode('utf-8'))
     # cgutils.global_constant gives the global internal linkage and a name that module.get_unique_name makes unique
-    # in the module, as printf_format, printf_format.1 and so on. An internal global is private to its module, and
+    # in the module, such as printf_format and printf_format.1. An internal global is private to its module, and
     # LLVM's linker renames such globals when it merges modules into the JIT. Each call site, with the same format or
     # another, therefore gets a global of its own.
     global_fmt = cgutils.global_constant(mod, f"{symbol}_format", fmt_bytes)
@@ -371,7 +372,7 @@ def _snprintf_intrinsic(typingctx, buf_ty, size_ty, fmt_ty, args_ty):
 def _sscanf_intrinsic(typingctx, buf_ty, fmt_ty, args_ty):
     """Emit C's ``sscanf`` call for :func:`sscanf`, with the text's address, the literal format and the addresses.
 
-    Each argument is the ``intp`` address of the storage for one conversion. The addresses go to C as they are,
+    Each argument is the ``intp`` address of the storage for one conversion. C receives the addresses unconverted,
     because C's default argument promotion leaves a pointer unchanged.
     """
     fmt_str = extract_literal_str("sscanf", fmt_ty, field="format string")
@@ -408,7 +409,8 @@ def _build_args_tuple_expr_from_starargs(arg_tys):
 
     The source indexes the implementation's ``args``, as in ``(args[0], args[1])``, and wraps a unicode argument in
     ``get_unicode_data_p``, so that C receives the address of a NUL-terminated string for ``%s``. numba requires the
-    implementation to take ``*args`` where the overload does, so the source cannot name one parameter per argument.
+    implementation to take ``*args`` when the overload's typing function takes ``*args``, so the source cannot name one
+    parameter per argument.
     """
     n = len(arg_tys)
     if n == 0:
@@ -446,8 +448,8 @@ def _build_overload_impl(name, fixed_params, args_tys, intrinsic_callable,
 
 def _get_unicode_data_p_lazy():
     """Return :func:`numbox.utils.lowlevel.get_unicode_data_p`, which it imports when called."""
-    # The import waits until numba types the first jitted call of one of the four functions, so importing this module
-    # does not import numbox.utils.lowlevel.
+    # The import is deferred until numba types the first jitted call of one of the four functions, so importing this
+    # module does not import numbox.utils.lowlevel.
     from numbox.utils.lowlevel import get_unicode_data_p
     return get_unicode_data_p
 
@@ -463,13 +465,13 @@ _PY_STREAM_BY_FP = None
 def _ensure_py_stream_cache():
     """Build ``_PY_STREAM_BY_FP``, the map from the three C streams' addresses to Python's streams, once.
 
-    The map holds the ``sys.stdout``, ``sys.stderr`` and ``sys.stdin`` objects of the first call, so a redirection
-    installed after that call does not change where :func:`fprintf` writes under Python.
+    The map holds the ``sys.stdout``, ``sys.stderr`` and ``sys.stdin`` objects that are current at the first call, so a
+    redirection installed after that call does not change where :func:`fprintf` writes under Python.
     """
     global _PY_STREAM_BY_FP
     if _PY_STREAM_BY_FP is not None:
         return
-    # The import waits until the first call, so importing this module does not import and compile the stdio
+    # The import is deferred until the first call, so importing this module does not import and compile the stdio
     # bindings; under NUMBA_DISABLE_JIT=1 the import fails with AttributeError, because proxy needs numba's compiler.
     from numbox.core.bindings.stdio import stdout, stderr, stdin
     _PY_STREAM_BY_FP = {
@@ -487,8 +489,8 @@ def _ensure_py_stream_cache():
 def _reject_percent_n_in_python(name, fmt):
     """Raise ``ValueError`` if ``fmt`` holds a ``%n`` conversion, as ``_reject_percent_n_or_raise`` does in jitted code.
 
-    Python's ``%`` operator would raise for ``%n`` as well, as an unsupported format character, but with a generic
-    message. This check gives the message of the jitted path.
+    Python's ``%`` operator would also raise ``ValueError`` for ``%n``, an unsupported format character, but with a
+    generic message. This check raises the error with the jitted path's message.
     """
     stripped = fmt.replace('%%', '\x00\x00')
     if _PERCENT_N_RE.search(stripped):
@@ -503,8 +505,8 @@ def _reject_percent_n_in_python(name, fmt):
 def _reject_grouping_flag_in_python(name, fmt):
     """Raise ``ValueError`` if ``fmt`` uses the ``'`` flag, as ``_reject_grouping_flag_or_raise`` does in jitted code.
 
-    Python's ``%`` operator would raise for ``%'d`` as well, as an unsupported format character, but with a generic
-    message. This check gives the message of the jitted path.
+    Python's ``%`` operator would also raise ``ValueError`` for ``%'d``, an unsupported format character, but with a
+    generic message. This check raises the error with the jitted path's message.
     """
     stripped = fmt.replace('%%', '\x00\x00')
     if _GROUPING_FLAG_RE.search(stripped):
@@ -530,12 +532,12 @@ def printf(fmt, *args):
     In jitted code, numba compiles the call into a call of C's ``printf``, which writes to C's stdout and returns an
     ``int32``. ``fmt`` must be a string that numba reads as a constant, such as a literal, and C receives it in UTF-8.
     numbox checks the conversions against the arguments when numba compiles the call, as GCC's ``-Wformat`` does, and
-    raises ``TypingError`` for a mismatch. A ``str`` argument goes to C as the address of its characters, which C reads
-    as text only for an ASCII string; the check sees that address, so a ``str`` given to ``%d`` compiles and prints the
-    address. Every integer and ``bool`` goes to C as 64 bits and every float as a ``float64``, and C converts each
-    value to the type that its conversion names, such as ``int`` for ``%d``. On Windows, C's ``long`` has 32 bits, so
-    use ``%lld`` rather than ``%ld`` for an ``int64``. A width such as ``%-10s`` counts bytes, not characters; to pad
-    by characters, pad the string first, for example with ``str.ljust``.
+    raises ``TypingError`` for a mismatch. numbox passes a ``str`` argument to C as the address of its characters, which
+    C reads as text only for an ASCII string. The check is applied to that address, so a ``str`` given to ``%d``
+    compiles and prints the address. numbox passes every integer and ``bool`` to C as 64 bits and every float as a
+    ``float64``, and C converts each value to the type that its conversion names, such as ``int`` for ``%d``. On
+    Windows, C's ``long`` has 32 bits, so use ``%lld`` rather than ``%ld`` for an ``int64``. A width such as ``%-10s``
+    counts bytes, not characters; to pad by characters, pad the string first, for example with ``str.ljust``.
 
     In both modes, ``%n`` and the ``'`` flag raise an error: ``TypingError`` in jitted code and ``ValueError`` under
     Python.
@@ -576,10 +578,10 @@ def fprintf(fp, fmt, *args):
     returns. The format and the arguments follow the rules of :func:`printf`, in both modes. In jitted code, numba
     compiles the call into a call of C's ``fprintf``, which accepts any ``FILE *``.
 
-    Under Python, the function writes to ``sys.stdout``, ``sys.stderr`` or ``sys.stdin`` for the address of the
-    matching C stream, and flushes it. It raises ``RuntimeError`` for any other ``FILE *``, such as one from ``fopen``;
-    use Python's ``open`` and ``write`` for a file there. The function maps the three addresses to the ``sys`` objects
-    that it finds at its first call, so a redirection installed after that call does not change where it writes. With
+    Under Python, the function writes to ``sys.stdout``, ``sys.stderr`` or ``sys.stdin`` for the address of the matching
+    C stream, and flushes it. It raises ``RuntimeError`` for any other ``FILE *``, such as one from ``fopen``; use
+    Python's ``open`` and ``write`` for a file there. The function maps the three addresses to the ``sys`` objects that
+    are current at its first call, so a redirection installed after that call does not change where it writes. With
     ``NUMBA_DISABLE_JIT=1``, the first call raises ``AttributeError``, because it imports the stdio bindings.
     """
     _reject_percent_n_in_python("fprintf", fmt)
@@ -635,10 +637,9 @@ def snprintf(buf_p, size, fmt, *args):
     In jitted code, ``buf_p`` and ``size`` must be ``intp`` values: ``a.size``, ``np.intp(16)`` and an ``int64``
     argument of the jitted function work, but a literal such as ``16`` and an ``np.int32`` fail to compile with
     ``TypingError``. On Windows, jitted code calls C's `_snprintf
-    <https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/
-    snprintf-snprintf-snprintf-l-snwprintf-snwprintf-l>`_ instead. It returns -1 when the text is longer than
-    ``size``, and when the text is exactly ``size`` bytes long, it returns ``size`` and writes no NUL. The test
-    ``n < 0 or n >= size`` covers both cases on every platform.
+    <https://learn.microsoft.com/cpp/c-runtime-library/reference/snprintf-snprintf-snprintf-l-snwprintf-snwprintf-l>`__
+    instead. It returns -1 when the text is longer than ``size``, and when the text is exactly ``size`` bytes long, it
+    returns ``size`` and writes no NUL. The test ``n < 0 or n >= size`` covers both cases on every platform.
 
     Under Python, the function follows the C99 rule on every platform. ``ctypes.memmove`` writes the text, and it
     rejects a NumPy integer as ``buf_p``. ``array_data_p`` returns one under ``NUMBA_DISABLE_JIT=1``, so pass
@@ -673,9 +674,9 @@ def _overload_snprintf(buf_p, size, fmt, *args):
             f"snprintf: buf must be intp (pointer-as-int), got {buf_p!r}"
         )
     # numba types an overload's call first with the arguments' non-literal types and then with their literal types.
-    # The first typing fails, because the format must be a literal, so this check sees a literal size such as 16 as
-    # Literal[int](16), not as intp, and refuses it. It refuses an int32 as well; a.size, np.intp(16) and an int64
-    # argument pass.
+    # The first typing fails, because the format must be a literal, so this check receives a literal size such as 16
+    # as Literal[int](16), not as intp, and refuses it. It refuses an int32 as well, and it accepts a.size, np.intp(16)
+    # and an int64 argument.
     if size != intp:
         raise TypingError(
             f"snprintf: size must be intp (size_t-as-int), got {size!r}"
@@ -694,13 +695,13 @@ def sscanf(buf, fmt, *args):
 
     C reference: `sscanf(3) <https://man7.org/linux/man-pages/man3/sscanf.3.html>`_.
 
-    The result is the number of values stored, or -1, C's ``EOF``, if the text ends before the first conversion.
-    ``buf`` is the ``intp`` address of the text, such as ``get_unicode_data_p(text)`` for an ASCII ``str``. Each
-    argument after ``fmt`` is the ``intp`` address of the storage for one conversion, such as ``array_data_p`` of a
-    one-element array of the matching dtype. numbox checks only that each of them is an ``intp``. It does not compare
-    the format with the arguments, so the caller makes them match in number and in size. ``fmt`` must be a string that
-    numba reads as a constant, as for :func:`printf`. Under Python, the function raises ``NotImplementedError``; there,
-    ``int()``, ``float()`` or ``re`` parse the text instead.
+    The result is the number of values stored, or -1, C's ``EOF``, if the text ends before the first conversion. ``buf``
+    is the ``intp`` address of the text, such as ``get_unicode_data_p(text)`` for an ASCII ``str``. Each argument after
+    ``fmt`` is the ``intp`` address of the storage for one conversion, such as ``array_data_p`` of a one-element array
+    of the matching dtype. numbox checks only that each of them is an ``intp``. It does not compare the format with the
+    arguments, so the caller must make them match in number and in size. ``fmt`` must be a string that numba reads as a
+    constant, as for :func:`printf`. Under Python, the function raises ``NotImplementedError``; use ``int()``,
+    ``float()`` or ``re`` to parse the text there.
     """
     raise NotImplementedError(
         "sscanf is @njit-only; wrap the call in @njit, or use Python's "
@@ -721,7 +722,7 @@ def _overload_sscanf(buf, fmt, *args):
             f"sscanf: buf must be intp (pointer-as-int), got {buf!r}"
         )
     # Each argument is the address of storage for one conversion, so it must be an intp. A str is not accepted here,
-    # so the shared builder below wraps no argument in get_unicode_data_p, and each address goes to C unchanged.
+    # so the shared builder below wraps no argument in get_unicode_data_p, and C receives each address unchanged.
     for i, ty in enumerate(args):
         if ty != intp:
             raise TypingError(

@@ -32,22 +32,23 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
     """Call the C function named by a string literal, with its arguments in a tuple, and return the C result.
 
     ``func_name_ty`` is the C function's name, which must be a string literal. ``args_ty`` is a tuple of the arguments,
-    which is empty or absent for a function that takes none; a single argument may also come without a tuple. The
+    which is empty or absent for a function that takes none; a single argument may also be passed without a tuple. The
     ``signatures`` table supplies the result type, and each argument keeps the numba type that the caller passes. Call
     the helper from a function compiled for the table's signature, as numbox's proxied bindings are, so that numba has
     converted the arguments to the C types.
 
-    Numbers and pointers pass as they are. A struct, written as a numba tuple, passes by the host's C convention, within
-    the limits that the comment above ``numbox.core.bindings.abi._classify`` lists. Declare no ``Record`` result: one
-    larger than 16 bytes raises ``TypingError``, and a smaller one crashes the process when the call runs. Use
+    Numbers and pointers are passed unchanged. A struct, written as a numba tuple, is passed by the host's C convention,
+    within the limits that the comment above ``numbox.core.bindings.abi._classify`` lists. Declare no ``Record`` result:
+    one larger than 16 bytes raises ``TypingError``, and a smaller one crashes the process when the call runs. Use
     ``_call_lib_func_byval`` for a C function that takes a pointer to a struct.
 
     numba raises ``TypingError`` when it compiles the call if LLVM cannot find the name, if the table has no entry for
     it, or if a tuple field has no fixed bit width.
     """
     func_name = extract_literal_str("_call_lib_func", func_name_ty, field="func_name")
-    # The address only shows that LLVM can resolve the name. The generated code calls the function by name and never
-    # uses this address, so a cached caller finds the function again in a later process, where its address differs.
+    # The address is used only to check that LLVM can resolve the name. The generated code calls the function by name
+    # and never uses this address, so the JIT linker resolves the name again for a cached caller in a later process,
+    # where the address differs.
     func_p_as_int = ll.address_of_symbol(func_name)
     if func_p_as_int is None:
         raise TypingError(f"{func_name} is unavailable in the LLVM context")
@@ -58,13 +59,14 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
     # Only the result type comes from the signatures table. Each argument is lowered with the numba type that the
     # caller passes (arg_types below), without conversion. Call this helper only from a function compiled for the
     # table's signature, as numbox's proxied bindings are, so that numba converts the arguments first. A direct call
-    # with other types passes them as they are: given the tuple (11, 22, 33), whose fields numba types as int64, a C
+    # with other types passes them unconverted: given the tuple (11, 22, 33), whose fields numba types as int64, a C
     # function whose entry takes the struct (int32, int32, int64) receives wrong values.
     ret_ty = func_sig.return_type
     ret_class = _classify(ret_ty)
     # numba represents a Record value as a pointer to its data, so a Record result in an sret slot on the stack would
-    # leave the caller a pointer into a finished stack frame. A Record result of 16 bytes or less passes this check:
-    # the call is then declared to return a pointer where C returns the struct's bytes, and the process crashes.
+    # give the caller a pointer into the stack frame of a function that has returned. A Record result of 16 bytes or
+    # less passes this check: the call is then declared to return a pointer where C returns the struct's bytes, and the
+    # process crashes.
     if ret_class == _CLASS_STRUCT_LARGE and isinstance(ret_ty, Record):
         raise TypingError(
             f"_call_lib_func: Record returns >16 bytes are not yet "
@@ -87,9 +89,9 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
         arg_classes = (_classify(args_ty),)
 
     plat = _current_platform()
-    # A result larger than 16 bytes comes back through sret, and so does a smaller one on Windows x64 if its size is
-    # not 1, 2, 4 or 8. With sret, the caller allocates the result and passes its address as a hidden first argument,
-    # and the call is declared to return void.
+    # A result larger than 16 bytes is returned through sret, and so is a smaller one on Windows x64 if its size is not
+    # 1, 2, 4 or 8. With sret, the caller allocates the result and passes its address as a hidden first argument, and
+    # the call is declared to return void.
     use_sret = (
         ret_class == _CLASS_STRUCT_LARGE
         or (
@@ -156,9 +158,10 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
                 ll_arg_tys.append(arg_ll_ty)
                 ll_arg_vals.append(val)
                 continue
-            # Any other struct goes through a pointer to a copy on the stack of the function that makes the call. On
-            # SysV x86-64, a struct over 16 bytes also gets the byval attribute below: LLVM then copies the struct
-            # onto the stack, as the C convention requires, and C receives the copy instead of a pointer.
+            # Any other struct is passed as a pointer to a copy on the stack of the function that makes the call. On
+            # SysV x86-64, the code below also marks the pointer to a struct over 16 bytes with the byval attribute.
+            # LLVM then copies the struct onto the stack, as the C convention requires, and C receives the copy instead
+            # of a pointer.
             stack_p = builder.alloca(arg_ll_ty)
             builder.store(val, stack_p)
             ll_arg_tys.append(arg_ll_ty.as_pointer())
@@ -202,7 +205,7 @@ def _call_lib_func(typingctx, func_name_ty, args_ty=NoneType):
 def _emit_byval_call(builder, arg, arg_ll_ty, ret_type, func_name):
     """Emit a call of ``func_name`` that passes ``arg`` as a pointer to a copy on the stack, and return its result.
 
-    The pointer carries no ``byval`` attribute, so C receives the address of the copy.
+    The pointer has no ``byval`` attribute, so C receives the address of the copy.
     """
     stack_p = builder.alloca(arg_ll_ty)
     builder.store(arg, stack_p)
@@ -225,8 +228,8 @@ def _needs_int_int_eightbyte_repack(ty, plat):
     if _is_canonical_int64_pair_layout(ty):
         return False
     # LLVM passes each field of an aggregate in a register of its own, while C packs the fields of each 8-byte half
-    # into one register. Passed as {i32, i32, i64}, the two i32 fields therefore do not reach C as one half. Passed as
-    # {i64, i64}, each half goes in the register where C reads it.
+    # into one register. If the struct is passed as {i32, i32, i64}, C therefore does not receive the two i32 fields as
+    # one half. If it is passed as {i64, i64}, each half is passed in the register where C reads it.
     return _classify_eightbytes(ty) == (
         _EIGHTBYTE_CLASS_INTEGER, _EIGHTBYTE_CLASS_INTEGER,
     )
@@ -235,9 +238,9 @@ def _needs_int_int_eightbyte_repack(ty, plat):
 def _repack_to_i64_pair(builder, val, orig_ll_ty):
     """Return ``(value, type)``: ``val``, a 16-byte struct, reinterpreted as ``{i64, i64}``, and that LLVM type.
 
-    The bytes stay as they are, so both halves must be INTEGER class, as ``_needs_int_int_eightbyte_repack`` checks
-    before the call. The caller puts the value and the type into the call in place of the original ones. See
-    https://github.com/numba/llvmlite/issues/300#issuecomment-327235846 for why LLVM needs the repack.
+    The bytes remain unchanged, so both halves must be INTEGER class, as ``_needs_int_int_eightbyte_repack`` checks
+    before the call. The caller substitutes the returned value and type for the original ones in the call. See
+    https://github.com/numba/llvmlite/issues/300#issuecomment-327235846 for the reason that LLVM needs the repack.
     """
     i64x2_ll_ty = llir.LiteralStructType(
         [llir.IntType(64), llir.IntType(64)])
@@ -272,11 +275,10 @@ def _call_lib_func_byval(typingctx, func_name_ty, arg_ty):
     """Call the C function named by a string literal with a pointer to a copy of ``arg``, and return the C result.
 
     Use it for a C function that takes a pointer to a struct, ``T *``, when the caller holds the struct as a value.
-    numba's types cannot tell ``T`` from ``T *``, so the caller chooses this helper or ``_call_lib_func`` by the C
-    declaration. The copy is on the stack of the function that makes the call, so C must not keep the pointer after
-    that function returns. The result type comes from the ``signatures`` table, and numba raises ``TypingError`` if
-    the table has no entry for the name. Unlike ``_call_lib_func``, this helper does not check that LLVM can find the
-    name.
+    numba's types cannot distinguish ``T`` from ``T *``, so the caller chooses this helper or ``_call_lib_func`` by the
+    C declaration. The copy is on the stack of the function that makes the call, so C must not keep the pointer after
+    that function returns. The result type comes from the ``signatures`` table, and numba raises ``TypingError`` if the
+    table has no entry for the name. Unlike ``_call_lib_func``, this helper does not check that LLVM can find the name.
     """
     func_name = extract_literal_str("_call_lib_func_byval", func_name_ty, field="func_name")
     func_sig = signatures.get(func_name, None)

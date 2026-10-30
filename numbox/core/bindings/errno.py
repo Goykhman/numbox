@@ -28,7 +28,7 @@ _ERRNO_ACCESSOR = {
 def _errno_ptr(typingctx):
     """Return the address of the calling thread's ``errno`` as an ``intp``.
 
-    The call goes to the C library's accessor, ``__errno_location`` on Linux, ``__error`` on macOS and ``_errno`` on
+    The intrinsic calls the C library's accessor: ``__errno_location`` on Linux, ``__error`` on macOS and ``_errno`` on
     Windows. numba raises ``TypingError`` when it compiles the call on any other platform.
     """
     sym = _ERRNO_ACCESSOR.get(platform_)
@@ -40,10 +40,11 @@ def _errno_ptr(typingctx):
         intp_ll = context.get_value_type(intp)
         i32_ptr = llir.IntType(32).as_pointer()
         # The declaration carries no readnone or memory(none) attribute, although glibc declares __errno_location with
-        # __attribute_const__, which LLVM expresses as readnone. With that attribute, LLVM could compute the address
-        # once and reuse it, out of a loop or across other calls. The address belongs to the thread that computed it,
-        # so code that runs on several threads, such as the body of a parallel loop, must look it up on the thread
-        # that uses it. A call that LLVM treats as opaque is looked up each time.
+        # __attribute_const__, which LLVM expresses as readnone. With that attribute, LLVM could move the call out of a
+        # loop, or use one result across other calls. The address belongs to the thread that computed it, so code that
+        # runs on several threads, such as the body of a parallel loop, must look it up on the thread that uses it.
+        # Because LLVM treats the call as opaque, the code calls the accessor at every errno access, on the thread that
+        # makes the access.
         func_ty = llir.FunctionType(i32_ptr, [])
         func_p = get_or_insert_function(builder.module, func_ty, sym)
         ptr = builder.call(func_p, [])
@@ -58,10 +59,10 @@ def errno_get():
     C reference: `errno(3) <https://man7.org/linux/man-pages/man3/errno.3.html>`_.
 
     Each call looks up the errno of the thread that runs it, so an iteration of a ``prange`` loop reads the errno of
-    its own thread. A Python caller sees the errno that a jitted function left on the same thread. After a parallel
+    its own thread. A Python caller reads the errno that a jitted function set on the same thread. After a parallel
     loop, the calling thread's errno depends on numba's threading layer. Under OpenMP, the calling thread runs some
-    iterations itself, and its errno holds what they set. Under the workqueue layer, it runs none, and its errno is
-    unchanged.
+    iterations itself, and its errno holds the value that those iterations set. Under the workqueue layer, the calling
+    thread runs no iterations, and its errno is unchanged.
     """
     return load_at(_errno_ptr(), int32)
 

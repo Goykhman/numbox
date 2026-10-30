@@ -63,8 +63,8 @@ def _stdio_handle(typingctx, name_ty):
         intp_ll = context.get_value_type(intp)
         ptr_ll = llir.IntType(8).as_pointer()
         # The IR names the symbol as an external global and loads the FILE * from it when the code runs. An address
-        # written into the IR would be the compiling process's, which ASLR makes wrong in any later process that loads
-        # the cached code.
+        # written into the IR would be valid only in the compiling process, because ASLR places the stream at another
+        # address in any later process that loads the cached code.
         if platform_ in ("Linux", "Darwin"):
             sym = _DATA_SYMBOL_BY_NAME[platform_][name]
             gv = _get_or_insert_global(builder.module, ptr_ll, sym)
@@ -88,8 +88,9 @@ def stdout():
 
     C reference: `stdout(3) <https://man7.org/linux/man-pages/man3/stdout.3.html>`_.
 
-    Each call reads the address in the running process. C buffers this stream apart from Python's ``sys.stdout``, so
-    flush both, with ``fflush(stdout())`` and ``sys.stdout.flush()``, to keep jitted output in order with Python's.
+    Each call reads the address in the running process. C buffers this stream separately from Python's ``sys.stdout``,
+    so flush both, with ``fflush(stdout())`` and ``sys.stdout.flush()``, to make jitted output and Python output appear
+    in the order in which they were written.
     """
     return _stdio_handle("stdout")
 

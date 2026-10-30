@@ -35,14 +35,14 @@ def rand():
     C reference: `rand(3) <https://man7.org/linux/man-pages/man3/rand.3.html>`_.
 
     ``RAND_MAX`` is 2147483647 with glibc and on macOS, and 32767 on Windows. C does not require ``rand`` to be safe to
-    call from several threads at once.
+    call from several threads concurrently.
     """
     return _call_lib_func("rand", ())
 
 
 @proxy(signatures.get("srand"), jit_options=jit_options)
 def srand(s):
-    """Seed the generator that ``rand`` draws from with ``s``.
+    """Seed the generator that ``rand`` uses with ``s``.
 
     C reference: `srand(3) <https://man7.org/linux/man-pages/man3/srand.3.html>`_.
 
@@ -130,8 +130,8 @@ def fread(ptr, size, nmemb, fp):
     C reference: `fread(3) <https://man7.org/linux/man-pages/man3/fread.3.html>`_.
 
     The result is the number of elements read, which is less than ``nmemb`` at the end of the file or on an error;
-    ``feof`` and ``ferror`` tell the two apart. ``ptr`` is the ``intp`` address of at least ``size * nmemb`` bytes,
-    which the caller keeps alive during the call.
+    ``feof`` and ``ferror`` distinguish the two cases. ``ptr`` is the ``intp`` address of at least ``size * nmemb``
+    bytes, which the caller keeps alive during the call.
     """
     return _call_lib_func("fread", (ptr, size, nmemb, fp))
 

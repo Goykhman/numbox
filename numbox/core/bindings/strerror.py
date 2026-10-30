@@ -7,8 +7,7 @@ thread-safe form of ``strerror`` that the platform's C library exports, chosen w
   form, which glibc exports from version 2.3.4, released in 2004;
 - **musl**: also ``__xpg_strerror_r``, which musl exports as a `weak alias
   <https://git.musl-libc.org/cgit/musl/tree/src/string/strerror_r.c>`_ of its ``strerror_r``, itself the POSIX form;
-- **macOS**: `strerror_r <https://developer.apple.com/library/archive/documentation/System/Conceptual/
-  ManPages_iPhoneOS/man3/strerror_r.3.html>`_, the POSIX form;
+- **macOS**: `strerror_r <macos-strerror-r_>`_, the POSIX form;
 - **Windows**: `strerror_s
   <https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/strerror-s-strerror-s-wcserror-s-wcserror-s>`_,
   which takes its arguments in the order buffer, size, error number.
@@ -17,6 +16,9 @@ numbox supports no other C library on Linux. glibc's plain ``strerror_r`` is the
 and does not match the POSIX-shaped call that this module emits. The module therefore calls ``__xpg_strerror_r`` on
 Linux whenever LLVM finds it, as it does with glibc and musl, and falls back to ``strerror_r`` only for a C library that
 lacks the symbol.
+
+.. _macos-strerror-r:
+   https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/strerror_r.3.html
 """
 import llvmlite.binding as ll
 from llvmlite import ir as llir
@@ -37,17 +39,17 @@ load_lib("c")
 
 
 def _select_posix_symbol():
-    """Return the name of the POSIX-form ``strerror_r`` that the C library exports on Linux or macOS, else None.
+    """Return the name of the POSIX-form ``strerror_r`` that the C library exports on Linux or macOS, or None.
 
     The name is ``__xpg_strerror_r`` on Linux if LLVM finds that symbol, and ``strerror_r`` on Linux otherwise and on
-    macOS. Windows and any other platform give None.
+    macOS. On Windows and on any other platform, the function returns None.
     """
     if platform_ == "Linux":
         if ll.address_of_symbol("__xpg_strerror_r") is not None:
             return "__xpg_strerror_r"
-        # Neither glibc nor musl reaches this line: glibc exports __xpg_strerror_r from 2.3.4, and musl exports it as a
-        # weak alias of its POSIX-form strerror_r. The fallback is for a C library without the symbol. On glibc, plain
-        # strerror_r is the GNU form, which returns a char * and does not match the declared i32 result.
+        # Execution does not reach this line with glibc or musl: glibc exports __xpg_strerror_r from 2.3.4, and musl
+        # exports it as a weak alias of its POSIX-form strerror_r. The fallback is for a C library without the symbol.
+        # On glibc, plain strerror_r is the GNU form, which returns a char * and does not match the declared i32 result.
         return "strerror_r"
     if platform_ == "Darwin":
         return "strerror_r"
@@ -59,12 +61,12 @@ def _strerror_safe(typingctx, errnum_ty, buf_ty, buflen_ty):
     """Call the platform's thread-safe ``strerror`` with ``(errnum, buf, buflen)``, and return its ``int32`` result.
 
     ``errnum`` must be an ``int32``, and numba raises ``TypingError`` for any other type when it compiles the call, as
-    it does on a platform that ``_select_posix_symbol`` does not know. On Windows the call is
+    it does on a platform for which ``_select_posix_symbol`` returns None. On Windows the call is
     ``strerror_s(buf, buflen, errnum)``.
     """
-    # strerror_r, __xpg_strerror_r and strerror_s all take errnum as a 32-bit int. The check refuses another type when
-    # numba types the call, so a caller that passes an int64, as strerror_safe would without its int32 conversion, gets
-    # this TypingError instead of a type mismatch in the generated IR.
+    # strerror_r, __xpg_strerror_r and strerror_s all take errnum as a 32-bit int. The check refuses any other type
+    # when numba types the call. A caller that passes an int64, as strerror_safe would do without its int32
+    # conversion, therefore receives this TypingError instead of a type mismatch in the generated IR.
     if errnum_ty != int32:
         raise TypingError(
             f"_strerror_safe: errnum must be int32, got {errnum_ty!r}")
@@ -97,8 +99,9 @@ def _render_ir_for_probe():
 
     ``test_strerror_safe.py`` makes ``ll.address_of_symbol("__xpg_strerror_r")`` return None and checks that the
     declared symbol is then ``strerror_r``. The test reads the text instead of making the call, because on glibc the
-    plain ``strerror_r`` is the GNU form, which the POSIX-shaped declaration does not match. The ``size_t`` parameter
-    comes from ``intp_ll_type()``, the helper that the codegen calls with its context, and the two give the same type.
+    plain ``strerror_r`` is the GNU form, which the POSIX-shaped declaration does not match. The ``size_t`` parameter's
+    type comes from ``intp_ll_type()``, the helper that the codegen calls with its context, and both calls return the
+    same type.
     """
     module = llir.Module(name="probe")
     i32 = llir.IntType(32)
@@ -116,10 +119,11 @@ def strerror_safe(errnum, buf, buflen):
     C reference: `strerror_r(3) <https://man7.org/linux/man-pages/man3/strerror_r.3.html>`_.
 
     ``buf`` is the ``intp`` address of ``buflen`` bytes that the caller keeps alive during the call, and the message
-    ends with a NUL. The binding narrows ``errnum`` to ``int32``, the width of C's ``int``. With glibc, an unknown
-    number returns ``EINVAL`` (22) and writes ``Unknown error`` followed by the number, and a buffer too short for the
-    message returns ``ERANGE`` (34) and writes as much of the message as fits. The function keeps no buffer of its own,
-    so threads can call it at the same time. On Linux it calls ``__xpg_strerror_r``, which glibc and musl export, on
-    macOS ``strerror_r``, and on Windows ``strerror_s``, with the arguments in that function's order.
+    ends with a NUL. The binding narrows ``errnum`` to ``int32``, the width of C's ``int``. With glibc, the function
+    returns ``EINVAL`` (22) for an unknown number and writes ``Unknown error`` followed by the number. It returns
+    ``ERANGE`` (34) for a buffer too short for the message and writes as much of the message as fits. The function uses
+    no buffer of its own, so threads can call it at the same time. On Linux it calls ``__xpg_strerror_r``, which glibc
+    and musl export, on macOS ``strerror_r``, and on Windows ``strerror_s``, with the arguments in that function's
+    order.
     """
     return _strerror_safe(int32(errnum), buf, buflen)

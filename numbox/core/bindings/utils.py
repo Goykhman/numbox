@@ -39,9 +39,9 @@ def extract_literal_str(binding_name, ty, *, field="argument"):
 def intp_ll_type(context=None):
     """Return the LLVM integer type of numba's ``intp``, which numbox uses for ``size_t`` and pointers.
 
-    With a codegen ``context``, the type is ``context.get_value_type(intp)``, the way an intrinsic derives a width that
-    depends on the platform, such as that of ``size_t``, ``ssize_t`` or ``ptrdiff_t``. Without one, as in a test or an
-    IR probe, it is ``llir.IntType(intp.bitwidth)``. numba lowers ``intp`` to an integer of that same width, so both
+    With a codegen ``context``, the type is ``context.get_value_type(intp)``, which is how an intrinsic derives a width
+    that depends on the platform, such as that of ``size_t``, ``ssize_t`` or ``ptrdiff_t``. Without one, as in a test or
+    an IR probe, it is ``llir.IntType(intp.bitwidth)``. numba lowers ``intp`` to an integer of that same width, so both
     calls give the same type.
     """
     if context is not None:
@@ -52,9 +52,9 @@ def intp_ll_type(context=None):
 def _windows_bundled_dll_path(name):
     """Return the path of the DLL ``name`` that the Python installation bundles on Windows, or None.
 
-    The function tries three places in order and returns the first that exists: ``<sys.prefix>/DLLs/<name>.dll``,
-    where CPython keeps its DLLs, outside a virtual environment too; ``<sys.base_prefix>/DLLs/<name>.dll``, the base
-    installation of a virtual environment; and ``<sys.base_prefix>/Library/bin/<name>.dll``, conda's layout.
+    The function checks three paths in order and returns the first that exists: ``<sys.prefix>/DLLs/<name>.dll``,
+    CPython's DLL directory for an installation outside a virtual environment; ``<sys.base_prefix>/DLLs/<name>.dll``,
+    the base installation of a virtual environment; and ``<sys.base_prefix>/Library/bin/<name>.dll``, conda's layout.
     """
     import os
     import sys
@@ -73,15 +73,16 @@ def _windows_bundled_dll_path(name):
 def _resolve_lib_path(name):
     """Return a path or a name that ``ctypes.CDLL`` can load for the library ``name``, or None if none is found.
 
-    On Linux and macOS the result is ``ctypes.util.find_library(name)``. On Windows, ``"c"`` and ``"m"`` give
-    ``find_msvcrt()``. ``"sqlite3"`` gives only the DLL that Python bundles, from ``_windows_bundled_dll_path``, and any
-    other name prefers that DLL to one that ``find_library`` finds on the ``PATH``.
+    On Linux and macOS the result is ``ctypes.util.find_library(name)``. On Windows, the result for ``"c"`` and ``"m"``
+    is ``find_msvcrt()``. For ``"sqlite3"``, the result is only the DLL that Python bundles, from
+    ``_windows_bundled_dll_path``. For any other name, the function prefers that DLL to one that ``find_library`` finds
+    on the ``PATH``.
 
-    The bundled DLL comes first because a directory on the ``PATH`` can hold a copy of a common DLL that another tool
-    ships for its own use, and such a copy can crash an outside caller. On GitHub's windows-latest runners, AWS CLI v2
-    puts ``C:\\Program Files\\Amazon\\AWSCLIV2\\sqlite3.dll`` on the ``PATH``. That DLL exports the full SQLite API, but
-    it writes through a null pointer inside ``sqlite3_open`` when a process other than ``aws.exe`` calls it. CPython's
-    bundled ``sqlite3.dll`` is the SQLite that Python's own ``sqlite3`` module uses on Windows.
+    The function prefers the bundled DLL because a directory on the ``PATH`` can hold a copy of a common DLL that
+    another tool installs for its own use, and such a copy can crash an outside caller. On GitHub's windows-latest
+    runners, AWS CLI v2 puts ``C:\\Program Files\\Amazon\\AWSCLIV2\\sqlite3.dll`` on the ``PATH``. That DLL exports the
+    full SQLite API, but it writes through a null pointer inside ``sqlite3_open`` when a process other than ``aws.exe``
+    calls it. CPython's bundled ``sqlite3.dll`` is the SQLite that Python's own ``sqlite3`` module uses on Windows.
     """
     if platform_ in ("Darwin", "Linux"):
         return find_library(name)
@@ -114,16 +115,16 @@ def load_lib(name):
     loaded for the life of the process.
 
     On Linux and macOS, ``ctypes.util.find_library`` finds the file by the short name, such as ``"m"`` for the C math
-    library, in the system's library search and not in the Python installation. The file is then opened in global
-    symbol mode, ``RTLD_GLOBAL``. On Windows, ``"c"`` and ``"m"`` load the C runtime ``msvcrt.dll``, ``"sqlite3"`` loads
-    only the ``sqlite3.dll`` that comes with Python, and any other name prefers a DLL that comes with Python to one on
-    the ``PATH``.
+    library, in the system's library search and not in the Python installation. The file is then opened in global symbol
+    mode, ``RTLD_GLOBAL``. On Windows, the function loads the C runtime ``msvcrt.dll`` for ``"c"`` and ``"m"``, and only
+    the ``sqlite3.dll`` bundled with Python for ``"sqlite3"``. For any other name, it prefers a DLL bundled with Python
+    to one on the ``PATH``.
 
-    If no file is found, the function raises ``RuntimeError: Could not find shared library for <name>``; pass the
-    file's path to :func:`load_lib_path` instead. On Linux, ``find_library`` also looks in the directories of
-    ``LD_LIBRARY_PATH``, but only finds a library built with a SONAME there, and the system's loader reads the variable
-    only when the process starts. On macOS, ``find_library`` looks in the directories of ``DYLD_LIBRARY_PATH`` as
-    ``os.environ`` holds it at the call.
+    If no file is found, the function raises ``RuntimeError: Could not find shared library for <name>``; pass the file's
+    path to :func:`load_lib_path` instead. On Linux, ``find_library`` also searches the directories in
+    ``LD_LIBRARY_PATH``, but it finds a library there only if the library was built with a SONAME, and the system's
+    loader reads the variable only when the process starts. On macOS, ``find_library`` searches the directories in
+    ``DYLD_LIBRARY_PATH`` as ``os.environ`` holds the variable at the call.
     """
     handle = _loaded_libs.get(name)
     if handle is None:

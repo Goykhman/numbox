@@ -4,10 +4,11 @@ Each binding calls the ``double`` form of the C function of its name, so it take
 converts an integer or ``float32`` argument without a warning. The bindings behave as C's functions, not Python's. C
 returns NaN or an infinity where Python's ``math`` module raises ``ValueError`` or ``OverflowError``, as for
 ``sqrt(-1.0)``, ``log(0.0)`` or ``exp(1000.0)``, and ``round`` and ``pow`` differ from Python's built-ins. Import the
-module, as in ``from numbox.core.bindings import libm``, and call ``libm.round``, so that the name ``round`` keeps its
-Python meaning. numba registers 26 of these names, among them ``cos``, ``pow`` and ``sqrt``, for its own math support,
-and LLVM finds a registered name before it searches any library. On Windows, those 26 bindings therefore run CPython's
-C runtime instead of the ``msvcrt.dll`` that this module loads for ``"m"``.
+module, as in ``from numbox.core.bindings import libm``, and call ``libm.round``, so that the name ``round`` still
+refers to Python's built-in function. numba registers 26 of these names, among them ``cos``, ``pow`` and ``sqrt``, for
+its own math support, and LLVM finds a registered name before it searches any library. On Windows, those 26 bindings
+therefore call the functions of CPython's C runtime instead of those of the ``msvcrt.dll`` that this module loads for
+``"m"``.
 """
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
@@ -35,7 +36,7 @@ __all__ = [
 # numba registers the names in numba.core.intrinsics.INTR_MATH, 26 of the 42 bound below, with ll.add_symbol
 # (numba/core/externals.py), and LLVM resolves a registered name before it searches the loaded libraries. On Linux the
 # registered addresses point into the same libm that this call loads. On Windows, they point into CPython's C runtime,
-# so the msvcrt.dll that this call loads serves none of those 26 names.
+# so LLVM resolves none of those 26 names to the msvcrt.dll that this call loads.
 load_lib("m")
 
 
@@ -46,8 +47,8 @@ def cos(x):
     C reference: `cos(3) <https://man7.org/linux/man-pages/man3/cos.3.html>`_.
 
     The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or
-    ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because
-    numba registers the name ``cos`` for its own math support.
+    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the
+    one in ``msvcrt.dll``, because numba registers the name ``cos`` for its own math support.
     """
     return _call_lib_func("cos", (x,))
 
@@ -59,8 +60,8 @@ def sin(x):
     C reference: `sin(3) <https://man7.org/linux/man-pages/man3/sin.3.html>`_.
 
     The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or
-    ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because
-    numba registers the name ``sin`` for its own math support.
+    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the
+    one in ``msvcrt.dll``, because numba registers the name ``sin`` for its own math support.
     """
     return _call_lib_func("sin", (x,))
 
@@ -72,8 +73,8 @@ def tan(x):
     C reference: `tan(3) <https://man7.org/linux/man-pages/man3/tan.3.html>`_.
 
     The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or
-    ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because
-    numba registers the name ``tan`` for its own math support.
+    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the
+    one in ``msvcrt.dll``, because numba registers the name ``tan`` for its own math support.
     """
     return _call_lib_func("tan", (x,))
 
@@ -85,8 +86,9 @@ def acos(x):
     C reference: `acos(3) <https://man7.org/linux/man-pages/man3/acos.3.html>`_.
 
     An ``x`` outside [-1, 1] gives NaN. The binding calls C's ``double`` form, so it takes and returns ``float64``, and
-    numba converts an integer or ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime,
-    not ``msvcrt.dll``, because numba registers the name ``acos`` for its own math support.
+    numba converts an integer or ``float32`` argument without a warning. On Windows, the binding calls the function in
+    CPython's C runtime, not the one in ``msvcrt.dll``, because numba registers the name ``acos`` for its own math
+    support.
     """
     return _call_lib_func("acos", (x,))
 
@@ -98,8 +100,9 @@ def asin(x):
     C reference: `asin(3) <https://man7.org/linux/man-pages/man3/asin.3.html>`_.
 
     An ``x`` outside [-1, 1] gives NaN. The binding calls C's ``double`` form, so it takes and returns ``float64``, and
-    numba converts an integer or ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime,
-    not ``msvcrt.dll``, because numba registers the name ``asin`` for its own math support.
+    numba converts an integer or ``float32`` argument without a warning. On Windows, the binding calls the function in
+    CPython's C runtime, not the one in ``msvcrt.dll``, because numba registers the name ``asin`` for its own math
+    support.
     """
     return _call_lib_func("asin", (x,))
 
@@ -111,8 +114,8 @@ def atan(x):
     C reference: `atan(3) <https://man7.org/linux/man-pages/man3/atan.3.html>`_.
 
     The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or
-    ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because
-    numba registers the name ``atan`` for its own math support.
+    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the
+    one in ``msvcrt.dll``, because numba registers the name ``atan`` for its own math support.
     """
     return _call_lib_func("atan", (x,))
 
@@ -124,8 +127,8 @@ def cosh(x):
     C reference: `cosh(3) <https://man7.org/linux/man-pages/man3/cosh.3.html>`_.
 
     The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or
-    ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because
-    numba registers the name ``cosh`` for its own math support.
+    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the
+    one in ``msvcrt.dll``, because numba registers the name ``cosh`` for its own math support.
     """
     return _call_lib_func("cosh", (x,))
 
@@ -137,8 +140,8 @@ def sinh(x):
     C reference: `sinh(3) <https://man7.org/linux/man-pages/man3/sinh.3.html>`_.
 
     The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or
-    ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because
-    numba registers the name ``sinh`` for its own math support.
+    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the
+    one in ``msvcrt.dll``, because numba registers the name ``sinh`` for its own math support.
     """
     return _call_lib_func("sinh", (x,))
 
@@ -150,8 +153,8 @@ def tanh(x):
     C reference: `tanh(3) <https://man7.org/linux/man-pages/man3/tanh.3.html>`_.
 
     The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or
-    ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because
-    numba registers the name ``tanh`` for its own math support.
+    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the
+    one in ``msvcrt.dll``, because numba registers the name ``tanh`` for its own math support.
     """
     return _call_lib_func("tanh", (x,))
 
@@ -163,8 +166,9 @@ def acosh(x):
     C reference: `acosh(3) <https://man7.org/linux/man-pages/man3/acosh.3.html>`_.
 
     An ``x`` below 1 gives NaN. The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba
-    converts an integer or ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not
-    ``msvcrt.dll``, because numba registers the name ``acosh`` for its own math support.
+    converts an integer or ``float32`` argument without a warning. On Windows, the binding calls the function in
+    CPython's C runtime, not the one in ``msvcrt.dll``, because numba registers the name ``acosh`` for its own math
+    support.
     """
     return _call_lib_func("acosh", (x,))
 
@@ -176,8 +180,8 @@ def asinh(x):
     C reference: `asinh(3) <https://man7.org/linux/man-pages/man3/asinh.3.html>`_.
 
     The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or
-    ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because
-    numba registers the name ``asinh`` for its own math support.
+    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the
+    one in ``msvcrt.dll``, because numba registers the name ``asinh`` for its own math support.
     """
     return _call_lib_func("asinh", (x,))
 
@@ -190,8 +194,8 @@ def atanh(x):
 
     An ``x`` of 1 or -1 gives an infinity of the same sign, and an ``x`` outside [-1, 1] gives NaN. The binding calls
     C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or ``float32`` argument
-    without a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because numba registers the
-    name ``atanh`` for its own math support.
+    without a warning. On Windows, the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``,
+    because numba registers the name ``atanh`` for its own math support.
     """
     return _call_lib_func("atanh", (x,))
 
@@ -203,8 +207,8 @@ def exp(x):
     C reference: `exp(3) <https://man7.org/linux/man-pages/man3/exp.3.html>`_.
 
     The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or
-    ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because
-    numba registers the name ``exp`` for its own math support.
+    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the
+    one in ``msvcrt.dll``, because numba registers the name ``exp`` for its own math support.
     """
     return _call_lib_func("exp", (x,))
 
@@ -228,8 +232,8 @@ def expm1(x):
     C reference: `expm1(3) <https://man7.org/linux/man-pages/man3/expm1.3.html>`_.
 
     The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or
-    ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because
-    numba registers the name ``expm1`` for its own math support.
+    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the
+    one in ``msvcrt.dll``, because numba registers the name ``expm1`` for its own math support.
     """
     return _call_lib_func("expm1", (x,))
 
@@ -242,8 +246,8 @@ def log(x):
 
     An ``x`` of 0 gives negative infinity, and a negative ``x`` gives NaN. The binding calls C's ``double`` form, so it
     takes and returns ``float64``, and numba converts an integer or ``float32`` argument without a warning. On Windows,
-    the call runs CPython's C runtime, not ``msvcrt.dll``, because numba registers the name ``log`` for its own math
-    support.
+    the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``, because numba registers the
+    name ``log`` for its own math support.
     """
     return _call_lib_func("log", (x,))
 
@@ -268,8 +272,8 @@ def log10(x):
 
     An ``x`` of 0 gives negative infinity, and a negative ``x`` gives NaN. The binding calls C's ``double`` form, so it
     takes and returns ``float64``, and numba converts an integer or ``float32`` argument without a warning. On Windows,
-    the call runs CPython's C runtime, not ``msvcrt.dll``, because numba registers the name ``log10`` for its own math
-    support.
+    the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``, because numba registers the
+    name ``log10`` for its own math support.
     """
     return _call_lib_func("log10", (x,))
 
@@ -282,8 +286,8 @@ def log1p(x):
 
     An ``x`` of -1 gives negative infinity, and an ``x`` below -1 gives NaN. The binding calls C's ``double`` form, so
     it takes and returns ``float64``, and numba converts an integer or ``float32`` argument without a warning. On
-    Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because numba registers the name ``log1p`` for its
-    own math support.
+    Windows, the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``, because numba
+    registers the name ``log1p`` for its own math support.
     """
     return _call_lib_func("log1p", (x,))
 
@@ -307,8 +311,9 @@ def sqrt(x):
     C reference: `sqrt(3) <https://man7.org/linux/man-pages/man3/sqrt.3.html>`_.
 
     A negative ``x`` gives NaN. The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba
-    converts an integer or ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not
-    ``msvcrt.dll``, because numba registers the name ``sqrt`` for its own math support.
+    converts an integer or ``float32`` argument without a warning. On Windows, the binding calls the function in
+    CPython's C runtime, not the one in ``msvcrt.dll``, because numba registers the name ``sqrt`` for its own math
+    support.
     """
     return _call_lib_func("sqrt", (x,))
 
@@ -332,8 +337,8 @@ def ceil(x):
     C reference: `ceil(3) <https://man7.org/linux/man-pages/man3/ceil.3.html>`_.
 
     The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or
-    ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because
-    numba registers the name ``ceil`` for its own math support.
+    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the
+    one in ``msvcrt.dll``, because numba registers the name ``ceil`` for its own math support.
     """
     return _call_lib_func("ceil", (x,))
 
@@ -345,8 +350,8 @@ def floor(x):
     C reference: `floor(3) <https://man7.org/linux/man-pages/man3/floor.3.html>`_.
 
     The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or
-    ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because
-    numba registers the name ``floor`` for its own math support.
+    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the
+    one in ``msvcrt.dll``, because numba registers the name ``floor`` for its own math support.
     """
     return _call_lib_func("floor", (x,))
 
@@ -358,8 +363,8 @@ def trunc(x):
     C reference: `trunc(3) <https://man7.org/linux/man-pages/man3/trunc.3.html>`_.
 
     The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or
-    ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because
-    numba registers the name ``trunc`` for its own math support.
+    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the
+    one in ``msvcrt.dll``, because numba registers the name ``trunc`` for its own math support.
     """
     return _call_lib_func("trunc", (x,))
 
@@ -372,8 +377,8 @@ def round(x):
 
     This is C's ``round``, not Python's: ``round(2.5)`` is 3.0 here and 2 in Python. The binding calls C's ``double``
     form, so it takes and returns ``float64``, and numba converts an integer or ``float32`` argument without a warning.
-    On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because numba registers the name ``round`` for
-    its own math support.
+    On Windows, the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``, because numba
+    registers the name ``round`` for its own math support.
     """
     return _call_lib_func("round", (x,))
 
@@ -461,21 +466,22 @@ def fabs(x):
     C reference: `fabs(3) <https://man7.org/linux/man-pages/man3/fabs.3.html>`_.
 
     The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or
-    ``float32`` argument without a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because
-    numba registers the name ``fabs`` for its own math support.
+    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the
+    one in ``msvcrt.dll``, because numba registers the name ``fabs`` for its own math support.
     """
     return _call_lib_func("fabs", (x,))
 
 
 @proxy(signatures.get("atan2"), jit_options=jit_options)
 def atan2(y, x):
-    """Return the arc tangent of ``y / x`` in radians, from -pi to pi, in the quadrant that the signs of both give.
+    """Return the arc tangent of ``y / x`` in radians, in the quadrant that the signs of ``x`` and ``y`` determine.
 
     C reference: `atan2(3) <https://man7.org/linux/man-pages/man3/atan2.3.html>`_.
 
-    The first argument is ``y``, as in C. The binding calls C's ``double`` form, so it takes and returns ``float64``,
-    and numba converts an integer or ``float32`` argument without a warning. On Windows, the call runs CPython's C
-    runtime, not ``msvcrt.dll``, because numba registers the name ``atan2`` for its own math support.
+    The result is in the range from -pi to pi, and the first argument is ``y``, as in C. The binding calls C's
+    ``double`` form, so it takes and returns ``float64``, and numba converts an integer or ``float32`` argument without
+    a warning. On Windows, the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``, because
+    numba registers the name ``atan2`` for its own math support.
     """
     return _call_lib_func("atan2", (y, x))
 
@@ -489,8 +495,8 @@ def pow(x, y):
     This is C's ``pow``, not Python's: a negative ``x`` with a non-integral ``y`` gives NaN, and 0 with a negative ``y``
     gives infinity, where Python's ``**`` gives a complex number or raises ``ZeroDivisionError``. The binding calls C's
     ``double`` form, so it takes and returns ``float64``, and numba converts an integer or ``float32`` argument without
-    a warning. On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because numba registers the name
-    ``pow`` for its own math support.
+    a warning. On Windows, the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``, because
+    numba registers the name ``pow`` for its own math support.
     """
     return _call_lib_func("pow", (x, y))
 
@@ -503,8 +509,8 @@ def fmod(x, y):
 
     Python's ``%`` gives the result the sign of ``y`` instead. A ``y`` of 0 gives NaN. The binding calls C's ``double``
     form, so it takes and returns ``float64``, and numba converts an integer or ``float32`` argument without a warning.
-    On Windows, the call runs CPython's C runtime, not ``msvcrt.dll``, because numba registers the name ``fmod`` for its
-    own math support.
+    On Windows, the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``, because numba
+    registers the name ``fmod`` for its own math support.
     """
     return _call_lib_func("fmod", (x, y))
 
