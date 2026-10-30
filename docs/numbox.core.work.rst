@@ -186,7 +186,7 @@ Values can be loaded into graph nodes through the access node as follows [#f3]_:
 
     load_data = Dict.empty(key_type=unicode_type, value_type=AnyType)
     assert sheaf["w1"].get_as(int16) == 137
-    load_data["w1"] = make_any(12)
+    load_data["w1"] = make_any(int16(12))
     w10.load(load_data)
     w10.combine(sheaf)
     assert sheaf["w1"].get_as(int16) == 12
