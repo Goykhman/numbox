@@ -1,10 +1,10 @@
 """Tests for ``numbox.utils.digest``, the hash of 16 hexadecimal digits that names generated code.
 
 The tests check that the digest has 16 digits and is the same for the same inputs. They check that it changes with
-the subject, with a literal in a function's body and with numbox's default jit options. It also changes with the
-options of a dispatcher or a ``@vectorize`` function. A callable without code is hashed as a cloudpickle that holds
-its state. A function that reads a value without a fingerprint is hashed with the best-effort fingerprint, which still
-folds closure values. All the digests are compared within one process.
+the subject, with a function that differs in a literal and in its name, and with numbox's default jit options. It
+also changes with the options of a dispatcher or a ``@vectorize`` function. A callable without code is hashed as a
+cloudpickle that holds its state. A function that reads a value without a fingerprint is hashed with the best-effort
+fingerprint, which still folds closure values. All the digests are compared within one process.
 """
 import functools
 
@@ -33,8 +33,8 @@ def test_digest_varies_with_subject():
 
 
 def test_digest_varies_with_function_literal():
-    # The two bodies differ only in co_consts on Python 3.10 to 3.13, where their bytecode is the same. The fingerprint
-    # folds co_consts.
+    # The two functions differ in co_consts and in their names; their bytecode is the same on Python 3.10 to 3.13. The
+    # fingerprint folds both, so the test does not show which of the two changes the digest.
     def cb_one(x):
         return x + 1
 

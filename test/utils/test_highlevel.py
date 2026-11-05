@@ -418,7 +418,7 @@ def test_type_identity_dispatcher_is_uncacheable_and_content_sensitive():
     """A dispatcher type is not cacheable, and two dispatchers with different bodies have different digests.
 
     ``intrinsic_ref`` calls ``_call_lib_func``, an ``@intrinsic`` without a fingerprint, so its digest comes from the
-    best-effort fingerprint, which must still distinguish the two bodies.
+    best-effort fingerprint, and the two digests differ.
     """
     @njit
     def plain(x):

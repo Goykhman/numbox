@@ -224,8 +224,7 @@ def test_a_parallel_derive_still_propagates():
         acc = 0.0
         # The raise is a second exit from the prange loop, so numba runs the loop serially and warns with
         # NumbaPerformanceWarning. No test covers a derive whose loop runs in parallel and calls a function that
-        # raises. Such a derive returns normally, and calculate stores the incomplete result and sets derived, as the
-        # work page describes under "Exceptions in parallel loops".
+        # raises. In that case calculate stores a value and sets derived, and the call then raises SystemError.
         for i in prange(4):
             if a > 0.0:
                 raise ValueError("parallel boom")
