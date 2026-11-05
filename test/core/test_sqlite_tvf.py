@@ -464,8 +464,7 @@ def _fetchall_text(db, sql):
 
 
 _STR_OUT = np.dtype([("n", "i8"), ("u", "U6"), ("s", "S4")])
-# numba cannot assign a str to a 'U' field of a record in jitted code, because it fails to cast the str literal to the
-# fixed-width field. fn therefore returns a slice of an array that Python builds.
+# fn returns a slice of an array that Python builds, which is enough to drive the column-emit path.
 _STR_ROWS = np.array([(0, "héllo", b"ab"), (1, "\U0001F600", b"cd")], dtype=_STR_OUT)
 
 
