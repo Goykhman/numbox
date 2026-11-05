@@ -163,3 +163,19 @@ def test_strerror_safe_ir_uses_strerror_r_when_xpg_absent(monkeypatch):
     ir_text = strerror_mod._render_ir_for_probe()
     assert "strerror_r" in ir_text
     assert "__xpg_strerror_r" not in ir_text
+
+
+def _libc_is_glibc():
+    import platform
+    return platform.libc_ver()[0] == "glibc"
+
+
+@pytest.mark.skipif(not _libc_is_glibc(), reason="the return codes the docstring states are glibc's")
+def test_strerror_safe_returns_glibc_error_codes():
+    """With glibc, an unknown error number returns EINVAL and a buffer too short for the message returns ERANGE."""
+    rc, msg = _strerror(INVALID_ERRNO)
+    assert rc == errno.EINVAL, f"rc={rc}, msg={msg!r}"
+    assert msg == f"Unknown error {INVALID_ERRNO}", msg
+    buf = np.full(2, 0xFF, dtype=np.uint8)
+    rc, _ = _describe(errno.ENOENT, buf, buf.size)
+    assert rc == errno.ERANGE, f"rc={rc}"

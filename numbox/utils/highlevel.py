@@ -333,11 +333,13 @@ def make_structref(
 
     ``struct_fields`` is a dict of field names to numba types, or a sequence of field names whose types numba infers
     from the arguments of each call to the class. ``struct_type_class`` is an empty subclass of numba's ``StructRef``
-    registered with numba's ``@register``, and each struct needs one of its own. If code that uses the struct is to be
-    cached, define the type class in a module that the program imports, not in the script that runs. numba pickles the
-    struct's type into its cache, and a class from the running script does not match the cached copy in the next run.
-    A StructRef written by hand has the same requirement. For the same reason, ``make_structref`` cannot define the
-    type class in the code that it generates.
+    registered with numba's ``@register``, and each struct needs one of its own. The class must not be named
+    ``struct_name`` followed by ``Type``, such as ``PointType`` for a struct named ``Point``, because the generated code
+    assigns that name to the struct's numba type. If code that uses the struct is to be cached, define the type class
+    in a module that the program imports, not in the script that runs. numba pickles the struct's type into its cache,
+    and a class from the running script does not match the cached copy in the next run. A StructRef written by hand
+    has the same requirement. For the same reason, ``make_structref`` cannot define the type class in the code that it
+    generates.
 
     ``struct_methods`` maps method names to functions. Each function becomes a method that Python code and jitted code
     can call, and it receives the struct as its first argument. A method must not define a nested function, because
