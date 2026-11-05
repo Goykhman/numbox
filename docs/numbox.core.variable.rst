@@ -285,8 +285,9 @@ Whether numba caches the kernel depends on the first of these settings that is p
    the settings below;
 2. the ``cache`` option of ``jit_options``;
 3. the ``cache`` option of numbox's default options. numbox reads those options from the ``NUMBOX_JIT_OPTIONS``
-   environment variable for every function it compiles, and it sets their ``cache`` to ``False``, for all of those
-   functions, when numba can write no cache for numbox's own modules (:doc:`numbox.core.configurations`);
+   environment variable once, at import, so set the variable before importing numbox. The options apply to every
+   function numbox compiles, and numbox sets their ``cache`` to ``False``, for all of those functions, when numba can
+   write no cache for numbox's own modules (:doc:`numbox.core.configurations`);
 4. if none of these settings is present, caching is enabled.
 
 Even with ``cache=True``, the kernel compiles without a cache in the cases listed in `When the kernel is not cached`_.
@@ -480,8 +481,9 @@ for the kernel:
   arrays other than object arrays, tuples, lists, sets and dicts of these, modules, Python functions, numba
   dispatchers and ``@vectorize`` functions.
 
-One rule covers a function or a type that a module provides: calling it through its module allows caching, and
-calling it by a bare name imported from the module does not.
+One rule covers a built-in function, a NumPy ufunc and a type that a module provides, none of which numbox can hash:
+calling one through its module allows caching, and calling it by a bare name imported from the module does not. A
+Python function or a numba dispatcher imported by name is hashed, so it allows caching.
 
 ==============================  ================================================================
 Allows caching                  Prevents caching
@@ -510,8 +512,10 @@ values of the kernel's first call, and each ``recompute`` writes its changes int
 compiled as one function, returns only the requested variables, so numbox fills its store at the first
 ``recompute``. numbox then computes every variable once more from the first call's arguments, and numba compiles each
 formula separately for this computation. numba does not cache these compilations, so every new process compiles the
-formulas once. The store of a kernel that runs in segments, described in `If a formula cannot be compiled`_, fills
-during the first call. Before any call, ``recompute`` raises
+formulas once. The store of a kernel that numbox splits into segments at its first call, described in `If a formula
+cannot be compiled`_, fills during that call. A kernel built from declared types, described in `Declaring the types`_,
+fills its store at the first ``recompute`` even when it runs in segments, and its Python formulas then run a second
+time. Before any call, ``recompute`` raises
 ``RuntimeError: CompiledKernel.recompute requires a prior full call``.
 
 A call of ``ck.kernel`` or ``ck.execute`` does not update the store. A ``recompute`` after ``ck.kernel`` with new

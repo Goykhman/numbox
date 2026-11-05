@@ -3,8 +3,9 @@ numbox.core.bindings.sqlite
 
 The ``numbox.core.bindings.sqlite`` subpackage holds the bindings to SQLite's C API and the helpers built on them,
 one module for each group. Import a function from its module, as in
-``from numbox.core.bindings.sqlite.conn import sqlite3_open``. The package's ``__init__`` is empty, so importing one
-module neither imports nor compiles the others.
+``from numbox.core.bindings.sqlite.conn import sqlite3_open``. The package's ``__init__`` is empty, so importing a
+module imports and compiles only that module and the sibling modules it uses. A binding module such as ``conn`` uses
+none. The helper modules ``query``, ``tvf``, ``vtable`` and ``udf_helpers`` import the binding modules they call.
 
 numbox.core.bindings.sqlite.conn
 --------------------------------
