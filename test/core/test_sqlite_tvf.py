@@ -201,7 +201,8 @@ def test_tvf_column_tag_without_a_branch_fails_the_query():
 def test_tvf_missing_hidden_arg():
     """A query that leaves the arguments unbound returns no rows.
 
-    SQLite fails to prepare it with "no query solution", because xBestIndex rejects every plan with an unbound argument.
+    xBestIndex rejects every plan with an unbound argument, so SQLite fails to prepare the query with "no query
+    solution". The test checks only that no rows come back, which a failed prepare and an empty scan both satisfy.
     """
     db = _open()
     h = register_tvf(db.value, "series", (np.int64, np.int64), _OUT, _series)

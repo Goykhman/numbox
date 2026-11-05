@@ -97,7 +97,8 @@ def test_errno_set_get_observable_in_parallel_iterations():
     ``errno_get`` by name, so the compiled loop contains no call of ``__errno_location`` that LLVM could move out of an
     iteration. The test does not show that ``errno`` is per thread: an iteration runs its set and its get on one
     thread, and a process-wide ``errno`` would differ only if another thread set it between them.
-    ``test_errno_per_thread_isolation`` checks that each thread has its own ``errno``.
+    ``test_errno_per_thread_isolation`` checks that two threads each read back their own value, which a process-wide
+    ``errno`` fails only when the threads interleave between a set and its get.
     """
     @njit(parallel=True, cache=True)
     def f(n):

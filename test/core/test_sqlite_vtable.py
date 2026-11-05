@@ -2,10 +2,10 @@
 
 The helpers convert UTF-32 to UTF-8, measure the length of a value without its trailing NULs and build a table's
 descriptor. The tests register 2-D, structured and columnar data of every supported dtype, with strided, reversed and
-Fortran-ordered layouts, and query it with joins, aggregates and constraints. The tests whose names contain pushdown
+Fortran-ordered layouts, and query it with joins, aggregates and constraints. Most tests whose names contain pushdown
 check the constraints that xBestIndex claims, against a full scan or against Python's ``sqlite3`` module. Other tests
-check the release of a registration when its connection closes or its name is registered again, and the reuse of numba's
-cache in a second process.
+check the release of a registration when its connection closes or its name is registered again, and the reuse of
+numba's cache in a second process.
 """
 import gc
 import os
