@@ -1,3 +1,8 @@
+"""The base node type ``NodeBaseType``, whose only field is the name, and its Python proxy ``NodeBase``.
+
+Every ``Node`` and ``Work`` payload begins with the ``name`` field, so a node of either kind can be cast to
+``NodeBaseType``; the inputs of a ``Node`` are stored that way.
+"""
 from numba import njit
 from numba.core.errors import NumbaError
 from numba.core.types import StructRef, unicode_type
@@ -11,12 +16,20 @@ deleted_node_base_ctor_error = "Intended for inheritance."
 
 
 class NodeBase(StructRefProxy):
+    """A node whose only field is its name: the Python proxy of ``NodeBaseType`` and the base class of Node and Work.
+
+    ``NodeBaseType`` has one field, ``name``. The payloads of :class:`~numbox.core.work.node.Node` and
+    :class:`~numbox.core.work.work.Work` nodes begin with that field, so a node of either kind can be cast to
+    ``NodeBaseType``, as the inputs of a ``Node`` are cast. Calling ``NodeBase`` raises ``NotImplementedError`` in
+    Python and fails to compile in jitted code.
+    """
     def __new__(cls, name):
         raise NotImplementedError(deleted_node_base_ctor_error)
 
     @property
     @njit(**jit_options)
     def name(self):
+        """The node's name."""
         return self.name
 
     def __str__(self):
@@ -25,6 +38,7 @@ class NodeBase(StructRefProxy):
 
 @register
 class NodeBaseTypeClass(StructRef):
+    """The numba type class of ``NodeBaseType``, the type of a node whose only field is its name."""
     pass
 
 

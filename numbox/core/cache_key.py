@@ -1,4 +1,12 @@
-"""numbox's part of numba's on-disk cache key."""
+"""numbox's part of numba's on-disk cache key, and the decorators that add it to a function's key.
+
+numba caches a compiled function under a key that leaves out the jit options and most of the ``NUMBA_*`` settings
+that change the emitted code. numbox appends a part of its own to that key for each function that it compiles with
+caching enabled: numbox's version, the jit options that numba compiles under, and the settings in
+:data:`KEYED_SETTINGS`. :func:`numbox_njit` and :func:`numbox_cfunc` add the same part to the functions you decorate,
+and :func:`explain_cache_key` returns it. numbox installs the part by wrapping numba's cache functions once per
+process, when ``numbox.core`` is first imported.
+"""
 import contextlib
 import functools
 import re
@@ -21,27 +29,33 @@ import numbox
 
 
 #: The ``NUMBA_*`` settings that change the code numba emits, each with the ``numba.config`` attribute numba reads it
-#: into. A survey of numba 0.63 to 0.68, each minor version at its latest patch release, classified them. The survey
-#: compiled a fixed corpus with each setting changed in turn and compared the emitted LLVM IR and assembly. Of the
-#: settings that numba's own key leaves out, one is keyed if and only if changing it changes the code, including
-#: settings that change only speed or debugging information. ``NUMBA_DUMP_ASSEMBLY``, ``NUMBA_DEBUG`` and
-#: ``NUMBA_DIFF_IR`` change the code only as a side effect of the dumps they request, and are keyed as well. Three
-#: settings change the code only in combination with another setting or flag, so a survey that changes one setting at
-#: a time cannot reveal them. They were found in numba's source: ``NUMBA_DEBUG_NRT_STACK_LIMIT`` changes the code only
-#: under ``NUMBA_DEBUG_NRT``, and ``NUMBA_FULL_TRACEBACKS`` and ``NUMBA_DEVELOPER_MODE`` (its default) change it only
-#: where bounds checking is enabled. ``NUMBA_DISABLE_INTEL_SVML`` changes the code only where Intel's SVML library is
+#: into. A survey of the latest patch release of each minor version of numba from 0.63 to 0.68 classified them. The
+#: survey compiled a fixed corpus with each setting changed in turn and compared the emitted LLVM IR and assembly. A
+#: setting that numba's own key leaves out is keyed if and only if changing it changes the code, even if only speed or
+#: debugging information changes. ``NUMBA_DUMP_ASSEMBLY``, ``NUMBA_DEBUG`` and ``NUMBA_DIFF_IR`` change the code only
+#: as a side effect of the dumps they request, and are keyed as well. Three settings change the code only in
+#: combination with another setting or flag, so a survey that changes one setting at a time cannot reveal them. numba's
+#: source shows them. ``NUMBA_DEBUG_NRT_STACK_LIMIT``, which numba reads from 0.66 on, changes the code only under
+#: ``NUMBA_DEBUG_NRT``. ``NUMBA_FULL_TRACEBACKS`` and ``NUMBA_DEVELOPER_MODE`` (its default) change it only where
+#: bounds checking is enabled. ``NUMBA_DISABLE_INTEL_SVML`` changes the code only where Intel's SVML library is
 #: installed, which the survey's machines lacked; numba then calls SVML for vectorized math.
 KEYED_SETTINGS = {
     "NUMBA_BOUNDSCHECK": "BOUNDSCHECK",
     "NUMBA_OPT": "OPT",
     "NUMBA_LOOP_VECTORIZE": "LOOP_VECTORIZE",
     "NUMBA_SLP_VECTORIZE": "SLP_VECTORIZE",
+    # numba's own key already reflects this setting. Unless NUMBA_CPU_FEATURES is set, numba removes the AVX features
+    # from its target machine's CPU features when the setting is 0, and its key holds those features
+    # (get_host_cpu_features and CPUCodegen.magic_tuple in numba.core.codegen). Keying it here is redundant.
     "NUMBA_ENABLE_AVX": "ENABLE_AVX",
     "NUMBA_DEBUGINFO": "DEBUGINFO_DEFAULT",
     "NUMBA_ENABLE_PROFILING": "ENABLE_PROFILING",
     "NUMBA_EXTEND_VARIABLE_LIFETIMES": "EXTEND_VARIABLE_LIFETIMES",
     "NUMBA_LLVM_REFPRUNE_PASS": "LLVM_REFPRUNE_PASS",
     "NUMBA_LLVM_REFPRUNE_FLAGS": "LLVM_REFPRUNE_FLAGS",
+    # numba 0.66 and later choose the type of the NRT incref and decref calls from these two settings when numba is
+    # imported (print_nrt_stack in numba.core.runtime.nrtdynmod). A change of either setting inside a running process
+    # therefore changes the key, while those calls retain the type chosen at import.
     "NUMBA_DEBUG_NRT": "DEBUG_NRT",
     "NUMBA_DEBUG_NRT_STACK_LIMIT": "DEBUG_NRT_STACK_LIMIT",
     "NUMBA_FULL_TRACEBACKS": "FULL_TRACEBACKS",
@@ -97,25 +111,35 @@ _WHY = "numbox's cache key cannot hold it reliably, so the function is not cache
 
 
 class UncachedWarning(RuntimeWarning):
-    """A function numbox keys is compiled without an on-disk cache, because the key cannot hold one of its flags.
+    """Warning that numbox compiles a function without an on-disk cache, because its key cannot hold a jit option.
 
-    That is a ``parallel`` dict, which numba empties as it parses it; a pipeline class other than numba's default; a
-    function given as the ``inline`` cost model; or a type in ``locals`` that numba names after an object's address.
-    The warning names the function and what the key could not hold.
+    One of these options causes it:
+
+    - A ``parallel`` dict, which numba empties as it parses it.
+    - A pipeline class other than numba's default.
+    - A function given as the ``inline`` option, which numba calls as a cost model.
+    - A type in ``locals`` whose name numba builds from an object's address.
+    - Any other value that the key has no stable text for.
+
+    numba then compiles the function again in every process. numbox warns once per process for each function and
+    option, and the warning names both.
     """
 
 
 class _Unkeyable(Exception):
-    """Raised inside the key computation for a flag the key cannot hold; the cache wrappers treat it as a cache miss."""
+    """Exception that the key computation raises for a jit option that the key cannot hold.
+
+    The cache wrappers treat it as a cache miss, save nothing, and warn with :class:`UncachedWarning`.
+    """
 
 
 # ---- The settings ----
 
 def _setting_value(value) -> str:
-    """The canonical text of one setting's value.
+    """Return the text that the key holds for one setting's value.
 
-    numba's ``NUMBA_OPT`` is an ``int`` that keeps the value it was given, such as ``max``, in ``_raw_value``. A bool
-    and an int that numba treats as equal have the same canonical text.
+    numba's ``NUMBA_OPT`` is an ``int`` that stores the value it was given, such as ``max``, in ``_raw_value``, and the
+    text is that value. A bool and an int that numba treats as equal have the same text.
     """
     raw = getattr(value, "_raw_value", None)
     if raw is not None:
@@ -126,15 +150,19 @@ def _setting_value(value) -> str:
 
 
 def _current_settings() -> tuple:
-    """Each keyed setting and its value, as ``numba.config`` holds it now."""
+    """Return each keyed setting with the text of its current value in ``numba.config``."""
+    # The values are read from numba.config, not from os.environ. numba copies the NUMBA_* environment variables into
+    # numba.config when it is imported, together with the settings of a .numba_config.yaml file in the working
+    # directory if there is one. It copies them again when a compile starts, if one of them changed:
+    # CompilerBase.__init__ calls config.reload_config, which runs _EnvReloader.update.
     return tuple((env, _setting_value(getattr(numba_config, attr, None))) for env, attr in KEYED_SETTINGS.items())
 
 
 def _settings_canon() -> str:
-    """The settings part of the key, with the current values.
+    """Return the settings part of the key, with the current values, as one string.
 
-    Shared with the content-addressed names of the kernels :mod:`numbox.core.variable.compile_kernel` generates and
-    the derives :mod:`numbox.core.work.builder` anchors, which include it in their digests.
+    :mod:`numbox.core.variable.compile_kernel` and :mod:`numbox.core.work.builder` also include it in the digests
+    that name the kernels and the derive functions they generate.
     """
     return repr(list(_current_settings()))
 
@@ -147,7 +175,11 @@ _ADDRESS = re.compile(r" at 0x[0-9a-fA-F]+|jitclass\.[\w.]*#[0-9a-fA-F]+|Deferre
 
 
 def _type_text(value, where) -> str:
-    """A type given in ``locals``, as the key holds it: numba's text for it, unless that text names an address."""
+    """Return the text that the key holds for a type given in ``locals``: numba's text for the type.
+
+    Raises :class:`_Unkeyable` if that text names an object by its address, or if ``value`` is neither a string nor a
+    numba type. ``where`` describes the value in the message.
+    """
     if isinstance(value, str):
         return repr(value)
     if isinstance(value, NumbaType):
@@ -159,8 +191,12 @@ def _type_text(value, where) -> str:
 
 
 def _flag_value_text(value, where) -> str:
-    """One of the flags numba compiles under, as the key holds it: a plain value as its ``repr``, a set of fast-math
-    flags in order, each parallel option separately, or the inlining choice."""
+    """Return the text that the key holds for the value of one flag that numba compiles under.
+
+    The function writes a plain value as its ``repr``, a set of fast-math flags in sorted order, each parallel option
+    as a separate item, and an inlining choice as its string. Raises :class:`_Unkeyable` for a function given as the
+    inlining cost model and for a value of any other type. ``where`` describes the value in the message.
+    """
     if isinstance(value, np.generic):
         value = value.item()
     if value is None or isinstance(value, (bool, int, str)):
@@ -177,26 +213,31 @@ def _flag_value_text(value, where) -> str:
 
 
 def _flags_text(kind, compiler) -> str:
-    """The decorator kind, the flags numba compiles under and the ``locals`` given at decoration.
+    """Return the flags part of the key: the decorator kind, the flags numba compiles under and the ``locals`` types.
 
-    The flags come from numba's own parse of the decorator's options, followed by the changes numba's compiler then
-    makes to them, including those for a C callback. When the function is compiled during the compilation of a caller,
-    the parse takes from the caller's compilation any of ``nrt``, ``fastmath``, ``error_model`` and ``forceinline``
-    that the options leave unset, as numba's parse does. For a variable given in ``locals`` that it renames, numba's SSA
-    pass adds each new name, the variable's name and a number after a dot, typed as the variable. Those names are left
-    out, since the given type determines them. A name with a dot whose part before the last dot is not given is the
-    caller's own, and is kept.
+    Raises :class:`_Unkeyable` for a ``parallel`` dict, for a pipeline class other than numba's default, and for a
+    flag or a type that the key cannot hold.
     """
     options = compiler.targetoptions
+    # numba empties a parallel dict as it parses it, so a later compile of the function with the same dict would use
+    # numba's defaults.
     if isinstance(options.get("parallel"), dict):
         raise _Unkeyable("the jit flag parallel is a dict, which numba empties as it parses it")
     pipeline = compiler.pipeline_class
+    # A pipeline class is code, and the key does not hold code.
     if pipeline is not Compiler:
         name = pipeline.__qualname__ if isinstance(pipeline, type) else f"an instance of {type(pipeline).__qualname__}"
         raise _Unkeyable(f"the pipeline class is {name}, not numba's default")
     given = compiler.locals or {}
+    # numba's SSA pass adds a name for each variable in locals that it renames: the variable's name, a dot and a
+    # number, typed as the variable. The key leaves those names out, because the given type determines them. The key
+    # includes a name with a dot whose part before the last dot is not in locals, because the caller, not the SSA pass,
+    # gave that name.
     locals_ = sorted((name, ty) for name, ty in given.items() if name.rpartition(".")[0] not in given)
     flags = Flags()
+    # Like numba, the function parses the options into flags and then applies the changes that numba's compiler makes
+    # to them, including the changes for a C callback. When numba compiles the function inside a caller's compile, the
+    # parse inherits nrt, fastmath, error_model and forceinline from the caller wherever the options leave them unset.
     compiler.targetdescr.options.parse_as_flags(flags, options)
     flags = compiler._customize_flags(flags)
     values = ";".join(
@@ -207,19 +248,23 @@ def _flags_text(kind, compiler) -> str:
 
 
 def _key_part(keyed) -> tuple:
-    """numbox's part of the key for the next compile: its version, the flags and the settings."""
+    """Return numbox's part of the key: numbox's version, the flags text and the settings text."""
     kind, compiler = keyed
     return (numbox.__version__, _flags_text(kind, compiler), _settings_canon())
 
 
 def explain_cache_key(func) -> dict:
-    """The parts numbox adds to ``func``'s cache key, with their current values, for the next compile of a direct call
-    in this process.
+    """Return numbox's part of ``func``'s cache key, with the values that the next cache lookup in this process uses.
 
-    ``func`` is a dispatcher or ``@cfunc`` whose cache numbox keys, what ``cres`` returns, or a ``@proxy`` function's
-    ``.as_func``: a function numbox compiled, or one decorated with :func:`numbox_njit` or :func:`numbox_cfunc` with
-    ``cache=True``. The result maps ``"numbox"`` to numbox's version, ``"flags"`` to the flags as the key holds them,
-    and ``"settings"`` to each keyed setting's value. Two results that differ belong to two different keys.
+    ``func`` is a dispatcher or a ``@cfunc`` whose cache numbox keys, the object that ``cres`` returns, or the
+    ``.as_func`` of a ``@proxy`` function. numbox keys the functions that it compiles with caching enabled, and the
+    functions decorated with :func:`numbox_njit` or :func:`numbox_cfunc` and ``cache=True``. The result maps
+    ``"numbox"`` to numbox's version, ``"flags"`` to the flags as the key holds them, and ``"settings"`` to the text of
+    each keyed setting's value. The flags are those of a call from Python; a jitted caller can compile the function
+    under other options. Two results that differ belong to two different keys.
+
+    Raises ``ValueError`` if numbox does not key ``func``'s cache, or if numbox compiles ``func`` without an on-disk
+    cache.
     """
     func = getattr(func, "_numbox_dispatcher", func)
     cache = getattr(func, "_cache", None)
@@ -238,12 +283,13 @@ def explain_cache_key(func) -> dict:
 
 # ---- The opt-in ----
 
+# Each thread has its own stack of marks, so decorations on two threads cannot pop each other's marks.
 _keying = threading.local()
 
 
 @contextlib.contextmanager
 def _keyed(func):
-    """Mark the cache that numba sets up for ``func`` while the context is active, so that numbox keys it."""
+    """Mark ``func`` while the context is active, so that numbox keys the cache that numba sets up for it."""
     stack = getattr(_keying, "funcs", None)
     if stack is None:
         stack = _keying.funcs = []
@@ -255,7 +301,7 @@ def _keyed(func):
 
 
 def _keys(py_func) -> bool:
-    """Whether numbox keys the cache of ``py_func``: numbox's own code, or a function being decorated by numbox."""
+    """Return whether numbox keys the cache of ``py_func``: a numbox module's function, or one numbox is decorating."""
     module = getattr(py_func, "__module__", None) or ""
     if module == "numbox" or module.startswith("numbox."):
         return True
@@ -263,14 +309,17 @@ def _keys(py_func) -> bool:
 
 
 def numbox_njit(*args, **kwargs):
-    """``numba.njit``, taking its arguments unchanged, with numbox's cache key on the function it decorates.
+    """Decorate a function as ``numba.njit`` does, and add numbox's part to the key under which numba caches it.
 
-    With ``cache=True``, the function is cached under numba's key with numbox's part added, which the
-    ``numbox.core.cache_key`` documentation page describes. numbox sets up the key when numba creates the cache, at
-    decoration, so the key applies to an eager compile, for which a signature is given, as well as to a lazy one.
-    Without ``cache=True``, it behaves exactly as ``numba.njit``.
+    The decorator takes numba's arguments unchanged, including signatures and options. With ``cache=True``, numba
+    caches the function under its own key with numbox's part appended: numbox's version, the jit options and the
+    settings in :data:`KEYED_SETTINGS`. The part applies to an eager compile, for which the decorator is given a
+    signature, and to a lazy compile at the first call. Without ``cache=True``, the decorator behaves exactly as
+    ``numba.njit``.
     """
     func = args[0] if args else kwargs.get("signature_or_function")
+    # numba sets up the function's cache inside the decorator call, so the function is marked for the length of that
+    # call: here for the form numbox_njit(func, ...), and in wrap for the form numbox_njit(...)(func).
     if isinstance(func, FunctionType):
         with _keyed(func):
             return njit(*args, **kwargs)
@@ -283,10 +332,13 @@ def numbox_njit(*args, **kwargs):
 
 
 def numbox_cfunc(*args, **kwargs):
-    """``numba.cfunc``, taking its arguments unchanged, with numbox's cache key on the function it decorates.
+    """Decorate a function as ``numba.cfunc`` does, and add numbox's part to the key under which numba caches it.
 
-    With ``cache=True``, the C callback is cached under numba's key with numbox's part added, which also distinguishes
-    it from an ``njit`` of the same function. Without ``cache=True``, it behaves exactly as ``numba.cfunc``.
+    The decorator takes numba's arguments unchanged. With ``cache=True``, numbox's part also holds the decorator kind,
+    so numba caches the C callback apart from a :func:`numbox_njit` of the same function. Under numba's key alone, an
+    eager ``numba.njit`` given the same signature as a numba ``Signature`` object shares the callback's entry. A call to
+    such an njit after it loaded the callback's entry crashes the process with a segmentation fault. Without
+    ``cache=True``, the decorator behaves exactly as ``numba.cfunc``.
     """
     decorator = cfunc(*args, **kwargs)
 
@@ -298,6 +350,7 @@ def numbox_cfunc(*args, **kwargs):
 
 # ---- The hooks ----
 
+# Each pair of a cache's name and a reason is reported once per process.
 _uncached_reported = set()
 
 
@@ -320,6 +373,13 @@ def _warn_uncached(cache, exc):
 def _wrap_index_key(original):
     @functools.wraps(original)
     def _index_key(self, sig, codegen):
+        # numba computes the key twice for each compile: at the lookup before it (Cache._load_overload) and at the
+        # save after it (Cache._save_overload). The compile between the lookup and the save can refresh numba.config
+        # from os.environ, because CompilerBase.__init__ calls config.reload_config. The saved key therefore holds the
+        # refreshed values, and the code may not match them. numba parsed the compile's flags before the refresh
+        # (_FunctionCompiler._compile_core), and it built the target machine, with NUMBA_OPT and NUMBA_ENABLE_AVX, at
+        # the first decoration in the process (CPUCodegen._init). A setting changed inside a running process can
+        # therefore be saved under a key that does not describe the code.
         key = original(self, sig, codegen)
         keyed = getattr(self, "_numbox_keyed", None)
         return key if keyed is None else key + (_key_part(keyed),)
@@ -351,26 +411,38 @@ def _wrap_enable_caching(original, kind, py_func_of):
     @functools.wraps(original)
     def enable_caching(self):
         original(self)
+        # numba calls enable_caching at decoration if cache=True. A cache that numbox keys records the decorator kind
+        # and the compiler, from which _flags_text reads the options at each lookup and save.
         if _keys(py_func_of(self)):
             self._cache._numbox_keyed = (kind, self._compiler)
     return enable_caching
 
 
 def _install():
-    """Wrap numba's cache and the two decorators' cache set-up; once per process.
+    """Wrap numba's cache methods and the cache set-up of numba's two decorators, once per process.
 
-    Every lookup happens before the first assignment, so on a numba version that lacks one of them, nothing is
-    installed. The marker that makes a second install return early is set after the last assignment, and an
-    assignment that fails, the marker's assignment included, restores the attributes assigned before it. A failed
-    install leaves numba unchanged, and the next import attempts it again.
+    If the installation fails, numba is left unchanged, and a later fresh import of this module runs the installation
+    again.
     """
+    # After a reload of this module, _install returns here. The installed hooks still key the functions that the
+    # decorators mark, because importlib.reload reuses the module's namespace and the hooks read _keying from it.
+    # _install also returns here when the module is imported again after its removal from sys.modules. The decorators
+    # of that fresh copy mark functions in a new _keying that the installed hooks never read. Those functions are
+    # therefore cached under numba's key alone, while numbox's own functions remain keyed.
     if getattr(caching, "_numbox_cache_key", False):
         return
+    # Every attribute is looked up before the first assignment, so on a numba version that lacks one of them, nothing
+    # is installed.
     wrapped = [
         (caching.Cache, "_index_key", _wrap_index_key(caching.Cache._index_key)),
         (caching.Cache, "load_overload", _wrap_load_overload(caching.Cache.load_overload)),
         (caching.Cache, "save_overload", _wrap_save_overload(caching.Cache.save_overload)),
         (Dispatcher, "enable_caching", _wrap_enable_caching(Dispatcher.enable_caching, "njit", lambda d: d.py_func)),
+        # The kind separates the cache entries of a C callback from those of an njit. numba keys an eager njit by the
+        # signature as it is given (Dispatcher.compile). It keys a C callback by the Signature that it builds
+        # (CFunc.__init__). The two therefore share entries if the njit is given a Signature object. numba compiles a C
+        # callback without the CPython wrapper (no_cpython_wrapper in _CFuncCompiler._customize_flags), so a call to an
+        # njit that loaded the callback's entry crashes the process.
         (CFunc, "enable_caching", _wrap_enable_caching(CFunc.enable_caching, "cfunc", lambda c: c._pyfunc)),
     ]
     applied = []
@@ -379,6 +451,8 @@ def _install():
             original = getattr(owner, name)
             setattr(owner, name, replacement)
             applied.append((owner, name, original))
+        # The marker is set after the last assignment. An assignment that fails, including the marker's assignment,
+        # restores the attributes assigned before it.
         caching._numbox_cache_key = True
     except BaseException:
         for owner, name, original in reversed(applied):

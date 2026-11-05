@@ -1,3 +1,9 @@
+"""A text drawing of a node and the nodes it depends on.
+
+:func:`~numbox.core.work.print_tree.make_image` returns the drawing for a :class:`~numbox.core.work.node.Node` or a
+:class:`~numbox.core.work.work.Work` node; :func:`~numbox.core.work.print_tree.make_graph` lays the tree out on a grid
+first.
+"""
 from io import StringIO
 
 VERTICAL_SEP = "|"
@@ -6,6 +12,10 @@ HORIZONTAL_SEP = HORIZONTAL_BIT * 2
 
 
 class ImmutableItemDict(dict):
+    """A dictionary in which each key can be set only once; setting a key again raises ``ValueError``.
+
+    The layout uses it to detect two items placed in one cell of the grid.
+    """
     def __setitem__(self, key, value):
         if key in self:
             raise ValueError(f"Already stored {value} in {key}")
@@ -13,6 +23,10 @@ class ImmutableItemDict(dict):
 
 
 def calculate_col_widths(graph):
+    """Return the width of each column of the grid ``graph``: the length of the longest item in the column.
+
+    ``graph`` maps (row, column) pairs to strings.
+    """
     col_widths = {}
     for (row, col), item in graph.items():
         col_widths[col] = max(col_widths.setdefault(col, 0), len(item))
@@ -39,10 +53,19 @@ def _build_graph(node, graph, row, col):
 
 
 def make_graph(node):
+    """Return the tree of ``node`` laid out on a grid, with the numbers of rows and columns and the column widths.
+
+    The grid maps (row, column) pairs to strings. Each item is padded to its column's width, with ``-`` when the next
+    cell of its row holds an item and with spaces otherwise; a ``|`` is always padded with spaces. The inputs of a node
+    are placed two columns to its right, one below another, and a node that the tree reaches along several paths
+    appears once on each path.
+    """
     graph = ImmutableItemDict()
     _build_graph(node, graph, 0, 0)
     col_widths = calculate_col_widths(graph)
-    graph = dict(graph)  # make it mutable
+    # The padding below sets each cell a second time, and ImmutableItemDict raises ValueError for a key that is already
+    # set. The padding therefore writes to a plain copy of the grid.
+    graph = dict(graph)
     num_rows = 0
     num_columns = 0
     for (row, col), item in graph.items():
@@ -56,6 +79,12 @@ def make_graph(node):
 
 
 def make_image(node):
+    """Return a text drawing of the tree of ``node`` and of the nodes it depends on.
+
+    ``node`` is a :class:`~numbox.core.work.node.Node` or a :class:`~numbox.core.work.work.Work` node. Deeper nodes are
+    drawn further to the right, and the inputs of a node are drawn one below another. A node that the tree reaches
+    along several paths appears once on each path. The text begins with a newline, and no row ends in a space.
+    """
     graph, num_rows, num_columns, col_widths = make_graph(node)
     image = StringIO()
     image.write("\n")

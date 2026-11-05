@@ -1,3 +1,12 @@
+"""The table of C signatures that the libc, libm and SQLite bindings use, keyed by the C function's name.
+
+``signatures`` merges ``signatures_c`` for the C standard library, ``signatures_m`` for the C math library and
+``signatures_sqlite`` for SQLite. Each value is the numba signature of the C function. C's ``int`` is ``int32``, a
+64-bit integer such as ``long long`` or ``sqlite3_int64`` is ``int64``, and ``double`` is ``float64``. An unsigned type
+is the unsigned numba type of the same width, and ``size_t`` and every pointer are ``intp``. Each binding is compiled
+for its entry, and ``_call_lib_func`` takes the result type from it. The table holds no C ``long``, whose width is 64
+bits on Linux and macOS and 32 bits on Windows. ``lldiv_t`` is the tuple type of the result of C's ``lldiv``.
+"""
 from numba.core.types import (
     Tuple, float64, int32, int64, intp, uint8, uint32, uint64, void
 )
@@ -118,7 +127,7 @@ signatures_sqlite = {
     "sqlite3_changes": int32(intp),
     "sqlite3_last_insert_rowid": int64(intp),
     "sqlite3_total_changes": int32(intp),
-    # 64-bit row counts — SQLite 3.37+ (Nov 2021); guarded via proxy_if_available
+    # 64-bit row counts, added in SQLite 3.37 (November 2021); their bindings use proxy_if_available.
     "sqlite3_changes64": int64(intp),
     "sqlite3_total_changes64": int64(intp),
     # === Statement lifecycle ===
@@ -150,7 +159,7 @@ signatures_sqlite = {
     "sqlite3_column_count": int32(intp),
     "sqlite3_column_name": intp(intp, int32),
     "sqlite3_column_decltype": intp(intp, int32),
-    # Compile-flag-gated (SQLITE_ENABLE_COLUMN_METADATA); via proxy_if_available
+    # Present only in a SQLite built with SQLITE_ENABLE_COLUMN_METADATA; their bindings use proxy_if_available.
     "sqlite3_column_database_name": intp(intp, int32),
     "sqlite3_column_table_name": intp(intp, int32),
     "sqlite3_column_origin_name": intp(intp, int32),
@@ -171,7 +180,7 @@ signatures_sqlite = {
     "sqlite3_commit_hook": intp(intp, intp, intp),
     "sqlite3_rollback_hook": intp(intp, intp, intp),
     "sqlite3_trace_v2": int32(intp, int32, intp, intp),
-    # -- value accessors (read UDF arguments) --
+    # === value accessors (read UDF arguments) ===
     "sqlite3_value_int": int32(intp),
     "sqlite3_value_int64": int64(intp),
     "sqlite3_value_double": float64(intp),
@@ -185,7 +194,7 @@ signatures_sqlite = {
     "sqlite3_value_subtype": uint32(intp),
     "sqlite3_value_dup": intp(intp),
     "sqlite3_value_free": void(intp),
-    # -- result setters (write UDF return value) --
+    # === result setters (write UDF return value) ===
     "sqlite3_result_int": void(intp, int32),
     "sqlite3_result_int64": void(intp, int64),
     "sqlite3_result_double": void(intp, float64),
@@ -202,13 +211,13 @@ signatures_sqlite = {
     "sqlite3_result_value": void(intp, intp),
     "sqlite3_result_zeroblob": void(intp, int32),
     "sqlite3_result_zeroblob64": int32(intp, uint64),
-    # -- UDF registration + context --
+    # === UDF registration + context ===
     "sqlite3_create_function_v2": int32(intp, intp, int32, int32, intp, intp, intp, intp, intp),
     "sqlite3_create_window_function": int32(intp, intp, int32, int32, intp, intp, intp, intp, intp, intp),
     "sqlite3_aggregate_context": intp(intp, int32),
     "sqlite3_user_data": intp(intp),
     "sqlite3_context_db_handle": intp(intp),
-    # -- virtual table registration --
+    # === virtual table registration ===
     "sqlite3_create_module_v2": int32(intp, intp, intp, intp, intp),
     "sqlite3_declare_vtab": int32(intp, intp),
     "sqlite3_malloc": intp(int32),

@@ -1,4 +1,11 @@
-"""ABI primitives for numba bindings: platform / struct classification."""
+"""The C calling-convention rules that the bindings' internal helper applies to each call.
+
+``numbox.core.bindings.call._call_lib_func`` uses this module to determine the calling convention that the host follows
+and the class of each value in a call: a number or a pointer, a struct of 16 bytes or less, or a larger struct. The
+module computes the size of a struct written as a numba tuple or record, and the offset of each field, as a C compiler
+lays them out. For a 16-byte struct, the module computes the class of each 8-byte half, and those classes determine
+whether the helper repacks the struct before the call. Every name in the module is private to the bindings.
+"""
 import platform
 import sys
 
@@ -12,16 +19,13 @@ _PLATFORM_AAPCS64 = "aapcs64"
 
 
 def _current_platform():
-    """Identify the C calling convention for the current host.
+    """Return the C calling convention that the host follows, by which ``_call_lib_func`` passes structs.
 
-    Returns one of ``_PLATFORM_WIN_X64``, ``_PLATFORM_SYSV_X86_64``,
-    ``_PLATFORM_AAPCS64``. Used by the ABI-aware codegen in
-    ``numbox.core.bindings.call._call_lib_func`` to pick the right
-    struct-passing convention. Raises ``RuntimeError`` on unsupported
-    ``(sys.platform, platform.machine())`` combinations rather than
-    silently misclassifying — Windows ARM64 (`platform.machine() ==
-    "ARM64"`) is unsupported and would otherwise default to the wrong
-    ABI dispatch.
+    The result is ``_PLATFORM_WIN_X64`` on Windows on x86-64, ``_PLATFORM_SYSV_X86_64`` on any other system on x86-64,
+    such as Linux or macOS, and ``_PLATFORM_AAPCS64`` on a system other than Windows on 64-bit Arm. The function raises
+    ``RuntimeError`` for any other pair of ``sys.platform`` and ``platform.machine()``, so that no host is classified
+    under another host's convention. It raises the error on Windows on Arm64 as well, although that machine's name,
+    ``ARM64``, would otherwise select AAPCS64.
     """
     machine = platform.machine().lower()
     if sys.platform == "win32":
@@ -50,29 +54,45 @@ _WIN_REGISTER_PASSABLE_SIZES = (1, 2, 4, 8)
 
 
 def _is_windows_register_passable(struct_bytes):
-    """Whether a struct of size ``struct_bytes`` is passed/returned in
-    registers on the Windows x64 ABI.
+    """Return True if Windows x64 passes and returns a struct of ``struct_bytes`` bytes in a register.
 
-    Windows x64 passes aggregates of size 1, 2, 4, or 8 bytes directly
-    (in integer registers) and returns them in RAX. Other sizes (3, 5,
-    6, 7, or anything > 8) go via caller-allocated pointer for args and
-    via ``sret`` for returns.
+    The Windows x64 convention passes a struct of 1, 2, 4 or 8 bytes in an integer register and returns it in RAX. It
+    passes a struct of any other size as a pointer to a copy that the caller makes, and returns one through a hidden
+    pointer argument, ``sret``.
     """
     return struct_bytes in _WIN_REGISTER_PASSABLE_SIZES
 
 
+# This comment lists what C receives when _call_lib_func passes a numba tuple by value. The rule holds on x86-64 Linux,
+# where it was measured against C functions that take and return structs by value; it has not been measured on
+# AAPCS64 or Windows x64.
+# - Up to 16 bytes on SysV x86-64 and AAPCS64: the helper passes and returns the struct as an LLVM aggregate, which
+#   LLVM lowers one field at a time. call.py repacks a 16-byte value to {i64, i64} when both 8-byte halves are
+#   INTEGER class (_classify_eightbytes, _needs_int_int_eightbyte_repack). A struct is passed and returned intact if
+#   it has a single field or if it is exactly 16 bytes with one field in each half. A struct of exactly 16 bytes with
+#   two or more fields in a half is also intact if neither half is all floating point. A struct under 16 bytes with two
+#   or more fields is corrupted: C's div, for example, returns an 8-byte div_t whose remainder the helper reads as 0. A
+#   struct of exactly 16 bytes is also corrupted if a half holds two or more fields and either half is all floating
+#   point, such as (float32, float32, int64) or (int32, int32, float64).
+# - Windows x64: the helper passes a struct of 1, 2, 4 or 8 bytes by value and a struct of any other size as a pointer
+#   to a copy. A result of any other size is returned through sret.
+# - Over 16 bytes: on SysV x86-64, the argument has the byval attribute, so LLVM copies the struct onto the stack and
+#   C receives the copy rather than a pointer. The function that makes the call is then compiled with optnone and
+#   noinline. AAPCS64 and Windows x64 pass a pointer to a copy. A result is returned through sret. Structs over 16
+#   bytes are passed and returned intact on x86-64 Linux.
+# - Record: numba's value for a record is a pointer to its data, so C receives an address instead of the fields. A
+#   Record result of 16 bytes or less crashes the process with a segmentation fault, and _call_lib_func refuses a
+#   larger one.
+# LLVM does not implement the C convention for passing structs; the compiler front end applies it:
+# https://github.com/numba/llvmlite/issues/300#issuecomment-327235846
 def _classify(ty):
-    """Classify a numba type for ABI dispatch.
+    """Return the class by which ``_call_lib_func`` passes a value of the numba type ``ty``.
 
-    Returns one of:
-
-    - ``_CLASS_SCALAR`` — any non-struct numba type (e.g. ``int32``,
-      ``float64``, pointers represented as ``intp``).
-    - ``_CLASS_STRUCT_SMALL`` — ``Record`` / ``BaseTuple`` of size
-      <= 16 bytes; passed by value on register-passing ABIs.
-    - ``_CLASS_STRUCT_LARGE`` — ``Record`` / ``BaseTuple`` of size
-      > 16 bytes; passed by pointer with ``byval`` on SysV x86-64,
-      by pointer (no special attribute) on other ABIs.
+    The class is ``_CLASS_SCALAR`` for a type other than a ``Record`` or a tuple, such as ``int32``, ``float64`` or a
+    pointer held as ``intp``. A ``Record`` or a tuple of 16 bytes or less is ``_CLASS_STRUCT_SMALL``, and a larger one
+    is ``_CLASS_STRUCT_LARGE``. ``_call_lib_func`` passes a small struct as a value on SysV x86-64 and AAPCS64, and on
+    Windows x64 only at 1, 2, 4 or 8 bytes; it passes a large struct through memory. A tuple with a field of no fixed
+    bit width raises ``TypingError``.
     """
     if not isinstance(ty, (nb_types.Record, nb_types.BaseTuple)):
         return _CLASS_SCALAR
@@ -81,25 +101,22 @@ def _classify(ty):
 
 
 def _align_up(n, alignment):
+    """Return ``n`` rounded up to a multiple of ``alignment``."""
     return (n + alignment - 1) // alignment * alignment
 
 
 def _basetuple_layout(ty, fn_name):
-    """Natural-alignment C layout for a ``BaseTuple`` of scalar fields.
+    """Return the C layout of a tuple of scalar fields, as ``(total_size, [(offset, size, is_float), ...])``.
 
-    numba lowers a tuple through its ``StructModel`` (the tuple data model) to a
-    literal LLVM struct, which llvmlite emits *non-packed* (padded) by default, so
-    each field sits at the next offset aligned up to its own size and the total is
-    padded up to the largest field's alignment — exactly the layout of the
-    equivalent ``Record`` (verified against ``get_data_type`` / ``get_abi_sizeof``).
-    A plain ``sum(bitwidth)`` bit-packed model under-counts the size and mislocates
-    fields, which corrupts both the SMALL/LARGE classification and the eightbyte
-    split. Returns ``(total_size, [(offset, size, is_float), ...])``.
-
-    A field with no fixed ``bitwidth`` (a pointer / function / other non-scalar
-    type) raises a clean ``TypingError`` naming ``fn_name`` rather than a cryptic
-    ``AttributeError`` — raw pointers are expected to be passed as ``intp``.
+    Each field is placed at the next offset that is a multiple of its size, and the total is padded to a multiple of the
+    largest field's alignment, as in the C struct with the same fields. ``is_float`` is True for a ``Float`` field. A
+    field with no fixed bit width, such as a ``voidptr`` or a function, raises ``TypingError`` naming ``fn_name``
+    instead of an ``AttributeError``; a caller passes a pointer as ``intp``.
     """
+    # numba lowers a heterogeneous tuple to an unpacked LLVM struct and a UniTuple to an LLVM array. In both cases, each
+    # field is placed at its natural alignment, as in the C struct and in the equivalent Record. The total equals the
+    # size that numba's get_abi_sizeof reports for the type. A sum of the fields' bit widths would undercount the size
+    # and misplace fields. Both the small or large class and the split into 8-byte halves would then be wrong.
     offset = 0
     max_align = 1
     fields = []
@@ -111,7 +128,7 @@ def _basetuple_layout(ty, fn_name):
                 f"(pointers must be passed as intp)."
             )
         size = ft.bitwidth // 8
-        align = size  # primitive scalar fields: alignment == size
+        align = size  # A scalar field's alignment equals its size.
         offset = _align_up(offset, align)
         fields.append((offset, size, isinstance(ft, nb_types.Float)))
         offset += size
@@ -120,14 +137,11 @@ def _basetuple_layout(ty, fn_name):
 
 
 def _struct_bytes(ty, fn_name):
-    """Compute struct size in bytes for a numba struct-shaped type.
+    """Return the size in bytes of a ``Record`` or a tuple type.
 
-    Supports ``types.Record`` (via ``.size``) and ``types.BaseTuple``
-    subclasses — ``types.Tuple``, ``types.UniTuple``, and
-    ``types.NamedTuple`` — via natural-alignment layout (see
-    ``_basetuple_layout``). Anything else raises a clean ``TypingError``
-    naming the caller so a misuse doesn't surface as a cryptic
-    ``AttributeError`` / ``KeyError``.
+    A ``Record`` gives its own ``size``. The size of a tuple, any numba ``BaseTuple`` such as ``Tuple``, ``UniTuple`` or
+    ``NamedTuple``, is the size of its C layout from ``_basetuple_layout``. Any other type raises ``TypingError`` naming
+    ``fn_name``, so that a misuse fails with that message rather than with an ``AttributeError`` or a ``KeyError``.
     """
     if isinstance(ty, nb_types.Record):
         return ty.size
@@ -144,18 +158,13 @@ _EIGHTBYTE_CLASS_SSE = "sse"
 
 
 def _iter_struct_fields(ty, fn_name):
-    """Yield ``(offset, size, is_float)`` for each scalar field of a
-    struct-shaped numba type. ``is_float`` is true for ``Float`` types
-    (float / double); the SysV ABI's "field is float ⇒ eightbyte is
-    SSE" mapping is the consumer's responsibility (see
-    ``_classify_eightbytes``). Size is needed to detect fields that
-    span the 8-byte eightbyte boundary.
+    """Yield ``(offset, size, is_float)`` for each scalar field of a ``Record`` or a tuple type.
 
-    For ``BaseTuple`` the fields follow the natural-alignment layout (see
-    ``_basetuple_layout``, mirroring ``_struct_bytes``), so padded gaps match
-    the non-packed LLVM struct numba lowers tuples to. For ``Record`` each
-    ``_RecordField`` carries an explicit ``offset`` that already accounts for
-    any C-layout padding gaps.
+    ``is_float`` is True for a ``Float`` field, ``float32`` or ``float64``; ``_classify_eightbytes`` turns these flags
+    into the SysV class of each 8-byte half. ``_classify_eightbytes`` uses the size to find a field that spans the
+    boundary between the halves. A tuple's fields and the padding between them follow the layout of
+    ``_basetuple_layout``, which matches the way numba lays out the tuple in memory. Each field of a ``Record`` has its
+    own offset, which already accounts for C's padding. Any other type raises ``TypingError`` naming ``fn_name``.
     """
     if isinstance(ty, nb_types.BaseTuple):
         yield from _basetuple_layout(ty, fn_name)[1]
@@ -175,29 +184,14 @@ def _iter_struct_fields(ty, fn_name):
 
 
 def _classify_eightbytes(ty):
-    """Classify the two eightbytes of a 16-byte struct.
+    """Return the SysV class of each 8-byte half of a 16-byte struct, as ``(class_lo, class_hi)``.
 
-    Returns ``(class_lo, class_hi)`` where each is
-    ``_EIGHTBYTE_CLASS_INTEGER`` (ints / pointers) or
-    ``_EIGHTBYTE_CLASS_SSE`` (float / double). The SysV merge rule
-    applies per eightbyte: an eightbyte is SSE only if every field that
-    touches it is float / double; if it holds *any* integer field it is
-    INTEGER (SSE + INTEGER -> INTEGER, i.e. passed in a GP register).
-    The class names are SysV-flavoured but the helper drives the
-    repack path on both SysV x86-64 and AAPCS64. (The full SysV ABI
-    has X87 / NO_CLASS / etc.; our scope is fixed-size 16-byte
-    aggregates of scalar integer-or-float fields, which is what
-    numbox bindings consume.)
-
-    Used by ``_call_lib_func`` together with
-    ``_is_canonical_int64_pair_layout`` to decide when a 16-byte by-
-    value arg needs repacking via memory bitcast to ``{i64, i64}`` to
-    work around llvmlite not modelling the eightbyte-packing rule (it
-    drops fields like the second ``i32`` in ``{i32, i32, i64}`` —
-    duckdb_interval).
-
-    Raises ``TypingError`` if ``ty`` is not a 16-byte struct-shaped
-    type — the caller should already have classified the size.
+    A half is ``_EIGHTBYTE_CLASS_SSE`` if every field that overlaps it is a float, and ``_EIGHTBYTE_CLASS_INTEGER`` if
+    any field that overlaps it is an integer, including a pointer held as ``intp``. ``_call_lib_func`` uses the classes
+    on SysV x86-64 and on AAPCS64 alike: with ``_is_canonical_int64_pair_layout``, they determine whether a 16-byte
+    struct passed by value is repacked to ``{i64, i64}``. The SysV convention defines further classes, such as X87 and
+    NO_CLASS. This function does not model them, because the bindings pass structs of integer and float fields only. A
+    ``ty`` that is not a 16-byte ``Record`` or tuple raises ``TypingError``.
     """
     size = _struct_bytes(ty, "_classify_eightbytes")
     if size != 16:
@@ -209,7 +203,7 @@ def _classify_eightbytes(ty):
     lo_has_float = hi_has_float = False
     for offset, size, is_float in _iter_struct_fields(
             ty, "_classify_eightbytes"):
-        # A field spanning the 8-byte boundary touches both eightbytes.
+        # A field that spans the 8-byte boundary overlaps both halves.
         touches_lo = offset < 8
         touches_hi = offset + size > 8
         if is_float:
@@ -218,12 +212,11 @@ def _classify_eightbytes(ty):
         else:
             lo_has_int |= touches_lo
             hi_has_int |= touches_hi
-    # SysV merge rule: an eightbyte holding any integer field is INTEGER
-    # (passed in a GP register), even if it also holds a float -- SSE +
-    # INTEGER -> INTEGER. Only an all-float eightbyte is SSE. This is the
-    # rule llvmlite does not model (it would otherwise lower a mixed
-    # int/float eightbyte through SSE and drop the integer field), which is
-    # exactly why the int/int repack in call.py exists.
+    # Under the SysV merge rule, a half that holds any integer field is INTEGER class, even if it also holds a float,
+    # and is passed in a general-purpose register. Only a half that holds floats alone is SSE class. LLVM does not
+    # apply this rule to an aggregate. It passes each field in a register of its own, while C expects the fields of each
+    # half packed into one register. For that reason, the repack in call.py passes a struct with two INTEGER halves as
+    # {i64, i64}. LLVM then passes each half in the register where C reads it.
     cls_lo = (_EIGHTBYTE_CLASS_SSE if (lo_has_float and not lo_has_int)
               else _EIGHTBYTE_CLASS_INTEGER)
     cls_hi = (_EIGHTBYTE_CLASS_SSE if (hi_has_float and not hi_has_int)
@@ -232,10 +225,12 @@ def _classify_eightbytes(ty):
 
 
 def _is_canonical_int64_pair_layout(ty):
-    """Whether ``ty`` already lowers to LLVM ``{i64, i64}`` — i.e. two
-    64-bit integer fields at offsets 0 and 8 with no gaps. When True,
-    the SysV-x86-64 small-struct INT/INT path needs no repack: llvmlite
-    already emits the canonical eightbyte-pair shape.
+    """Return True if ``ty`` is two 64-bit integer fields at offsets 0 and 8, with nothing else.
+
+    A tuple qualifies if it has exactly two 64-bit ``Integer`` fields, and a ``Record`` qualifies if its size is 16 and
+    it has two such fields at offsets 0 and 8. ``_call_lib_func`` does not repack such a type to ``{i64, i64}``. LLVM
+    already passes its two 64-bit integers in two general-purpose registers, as C passes a struct with two INTEGER
+    halves.
     """
     if isinstance(ty, nb_types.BaseTuple):
         return len(ty.types) == 2 and all(
@@ -245,10 +240,8 @@ def _is_canonical_int64_pair_layout(ty):
     if isinstance(ty, nb_types.Record):
         if ty.size != 16:
             return False
-        # Sort by offset so a Record built with fields declared in
-        # non-offset order (e.g. via numpy structured dtype with
-        # explicit `offsets`) is still recognized as canonical when
-        # the offsets sort to [0, 8].
+        # A Record built from a NumPy dtype with explicit offsets can declare its fields out of offset order, so the
+        # fields are sorted by offset, and such a Record qualifies when the sorted offsets are 0 and 8.
         flds = sorted(ty.fields.values(), key=lambda f: f.offset)
         if len(flds) != 2:
             return False

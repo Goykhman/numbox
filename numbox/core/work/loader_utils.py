@@ -1,3 +1,7 @@
+"""Load the fields of a NumPy structured array into a graph. Called from jitted code,
+:func:`load_array_row_into_dict` stores the fields of one row in a typed dictionary of ``Any`` values keyed by field
+name, the dictionary that ``Work.load`` reads. :func:`np_struct_member_type` gives the numba type of a field.
+"""
 import numpy
 
 from inspect import getfile, getmodule
@@ -11,9 +15,17 @@ from numbox.core.any.any_type import AnyType, _make_any
 
 
 def load_array_row_into_dict(*args):
+    """Store each field of one row of a structured array, under the field's name, in a dictionary of ``Any`` values.
+
+    Call it from jitted code as ``load_array_row_into_dict(array, row_index, loader_dict)``. ``loader_dict`` is a typed
+    dictionary from strings to ``Any`` values, which ``Work.load`` reads. Called from Python, the function raises
+    ``NotImplementedError``.
+    """
     raise NotImplementedError
 
 
+# The generated code has one statement per field of the record, because jitted code can access a record field only
+# through a name that is known at compile time.
 def _make_load_to_dict_code(fields_names):
     code_txt = StringIO()
     code_txt.write("""
@@ -31,6 +43,7 @@ def _load_to_dict_(array_, row_ind_, loader_dict_):
 
 @overload(load_array_row_into_dict, strict=False, jit_options=jit_options)
 def ol_load_array_row_into_dict(array_ty, row_ind_ty, loader_dict_ty):
+    """Implement ``load_array_row_into_dict`` in jitted code, with a statement for each field of the array's record."""
     record_ty: Record = array_ty.dtype
     record_fields = record_ty.fields
     fields_names = list(record_fields.keys())
@@ -45,4 +58,5 @@ def ol_load_array_row_into_dict(array_ty, row_ind_ty, loader_dict_ty):
 
 
 def np_struct_member_type(data_ty_: numpy.dtypes.VoidDType, member_name):
+    """Return the numba type of the field ``member_name`` of the NumPy structured dtype ``data_ty_``."""
     return from_dtype(data_ty_).fields[member_name].type

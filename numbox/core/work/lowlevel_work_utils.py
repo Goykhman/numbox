@@ -1,3 +1,7 @@
+"""The numba implementation of ``Work`` nodes: their type class :class:`WorkTypeClass`, the intrinsic constructor
+:func:`ll_make_work`, and the code that fills the fields of a new node. :mod:`numbox.core.work.work` defines the Python
+class ``Work`` and its jitted methods for the types that this module creates.
+"""
 from numba.core.cgutils import get_null_value, int8_t, int32_t, pack_array
 from numba.core.types import FunctionType, int8, NoneType, StructRef, TypeRef, UniTuple
 from numba.experimental.structref import register
@@ -10,6 +14,7 @@ from numbox.utils.lowlevel import _new, populate_structref
 
 
 def derive_ty_error(derive_ty):
+    """Return the message for a derive type that is neither a first-class function type nor ``None``."""
     return f"Either None or Compile Result supported, not CPUDispatcher, got {derive_ty}, of type {type(derive_ty)}"
 
 
@@ -32,20 +37,19 @@ but data and sources imply {derive_sig}"""
 
 @register
 class WorkTypeClass(StructRef):
+    """The numba type class of ``Work`` nodes, with one type for each combination of data, source and derive types."""
     pass
 
 
 def _create_work_type(data_ty, sources_ty, derive_ty, inputs_ty):
     """
-    Dynamically create `WorkType`, depending on the type of `data`, `sources`, and `derive`.
+    Return the numba type of a ``Work`` node with the given types of data, sources, derive and inputs.
 
-    Different instances of `Work` accommodate various types of data they might contain,
-    various heterogeneous types of other instances of `Work` it might depend on,
-    and custom `derive` function objects used to calculate the instance's `data` depending
-    on the `data` of its `sources`.
-
-    (`name`,) tuple initializes the :obj:`numbox.core.node_base.NodeBase`
-    header of the composition.
+    Each combination of these types is a type of its own, so the nodes of one graph can hold data of different types,
+    depend on sources of different types and have derives of different signatures. The payload begins with the
+    ``name`` field of :obj:`numbox.core.work.node_base.NodeBase`, so a ``Work`` node can be cast to ``NodeBaseType``.
+    ``derive_ty`` must be a ``FunctionType`` or ``NoneType``, and a signature that does not match ``data_ty`` and the
+    sources' data types raises ``ValueError``.
     """
     assert isinstance(derive_ty, (FunctionType, NoneType)), derive_ty_error(derive_ty)
     work_attributes_ = node_base_attributes + [
@@ -62,6 +66,11 @@ def _create_work_type(data_ty, sources_ty, derive_ty, inputs_ty):
 
 
 def create_uniform_inputs(context, builder, tup_ty, tup):
+    """Emit code that casts each node of ``tup`` to ``NodeBaseType`` and packs the results into an array value.
+
+    The emitted code increments the reference count of each cast value. Every element type of ``tup_ty`` must be a
+    struct type, which an assertion checks.
+    """
     tup_size = tup_ty.count
     for tup_ind in range(tup_size):
         item_ty = tup_ty[tup_ind]
@@ -79,26 +88,30 @@ def create_uniform_inputs(context, builder, tup_ty, tup):
 
 
 def store_inputs(context, builder, sources_ty, sources, data_pointer, inputs_index):
+    """Emit code that stores the sources, cast to ``NodeBaseType``, in the ``inputs`` field of a new node's payload."""
     inputs = create_uniform_inputs(context, builder, sources_ty, sources)
     inputs_p = builder.gep(data_pointer, (int32_t(0), int32_t(inputs_index)))
     builder.store(inputs, inputs_p)
 
 
 def store_derived(builder, data_pointer, derived_index):
+    """Emit code that stores 0 in the ``derived`` field of a new node's payload."""
     derived_p = builder.gep(data_pointer, (int32_t(0), int32_t(derived_index)))
     builder.store(int8_t(0), derived_p)
 
 
 def store_node(context, builder, data_pointer, node_index):
+    """Emit code that stores a null ``NodeType`` in the ``node`` field of a new node, for ``as_node`` to fill."""
     node_p = builder.gep(data_pointer, (int32_t(0), int32_t(node_index)))
     builder.store(get_null_value(context.get_value_type(NodeType)), node_p)
 
 
 def ensure_work_boxing():
     """
-    this will trigger `define_boxing` in the imported `numbox.core.work.work`;
-    resolves circular import and prepares boxing to Python object of
-    the low-level created work types.
+    Import :mod:`numbox.core.work.work`, which registers with numba how to box a ``Work`` node into a Python object.
+
+    The import runs when this function is called, because ``numbox.core.work.work`` imports this module, and an import
+    at the top of this module would be circular.
     """
     from numbox.core.work.work import Work  # noqa: F401
 
@@ -106,16 +119,18 @@ def ensure_work_boxing():
 @intrinsic(prefer_literal=False)
 def ll_make_work(typingctx, name_ty, data_ty, sources_ty, derive_ty, data_ty_ref: TypeRef = NoneType):
     """
-    Purely intrinsic work constructor.
+    Create a ``Work`` node in jitted code, with the construction emitted directly into the calling function.
 
-    Substantially more efficient in memory use, cache disk space, and
-    compilation time for inlining multiple `Work` instantiations inside
-    jitted context (e.g., in large-graph applications).
+    The arguments and checks are those of :func:`~numbox.core.work.work.make_work`, without the upgrade of a
+    ``CompileResultWAP``: a ``derive`` whose signature does not match the types of ``data`` and of the sources' data
+    raises ``ValueError``. The optional ``data_ty_ref``, a numba type, sets the node's data type in place of the type
+    of ``data``, and numba converts ``data`` to it. The ``derived`` field of the new node is 0. Calling the intrinsic
+    from Python raises ``NotImplementedError``.
 
-    Alternative `make_work`-like constructors with `inline="always"`
-    might save memory and cache disk space demand (when the inlining
-    directive is actually heeded by numba engine) but significantly
-    lengthen the compilation time.
+    ``ll_make_work`` uses much less memory, cache disk space and compilation time than ``make_work`` when one jitted
+    function creates many nodes, for example to build a large graph. A ``make_work``-like constructor declared with
+    ``inline="always"`` might also save memory and disk space if numba applies the directive, but it would take much
+    longer to compile.
     """
     if data_ty_ref != NoneType:
         data_ty = data_ty_ref.instance_type
@@ -126,6 +141,7 @@ def ll_make_work(typingctx, name_ty, data_ty, sources_ty, derive_ty, data_ty_ref
     ordered_args_names = ["name", "data", "sources", "derive"]
 
     def codegen(context, builder, signature, args):
+        """Emit the allocation of the node and the stores that fill its fields."""
         work_value, data_pointer = _new(context, builder, work_type_)
         populate_structref(context, builder, signature, work_type_, work_value, args[:4], ordered_args_names)
         if len(sources_ty) > 0:

@@ -1,22 +1,10 @@
-"""Expose a per-query-computed numpy structured array as a SQLite table-valued
-function (register_tvf).
+"""Register a SQLite table-valued function whose rows a Python or jitted function computes for each query.
 
-``register_tvf(db, name, arg_types, out_dtype, fn)`` registers an eponymous virtual table whose rows are NOT static --
-they are produced per query by the user's ``fn(*args)``, which returns a 1-D numpy structured array of ``out_dtype``.
-The function arguments are exposed as HIDDEN columns: ``SELECT * FROM f(2, 5)`` turns ``2``/``5`` into EQ constraints
-on the hidden columns, which ``xBestIndex`` binds into ``argv`` (in declaration order) and ``xFilter`` decodes, feeds
-to ``fn`` and keeps in the cursor, so a query naming a hidden column reads its argument back. The returned array is
-held alive for the cursor's lifetime via an NRT-backed ``[meminfo_p, data_p]`` slot (pinned with the inlined
-``_incref_meminfo`` intrinsic so numba's refcount pass cannot strip it), and released exactly once in ``xClose``.
-
-Unlike the read-only ``register_table`` (one shared module), each
-``register_tvf`` GENERATES its own ``xFilter`` / ``xColumn`` (the user ``fn`` and
-``out_dtype`` are baked in as codegen globals so the allocator specialises on the
-dtype and the impls cache cross-process) and builds its own ``sqlite3_module``
-from this registration's cfunc addresses. The handle retains the module struct,
-every cfunc object (SQLite stores their addresses), the descriptor buffers, and
-``fn``; its keep-alive lives in the module-level ``_DATA_ANCHOR`` (released by
-SQLite via ``xDestroy``).
+:func:`register_tvf` registers ``fn`` under a name on a connection. ``SELECT * FROM name(2, 5)`` then calls
+``fn(2, 5)`` and returns the rows of the structured array that ``fn`` returns. Each registration generates and
+compiles its own ``xFilter`` implementation, the code that calls ``fn``, and builds its own ``sqlite3_module``. The
+structs, the function that sets a cell as a column's result, and the registration come from
+:mod:`~numbox.core.bindings.sqlite.vtable`.
 """
 import ctypes
 
@@ -38,8 +26,8 @@ from numbox.utils.preprocessing import (
     _anchor_path, _anchored_or_uncached, _orphan_anchor_sweep,
 )
 
-# Names referenced by the GENERATED source; importing them here puts them in
-# this module's __dict__, which seeds the exec namespace below.
+# The generated code names these. Importing them here puts them in this module's __dict__, from which
+# _compile_xfilter seeds the namespace of the generated code.
 from numba import carray, njit  # noqa: F401
 from numba.core.types import (  # noqa: F401
     int32, int64, float64,
@@ -68,6 +56,9 @@ from numbox.utils.meminfo import (  # noqa: F401
 
 __all__ = ["register_tvf"]
 
+# The callbacks below compile with the cache option alone, taken from numbox's jit options and treated as enabled when
+# the key is absent; no other jit option applies to them. The generated xFilter implementation compiles under all of
+# numbox's jit options.
 _CACHE = jit_options.get("cache", True)
 _SQLITE_TRANSIENT = -1
 
@@ -75,25 +66,29 @@ _ANCHOR_SUBDIR = "numbox-sqlite-tvf"
 _orphan_anchor_sweep(_ANCHOR_SUBDIR)
 
 
-# per-registration descriptor passed as pClientData; xConnect/xBestIndex/xColumn
-# read it by-name via carray(ptr, (1,), dtype=_TVF_DESC_DTYPE). The visible
-# (out_dtype) columns come first in the schema, the n_hidden arg columns after.
-# col_tags has an entry for every schema column, hidden args included;
-# col_offsets and col_widths cover only the visible ones.
+# _TVF_DESC_DTYPE describes the descriptor of a registration, whose address SQLite passes to xConnect as the module's
+# client data. xConnect, xBestIndex, xOpen and xColumn read its fields by name through
+# carray(ptr, (1,), dtype=_TVF_DESC_DTYPE). The schema
+# declares the visible columns of out_dtype first and the n_hidden argument columns after them. col_tags has an entry
+# for every column of the schema, the hidden ones included; col_offsets and col_widths cover only the visible ones.
 _TVF_DESC_DTYPE = np.dtype([
     ("ncols", "i4"), ("n_hidden", "i4"), ("itemsize", "i8"),
     ("col_offsets", "i8"), ("col_tags", "i8"), ("col_widths", "i8"),
     ("schema_ptr", "i8"), ("scratch_bytes", "i8"),
 ], align=True)
 
+# _TVF_CUR_DTYPE describes the cursor. mi_p and data_p hold the MemInfo and the data address of the array that fn
+# returned for the current filter, and n_rows and row_stride describe that array. scratch_p is the scratch buffer for
+# 'U' cells, and args_p is the buffer of decoded arguments. The cursor holds a reference to each array from the moment
+# that xFilter stores the array until the next xFilter or xClose releases it, so each array is released once.
 _TVF_CUR_DTYPE = np.dtype([
     ("base", _SQLITE3_VTAB_CURSOR_DTYPE), ("descriptor", "i8"), ("rowid", "i8"),
     ("mi_p", "i8"), ("data_p", "i8"), ("n_rows", "i8"), ("row_stride", "i8"), ("scratch_p", "i8"),
     ("args_p", "i8"),
 ], align=True)
 _TVF_CUR_SIZE = _TVF_CUR_DTYPE.itemsize
-# bytes per hidden argument in the cursor's args_p buffer: each is kept as the
-# int64 or float64 xFilter decoded it to
+# _ARG_SLOT is the number of bytes for each hidden argument in the cursor's args_p buffer, which holds each argument as
+# the int64 or float64 that xFilter decoded.
 _ARG_SLOT = 8
 
 _INT_TAGS = frozenset((_TAG_I8, _TAG_I16, _TAG_I32, _TAG_I64,
@@ -102,14 +97,16 @@ _FLOAT_TAGS = frozenset((_TAG_F32, _TAG_F64))
 
 
 # --- generated-source templates -------------------------------------------
-# Baked globals (seeded into the exec namespace): _fn (the user callable),
-# _N_HIDDEN, jit_options, and every helper imported above. The {arg_decode} /
-# {fn_call} substitutions are the only arity-varying parts; they are generated
-# from arg_types before exec, exactly as the UDAF helpers bake per-UDAF source.
-# Cache-correctness across out_dtypes is not a shared-function hazard here: each
-# registration gets a DISTINCT anchor/cache key from digest((out_dtype,
-# tuple(arg_tags)), [fn]), and the baked _fn's fixed return type (set by
-# out_dtype) makes numba specialise the impl, so two out_dtypes never collide.
+# The template of a registration's xFilter implementation. The code runs in a namespace seeded from this module's
+# globals, which hold every helper imported above, with _fn (the caller's function), _N_HIDDEN and jit_options added.
+# {arg_decode} and {fn_call} are the only parts that vary with the number of arguments. _compile_xfilter fills them
+# from arg_types before it compiles the code, as udf_helpers does for an aggregate.
+# The implementation first releases the array of the cursor's previous filter. It then decodes each argument from
+# argv, keeps it in the cursor for xColumn, and calls _fn. _incref_meminfo takes a reference to the returned array for
+# the cursor, so the array survives the function's return. The intrinsic marks its function so that numba's
+# pass that prunes reference counts, which numba 0.66 removed, cannot delete the increment.
+# Registrations with different out_dtypes never share compiled code: each compiles from an anchor of its own, named
+# after the code and digest((out_dtype, tuple(arg_tags)), [fn]).
 _XFILTER_SRC = '''
 @njit(**jit_options)
 def _tvf_xfilter_impl(cur, argc, argv):
@@ -142,12 +139,15 @@ def _gen_arg_decode(arg_tags):
             lines.append("    a%d = sqlite3_value_int64(vals[%d])" % (i, i))
         else:
             lines.append("    a%d = sqlite3_value_double(vals[%d])" % (i, i))
-        # kept in the cursor for xColumn, which answers the hidden column with it
+        # The cursor keeps the value for xColumn, which returns it for the hidden column.
         lines.append("    store_at(c[0].args_p + %d, a%d)" % (_ARG_SLOT * i, i))
     return "\n".join(lines)
 
 
 # --- per-registration cfunc factories -------------------------------------
+# Each call of a factory compiles new cfunc objects for one registration. Their code is the same for every
+# registration, because each callback reads the registration's layout from its descriptor. With caching enabled,
+# numba therefore loads the compiled code from its cache after the first compilation.
 def _make_xconnect():
     @cfunc(types.int32(types.intp, types.intp, types.int32, types.intp, types.intp, types.intp),
            cache=_CACHE)
@@ -161,8 +161,8 @@ def _make_xconnect():
             vtab = sqlite3_malloc(int32(_VTAB_SIZE))
             if vtab == 0:
                 return SQLITE_NOMEM
-            # no zeroing needed: SQLite memsets the sqlite3_vtab base after this
-            # callback returns; descriptor is the only member we own.
+            # SQLite zeroes the sqlite3_vtab base after this callback returns and then sets its fields, so the code
+            # sets only descriptor, numbox's own member.
             v = carray(_cast_int_to_void_p(vtab), (1,), dtype=_VTAB_DTYPE)
             v[0].descriptor = p_aux
             slot = carray(_cast_int_to_void_p(pp_vtab), (1,), dtype=np.intp)
@@ -177,11 +177,11 @@ def _make_xconnect():
 def _make_xbestindex():
     @cfunc(types.int32(types.intp, types.intp), cache=_CACHE)
     def _tvf_xbestindex(vtab, idx_info):
-        # Require a usable EQ constraint on every hidden arg column; bind each to
-        # argv in declaration order (argvIndex = hidden-arg-index + 1, omit=1 so
-        # SQLite passes the value and drops the synthetic constraint). If any
-        # hidden arg is unbound, return SQLITE_CONSTRAINT so the plan is rejected
-        # cleanly -- xFilter is then never called with too few args.
+        # Every hidden argument column needs a usable EQ constraint. Each one is bound to argv in declaration order:
+        # argvIndex is the argument's index plus 1, and omit=1 makes SQLite pass the value and drop the constraint
+        # that the call syntax created. If an argument is unbound, the callback returns SQLITE_CONSTRAINT, so SQLite
+        # rejects the plan and never calls xFilter with too few arguments. If no plan binds every argument, the
+        # statement fails to prepare with SQLite's error "no query solution".
         v = carray(_cast_int_to_void_p(vtab), (1,), dtype=_VTAB_DTYPE)
         d = carray(_cast_int_to_void_p(v[0].descriptor), (1,), dtype=_TVF_DESC_DTYPE)
         ii = carray(_cast_int_to_void_p(idx_info), (1,), dtype=_IDX_INFO_DTYPE)
@@ -191,15 +191,13 @@ def _make_xbestindex():
         cons = carray(_cast_int_to_void_p(ii[0].aConstraint), (n_constraint,), dtype=_CONSTRAINT_DTYPE)
         usage = carray(_cast_int_to_void_p(ii[0].aConstraintUsage), (n_constraint,), dtype=_USAGE_DTYPE)
 
-        # Bind each hidden arg on its own, to the first usable EQ on its column. Not
-        # a running count: a duplicate usable EQ on one arg must not mask another
-        # arg being unbound. Not a bitmask either: a 64-bit mask would cap the args
-        # at 63. A second EQ on the same arg, as in f(1) WHERE arg0 = 1, gets no
-        # argvIndex, since SQLite refuses a plan in which two constraints share one,
-        # and is not omitted, so SQLite checks it against the hidden column.
-        # The scan is O(n_hidden * n_constraint): microseconds for a handful of
-        # args, about a millisecond at SQLite's default 2000-column cap, and it
-        # runs only when a query is planned.
+        # Each hidden argument is bound separately, to the first usable EQ constraint on its column. A running count
+        # of bound constraints would count a duplicate EQ on one argument, and so miss another argument that is
+        # unbound. A 64-bit mask would limit a function to 63 arguments. A second EQ on the same argument, as in
+        # f(1) WHERE arg0 = 1, receives no argvIndex, because SQLite refuses a plan in which two constraints share one.
+        # It is not omitted either, so SQLite checks it against the hidden column. The scan takes
+        # n_hidden * n_constraint steps: microseconds for a few arguments, and about a millisecond at SQLite's
+        # default limit of 2000 columns. It runs only when SQLite plans a query.
         for h in range(n_hidden):
             bound = False
             for i in range(n_constraint):
@@ -323,8 +321,8 @@ def _make_xcolumn():
             ncols = d[0].ncols
             tags = carray(_cast_int_to_void_p(d[0].col_tags), (ncols + d[0].n_hidden,), dtype=tags_buf_t)
             if j >= ncols:
-                # a hidden arg column: answer with the argument xFilter decoded
-                # for fn, as SQLite's own table-valued functions do
+                # A hidden argument column returns the argument that xFilter decoded for fn, as SQLite's own
+                # table-valued functions do.
                 arg_p = c[0].args_p + _ARG_SLOT * (j - ncols)
                 if tags[j] == _TAG_F32 or tags[j] == _TAG_F64:
                     sqlite3_result_double(ctx, load_unaligned(arg_p, float64))
@@ -334,10 +332,9 @@ def _make_xcolumn():
             offsets = carray(_cast_int_to_void_p(d[0].col_offsets), (ncols,), dtype=np.int64)
             widths = carray(_cast_int_to_void_p(d[0].col_widths), (ncols,), dtype=np.int64)
             addr = data_p + rowid * c[0].row_stride + offsets[j]
-            # unlike the vtable's STATIC S/BLOB, ALL tvf results stay
-            # TRANSIENT: they point into the per-cursor NRT array (or the
-            # scratch), which is released and replaced on the next xFilter,
-            # so a STATIC pointer here would dangle.
+            # register_table passes 'S' and BLOB results as SQLITE_STATIC, but every result here is SQLITE_TRANSIENT.
+            # It points into the cursor's array, or into its scratch buffer, and the next xFilter releases the array
+            # and replaces it, so a static pointer could outlive its memory.
             return _emit_cell(ctx, addr, tags[j], widths[j], c[0].scratch_p, _SQLITE_TRANSIENT)
         except Exception:
             sqlite3_result_error(ctx, get_unicode_data_p("error reading tvf column"), -1)
@@ -359,6 +356,12 @@ def _compile_xfilter(stem, arg_tags, out_dtype, fn):
     arg_decode = _gen_arg_decode(arg_tags)
     fn_call = "_fn(%s)" % ", ".join("a%d" % i for i in range(n_hidden))
     src = _XFILTER_SRC.format(arg_decode=arg_decode, fn_call=fn_call)
+    # The digest covers out_dtype, the argument tags, numba's and numbox's versions, numbox's jit options and the
+    # fingerprint of fn. The anchor's name ends in a hash of the code text, which starts with the digest, so an edit
+    # that changes the digest compiles new code. If fn reads a value without a fingerprint, digest falls back to a
+    # weaker fingerprint. It names the type of such a value instead of the value and omits the module attributes that
+    # fn reads, so an edit to such a value or to such an attribute keeps the anchor and the cached code. The utils page
+    # describes the case under "If a SQLite function keeps returning old results".
     tvf_digest = digest((out_dtype, tuple(arg_tags)), [fn])
     code_txt = "# tvf-digest: %s\n%s" % (tvf_digest, src)
     anchor = _anchor_path(_ANCHOR_SUBDIR, stem, code_txt)
@@ -386,8 +389,8 @@ def _build_tvf_descriptor(name, arg_types, out_dtype):
             "string/bytes hidden args are not supported")
 
     offsets_buf = np.array(offs, dtype=np.int64)
-    # one tag per schema column, in the order the schema below declares them: the
-    # visible columns, then the hidden args
+    # tags_buf holds one tag for each column of the schema, in the order that the schema below declares them: the
+    # visible columns, then the hidden arguments.
     tags_buf = np.array(vis_tags + arg_tags, dtype=tags_buf_t)
     widths_buf = np.array(vis_widths, dtype=np.int64)
     scratch = max([w + 1 for w, t in zip(vis_widths, vis_tags) if t == _TAG_U], default=0)
@@ -409,11 +412,15 @@ def _build_tvf_descriptor(name, arg_types, out_dtype):
 
 
 class _TvfHandle:
-    """Keeps the per-registration module struct, every cfunc object (SQLite
-    stores their addresses), the descriptor buffers, and fn alive. SQLite calls
-    the cfuncs by address; if this handle is GC'd they free and SQLite calls
-    freed code. The keep-alive lives in the module-level ``_DATA_ANCHOR``,
-    released by SQLite via ``xDestroy``."""
+    """The objects that a registration needs while SQLite can call it: its module struct, descriptor, buffers and code.
+
+    The handle holds the ``sqlite3_module`` struct, the descriptor, the buffers that the descriptor points into, the
+    schema text, ``fn``, the generated ``xFilter`` implementation and every callback. SQLite and the callbacks read
+    the struct, the descriptor and its buffers through their addresses, so these must stay alive. numba keeps a
+    cfunc's compiled code after the cfunc object is collected, but it does not document that behavior, so the handle
+    holds the callbacks as well. ``_DATA_ANCHOR`` holds the handle until SQLite calls the destructor that the
+    registration passed to ``sqlite3_create_module_v2``.
+    """
     __slots__ = ("_keep",)
 
     def __init__(self, *objs):
@@ -425,47 +432,55 @@ def _stem(name):
 
 
 def register_tvf(db, name, arg_types, out_dtype, fn):
-    """Register an eponymous table-valued function backed by a computed array.
+    """Register ``fn`` on the connection ``db`` as the eponymous table-valued function ``name``.
 
-    ``SELECT * FROM name(<args>)`` calls ``fn(*args)`` -- a plain Python or ``@njit`` callable returning a 1-D numpy
-    structured array of ``out_dtype`` -- and serves that array's rows. The ``arg_types`` (numpy scalar dtypes; integer
-    kinds are read via ``sqlite3_value_int64``, floating kinds via ``sqlite3_value_double``) are exposed as trailing
-    HIDDEN columns ``arg0``, ``arg1``, ... and must each be supplied with an equality value in the query; a call form
-    that leaves a hidden arg unbound is rejected with a SQLite constraint error (no rows). A query that names a hidden
-    column reads back that argument as ``fn`` received it.
+    ``SELECT * FROM name(a, b)`` calls ``fn(a, b)`` and returns the rows of the array that ``fn`` returns, a 1-D
+    NumPy structured array of ``out_dtype``. ``fn`` is a plain Python function, which numbox compiles with ``njit``,
+    or a jitted one. ``arg_types`` holds one integer, float or ``bool`` NumPy dtype for each argument. ``fn``
+    receives an integer or ``bool`` argument as an int64, and a float argument as a float64. Each argument is also a
+    hidden column of the table, after the columns of ``out_dtype``, and the hidden columns are named ``arg0``,
+    ``arg1``, ``arg2``, in the order of the arguments. Selecting a hidden column returns the value that ``fn``
+    received. A query must supply every argument: one that leaves an argument unbound, such as
+    ``SELECT * FROM name``, fails to prepare with SQLite's error "no query solution".
 
-    The registration's keep-alive lives in the module-level ``_DATA_ANCHOR``
-    and is released by SQLite via ``xDestroy`` (on connection close
-    or re-registration of the same name). ``out_dtype`` is baked
-    into the generated allocator (so it caches cross-process); a NaN ``float``
-    cell reads back as SQL NULL (SQLite coerces NaN REAL to NULL), as in
-    ``register_table``.
+    ``fn`` must return an array whose dtype is ``out_dtype``. A slice, a strided view or an offset view is read
+    correctly, because the row stride is honored. An array of another dtype is read through the layout of
+    ``out_dtype`` and yields undefined values. A query returns SQL NULL for a NaN float cell, because SQLite converts a
+    NaN REAL to NULL, as in :func:`~numbox.core.bindings.sqlite.vtable.register_table`. If ``fn`` raises, the query
+    fails with ``SQLITE_ERROR``.
 
-    ``fn`` must return a 1-D numpy structured array whose dtype is ``out_dtype``;
-    a slice / strided / offset view is handled (the row stride is honored), but a
-    return whose *dtype* differs from ``out_dtype`` is read through ``out_dtype``'s
-    layout and yields undefined values.
+    numba compiles ``fn`` and the generated code that calls it during this call, so numba raises a typing error in
+    ``fn`` from this call. The generated code compiles under numbox's jit options, and numbox names its cache after a
+    digest of ``out_dtype``, the argument types and ``fn``. If ``fn`` reads a value without a fingerprint, the digest
+    misses some edits. The registration can then run code compiled before an edit, as the section "If a SQLite
+    function keeps returning old results" of :doc:`numbox.utils` explains.
+
+    numbox keeps the registration's objects, ``fn`` included, until SQLite drops the module, when the connection
+    closes or when the name is registered again. Close the connection before the interpreter exits: if Python closes
+    a ``sqlite3.Connection`` during its shutdown after a query of the function, the process can end with a
+    segmentation fault.
+
+    Raises ``TypeError`` when ``out_dtype`` is not a structured dtype or has a field without a SQLite type, when an
+    argument type is not an integer, float or ``bool`` dtype, and when ``fn`` is not callable. Raises
+    ``RuntimeError``, with SQLite's message, when SQLite refuses the registration.
     """
     c, offsets_buf, tags_buf, widths_buf, schema, arg_tags = _build_tvf_descriptor(
         name, arg_types, out_dtype)
 
     xfilter_impl = _compile_xfilter(_stem(name), arg_tags, out_dtype, _prepare_fn(fn))
 
-    # cache=False, unlike every other cfunc here: this one closes over
-    # xfilter_impl, a dispatcher minted per registration, so its cache key never
-    # repeats. With cache=True it writes an index entry per registration per
-    # process and reads none of them back -- measured 1/2/3 overloads over three
-    # identical processes, and 4 over four registrations in one process, while
-    # the sibling cfuncs held at 1. The content-addressed xfilter_impl anchor
-    # (_compile_xfilter) is what actually caches this path.
+    # cache=False, unlike every other callback here: this one closes over xfilter_impl, a dispatcher made for each
+    # registration, so its cache key never repeats. With cache=True, each registration in each process writes an
+    # index entry that no later lookup reads. Three identical processes produced one, two and three overloads, and four
+    # registrations in one process produced four, while each of the other callbacks had one. The anchor of
+    # xfilter_impl, which _compile_xfilter writes, is what caches this path.
     @cfunc(types.int32(types.intp, types.int32, types.intp, types.int32, types.intp), cache=False)
     def _tvf_xfilter(cur, idx_num, idx_str, argc, argv):
-        # A bare try/except (not try/finally, which reraises on numba 0.65.1)
-        # converts a user-fn exception into SQLITE_ERROR via xFilter's own return
-        # code; otherwise the @cfunc boundary swallows it and returns the zero
-        # default (SQLITE_OK), so SQLite reports a successful query with no rows.
-        # xfilter_impl zeroes the cursor before calling the user fn, so the cursor
-        # is left in a consistent empty state on the error path.
+        # The try/except converts an exception from fn into SQLITE_ERROR, xFilter's own return code. Without it, the
+        # cfunc boundary would catch the exception and return the zero default, SQLITE_OK, and SQLite would report a
+        # successful query with no rows. A try/finally with no except clause does not prevent this: numba 0.65.1
+        # fails on its re-raise, and the cfunc boundary catches that error too. xfilter_impl empties the cursor before
+        # it calls fn, so the cursor is left consistent and empty when fn raises.
         try:
             xfilter_impl(cur, argc, argv)
         except Exception:

@@ -1,15 +1,12 @@
-"""SQLite numeric constants (result codes, type codes, open flags, blob flags,
-trace flags, destructor sentinels).
+"""SQLite's integer constants under their C names, for Python code and jitted code alike.
 
-Public surface — import directly, e.g.
-``from numbox.core.bindings.sqlite.constants import SQLITE_OK``.
-All names are uppercase ``SQLITE_*`` to avoid collision with the lowercase
-C-function-named wrappers.
-
-Numba handles Python integer literals natively in ``@njit`` code, so these
-constants are usable inside JITed functions without further wrapping. The
-underlying SQLite values are API-stable across all matrix versions
-(3.34.0 through current).
+The module holds the result codes, the column type codes, the flags of ``sqlite3_open_v2``, ``sqlite3_blob_open`` and
+``sqlite3_trace_v2``, the destructor values ``SQLITE_STATIC`` and ``SQLITE_TRANSIENT``, the flags that register a SQL
+function, and the constraint operators of a virtual table's ``xBestIndex``. Import a constant by name, as in
+``from numbox.core.bindings.sqlite.constants import SQLITE_OK``. The names are the C names, in capitals, so they do
+not collide with the bindings, which use the lowercase names of SQLite's functions. numba reads a module-level
+integer as a constant, so jitted code can use these names directly. SQLite has not changed these values between
+3.34.0, the oldest version in numbox's test matrix, and the current release.
 """
 
 __all__ = [
@@ -88,7 +85,7 @@ SQLITE_OPEN_FULLMUTEX = 0x00010000
 SQLITE_OPEN_SHAREDCACHE = 0x00020000
 SQLITE_OPEN_PRIVATECACHE = 0x00040000
 
-# === sqlite3_blob_open flags (the integer values its `flags` arg accepts) ===
+# === sqlite3_blob_open flags (the values of its flags argument) ===
 SQLITE_BLOB_READONLY = 0
 SQLITE_BLOB_READWRITE = 1
 
@@ -98,24 +95,25 @@ SQLITE_TRACE_PROFILE = 0x02
 SQLITE_TRACE_ROW = 0x04
 SQLITE_TRACE_CLOSE = 0x08
 
-# === Destructor sentinels for sqlite3_bind_text / sqlite3_bind_blob ===
+# === Destructor values for the text and BLOB bindings of bind.py and result.py ===
 SQLITE_STATIC = 0
 SQLITE_TRANSIENT = -1
 
-# === sqlite3_create_function_v2 / sqlite3_create_window_function flags ===
+# === Flags of sqlite3_create_function_v2 and sqlite3_create_window_function ===
 SQLITE_UTF8 = 1
 SQLITE_DETERMINISTIC = 0x800
 SQLITE_DIRECTONLY = 0x80000
 SQLITE_INNOCUOUS = 0x200000
-# SQLITE_SUBTYPE (since 3.30.0) declares a function may read its arguments'
-# subtypes via sqlite3_value_subtype; SQLITE_RESULT_SUBTYPE (since 3.45.0)
-# declares it may set a result subtype via sqlite3_result_subtype. Both are
-# required on strict-subtype builds (-DSQLITE_STRICT_SUBTYPE=1, e.g. conda-forge)
-# and harmlessly ignored on older sqlite.
+# SQLITE_SUBTYPE (SQLite 3.30.0 and later) registers a function that reads its arguments' subtypes with
+# sqlite3_value_subtype. If the flag is missing, that call may return 0 for an argument that has a subtype.
+# SQLITE_RESULT_SUBTYPE (3.45.0 and later) registers a function that sets its result's subtype with
+# sqlite3_result_subtype. A SQLite built with -DSQLITE_STRICT_SUBTYPE=1, such as the conda-forge build, makes the
+# function fail at that call when this flag is missing. The strict build checks only SQLITE_RESULT_SUBTYPE, in
+# sqlite3_result_subtype (SQLite's src/vdbeapi.c); sqlite3_value_subtype checks no flag. Older versions ignore both.
 SQLITE_SUBTYPE = 0x100000
 SQLITE_RESULT_SUBTYPE = 0x1000000
 
-# === sqlite3_index_info constraint op-codes (xBestIndex / xFilter pushdown) ===
+# === Constraint operators of sqlite3_index_info, which xBestIndex reads to pass constraints to xFilter ===
 SQLITE_INDEX_CONSTRAINT_EQ = 2
 SQLITE_INDEX_CONSTRAINT_GT = 4
 SQLITE_INDEX_CONSTRAINT_LE = 8

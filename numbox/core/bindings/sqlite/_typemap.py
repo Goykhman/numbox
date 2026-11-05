@@ -1,9 +1,9 @@
-"""Shared numpy-dtype ↔ SQLite type mapping + fixed-width string helpers.
+"""Map NumPy dtypes to SQLite column types, and convert fixed-width strings between UTF-32 and UTF-8.
 
-Used by the read-only vtable (sqlite.vtable), the table-valued-function
-mechanism, and query_to_array. The dtype tags are the single source of truth
-for how a numpy column maps to a SQLite column type and how its bytes are
-read/written.
+The read-only virtual tables of :mod:`~numbox.core.bindings.sqlite.vtable`, the table-valued functions of
+:mod:`~numbox.core.bindings.sqlite.tvf` and :func:`~numbox.core.bindings.sqlite.query.query_to_array` share this
+module. Each supported NumPy dtype has a tag, a small integer, and the tag alone decides the SQLite type of a NumPy
+column and how its bytes are read and written.
 """
 import numpy as np
 from numba import carray, njit
@@ -17,7 +17,8 @@ _TAG_U8, _TAG_U16, _TAG_U32, _TAG_U64 = 4, 5, 6, 7
 _TAG_F32, _TAG_F64, _TAG_BOOL = 8, 9, 10
 _TAG_S, _TAG_U, _TAG_BLOB = 11, 12, 13
 
-# element type of every col_tags buffer; deref sites must use this alias
+# The element type of every col_tags buffer. Each carray that reads such a buffer names this alias, so that the code
+# that writes the buffer and the code that reads it agree on its width.
 tags_buf_t = np.int32
 
 
@@ -32,7 +33,13 @@ def _nul_trimmed_len(p, width):
 
 @njit(**jit_options)
 def utf32_to_utf8(src, n_codepoints, dst):
-    """``dst`` must hold at least ``4 * n_codepoints + 1`` bytes."""
+    """Encode the UTF-32 code points at ``src`` as UTF-8 at ``dst``, and return the number of bytes written.
+
+    ``src`` holds ``n_codepoints`` code points in the machine's byte order, as a NumPy ``'U'`` value stores them. The
+    function ignores the trailing zero code points of the value's padding and encodes the interior ones. A surrogate or
+    a value above U+10FFFF is written as U+FFFD, and no NUL follows the bytes. ``dst`` must hold at least
+    ``4 * n_codepoints + 1`` bytes.
+    """
     m = n_codepoints
     while m > 0 and load_unaligned(src + 4 * (m - 1), uint32) == 0:
         m -= 1
@@ -63,22 +70,24 @@ def utf32_to_utf8(src, n_codepoints, dst):
     return k
 
 
-# Per-element helpers (here and in vtable.py) are inlined at the numba IR level.
-# Left to LLVM's inliner, the larger ones (_utf8_decode_one, _emit_cell) stay
-# out of line, and a call per code point or per cell measurably slows their loops.
+# numba inlines the helpers that run once per element, here and in vtable.py, in its own IR. Without that inlining,
+# LLVM's inliner leaves the larger ones, _utf8_decode_one and _emit_cell, out of line, and a call for each code point
+# or each cell measurably slows their loops.
 _INLINE_JIT_OPTIONS = {**jit_options, "inline": "always"}
 
 
 @njit(**_INLINE_JIT_OPTIONS)
 def _utf8_decode_one(inp, i, nbytes):
-    """Decode the UTF-8 form starting at ``inp[i]`` (``inp`` holds ``nbytes``
-    bytes). Returns ``(code point, index just past the form)``. A malformed
-    form that still parses (surrogate, overlong encoding, out-of-range) decodes
-    to U+FFFD and is consumed whole; a byte that starts no complete form (bad
-    continuation byte, truncation) decodes to U+FFFD and is consumed alone."""
-    # RFC 3629 forms: a lead byte 0xxxxxxx (b0 < 0x80), 110xxxxx (b0 >> 5 == 0x6),
-    # 1110xxxx (b0 >> 4 == 0xE) or 11110xxx (b0 >> 3 == 0x1E), then continuation
-    # bytes 10xxxxxx (>> 6 == 0x2) that carry 6 bits each (& 0x3F).
+    """Decode the UTF-8 form that starts at ``inp[i]``, and return the code point and the index just past the form.
+
+    ``inp`` holds ``nbytes`` bytes. A malformed form that still parses, such as a surrogate, an overlong encoding or a
+    value above U+10FFFF, decodes to U+FFFD, and the decoder consumes all of its bytes. A byte that starts no complete
+    form, such as a stray continuation byte or a truncated form, decodes to U+FFFD, and the decoder consumes only that
+    byte.
+    """
+    # A form of RFC 3629 starts with a lead byte 0xxxxxxx (b0 < 0x80), 110xxxxx (b0 >> 5 == 0x6), 1110xxxx
+    # (b0 >> 4 == 0xE) or 11110xxx (b0 >> 3 == 0x1E). Each continuation byte after it is 10xxxxxx (>> 6 == 0x2) and
+    # carries 6 bits (& 0x3F).
     b0 = uint32(inp[i])
     if b0 < 0x80:
         cp = b0
@@ -108,11 +117,13 @@ def _utf8_decode_one(inp, i, nbytes):
 
 @njit(**jit_options)
 def utf8_to_utf32(src, nbytes, dst, width_cp):
-    """Decode the UTF-8 bytes at ``src`` (length ``nbytes``) into up to
-    ``width_cp`` little-endian uint32 code points at ``dst``; NUL-pad the
-    remainder. Malformed input (bad continuation byte, surrogate, overlong
-    encoding, out-of-range) decodes to U+FFFD. Returns the number of code points
-    written. ``dst`` may be misaligned (writes are align=1)."""
+    """Decode the UTF-8 bytes at ``src`` into at most ``width_cp`` code points at ``dst``; return the number written.
+
+    ``nbytes`` is the length of the input. Each code point is written as a 4-byte unsigned integer in the machine's
+    byte order, which is little-endian on every platform that numbox supports, and the rest of the ``width_cp`` slots
+    are set to 0. Malformed input, such as a stray continuation byte, a surrogate, an overlong encoding or a value
+    above U+10FFFF, decodes to U+FFFD. ``dst`` may be unaligned, because every store is unaligned.
+    """
     inp = carray(_cast_int_to_void_p(src), (nbytes,), dtype=np.uint8)
     for k in range(width_cp):
         store_unaligned(dst + 4 * k, uint32(0))

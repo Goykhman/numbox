@@ -1,67 +1,31 @@
-"""First-class function values whose exceptions propagate out of the call.
+"""First-class function values whose exceptions propagate to the jitted code that calls them.
 
-The mechanism
--------------
+numba can call a first-class function value through two entry points. A call through the numba entry point
+propagates an exception to the caller. A call through the C entry point, the kind of wrapper that ``@cfunc`` builds,
+discards the exception: numba writes it to stderr as unraisable, and the call returns zero
+(`numba issue 8246 <https://github.com/numba/numba/issues/8246>`_). numba records the numba entry point only for a
+dispatcher. :class:`DeriveWAP` is a function value that records the numba entry point of a compiled function. Its
+numba type, :class:`DeriveFunctionType`, sets that entry point when Python passes the value to jitted code and when
+jitted code reads the value as a constant. :func:`~numbox.utils.highlevel.cres` returns such values, and
+:func:`rewrap_derive` converts numba's own ``CompileResultWAP`` into one. A value passed from Python to a parameter
+declared with the plain ``FunctionType`` loses its numba entry point when numba unboxes it, as
+:meth:`DeriveFunctionType.can_convert_to` explains.
 
-numba lowers a first-class ``FunctionType`` call two ways and picks between them on
-the function model's ``jit_addr`` slot. A populated slot selects the numba calling
-convention plus ``return_status_propagate``, so an exception unwinds into the caller.
-An empty slot selects the C wrapper, which numba documents as not supporting
-exceptions: it discards the exception, zero-fills the return value and reports the
-failure only as an unraisable on stderr.
-
-numba fills the slot for a ``Dispatcher`` and leaves it empty for everything else,
-``_get_jit_address`` returning 0. A bare compile result therefore arrives at a call
-site with no entry point that could carry an exception out.
-
-:class:`DeriveWAP` captures the compile result's numba-callconv entry point, and
-:class:`DeriveFunctionType` populates ``jit_addr`` from it on both unboxing and
-constant lowering. A value of this type carries a usable entry point wherever it
-goes.
-
-Using it
---------
-
-:func:`numbox.utils.highlevel.cres` mints these values, so a `cres`-compiled function
-is already one::
-
-    @cres(float64(float64))
-    def f(x):
-        if x < 0:
-            raise ValueError("negative")
-        return x
-
-Filling the slot is necessary but not sufficient: the *call site* decides which
-convention it emits, and one that reads the wrapper address unconditionally gets the
-C wrapper however the slot is filled. A consumer opts in by reading ``jit_addr`` and
-emitting ``call_conv.call_function`` plus ``return_status_propagate`` when it is
-non-null; numba's own version of that is
-``numba.core.lowering.Lower.__call_first_class_function_pointer``.
-
-``numbox.core.work.work._call_derive`` is the worked example in this repository, and
-:doc:`numbox.core.work` walks through it. It selects the propagating convention at
-compile time for a :class:`DeriveFunctionType`, and tests the slot at runtime for a
-plain ``FunctionType``, which numba does populate for an njit dispatcher passed as a
-``FunctionType``-typed argument.
-
-Limits
-------
-
-:meth:`DeriveFunctionType.can_convert_to` documents the one direction that does not
-survive: a value handed from Python into a parameter *declared* as a plain
-``FunctionType`` degrades to the C convention on the way in.
-
-Standing on numba
------------------
-
-The decorators below are numba's public extension API, save for ``lower_constant``,
-which ``numba.extending`` does not re-export. What they register against is not:
-``FunctionModel``, ``CompileResultWAP``, ``Conversion``, ``box_function_type`` and
-``lower_get_wrapper_address`` all sit outside ``numba.extending``, and the constant
-lowering drives ``context.declare_function`` and ``context.active_code_library``
-directly. What does hold is that no numba internals are patched: nothing here
-replaces numba behaviour, it only registers against it.
+A value propagates its exception only through a call that takes the numba entry point when the value has one. numba
+makes such a call when it calls a function value itself
+(``numba.core.lowering.Lower.__call_first_class_function_pointer``). A call that always takes the C entry point
+discards the exception, however the value was built. Code that calls a function value inside an ``@intrinsic`` must
+therefore read the value's ``jit_addr`` and, if it is set, emit ``call_conv.call_function`` followed by
+``return_status_propagate``. ``numbox.core.work.work._call_derive`` is such code. It takes the numba entry point
+without a test for a ``DeriveFunctionType``, and it tests ``jit_addr`` at run time for a plain ``FunctionType``, which
+numba sets for a dispatcher passed as an argument. The work page describes, in its section on exception handling, when
+the exception of a derive propagates.
 """
+# The decorators below belong to numba's public extension API, except lower_constant, which numba.extending does not
+# re-export. What they register against is not public: FunctionModel, CompileResultWAP, Conversion, box_function_type
+# and lower_get_wrapper_address are outside numba.extending, and the constant lowering calls context.declare_function
+# and context.active_code_library directly. The module patches nothing in numba; it only registers implementations
+# for its own types.
 from numba.core import cgutils, types
 from numba.core.imputils import lower_cast, lower_constant
 from numba.core.typeconv import Conversion
@@ -76,33 +40,42 @@ from numba.extending import NativeValue, box, register_model, unbox
 __all__ = ["DeriveFunctionType", "DeriveWAP", "rewrap_derive"]
 
 
-#: Where :func:`rewrap_derive` parks the upgraded wrapper on the object it upgrades,
-#: so that the address stored in ``py_addr`` stays backed for as long as the caller
-#: holds the original.
+#: The attribute under which :func:`rewrap_derive` stores the upgraded wrapper on the object that it upgrades, so that
+#: the address in ``py_addr`` stays valid for as long as the caller holds the original.
 _UPGRADED_ATTR = "_numbox_derive_wap"
 
 
+# DeriveFunctionType must never compare equal to the FunctionType of the same signature. The two hash alike, because
+# numba hashes a type on its key, and numba's Type.__eq__ distinguishes them by comparing their classes. numba interns
+# every type in a cache keyed by weak references, and a weak reference compares equal when its referent does, so for
+# two equal types the cache would return whichever was created first. If the plain type came first,
+# DeriveFunctionType(sig) would return it, and every cres value would discard its exception as a plain value does. If
+# this type came first, FunctionType(sig) would return it, and every plain function value would fail to unbox.
+# test_the_derive_type_stays_distinct_from_the_plain_function_type checks that the two stay distinct.
+#
+# Because the two types differ, numba below 0.68.0 refuses a tuple that holds a DeriveWAP and another kind of
+# function value with the same number of arguments. Its unified_function_type in numba/core/utils.py asserts that
+# the function types are equal, and the AssertionError has no message. numba 0.68.0 declines to unify the two types
+# instead, and the tuple has a type for each element. Under python -O the assertion is removed, and numba below
+# 0.68.0 assigns the whole tuple the type of its first element. A DeriveWAP after a value of another kind is then
+# called through its C entry point and discards its exception. A value of another kind after a DeriveWAP fails to
+# unbox with the TypeError of _get_derive_jit_address, which names the value's class.
 class DeriveFunctionType(FunctionType):
-    """First-class function type whose values always carry a populated ``jit_addr``.
+    """The numba type of a :class:`DeriveWAP`: a first-class function type whose values always hold a numba entry point.
 
-    Kept distinct from ``FunctionType`` so that ``_call_derive`` can select the
-    propagating calling convention at compile time, with no runtime branch, for
-    every derive numbox itself compiled.
+    numbox's ``_call_derive`` recognizes this type when it compiles a call, and it calls a value of the type through
+    the numba entry point, with no test at run time.
     """
 
     def can_convert_to(self, typingctx, other):
-        """Permit passing a :class:`DeriveWAP` where a plain ``FunctionType`` of
-        the same signature is declared.
+        """Return a safe conversion to the plain ``FunctionType`` of the same signature, and None for any other type.
 
-        Such a call site keeps working unchanged, which is the point, but it
-        keeps its *old* behaviour too: crossing the Python boundary into a
-        parameter declared as a plain ``FunctionType`` degrades the value to the
-        C convention, so a `derive` supplied that way still discards its
-        exception. Reaching the same declared type by a cast within jitted scope
-        does not degrade it, because :func:`lower_cast_derive_to_function_type`
-        is an identity on a shared ``FunctionModel`` and the populated
-        ``jit_addr`` survives. One source-level call site therefore has two
-        different exception semantics depending on where the value came from.
+        The conversion allows a :class:`DeriveWAP` to be passed to a parameter declared with the plain ``FunctionType``.
+        Whether its exception then propagates depends on where the value comes from. Inside jitted code, the cast in
+        :func:`lower_cast_derive_to_function_type` leaves the value unchanged, so it keeps its numba entry point. From
+        Python, numba unboxes the value as the plain ``FunctionType``, which sets no numba entry point, so a call of
+        the value discards its exception. One call site can therefore propagate an exception or discard it, depending
+        on where the value comes from.
         """
         if type(other) is FunctionType and other.signature == self.signature:
             return Conversion.safe
@@ -111,15 +84,15 @@ class DeriveFunctionType(FunctionType):
 
 @lower_cast(DeriveFunctionType, FunctionType)
 def lower_cast_derive_to_function_type(context, builder, fromty, toty, val):
-    """Identity cast. Both types use ``FunctionModel``, so the struct is shared."""
+    """Return the value unchanged: both types use numba's ``FunctionModel``, so the numba entry point stays set."""
     return val
 
 
 class DeriveWAP(CompileResultWAP):
-    """``CompileResultWAP`` that also captures the numba-callconv entry point.
+    """A first-class function value for one compile result that records the numba entry point as well as the C one.
 
-    ``CompileResultWAP`` records only the cfunc wrapper address, which is the
-    entry point that cannot carry an exception out.
+    numba's ``CompileResultWAP`` records only the C entry point, through which an exception cannot propagate. The
+    constructor raises ``ValueError`` if the compile result's library returns no address for the numba entry point.
     """
 
     def __init__(self, cres):
@@ -133,20 +106,24 @@ class DeriveWAP(CompileResultWAP):
 
 @typeof_impl.register(DeriveWAP)
 def typeof_derive_wap(val, c):
+    """Return the numba type of a :class:`DeriveWAP`, the ``DeriveFunctionType`` of its signature."""
     return DeriveFunctionType(val.signature())
 
 
+# A value of the type has numba's FunctionModel, three addresses: c_addr, the C entry point; py_addr, the Python
+# object; and jit_addr, the numba entry point. When numba calls a function value, it tests jit_addr at run time. If
+# jit_addr is set, the call follows numba's calling convention and then return_status_propagate. If it is null, the
+# call goes through the C entry point, which a comment on FunctionModel in numba/experimental/function_type.py
+# describes as not supporting exceptions.
 register_model(DeriveFunctionType)(FunctionModel)
 
 
 def _get_derive_jit_address(func, sig):
-    """Resolve the callconv entry address during unboxing.
+    """Return the numba entry point of ``func`` while a :class:`DeriveFunctionType` value is unboxed.
 
-    Called from jitted unboxing code with the GIL held, mirroring how numba's own
-    first-class unboxing reaches back into Python. Raising here surfaces at the
-    unbox boundary rather than corrupting the struct, so a value that is not a
-    :class:`DeriveWAP` fails loudly instead of producing a null ``jit_addr`` that
-    would silently reinstate the swallow.
+    The unboxing code calls this function with the GIL held, as numba's own unboxing of a function value calls back
+    into Python. ``TypeError`` is raised if ``func`` is not a :class:`DeriveWAP`. The error stops the unboxing, so
+    such a value fails with a message instead of passing with no numba entry point and discarding its exception.
     """
     if isinstance(func, DeriveWAP):
         return func.jit_address
@@ -155,11 +132,10 @@ def _get_derive_jit_address(func, sig):
 
 
 def _lower_get_derive_jit_address(context, builder, func, sig):
-    """Emit the call to :func:`_get_derive_jit_address`.
+    """Emit a call of :func:`_get_derive_jit_address` and return its result, a new reference.
 
-    Follows numba's ``_lower_get_address`` with ``failure_mode='return_null'``:
-    a null result returns NULL from the unboxing function, which propagates the
-    Python exception rather than swallowing it.
+    The code follows numba's ``_lower_get_address`` with ``failure_mode='return_null'``: if the call returns NULL, the
+    unboxing function returns NULL, and the Python exception propagates to the caller.
     """
     pyapi = context.get_python_api(builder)
     modname = context.insert_const_string(builder.module, __name__)
@@ -168,9 +144,9 @@ def _lower_get_derive_jit_address(context, builder, func, sig):
     pyapi.decref(mod)
     sig_obj = pyapi.unserialize(pyapi.serialize_object(sig))
     addr = pyapi.call_function_objargs(fn, (func, sig_obj))
-    # `fn` and `sig_obj` are new references and `addr` does not borrow from either,
-    # so release them before the branch below: the null path returns early, and
-    # unboxing runs on every call for a derive passed as an argument.
+    # fn and sig_obj are new references, and addr does not borrow from either. They are released before the branch
+    # below, because the NULL path returns early, and the unboxing runs on every call that passes a derive as an
+    # argument; a reference not released there would leak on each such call.
     pyapi.decref(fn)
     pyapi.decref(sig_obj)
     with builder.if_then(cgutils.is_null(builder, addr), likely=False):
@@ -180,6 +156,12 @@ def _lower_get_derive_jit_address(context, builder, func, sig):
 
 @unbox(DeriveFunctionType)
 def unbox_derive_function_type(typ, obj, c):
+    """Unbox a :class:`DeriveWAP` that Python passes to jitted code into its three addresses.
+
+    The code follows numba's ``unbox_function_type`` but takes the numba entry point from
+    :func:`_get_derive_jit_address`, which returns the address that the ``DeriveWAP`` recorded. A value that is not a
+    ``DeriveWAP`` makes that function raise ``TypeError``, and the call from Python fails with it.
+    """
     typ = typ.get_precise()
     sfunc = cgutils.create_struct_proxy(typ)(c.context, c.builder)
 
@@ -200,82 +182,62 @@ def unbox_derive_function_type(typ, obj, c):
 
 @box(DeriveFunctionType)
 def box_derive_function_type(typ, val, c):
+    """Box a value for Python as numba's ``box_function_type`` does, returning the ``DeriveWAP`` at ``py_addr``."""
     return box_function_type(typ, val, c)
 
 
 @lower_constant(DeriveFunctionType)
 def lower_constant_derive_function_type(context, builder, typ, pyval):
-    """Lower a derive reached as a compile-time constant from jitted code.
+    """Lower a :class:`DeriveWAP` that jitted code reads as a compile-time constant, such as a module-level global.
 
-    ``c_addr`` and ``py_addr`` follow numba's own lowering for a
-    ``WrapperAddressProtocol`` value. ``jit_addr`` is declared symbolically and
-    the compile result's library is linked in, which is the pattern numba uses
-    for its ``Dispatcher -> FunctionType`` cast, and which is what makes the
-    entry point resolve as a symbol rather than as a bare pointer.
-
-    Resolving it as a symbol is also what makes a constant-lowered derive
-    cacheable at all: the dead ``c_addr``/``py_addr`` globals are eliminated
-    before numba scans the final module, so a caller that only calls the derive
-    reports no dynamic globals and caches. A baked address would leave them live
-    and numba would refuse to cache the caller rather than store an address that
-    is randomized per process.
-
-    That caching is not free, on this constant-reference route alone: the
-    caller's cached binary binds the derive's code, linked in by the
-    ``add_linking_library`` below, so an edit to the derive's body in another
-    module is not reliably picked up, and which body such a caller runs is not
-    single-valued. The inline at work here is LLVM's, over that linked-in body.
-    It is not the numba-IR ``inline='always'`` that ``@proxy`` puts on its
-    generated wrapper, which fires only where a jitted caller calls the
-    dispatcher and which a constant reference never reaches. A body small enough
-    for LLVM to inline leaves no separate definition behind and the caller keeps
-    serving the old one. A larger body is embedded as a weak ``linkonce_odr``
-    definition under a mangled name carrying numba's per-process ``v<uid>``
-    abi-tag, which numba's cache key does not cover; the caller serves that
-    embedded copy when the name the body carries in the loading process differs
-    from it, and the body's current definition when it matches. That name comes
-    from whichever process last recompiled the body and is frozen in the body's
-    own cache entry, so the first process to recompile after an edit fixes the
-    outcome for every later one. A caller that reaches the same binding through
-    its dispatcher is unaffected: it goes through the alias and the stale-alias
-    guard heals it on load. For a caller holding the derive as a compile-time
-    constant, clearing the cache is the only remedy and nothing warns.
-
-    There is deliberately no fallback to a baked address. A value of this type
-    always takes the propagating call, so a `jit_addr` that failed to resolve
-    would be called unconditionally, and failing the compilation is the only
-    honest outcome.
+    The lowered value holds the numba entry point as a symbol, so an exception raised in the body propagates, and numba
+    can cache a caller that only calls the value. The cache entry of such a caller holds its own copy of the body's
+    compiled code. The cached caller may continue to run the old body after an edit to the body in another module, and
+    neither numba nor numbox issues a warning; deleting the caller's cache files is the only remedy. A caller that calls
+    a proxied function through its dispatcher is not affected, because the cache guard of ``@proxy`` discards its stale
+    cache entry when it loads. The function has no fallback to a fixed address. A value of this type is always called
+    through its numba entry point, so an entry point that does not resolve fails the compilation.
     """
     typ = typ.get_precise()
     assert typ.check_signature(pyval.signature())
     sfunc = cgutils.create_struct_proxy(typ)(context, builder)
+    # c_addr and py_addr follow numba's own lowering of a WrapperAddressProtocol value.
     sfunc.c_addr = context.add_dynamic_addr(
         builder, pyval.__wrapper_address__(), info=str(typ))
     sfunc.py_addr = context.add_dynamic_addr(
         builder, id(pyval), info=type(pyval).__name__)
+    # jit_addr is declared as a symbol, and the compile result's library is linked in, as numba does when it casts a
+    # dispatcher to a FunctionType. The symbol also makes the caller cacheable. A caller that only calls the value
+    # leaves the globals of c_addr and py_addr unused, LLVM removes them before numba scans the final module, and
+    # numba finds no dynamic global. A fixed address for jit_addr would be such a global, used by the call, and numba
+    # would refuse to cache the caller rather than store an address that differs in every process.
     fn = context.declare_function(builder.module, pyval.cres.fndesc)
     sfunc.jit_addr = builder.bitcast(fn, context.get_value_type(types.voidptr))
+    # The caller's cached binary includes the body's code from this linked library, so that binary can become stale.
+    # LLVM inlines the body here, not numba. The numba-IR inline='always' that @proxy puts on its generated wrapper
+    # applies only where a jitted caller calls the dispatcher, and a constant reference never reaches it. A body small
+    # enough for LLVM to inline leaves no separate definition, and the caller continues to run the old body. A larger
+    # body is linked in as a weak linkonce_odr definition. Its mangled name holds numba's per-process abi tag v<uid>,
+    # which numba's cache key does not cover. The caller runs that embedded copy when the body's name in the loading
+    # process differs from it, and it runs the body's current definition when the names match. The name comes from the
+    # process that last compiled the body and is stored in the body's own cache entry. The first process that compiles
+    # the body after an edit therefore determines the outcome for every later process.
     context.active_code_library.add_linking_library(pyval.cres.library)
     return sfunc._getvalue()
 
 
 def rewrap_derive(derive):
-    """Upgrade a foreign ``CompileResultWAP`` so its exceptions propagate.
+    """Upgrade ``derive`` to a :class:`DeriveWAP` if it is a ``CompileResultWAP``, so that its exceptions propagate.
 
-    A derive compiled by numbox's own :func:`~numbox.utils.highlevel.cres` is
-    already a :class:`DeriveWAP`. One built directly against numba is not, and
-    would keep the swallowing convention. The compile result it carries is all
-    that is needed to upgrade it.
+    A value that :func:`~numbox.utils.highlevel.cres` compiled is already a ``DeriveWAP`` and is returned unchanged. Any
+    other value, including ``None``, is also returned unchanged, so a caller can apply the function to every derive. A
+    ``CompileResultWAP`` built with numba directly would keep only the C entry point, and the compile result that it
+    carries suffices for the upgrade.
 
-    Anything else, including ``None``, is returned unchanged so callers can apply
-    this unconditionally.
-
-    The upgraded wrapper is memoized onto the object it upgrades, and that is
-    required rather than an optimization. ``py_addr`` holds the derive's address
-    without taking a reference, so a wrapper minted fresh per call would be freed
-    as soon as the caller returned, leaving every `Work` built from it pointing at
-    released memory. Hanging it off the original ties its lifetime to the object
-    the caller already holds, which is the lifetime the address assumed all along.
+    The upgraded wrapper is stored on the original object, and a second call returns the same wrapper. The storage is
+    required, not an optimization. ``py_addr`` holds the wrapper's address without a reference, so a new wrapper for
+    each call would be freed when the caller returned, and every ``Work`` built from it would point to freed memory.
+    Stored on the original, the wrapper is not freed while the caller holds the original object.
     """
     if not isinstance(derive, CompileResultWAP) or isinstance(derive, DeriveWAP):
         return derive

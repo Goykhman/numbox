@@ -1,3 +1,10 @@
+"""A wrapper that puts a value of any numba type in a structref of the value's own type, for ``any_type``.
+
+In jitted code, ``_Content(x)`` returns a new structref with one field, ``x``, that holds the value. Its type is
+``ContentTypeClass([("x", <the type of x>)])``, so values of different types are wrapped in structrefs of different
+types. :mod:`numbox.core.any.any_type` casts that structref to ``ErasedType`` to store it in an ``Any``. Only jitted
+code can call ``_Content`` with a value.
+"""
 from numba.core.types import StructRef
 from numba.experimental.structref import new, register
 from numba.extending import overload
@@ -7,6 +14,7 @@ from numbox.core.configurations import jit_options
 
 @register
 class ContentTypeClass(StructRef):
+    """The numba type class of the structref that ``_Content`` returns, with one field ``x`` of the value's type."""
     pass
 
 
@@ -16,6 +24,7 @@ class _Content:
 
 @overload(_Content, strict=False, jit_options=jit_options)
 def ol_content(x_ty):
+    """Implement ``_Content(x)`` for jitted code: return a new structref whose field ``x`` holds ``x``."""
     content_type = ContentTypeClass([("x", x_ty)])
 
     def _(x):
