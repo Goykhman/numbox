@@ -1,4 +1,9 @@
-"""BLOB incremental I/O tests for the SQLite buildout."""
+"""Tests of the bindings of :mod:`~numbox.core.bindings.sqlite.blob`, SQLite's incremental BLOB I/O.
+
+The tests open a BLOB handle on a stored value, read its bytes and read its size. They write new bytes and read them
+back through a second handle, move a handle to another row and close a handle. Opening a column that does not exist
+returns an error code.
+"""
 from ctypes import addressof, c_int64
 
 import numpy as np
@@ -15,9 +20,12 @@ from numbox.utils.cstrings import c_string
 
 @pytest.fixture
 def populated_db(tmp_path):
-    """Create a file-backed db (not :memory:, since stdlib + our bindings
-    can't share an in-memory connection) with t(b BLOB) containing one row
-    of known bytes at rowid 1."""
+    """Yield a connection to a database file whose table ``t(b BLOB)`` holds two rows of known bytes.
+
+    The row of rowid 1 holds the 7 bytes 01 to 07, and the row of rowid 2 holds the 4 bytes AA BB CC DD. Python's
+    ``sqlite3`` module writes the rows. The database is a file, because two connections to ``:memory:`` open two
+    separate databases.
+    """
     import sqlite3 as stdlib_sqlite3
     db_file = tmp_path / "blob.sqlite"
     conn = stdlib_sqlite3.connect(str(db_file))
@@ -36,6 +44,7 @@ def populated_db(tmp_path):
 
 
 def _blob_open(db_p, rowid, flags):
+    """Open a handle with ``flags`` on column ``b`` of row ``rowid`` of ``t``, and return the result code and handle."""
     blob_p = c_int64(0)
     with c_string("main") as main_p, c_string("t") as table_p, c_string("b") as col_p:
         rc = sqlite3_blob_open(db_p, main_p, table_p, col_p, rowid, flags,

@@ -1,10 +1,10 @@
-"""Tests for ``numbox.utils.standard`` source-string helpers.
+"""Tests for ``numbox.utils.standard``, which formats a function's parameters for the source that numbox generates.
 
-``make_params_strings`` is consumed by ``make_structref``'s method-binding
-codegen and by the ``@proxy`` decorator. Both produce Python source that
-gets ``exec()``'d; the helper must refuse parameter kinds it cannot
-faithfully reproduce, otherwise the generated wrapper silently binds
-arguments differently from the user's intent.
+``make_structref`` and ``@proxy`` write the strings of ``make_params_strings`` into source that they run with
+``exec``. The tests check the two strings for plain and defaulted parameters, and the ``ValueError`` for ``*args`` and
+``**kwargs``, which the generated code would bind as plain parameters. They check that the function drops the markers
+``*`` and ``/``. Other tests run the generated ``def`` for string and ``None`` defaults and for ``nan`` and ``inf``,
+whose ``repr`` makes the ``def`` raise ``NameError``.
 """
 import pytest
 
@@ -39,19 +39,22 @@ def test_make_params_strings_rejects_var_keyword():
 
 
 def test_make_params_strings_flattens_keyword_only():
-    """Keyword-only `*,` separator is silently dropped — this is the
-    behavior `@proxy` relies on for `Omitted`-style overloads written
-    as `def f(x, *, y=default)`. See test_proxy.py::test_2."""
+    """``make_params_strings`` drops the keyword-only marker ``*``, so every parameter becomes positional-or-keyword.
+
+    ``@proxy`` relies on this for a function such as ``def f(x, *, y=default)`` with an ``Omitted`` signature for
+    ``y``. ``test_2`` in ``test/core/test_proxy.py`` calls such a function with ``y`` passed by position.
+    """
     def f(a, *, b):
         pass
     assert make_params_strings(f) == ("a, b", "a, b")
 
 
 def test_make_params_strings_flattens_positional_only():
-    """Positional-only `/` separator is silently dropped to match the
-    kw-only handling — both are non-Critical for the codegen since they
-    only widen the calling-convention surface area, they don't
-    miscompile."""
+    """``make_params_strings`` drops the positional-only marker ``/``, as it drops ``*``.
+
+    Without the marker, a caller can pass such a parameter both by position and by name, and the generated code computes
+    the same result.
+    """
     def f(a, b, /, c):
         pass
     assert make_params_strings(f) == ("a, b, c", "a, b, c")
@@ -65,12 +68,10 @@ def test_make_params_strings_rejects_combined_var_args_and_kwargs():
 
 
 def test_make_params_strings_string_default_uses_repr():
-    """String defaults must round-trip through the generated source.
+    """A string default is written as its ``repr``, so the generated ``def`` returns the same string.
 
-    ``str("hello") == "hello"`` (no quotes) which is invalid as a
-    default-value expression — it would parse as a bare identifier
-    and NameError at exec time. ``repr("hello") == "'hello'"`` round-
-    trips correctly.
+    The string's ``str`` has no quotes, so Python would parse it in the generated code as a name and raise
+    ``NameError``.
     """
     def f(x="hello"):
         pass
@@ -83,8 +84,7 @@ def test_make_params_strings_string_default_uses_repr():
 
 
 def test_make_params_strings_none_default_round_trips():
-    """None default — both str and repr produce ``"None"``; pin the
-    repr fix didn't break the case that ``str`` handled correctly."""
+    """A ``None`` default, whose ``str`` and ``repr`` are both ``None``, is written correctly as well."""
     def f(x=None):
         pass
     sig, _ = make_params_strings(f)
@@ -96,11 +96,12 @@ def test_make_params_strings_none_default_round_trips():
 
 @pytest.mark.parametrize("bad_float", [float('nan'), float('inf'), float('-inf')])
 def test_make_params_strings_nan_inf_floats_documented_no_roundtrip(bad_float):
-    """nan/inf floats render via repr() to bare identifiers (``nan`` /
-    ``inf`` / ``-inf``) which are not valid Python expressions and raise
-    NameError at exec time. The docstring documents this as a known
-    limitation. Pin the behavior so the gotcha stays visible if the
-    codepath ever changes."""
+    """The defaults ``nan``, ``inf`` and ``-inf`` give a ``def`` that raises ``NameError`` when it runs.
+
+    Their ``repr`` is the name ``nan`` or ``inf``, with a minus sign for ``-inf``, and the generated code does not
+    define these names, as the docstring of ``make_params_strings`` states. The test fails if the function writes these
+    defaults in another way, so that the docstring changes with the function.
+    """
     def f(x=bad_float):
         pass
     sig, _ = make_params_strings(f)

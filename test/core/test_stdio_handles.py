@@ -1,3 +1,10 @@
+"""Tests of stdout, stderr and stdin in numbox.core.bindings.stdio, called from jitted code.
+
+The tests check that each function returns a nonzero ``FILE *``, that the three values differ, and that text written
+with ``fputs`` through ``stdout()`` or ``stderr()`` reaches the matching file descriptor, which pytest's ``capfd``
+fixture captures. The two ``capfd`` tests skip on Windows. ``test_fmtio.py`` tests the formatted output functions,
+which also write through these streams.
+"""
 import pytest
 from numba import njit
 
@@ -41,13 +48,11 @@ def test_stdin_handle_nonzero():
 
 
 def test_stdio_handles_are_distinct():
-    """stdout / stderr / stdin must resolve to three different FILE* values.
+    """Check that ``stdout()``, ``stderr()`` and ``stdin()`` return three different nonzero ``FILE *`` values.
 
-    Smoke-tests-by-address can miss a regression that transposes platform
-    symbol names (e.g. macOS ``_DATA_SYMBOL_BY_NAME`` swapping
-    ``__stdoutp`` and ``__stderrp``): each individual ``addr != 0`` check
-    passes, but two handles point at the same FILE. This test catches
-    that class of mistake without needing capfd.
+    If the stdio module mapped two streams to one symbol, such as ``__stdoutp`` on macOS, each value would still be
+    nonzero, but two of them would be equal. The test detects that without ``capfd``, so it also runs on Windows. A
+    table that swapped two names would give three distinct values; the two ``fputs`` tests below detect that case.
     """
     @njit(cache=True)
     def get_all():
@@ -64,6 +69,7 @@ def test_stdio_handles_are_distinct():
     reason="capfd does not reliably capture C-level fputs+fflush to stderr() on Windows",
 )
 def test_stderr_fputs_roundtrip(capfd):
+    """Check that text written with ``fputs`` through ``stderr()`` reaches standard error."""
     p = get_unicode_data_p("ok-err\n")
     _write_to_stderr(p)
     out, err = capfd.readouterr()
@@ -75,11 +81,10 @@ def test_stderr_fputs_roundtrip(capfd):
     reason="capfd does not reliably capture C-level fputs+fflush to stdout() on Windows",
 )
 def test_stdout_fputs_roundtrip(capfd):
-    """Verifies stdout() resolves to the actual standard-output FILE* by
-    writing through it and checking ``capfd``'s ``out`` capture (not
-    ``err``). If the Linux/Darwin data-symbol table ever transposed
-    ``stdout`` and ``stderr``, the smoke tests above would still pass
-    but this test would receive the bytes on ``err`` instead.
+    """Check that text written with ``fputs`` through ``stdout()`` reaches standard output and not standard error.
+
+    If the stdio module swapped the symbols of ``stdout`` and ``stderr``, the nonzero and distinct checks above would
+    still pass, but this test would find the text in standard error.
     """
     p = get_unicode_data_p("ok-out\n")
     _write_to_stdout(p)

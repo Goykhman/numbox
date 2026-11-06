@@ -1,9 +1,10 @@
-"""Value accessor tests for the SQLite UDF bindings.
+"""Tests of the bindings of :mod:`~numbox.core.bindings.sqlite.value`.
 
-Exercises each ``sqlite3_value_*`` accessor inside a ``@cfunc`` callback
-registered via ``sqlite3_create_function_v2``.  The capture pattern writes
-the accessor's result into a numpy array via ``sqlite3_user_data`` +
-``carray``, then the Python-level test asserts the captured value.
+Each test registers a scalar SQL function whose callback reads its argument with one accessor and writes the result into
+a NumPy array. The array's address is the function's user data, so the callback obtains the address with
+``sqlite3_user_data``, and the test reads the array after the query. The tests of ``sqlite3_value_numeric_type`` and
+``sqlite3_value_subtype`` are in test_sqlite_result.py, where a second function produces the value that each one reads.
+No test covers ``sqlite3_value_nochange`` or ``sqlite3_value_frombind``.
 """
 from ctypes import addressof, c_int64
 
@@ -49,11 +50,15 @@ def _register(db_p, name, narg, cb_address, ud_ptr):
 
 
 # ---------------------------------------------------------------------------
-# Callback: capture int
+# Callbacks of the scalar functions
+#
+# Each callback reads its first argument with one accessor, writes the result into the array at the function's user
+# data, and sets 0 as its SQL result.
 # ---------------------------------------------------------------------------
 
 @njit
 def _cap_int_impl(ctx, argc, argv_pp):
+    """Write the first argument, read with ``sqlite3_value_int``, into the int64 at the user data."""
     ud = sqlite3_user_data(ctx)
     out = carray(_cast_int_to_void_p(ud), (1,), dtype=np.int64)
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
@@ -66,12 +71,9 @@ _cap_int_cb = cfunc(
 )(_cap_int_impl)
 
 
-# ---------------------------------------------------------------------------
-# Callback: capture int64
-# ---------------------------------------------------------------------------
-
 @njit
 def _cap_int64_impl(ctx, argc, argv_pp):
+    """Write the first argument, read with ``sqlite3_value_int64``, into the int64 at the user data."""
     ud = sqlite3_user_data(ctx)
     out = carray(_cast_int_to_void_p(ud), (1,), dtype=np.int64)
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
@@ -84,12 +86,9 @@ _cap_int64_cb = cfunc(
 )(_cap_int64_impl)
 
 
-# ---------------------------------------------------------------------------
-# Callback: capture double
-# ---------------------------------------------------------------------------
-
 @njit
 def _cap_double_impl(ctx, argc, argv_pp):
+    """Write the first argument, read with ``sqlite3_value_double``, into the float64 at the user data."""
     ud = sqlite3_user_data(ctx)
     out = carray(_cast_int_to_void_p(ud), (1,), dtype=np.float64)
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
@@ -102,13 +101,9 @@ _cap_double_cb = cfunc(
 )(_cap_double_impl)
 
 
-# ---------------------------------------------------------------------------
-# Callback: capture text bytes into ud array
-# ud layout: [0] = byte count, [1..] = text bytes as uint8
-# ---------------------------------------------------------------------------
-
 @njit
 def _cap_text_impl(ctx, argc, argv_pp):
+    """Write the byte count of the first argument's text at byte 0 of the user data, followed by the text's bytes."""
     ud = sqlite3_user_data(ctx)
     meta = carray(_cast_int_to_void_p(ud), (64,), dtype=np.uint8)
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
@@ -126,13 +121,9 @@ _cap_text_cb = cfunc(
 )(_cap_text_impl)
 
 
-# ---------------------------------------------------------------------------
-# Callback: capture blob bytes into ud array
-# ud layout: [0] = byte count, [1..] = blob bytes as uint8
-# ---------------------------------------------------------------------------
-
 @njit
 def _cap_blob_impl(ctx, argc, argv_pp):
+    """Write the byte count of the first argument's BLOB at byte 0 of the user data, followed by the BLOB's bytes."""
     ud = sqlite3_user_data(ctx)
     meta = carray(_cast_int_to_void_p(ud), (64,), dtype=np.uint8)
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
@@ -150,12 +141,9 @@ _cap_blob_cb = cfunc(
 )(_cap_blob_impl)
 
 
-# ---------------------------------------------------------------------------
-# Callback: capture type codes for up to 5 args
-# ---------------------------------------------------------------------------
-
 @njit
 def _cap_types_impl(ctx, argc, argv_pp):
+    """Write ``argc`` and then each argument's type code into the six int64 at the user data."""
     ud = sqlite3_user_data(ctx)
     out = carray(_cast_int_to_void_p(ud), (6,), dtype=np.int64)
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)
@@ -170,12 +158,9 @@ _cap_types_cb = cfunc(
 )(_cap_types_impl)
 
 
-# ---------------------------------------------------------------------------
-# Callback: dup a value, read int from the dup, then free
-# ---------------------------------------------------------------------------
-
 @njit
 def _cap_dup_impl(ctx, argc, argv_pp):
+    """Read the first argument as an int64 from a copy that ``sqlite3_value_dup`` makes, and free the copy."""
     ud = sqlite3_user_data(ctx)
     out = carray(_cast_int_to_void_p(ud), (1,), dtype=np.int64)
     args = carray(_cast_int_to_void_p(argv_pp), (argc,), dtype=np.intp)

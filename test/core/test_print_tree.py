@@ -1,3 +1,7 @@
+"""Tests of ``make_image``, the text drawing of a node and the nodes it depends on, for ``Node`` and ``Work`` nodes.
+
+One test draws a random tree of ``Node`` objects from a fixed seed and compares the drawing with ``random_image_ref``.
+"""
 import numpy
 from numbox.core.work.node import make_node
 from numbox.core.work.print_tree import make_image
@@ -8,6 +12,7 @@ from test.core.random_image_ref import random_image_ref
 
 
 def test_make_node_graph():
+    """``make_image`` draws a graph of ``Node`` objects as shown in the print_tree section of the work page."""
     n1 = make_node("first")
     n2 = make_node("second")
     n3 = make_node("third", inputs=(n1, n2))
@@ -24,6 +29,10 @@ fifth--third---first
 
 
 def test_node_graph_random():
+    """The drawing of the tree of ``random_graph(50)`` from the seed 137 equals the text in ``random_image_ref``.
+
+    ``all_inputs_names`` lists the nodes that one node of the tree depends on, depth first.
+    """
     numpy.random.seed(137)
     tree, all_nodes = random_graph(50)
     tree_image = make_image(tree)
@@ -32,6 +41,7 @@ def test_node_graph_random():
 
 
 def test_make_work_graph():
+    """``make_image`` draws a graph of ``Work`` nodes without derives in the same way as a graph of ``Node`` objects."""
     w1 = make_work("first", 0.0)
     w2 = make_work("second", 0.0, sources=(w1,))
     w3 = make_work("third", 0.0, sources=(w2,))

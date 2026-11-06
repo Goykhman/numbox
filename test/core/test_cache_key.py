@@ -1,9 +1,11 @@
-"""numbox's part of numba's cache key: the settings and flags it holds with numbox's version, the opt-in decorators,
-what numbox compiles, and the fallback to uncached.
+"""Tests of numbox's part of numba's cache key, the decorators that add it, and the functions that numbox keys.
 
-The cross-process tests run a probe in child processes against one ``NUMBA_CACHE_DIR``. Each child reports a cache
-hit or miss per function and the values it computed. The report is a JSON file the child writes, because several
-settings flood a child's stdout with numba's own dumps.
+numbox's part holds numbox's version, the jit options as numba compiles them, and the settings in ``KEYED_SETTINGS``.
+The tests check that a change of a setting or an option changes the key, in this process and in child processes that
+share one ``NUMBA_CACHE_DIR``. They check that ``numbox_njit``, ``numbox_cfunc``, ``cres``, ``proxy`` and the work
+builder key what they compile, and that an option the key cannot hold makes the function compile without a cache, with
+an ``UncachedWarning``. The last tests check how importing ``numbox.core`` installs the key. The repair of a cached
+caller of a proxied function is tested in ``test_proxy_cache_stale.py``.
 """
 import ast
 import collections
@@ -41,7 +43,11 @@ from numbox.utils import highlevel
 
 
 def _child_env(cache_dir, **extra):
-    """The test's environment for a child, with numba's defaults for every keyed setting and the package's options."""
+    """Return the environment for a child process that caches in ``cache_dir``, with ``extra`` added.
+
+    The keyed settings and ``NUMBOX_JIT_OPTIONS`` are removed, so the child runs under numba's defaults and numbox's
+    default options. ``PYTHONPATH`` holds this process's ``sys.path``, and bytecode writing is disabled.
+    """
     env = {k: v for k, v in os.environ.items() if k not in KEYED_SETTINGS and k != "NUMBOX_JIT_OPTIONS"}
     env["NUMBA_CACHE_DIR"] = str(cache_dir)
     env["PYTHONPATH"] = os.pathsep.join(sys.path)
@@ -51,6 +57,11 @@ def _child_env(cache_dir, **extra):
 
 
 def _run(script, env, out, *args):
+    """Run ``script`` in a child process, assert that it succeeds, and return the JSON report that it writes to ``out``.
+
+    The child writes its report to a file, not to stdout, because several settings make numba print its dumps to
+    stdout.
+    """
     r = subprocess.run(
         [sys.executable, str(script), str(out), *args],
         capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
@@ -68,9 +79,13 @@ _ENVIRON_READ = re.compile(
 
 
 def test_every_setting_numba_reads_is_classified():
-    """A numba release that reads a ``NUMBA_*`` setting nobody has classified fails here, on the matrix cell that
-    runs it: the setting may change the code numba emits, and then it belongs in the key. numba reads most settings
-    in ``config.py``, and a few through ``os.environ`` elsewhere; both are scanned."""
+    """Every ``NUMBA_*`` setting that the installed numba reads is in ``KEYED_SETTINGS`` or in ``UNKEYED_SETTINGS``.
+
+    A numba release that reads a new setting fails this test in the CI cell that runs it, because the setting may change
+    the code numba emits, and the key must then hold it. numba reads most settings in ``config.py`` and a few through
+    ``os.environ`` in other modules, so the test scans both and skips numba's own tests. It also checks that no setting
+    is in both tables.
+    """
     read = set(re.findall(r'"(NUMBA_[A-Z0-9_]+)"', inspect.getsource(numba_config)))
     root = pathlib.Path(numba.__file__).parent
     for path in root.rglob("*.py"):
@@ -101,15 +116,19 @@ def _keyed_for_settings(x):
 
 
 def _key_of(func):
-    """The key a lookup of ``func`` for an ``int64`` asks numba's cache for now, with numbox's part where numbox keys
-    it."""
+    """Return the key under which numba's cache would now look up ``func`` for an ``int64`` argument.
+
+    The key ends with numbox's part if numbox keys ``func``.
+    """
     return func._cache._index_key((numba.int64,), cpu_target.target_context.codegen())
 
 
 @pytest.mark.parametrize("env", sorted(KEYED_SETTINGS))
 def test_a_setting_changed_in_code_changes_the_key(env, monkeypatch):
-    """numbox reads each setting when numba looks the function up, so a setting changed in code changes the key used
-    by the next lookup."""
+    """A keyed setting assigned in ``numba.config`` changes the key of the next lookup.
+
+    numbox reads each setting from ``numba.config`` whenever numba looks the function up in its cache.
+    """
     key_before = _key_of(_keyed_for_settings)
     monkeypatch.setattr(numba_config, KEYED_SETTINGS[env], "numbox-test-value", raising=False)
     assert explain_cache_key(_keyed_for_settings)["settings"][env] == "'numbox-test-value'"
@@ -119,8 +138,11 @@ def test_a_setting_changed_in_code_changes_the_key(env, monkeypatch):
 
 
 def test_the_key_is_numbas_with_numboxs_version_flags_and_settings_beside_it(monkeypatch):
-    """numbox appends one part to numba's key, and only to a cache it keys; a plain ``njit`` keeps numba's key as it
-    is. A new numbox version is a new key."""
+    """numbox appends one part to numba's key, and only for a function that it keys.
+
+    The part holds numbox's version, the flags and the settings. A plain ``njit`` of the same function is cached under
+    numba's key alone, and a different numbox version gives a different key.
+    """
     plain = njit(cache=True)(_keyed_for_settings.py_func)
     numbas = _key_of(plain)
     key = _key_of(_keyed_for_settings)
@@ -133,8 +155,11 @@ def test_the_key_is_numbas_with_numboxs_version_flags_and_settings_beside_it(mon
 
 
 def test_numbas_opt_level_keeps_max_apart_from_three():
-    """numba reads ``NUMBA_OPT=max`` into an ``int`` of value 3 that remembers it was ``max``, and builds a different
-    code generator for it; the key keeps the two apart."""
+    """The key holds ``'max'`` for ``NUMBA_OPT=max`` and ``3`` for ``NUMBA_OPT=3``.
+
+    numba reads ``max`` into an ``int`` of value 3 that stores ``'max'`` in ``_raw_value``, and it configures its code
+    generator differently for ``max``. The test also checks that a bool and the equal int have the same text.
+    """
     assert cache_key._setting_value(numba_config._OptLevel("max")) == "'max'"
     assert cache_key._setting_value(numba_config._OptLevel(3)) == "3"
     assert cache_key._setting_value(3) == "3"
@@ -175,9 +200,12 @@ with open(sys.argv[1], "w", encoding="utf-8") as out:
 
 
 def test_options_numba_changes_in_a_compile_key_every_compile_alike_in_the_next_process(tmp_path):
-    """One decorator gives two functions one ``locals`` dict, and one of them compiles for two signatures. numba's
-    first compile adds names to ``locals``, where a cache hit adds none: the next process must still find every entry
-    the first saved."""
+    """A second process loads every entry that the first saved, although numba's first compile changes ``locals``.
+
+    One ``numbox_njit`` call decorates two functions, which therefore share one ``locals`` dict, and one of them
+    compiles for two signatures. numba's SSA pass adds names to ``locals`` during a compile, and a cache hit adds none.
+    The second process must still load all three entries.
+    """
     script = tmp_path / "shared_options.py"
     script.write_text(_SHARED_OPTIONS, encoding="utf-8")
     cache = tmp_path / "cache"
@@ -239,8 +267,9 @@ with open(sys.argv[1], "w", encoding="utf-8") as f:
     json.dump(out, f)
 '''
 
-#: The value each keyed setting is flipped to in the sweep, against numba's default. ``NUMBA_ENABLE_AVX`` is flipped
-#: against what the first child reports, which depends on the host.
+#: The value to which the sweep sets each keyed setting, other than numba's default. The sweep sets
+#: ``NUMBA_ENABLE_AVX`` to the opposite of the value that the first child reports, because numba's default for that
+#: setting depends on the host.
 _FLIPS = {
     "NUMBA_BOUNDSCHECK": "1",
     "NUMBA_OPT": "0",
@@ -272,10 +301,14 @@ def test_the_sweep_flips_every_keyed_setting_but_enable_avx():
 
 
 def test_every_keyed_setting_misses_when_flipped_and_hits_when_flipped_back(tmp_path):
-    """Each keyed setting, in child processes. A first child compiles and caches under numba's defaults. A child with
-    the setting flipped must miss, and must show the changed behavior where it shows (a bounds check, a parfor too
-    wide to compile). A child flipped back on the same cache must find the first entry. Each flip runs on a copy of
-    the first cache, so the flips run side by side."""
+    """A child process misses the cache under a changed keyed setting and hits it again under numba's defaults.
+
+    A first child compiles and caches under numba's defaults. For each setting, a child with the setting changed must
+    miss the cache. It must also show the setting's effect if the probe can observe it: ``NUMBA_BOUNDSCHECK`` makes an
+    index past the end raise ``IndexError``, and ``NUMBA_PARFOR_MAX_TUPLE_SIZE`` makes the parallel function fail to
+    compile. A later child that runs under numba's defaults again must then load the first entry. The test gives each
+    setting its own copy of the first cache, so it can check the settings in parallel threads.
+    """
     (tmp_path / "sweep_module.py").write_text(_SWEEP_MODULE, encoding="utf-8")
     script = tmp_path / "sweep_run.py"
     script.write_text(_SWEEP_RUN, encoding="utf-8")
@@ -285,7 +318,8 @@ def test_every_keyed_setting_misses_when_flipped_and_hits_when_flipped_back(tmp_
     assert cold["parallel_tuple"] == 9.0
     flips = dict(_FLIPS, NUMBA_ENABLE_AVX="0" if cold["settings"]["NUMBA_ENABLE_AVX"] == "1" else "1")
     source = inspect.getsource(numba_config)
-    flips = {env: value for env, value in flips.items() if f'"{env}"' in source}  # those this numba reads
+    # The sweep skips a setting that this numba version does not read.
+    flips = {env: value for env, value in flips.items() if f'"{env}"' in source}
 
     def flip(env):
         cache = tmp_path / f"cache-{env}"
@@ -327,8 +361,14 @@ def test_numbox_njit_keys_lazy_and_eager_compiles_and_njit_does_not():
 
 
 def test_numbox_cfunc_is_keyed_apart_from_an_njit_of_the_same_function():
-    """numba keys a ``@cfunc`` and an ``@njit`` of one function and signature alike, though their compiled results
-    differ; numbox's flags hold the decorator."""
+    """numbox's part records the decorator kind, so a ``numbox_cfunc`` and a ``numbox_njit`` have separate entries.
+
+    Under numba's key alone, an eager ``njit`` given the same signature as a numba ``Signature`` object shares the
+    ``@cfunc``'s entry. numba compiles a ``@cfunc`` without the CPython wrapper (``no_cpython_wrapper`` in
+    ``_CFuncCompiler._customize_flags``), so an ``njit`` that loads the ``@cfunc``'s entry crashes the process with a
+    segmentation fault when Python calls it. This test passes the signature as a string, for which numba's own keys
+    already differ, and checks the kind in each function's flags.
+    """
     c = numbox_cfunc("float64(float64)", cache=True)(_plain)
     j = numbox_njit("float64(float64)", cache=True)(_plain)
     assert c._cache._numbox_keyed[0] == "cfunc"
@@ -348,8 +388,11 @@ def test_the_flags_are_in_the_key():
 
 
 def test_a_set_of_fastmath_flags_and_a_dict_of_locals_are_written_in_one_order():
-    """``fastmath`` takes a set of flag names, whose order changes with each process's hash seed, and two dicts of the
-    same locals given in another order are the same locals."""
+    """numbox writes a set of fast-math flags and a ``locals`` dict into the key in sorted order.
+
+    The iteration order of a set of names changes with each process's hash seed. Two ``locals`` dicts that hold the
+    same entries in different orders give the same types to the same variables, so their text in the key is the same.
+    """
     flags = {"nnan", "ninf", "nsz", "arcp", "contract", "afn", "reassoc"}
     assert cache_key._flag_value_text(FastMathOptions(flags), "x") == "fastmath[" + ",".join(sorted(flags)) + "]"
     one = {"b": numba.float32, "a": numba.int64}
@@ -359,8 +402,11 @@ def test_a_set_of_fastmath_flags_and_a_dict_of_locals_are_written_in_one_order()
 
 
 def test_options_numba_takes_in_another_form_are_keyed_as_numba_takes_them():
-    """numba turns a numpy bool into a bool, a dict of fast-math flags into the set of those enabled, and an options
-    object into its values. The key holds what numba compiles under, so each keys as its plain form does."""
+    """An option given in another form has the same text in the key as the plain form that numba converts it to.
+
+    numba turns a numpy bool into a bool, a dict of fast-math flags into the set of the flags it enables, and an options
+    object into its values. The key holds the options that numba compiles under.
+    """
     def flags(**options):
         return explain_cache_key(numbox_njit(cache=True, **options)(_plain))["flags"]
 
@@ -380,8 +426,11 @@ def _plus_two(x):
 
 
 def test_a_function_as_the_inline_cost_model_compiles_uncached_with_a_warning():
-    """The key holds ``inline='always'`` and ``'never'``. A function given as the cost model is code the key does not
-    hold, so the function compiles without a cache."""
+    """The key holds ``inline='always'`` and ``inline='never'``, but not a function given as the cost model.
+
+    Such a function is code, which the key does not hold, so the decorated function compiles without a cache, and
+    numbox warns with ``UncachedWarning``.
+    """
     assert cache_key._flag_value_text(InlineOptions("always"), "x") == "inline['always']"
     modeled = numbox_njit(cache=True, inline=_cost_model)(_plus_two)
     modeled._cache.flush()
@@ -455,8 +504,11 @@ def _recompiled(x):
 
 
 def test_a_recompile_after_a_setting_changed_in_code_saves_the_new_value(monkeypatch):
-    """Each lookup reads the part afresh, so a recompile under a setting changed in code saves under that setting,
-    not under the part the first compile read."""
+    """A recompile after a setting changed in ``numba.config`` saves its entry under the new value.
+
+    numbox computes its part again at each lookup and at each save, so the key of the saved entry holds the new value,
+    not the value of the first compile.
+    """
     recompiled = numbox_njit(cache=True)(_recompiled)
     recompiled._cache.flush()
     assert recompiled(1) == 2
@@ -478,8 +530,11 @@ def _counts(n):
 
 
 def test_a_flag_with_no_stable_form_compiles_uncached_with_a_warning():
-    """numba writes a jitclass's type after an address no other process shares; held in ``locals``, it makes the
-    function compile without a cache, once warned."""
+    """A jitclass instance type in ``locals`` makes the function compile without a cache, and numbox warns once.
+
+    numba's text for the type holds an address that differs in every process, so the key cannot hold it.
+    ``explain_cache_key`` raises ``ValueError`` for such a function.
+    """
     counts = numbox_njit(cache=True, locals={"t": _Tally.class_type.instance_type})(_counts)
     with pytest.warns(UncachedWarning, match="a type in locals is the numba type"):
         assert counts(3) == 3
@@ -515,8 +570,11 @@ def _divides_under_numpy(a, b):
 
 
 def test_a_callee_compiled_inside_a_caller_is_keyed_with_the_flags_it_takes_from_it():
-    """numba gives a callee the caller's ``error_model`` where the callee sets none: the callee's key says so, apart
-    from the key of a direct call."""
+    """A callee that numba compiles inside a caller is saved under the ``error_model`` that it takes from the caller.
+
+    numba gives the callee the caller's ``error_model`` when the callee sets none. The callee's saved key holds
+    ``'numpy'``, while the key of a direct call from Python holds ``'python'``.
+    """
     _divides_under_numpy._cache.flush()
     _divides._cache.flush()
     assert _divides_under_numpy(1.0, 0.0) == np.inf
@@ -544,8 +602,8 @@ def _sums_with_a_typed_local(n):
 
 
 def test_a_compile_saves_the_flags_a_later_lookup_reads():
-    """numba's SSA pass adds names to ``locals`` during a compile, and the key leaves them out, so the entry a compile
-    saves is the one a later lookup asks for."""
+    """numba's SSA pass adds names to ``locals`` during a compile, and the key leaves them out, so the entry that a
+    compile saves has the key that a later lookup computes."""
     typed = numbox_njit(cache=True, locals={"acc": numba.float64})(_sums_with_a_typed_local)
     typed._cache.flush()
     before = explain_cache_key(typed)["flags"]
@@ -555,8 +613,11 @@ def test_a_compile_saves_the_flags_a_later_lookup_reads():
 
 
 def test_a_parallel_dict_compiles_uncached_with_a_warning():
-    """numba takes each choice out of a ``parallel`` dict as it parses it, so a later compile given the same dict takes
-    numba's defaults. The key does not hold such a dict, and the function compiles without a cache."""
+    """A ``parallel`` dict makes the function compile without a cache, with a warning.
+
+    numba removes each choice from a ``parallel`` dict as it parses the dict, so a later compile given the same dict
+    uses numba's defaults. The key therefore does not hold such a dict, and ``explain_cache_key`` raises ``ValueError``.
+    """
     parallel = numbox_njit(cache=True, parallel={"fusion": False})(_sums_in_parallel)
     parallel._cache.flush()
     with pytest.warns(UncachedWarning, match="the jit flag parallel is a dict"):
@@ -581,8 +642,8 @@ def _sums_in_parallel_given_a_dict_subclass(n):
 
 
 def test_a_refused_parallel_dict_reaches_numba_whole(monkeypatch):
-    """The refusal comes before numbox parses the options, so numba's first compile takes the choices the dict gives;
-    a dict subclass is refused as a dict is."""
+    """numbox refuses a ``parallel`` dict before it parses the options, so numba's first compile still receives every
+    choice in the dict. A dict subclass is refused in the same way."""
     seen = {}
     compile_extra = numba_compiler.compile_extra
 
@@ -601,8 +662,11 @@ def test_a_refused_parallel_dict_reaches_numba_whole(monkeypatch):
 
 
 def test_a_cfuncs_key_holds_the_flags_numba_compiles_it_under():
-    """numba's compiler changes a C callback's flags after the parse: no CPython wrapper, no object mode. The key holds
-    them as numba compiles them, so ``nopython=True``, which a C callback always is, keys as its absence does."""
+    """numba's compiler changes a C callback's flags after it parses them: no CPython wrapper and no object mode.
+
+    The key holds the flags as numba compiles them, so ``nopython=True``, which every C callback has, gives the same
+    flags as no ``nopython`` option.
+    """
     flags = explain_cache_key(numbox_cfunc("float64(float64)", cache=True)(_plain))["flags"]
     assert ";no_cpython_wrapper=True;" in flags and ";enable_pyobject=False;" in flags
     assert explain_cache_key(numbox_cfunc("float64(float64)", cache=True, nopython=True)(_plain))["flags"] == flags
@@ -616,9 +680,12 @@ def _sums_into_a_renamed_variable(n):
 
 
 def test_a_name_with_a_dot_is_keyed_unless_numbas_ssa_pass_added_it():
-    """numba's SSA pass names a variable's later definitions after it, ``x.1`` and on. Given ``x`` in ``locals``, it
-    writes those names into ``locals`` with ``x``'s type, and the key leaves them out. Given ``x.1`` alone, numba types
-    that definition by it, and the key holds it."""
+    """The key leaves out the dotted names that numba's SSA pass adds to ``locals``, and holds one the caller gives.
+
+    The SSA pass names each later definition of a variable after the variable: ``x.1``, then ``x.2``. If ``locals``
+    holds ``x``, the pass adds those names to ``locals`` with the type of ``x``, and the key leaves them out. If
+    ``locals`` holds only ``x.1``, numba types that definition with it, and the key holds it.
+    """
     dotted = numbox_njit(cache=True, locals={"x.1": numba.float64})(_sums_into_a_renamed_variable)
     plain = numbox_njit(cache=True)(_sums_into_a_renamed_variable)
     dotted._cache.flush()
@@ -640,7 +707,8 @@ def test_explain_cache_key_reads_what_cres_returns():
 # ---- What numbox compiles ----
 
 def _keyed_at_decoration(monkeypatch, module):
-    """Record, for every function ``module`` hands to its ``njit``, whether numbox keys it at that moment."""
+    """Replace ``module.njit`` with a spy, and return the list in which the spy records whether numbox keys each
+    function at its decoration."""
     seen = []
     real = module.njit
 
@@ -657,8 +725,11 @@ def _keyed_at_decoration(monkeypatch, module):
 
 
 def test_numboxs_own_functions_are_keyed_and_a_module_named_alike_is_not():
-    """A function of a numbox module is keyed however it is decorated, ``vector_push`` with numba's plain ``njit``
-    among them; a module whose name only starts with the letters of numbox is not numbox."""
+    """numbox keys every function of a numbox module, whatever decorator compiles it.
+
+    ``vector_push``, which numba's plain ``njit`` decorates, is keyed. A function of a module whose name only starts
+    with ``numbox``, such as ``numboxer``, is not keyed.
+    """
     from numbox.core.vector.vector import vector_push
     assert vector_push._cache._numbox_keyed[0] == "njit"
 
@@ -755,7 +826,11 @@ with open(sys.argv[1], "w", encoding="utf-8") as f:
 
 
 def test_a_binding_misses_under_a_changed_numbox_jit_options(tmp_path):
-    """The package's options reach every binding; numba's key does not hold them, numbox's does."""
+    """A binding misses the cache under a changed ``NUMBOX_JIT_OPTIONS`` and hits it again under the original value.
+
+    numbox compiles every binding with the options of ``NUMBOX_JIT_OPTIONS``. numba's key does not hold them, and
+    numbox's part does.
+    """
     script = tmp_path / "binding.py"
     script.write_text(_BINDING, encoding="utf-8")
     cache = tmp_path / "cache"
@@ -774,8 +849,12 @@ _NUMBOX_CORE_LOADS = (
 
 
 def test_every_module_numbox_core_loads_imports_first_in_a_fresh_interpreter(tmp_path):
-    """numbox.core installs the cache key as it loads: a module it loads must not need numbox.core while it loads
-    itself, or imported first it meets its own half-loaded self."""
+    """Each module that ``numbox.core`` loads can be the first import of a fresh interpreter.
+
+    Python runs the ``__init__`` of ``numbox.core``, which installs the cache key, before any of its submodules,
+    whichever module a program imports first. A module that ``numbox.core`` loads must therefore not need
+    ``numbox.core`` while it loads itself, because ``numbox.core`` is then only partly initialized.
+    """
     env = _child_env(tmp_path / "cache")
     listing = subprocess.run([sys.executable, "-c", _NUMBOX_CORE_LOADS], capture_output=True, text=True, env=env)
     assert listing.returncode == 0, listing.stderr[-2000:]
@@ -848,8 +927,12 @@ with open(sys.argv[1], "w", encoding="utf-8") as out:
 
 @pytest.mark.parametrize("refused", ["hook", "marker"])
 def test_a_failed_install_leaves_numba_as_it_was_and_the_next_import_installs(tmp_path, refused):
-    """The last of the five assignments is refused, or the marker's store after them. The process is warned once,
-    keeps none of numbox's hooks and has no marker, so the next import of numbox installs all five."""
+    """A failed install leaves numba unchanged and warns once, and a fresh import of numbox then installs every hook.
+
+    The child process makes the last of the five hook assignments fail, or the assignment of the install marker after
+    them. numbox restores the hooks that it assigned and sets no marker. The child then removes numbox's modules from
+    ``sys.modules`` and imports numbox again, which installs all five hooks.
+    """
     script = tmp_path / "failed_install.py"
     script.write_text(_FAILED_INSTALL, encoding="utf-8")
     first, second = _run(script, _child_env(tmp_path / "cache"), tmp_path / "out.json", refused)

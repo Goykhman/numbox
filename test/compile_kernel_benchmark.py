@@ -1,78 +1,70 @@
-"""Benchmark: a fused ``compile_kernel`` kernel vs ``CompiledGraph`` execution.
+"""Benchmark compile_kernel against CompiledGraph on a chain of distinct formulas.
 
-Answers the two questions raised in review of the ``compile_kernel`` PR:
+The benchmark measures how much faster one fused @njit kernel is than ``CompiledGraph.execute`` over the same nodes,
+whose formulas are jitted as well. The difference is the gain of compiling the iteration over the ordered nodes, apart
+from the gain of compiling each formula. The benchmark also measures how large the fused kernel's numba cache grows,
+and how long the kernel takes to compile for a large graph, when each formula is a ``CPUDispatcher``. The compile
+report compiles the formulas with ``proxy`` as well, so that the kernel calls each formula as an external function
+instead of holding its code, and compares the two.
 
-1. How much faster is the single fused ``@njit`` kernel than iterating a
-   ``CompiledGraph`` whose formulas are themselves jitted -- i.e. how much comes
-   from jitting the *iteration over the topologically ordered nodes*, separate
-   from jitting the individual formulas?
-2. With the per-node bindings being ``CPUDispatcher`` objects, how big does the
-   fused kernel's numba cache get and how long does it take to compile for a
-   large graph -- and does lowering the bindings through ``proxy`` (an external
-   call per node instead of an inlined body) help?
+The graph is a chain of ``N`` arithmetic nodes over 1-d float64 arrays, ``v_i = f_i(v_{i-1}, b)``, already in
+topological order, so that the benchmark exercises the iteration over the nodes. Each node has a formula of its own.
+Under the default profile, mixed, a third of the formulas compute a transcendental function (sin, cos, tanh, exp or
+sqrt), and the others compute an affine form. The graph is therefore heterogeneous, and numba compiles each node's
+formula separately.
 
-The graph under test is a chain of ``N`` distinct arithmetic nodes over 1-d
-float64 arrays (``v_i = f_i(v_{i-1}, b)``), "already ordered", which stresses
-exactly the node iteration. Every node has its own generated formula -- a mix of
-cheap affine ops and (~1/3 of nodes) more expensive transcendentals (sin / cos /
-tanh / exp / sqrt) -- so the graph is genuinely heterogeneous and each node is a
-distinct numba compile, not one of a few ops repeated.
-
-Run it (from the repo root, with numbox installed)::
+Run it from the repository root, with numbox installed::
 
     python -m test.compile_kernel_benchmark                       # perf, N=200, mixed
     python -m test.compile_kernel_benchmark --nodes 1000 --size 10000
     python -m test.compile_kernel_benchmark --profile cheap       # dispatch-bound regime
     python -m test.compile_kernel_benchmark --compile-report      # + cache/compile
+    python -m test.compile_kernel_benchmark --python-nodes 3      # segmented, 3 Python nodes
     python -m test.compile_kernel_benchmark --recompute           # incremental recompute
     python test/compile_kernel_benchmark.py --help
 
-``--profile {cheap,mixed,expensive}`` selects the per-node cost mix, so every
-claim below is reproducible from this one file: ``cheap`` reproduces the
-dispatch-bound regime (large fusion win), ``mixed`` (default) the heterogeneous
-numbers reported here, ``expensive`` the compute-bound extreme.
+``--profile`` selects the cost of the formulas, so that the hot-path results below can be reproduced with this file.
+``cheap`` selects the regime in which dispatch dominates and the speedup of fusion is largest. ``mixed``, the default,
+produces the results reported here, and ``expensive`` selects the regime in which computation dominates.
 
-``--nodes`` drives a linear (depth-N) chain, so it is bounded by Python's
-recursion limit inside ``Graph.compile`` (a recursive topological sort); tested
-to 1000. The fused kernel compile is intentionally slow on a cold cache -- both
-the perf path and the compile report print a heads-up before compiling.
+``--nodes`` sets the length of the chain. Graph.compile orders the chain with a recursive walk, so main raises Python's
+recursion limit to 20000 before it builds the graph. The results below use chains of 1000 nodes. A cold compile of the
+fused kernel takes a long time, so each mode prints a notice before it compiles.
 
 ----------------------------------------------------------------------------
-Sample results (AMD Ryzen 5 7640HS, Linux x86-64, CPython 3.12, numba 0.65.1;
-default --profile mixed; your numbers will vary). Hot path, microseconds/call,
-best of 30:
+The sample results below were measured on an AMD Ryzen 5 7640HS under Linux x86-64, with CPython 3.12, numba 0.65.1
+and the default profile, mixed; the numbers differ on other machines. The hot path's times are in microseconds per
+call, the best of 30::
 
     N=1000, S=1000    fused 3311   cg_execute 6192 (1.9x)   iter-only 5689 (1.7x)   numpy 4829 (1.5x)
     N=1000, S=10000   fused 32737  cg_execute 62589 (1.9x)  iter-only 38155 (1.2x)  numpy 31135 (0.95x)
 
-The fused kernel is ~1.9x faster than CompiledGraph's public execute here -- far
-less than the >10x it reaches with --profile cheap, because ~1/3 of the nodes do
-transcendental work, so per-node compute now dominates the per-node Python
-dispatch that fusion removes. Isolating the iteration (iter-only) shows the same
-thing: a 1.7x win at S=1000 collapses to 1.2x at S=10000, where fusion roughly
-matches numpy (0.95x). So the jitted-iteration win is large for cheap,
-dispatch-bound graphs and small for compute-bound ones (run --profile cheap vs
---profile expensive to see both ends).
+Here CompiledGraph.execute takes 1.9 times as long as the fused kernel, while with --profile cheap it takes more than
+10 times as long. A third of the mixed profile's nodes compute transcendental functions, so the work inside the
+formulas outweighs the Python dispatch between them, which fusion removes. The iteration-only row shows the same
+pattern: it takes 1.7 times as long as the fused kernel at S=1000 and 1.2 times at S=10000, where the fused kernel is
+about as fast as NumPy (0.95). Compiling the iteration therefore yields a large gain on a graph of cheap formulas, in
+which dispatch dominates, and a small gain on a graph of expensive ones. --profile cheap and --profile expensive show
+the two extremes.
 
-Compile / cache (--compile-report) at N=1000, cold then warm restart. ``total``
-is the apples-to-apples cold cost (njit formulas compile lazily inside
-kernel_compile, proxy formulas eagerly inside build):
+The compile report (--compile-report) at N=1000 measured a cold run and then a new process with a warm cache. ``total``
+is the comparable cold cost, because the njit formulas compile inside kernel_compile, at the kernel's first call, and
+the proxy formulas compile inside build, when proxy decorates them. The child processes of the report's proxy rows
+raise ValueError, as run_compile_report explains, so this file cannot reproduce the proxy numbers below::
 
     bindings        total cold   warm restart   on-disk cache
     CPUDispatcher   ~155 s       ~0.8 s         ~23 MiB   (1 kernel file)
     proxy           ~168 s       ~114 s (*)     ~1.2 MiB  (kernel only)
     proxy (cached)  ~172 s       ~3.8 s         ~57 MiB   (~4000 files)
 
-The CPUDispatcher kernel inlines all N distinct bodies -> one ~23 MiB cache,
-~155 s cold compile, fast ~0.8 s warm restart. proxy lowers each node to an
-external call, shrinking the *kernel* cache ~20x to ~1.2 MiB -- but (*) with
-uncached formulas every process recompiles all N (warm restart ~114 s, worse than
-njit). Making the proxy formulas cache=True fixes warm (~3.8 s), but with N
-genuinely-distinct formulas each caches separately, so the *total* footprint
-balloons to ~57 MiB across ~4000 files -- larger than the monolithic njit cache.
-So "proxy = smaller cache" holds for the kernel, but reverses for the whole
-on-disk footprint once the formulas are distinct and made cacheable. proxy also
-needs an explicit signature + a named, source-resolvable function per formula.
+The kernel of CPUDispatcher formulas holds the code of all N formulas: one cache of about 23 MiB, a cold compile of
+about 155 s and a warm start of about 0.8 s. With proxy, the kernel calls each formula as an external function, and the
+kernel's cache is about 20 times smaller, about 1.2 MiB. The formulas themselves are then uncached, so every process
+compiles all N of them again (*): the warm start takes about 114 s, longer than with njit. With ``cache=True`` for the
+proxy formulas, the warm start takes about 3.8 s. Each of the N distinct formulas then has cache files of its own, about
+4000 files and 57 MiB in total, more than the single cache of the njit kernel. proxy therefore makes the kernel's cache
+smaller but the whole cache larger, once the formulas are distinct and cached. proxy also needs a signature and a named
+function with a source file for each formula.
 ----------------------------------------------------------------------------
 """
 import argparse
@@ -96,35 +88,34 @@ from numbox.core.variable.variable import Graph, Values
 from numbox.core.variable.compile_kernel import compile_kernel
 from numbox.core.proxy.proxy import proxy
 
+# SIG is the signature for which proxy compiles each formula: two 1-d float64 arrays in, one out.
 SIG = float64[:](float64[:], float64[:])
 
 
 # --- formula generation ------------------------------------------------------
-# Each node's formula takes (a, b) -> 1-d float64 array, where `a` is the
-# previous node's value (fed in 1000x deep) and `b` is a fixed external. For the
-# chain to stay finite, the `a`-dependence must be NON-AMPLIFYING: a bounded
-# transcendental of `a`, or an affine `ca*a` with |ca| < 1 (contractive). `b` is
-# constant down the chain, so any O(1) function of `b` is safe. Roughly a third
-# of the nodes use an expensive transcendental (which doubles as the stabilizer).
+# Each node's formula takes a and b and returns a 1-d float64 array: a is the previous node's value, and b is a fixed
+# external value. The chain can be a thousand nodes deep, so each formula must keep the values bounded: it applies a
+# bounded transcendental function to a, or multiplies a by a factor whose absolute value is below 1. b is the same at
+# every node, so a formula may apply any bounded function to it. Under the mixed profile, a third of the nodes compute
+# an expensive transcendental function, which also bounds their value.
 #
-# To make every node a genuinely DISTINCT numba compile (not 4 ops cycled), the N
-# functions are emitted into a real importable module, one per source line:
-# numba keys its on-disk cache on (file, lineno), so distinct lines => distinct
-# compiles even where two bodies are structurally similar. A real module file
-# also keeps inspect.getsource/getmodule working, which proxy lowering and
-# compile_kernel's content-addressed cache both require.
+# load_formulas writes the N functions into a module file and imports it. numba names a function's cache files after
+# its source file, its qualified name and its first line, so each formula has cache files of its own. proxy needs the
+# module and the source file of each function that it wraps. compile_kernel reads neither: its digest folds the code
+# objects of the formulas.
 
 def _body(i, profile):
-    """Deterministic, value-bounded, distinct formula body for node ``i``.
+    """Return the expression of node ``i``'s formula in ``a`` and ``b``, which keeps the chain's values bounded.
 
-    ``profile`` sets the per-node cost mix: 'cheap' (affine only -> dispatch-
-    bound), 'expensive' (transcendental only -> compute-bound), or 'mixed'
-    (~1/3 expensive). Every form is non-amplifying in ``a`` so the chain stays
-    finite; ``b`` is the fixed external, so any O(1) function of it is safe.
+    ``profile`` selects the forms: "cheap" uses affine forms alone, so dispatch dominates; "expensive" uses
+    transcendental forms alone, so computation dominates; "mixed" uses transcendental forms for every third node. Each
+    form bounds ``a`` with a transcendental function or scales it by a factor below 1. ``b`` is the same external value
+    at every node, so a form may apply any bounded function to it.
     """
-    ca = round(0.30 + (i % 13) * 0.05, 3)   # 0.30..0.90  (|ca| < 1 -> contractive)
-    cb = round(0.10 + (i % 7) * 0.05, 3)    # 0.10..0.40
-    cc = round(-0.5 + (i % 11) * 0.1, 3)    # small offset
+    # ca lies between 0.30 and 0.90, so ca * a contracts. cb lies between 0.10 and 0.40, and cc between -0.5 and 0.5.
+    ca = round(0.30 + (i % 13) * 0.05, 3)
+    cb = round(0.10 + (i % 7) * 0.05, 3)
+    cc = round(-0.5 + (i % 11) * 0.1, 3)
     cheap_a = [f"{ca}*a", f"-{ca}*a + {cc}", f"{ca}*a - {cb}*b"]
     exp_a = [
         f"numpy.sin({ca}*a)",
@@ -139,7 +130,7 @@ def _body(i, profile):
         a_forms, b_forms = cheap_a, cheap_b
     elif profile == "expensive":
         a_forms, b_forms = exp_a, exp_b
-    elif i % 3 == 0:                         # mixed: ~1/3 expensive
+    elif i % 3 == 0:  # The mixed profile makes every third node expensive.
         a_forms, b_forms = exp_a, exp_b
     else:
         a_forms, b_forms = cheap_a, cheap_b
@@ -147,12 +138,11 @@ def _body(i, profile):
 
 
 def python_node_indices(n_nodes, k):
-    """Indices of the ``k`` evenly-spaced interior nodes to make non-jittable.
+    """Return the indices of the ``k`` nodes that run in Python, spaced evenly through the chain.
 
-    ``i * (n_nodes // (k + 1))`` for ``i = 1..k``; empty when ``k <= 0``. Each
-    such node's formula gains a ``json.dumps`` first statement that numba cannot
-    type, so ``compile_kernel`` demotes it to a Python step and the surrounding
-    jit nodes fuse into separate segments around it.
+    The indices are ``i * (n_nodes // (k + 1))`` for ``i`` from 1 to ``k``, and there are none if ``k`` is 0 or less.
+    load_formulas puts a call of ``json.dumps``, which numba cannot compile, first in the formulas of these nodes. The
+    kernel's search therefore runs them in Python, and numba compiles the nodes between them as segments.
     """
     if k <= 0:
         return frozenset()
@@ -160,10 +150,15 @@ def python_node_indices(n_nodes, k):
     return frozenset(i * step for i in range(1, k + 1))
 
 
+# _FORMULAS_CACHE holds the functions of each generated module, so that a process imports each module once.
 _FORMULAS_CACHE = {}
 
 
 def _atomic_write(path, text):
+    """Write ``text`` to ``path`` through a temporary file and ``os.replace``.
+
+    A process that reads ``path`` therefore never sees a partly written file.
+    """
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".tmp-")
     try:
         with os.fdopen(fd, "w") as f:
@@ -175,30 +170,34 @@ def _atomic_write(path, text):
 
 
 def _formulas_dir():
+    """Return ``ck_bench_<user>`` under the temporary directory, the directory of the generated formula modules.
+
+    The function creates the directory if it is missing. On a system with user ids, it raises RuntimeError if another
+    user owns the directory, because the benchmark imports the modules that it holds. Otherwise it makes the directory
+    private to the user.
+    """
     user = re.sub(r"[^0-9A-Za-z._-]", "_", getpass.getuser())
     d = pathlib.Path(tempfile.gettempdir()) / f"ck_bench_{user}"
     d.mkdir(mode=0o700, exist_ok=True)
     if hasattr(os, "getuid"):
         if d.stat().st_uid != os.getuid():
             raise RuntimeError(f"{d} exists but is not owned by the current user")
-        d.chmod(0o700)  # a dir created mode-0755 by an older version stays self-only
+        d.chmod(0o700)  # mkdir does not change the mode of an existing directory, so chmod sets it.
     return d
 
 
 def load_formulas(n_nodes, profile, python_nodes=frozenset()):
-    """Return ``[f0 .. f{n-1}]``: N genuinely-distinct arithmetic formulas.
+    """Return the ``n_nodes`` distinct formulas ``f0`` to ``f{n_nodes - 1}`` of ``profile``, as a list.
 
-    Generated into a real importable module (one function per source line, so
-    each is a distinct numba compile and inspect can recover its source). The
-    module path is content-addressed by ``(profile, n_nodes)`` so subprocess
-    workers in the compile report regenerate an identical module -> stable
-    cross-process cache.
+    The function writes the formulas into a module file and imports it, so that numba and inspect find each function's
+    source. The module's name, and with it the file's name, holds the profile, the number of nodes and the indices of
+    the Python nodes. The child processes of the compile report therefore regenerate the same module, and numba's cache
+    of its functions stays valid across processes. A second call with the same arguments returns the same functions.
 
-    ``python_nodes`` (a set of node indices) makes those nodes non-jittable:
-    their body keeps the same arithmetic but is prefixed with a ``json.dumps``
-    call numba cannot compile, so ``compile_kernel`` runs them as Python steps.
-    Empty (the default) reproduces the original all-jittable module byte for
-    byte, including its name, so the two paths never share a stale cache.
+    ``python_nodes``, a set of node indices, makes those formulas run in Python. Their body keeps the same arithmetic
+    after a first statement, a call of ``json.dumps``, which numba cannot compile. With ``python_nodes`` empty, the
+    module has no ``json`` import and its name has no suffix, so the module without Python nodes and a module with
+    them never share a cache.
     """
     cache_key = (profile, n_nodes, python_nodes)
     cached = _FORMULAS_CACHE.get(cache_key)
@@ -209,15 +208,14 @@ def load_formulas(n_nodes, profile, python_nodes=frozenset()):
     for i in range(n_nodes):
         lines.append(f"def f{i}(a, b):")
         if i in python_nodes:
-            lines.append('    json.dumps({"k": 1})')   # untypeable -> Python step
+            lines.append('    json.dumps({"k": 1})')  # numba cannot compile json.dumps, so the node runs in Python.
         lines += [f"    return {_body(i, profile)}", "", ""]
     text = "\n".join(lines)
     suffix = "_py" + "-".join(map(str, sorted(python_nodes))) if python_nodes else ""
     mod_name = f"_ck_bench_formulas_{profile}_{n_nodes}{suffix}"
     path = _formulas_dir() / f"{mod_name}.py"
-    # Only (re)write when content actually changes: rewriting bumps the file's
-    # mtime, which invalidates numba's source-stamp and defeats the cross-process
-    # formula cache (the warm proxy_cached restart would recompile every body).
+    # The module is written only when its text changes. A rewrite would change the file's modification time, which
+    # numba's cache index records, so the warm proxy_cached run would compile every formula again.
     if not path.exists() or path.read_text() != text:
         _atomic_write(path, text)
     spec = importlib.util.spec_from_file_location(mod_name, path)
@@ -230,22 +228,27 @@ def load_formulas(n_nodes, profile, python_nodes=frozenset()):
 
 
 def make_formula(fn, kind):
+    """Return ``fn`` wrapped as ``kind`` names: "njit", "proxy", or "proxy_cached" for proxy with caching enabled.
+
+    A kernel holds the code of an @njit formula and calls a proxy formula as an external function. Any other ``kind``
+    raises ValueError.
+    """
     if kind == "njit":
-        return njit(fn)                                      # CPUDispatcher binding
+        return njit(fn)
     if kind == "proxy":
-        return proxy(SIG)(fn)                                # external-call binding
+        return proxy(SIG)(fn)
     if kind == "proxy_cached":
-        return proxy(SIG, jit_options={"cache": True})(fn)   # + cacheable formula
+        return proxy(SIG, jit_options={"cache": True})(fn)
     raise ValueError(kind)
 
 
 def build_graph(n_nodes, kind, formulas, python_nodes=frozenset()):
-    """Chain of ``n_nodes`` distinct nodes; returns ``(graph, required_qual)``.
+    """Return a chain of ``n_nodes`` nodes and the qualified name of its last node.
 
-    Nodes in ``python_nodes`` keep their plain-Python formula (no ``njit``
-    wrap), so a non-jittable body runs in Python under both CompiledGraph and
-    compile_kernel's discovery. Empty (the default) wraps every node per
-    ``kind``, unchanged.
+    vars.v0 reads ext.a and ext.b, and each later node reads the previous node and ext.b. make_formula wraps each
+    formula as ``kind`` names, except that a node in ``python_nodes`` keeps its plain Python function. CompiledGraph
+    calls a formula as it is given, and an @njit wrapper of a formula that numba cannot compile would fail.
+    compile_kernel's search finds such a formula and runs it in Python.
     """
     def formula_for(i):
         return formulas[i] if i in python_nodes else make_formula(formulas[i], kind)
@@ -265,12 +268,16 @@ def build_graph(n_nodes, kind, formulas, python_nodes=frozenset()):
 
 
 def make_externals(size, seed=0):
+    """Return two arrays of ``size`` values from a standard normal distribution, drawn with the seed ``seed``."""
     rng = numpy.random.default_rng(seed)
     return rng.standard_normal(size), rng.standard_normal(size)
 
 
 def reference_numpy(formulas, a, b):
-    """Pure-numpy evaluation of the same chain (correctness + vectorized baseline)."""
+    """Evaluate the chain with the plain Python formulas on NumPy arrays, and return the last value.
+
+    The benchmark checks the kernels against the result and times the evaluation as the vectorized baseline.
+    """
     v = formulas[0](a, b)
     for f in formulas[1:]:
         v = f(v, b)
@@ -278,7 +285,10 @@ def reference_numpy(formulas, a, b):
 
 
 def best_median(fn, repeats):
-    """Warm once, then return (best, median) per-call nanoseconds over ``repeats``."""
+    """Return the best and the median time of one call of ``fn``, in nanoseconds, over ``repeats`` calls.
+
+    A first call, which is not timed, precedes them.
+    """
     fn()
     samples = [_timed(fn) for _ in range(repeats)]
     samples.sort()
@@ -286,12 +296,19 @@ def best_median(fn, repeats):
 
 
 def _timed(fn):
+    """Return the time of one call of ``fn``, in nanoseconds."""
     t0 = time.perf_counter_ns()
     fn()
     return time.perf_counter_ns() - t0
 
 
 def run_perf(n_nodes, size, repeats, profile):
+    """Print the hot-path times of the fused kernel, CompiledGraph and NumPy on a chain of ``n_nodes`` formulas.
+
+    The rows are the fused kernel, CompiledGraph.execute, CompiledGraph's loop over the nodes alone (iter-only) and the
+    NumPy evaluation. Each row shows the best and the median time of ``repeats`` calls on arrays of ``size`` values.
+    The function first checks that the fused kernel and CompiledGraph compute the same values as the NumPy evaluation.
+    """
     formulas = load_formulas(n_nodes, profile)
     a, b = make_externals(size)
     ref = reference_numpy(formulas, a, b)
@@ -311,17 +328,17 @@ def run_perf(n_nodes, size, repeats, profile):
     last_var = {n.variable.qual_name(): n.variable
                 for n in compiled.ordered_nodes}[required]
 
-    # Correctness: fused kernel and CompiledGraph must match pure numpy.
+    # The fused kernel and CompiledGraph must compute the same values as the NumPy evaluation.
     fused_out = ck.kernel(a, b)[0]
     vs0 = Values()
     compiled.execute({"ext": {"a": a, "b": b}}, vs0)
     assert numpy.max(numpy.abs(fused_out - ref)) < 1e-9, "fused kernel mismatch"
     assert numpy.max(numpy.abs(vs0.get(last_var).value - ref)) < 1e-9, "CompiledGraph mismatch"
 
-    # Iteration-only: pre-load externals once (private call -- no public entry
-    # point assigns externals without also iterating), so the timing isolates the
-    # node loop. best_median's warmup primes vs_iter's Value objects, so all timed
-    # reps measure pure iteration + formula dispatch without dict-insertion churn.
+    # The iteration-only row writes the external values once, through a private method, because no public method
+    # writes them without also running the formulas. Its timing then covers the loop over the nodes and the calls of
+    # the formulas. The untimed first call of best_median creates the Value objects of vs_iter, so that no timed call
+    # inserts into its dict.
     vs_iter = Values()
     compiled._assign_external_values({"ext": {"a": a, "b": b}}, vs_iter)
 
@@ -343,13 +360,14 @@ def run_perf(n_nodes, size, repeats, profile):
 
 
 # --- segmented orchestration report (the --python-nodes mode) ----------------
-# Injects K evenly-spaced non-jittable nodes into the N-node chain. compile_kernel
-# can no longer fuse the whole graph: its first call discovers the non-jittable
-# nodes and builds a plan of fused @njit segments with Python steps between them.
-# This reports the discovery (first-call) cost and the steady-state per-node cost
-# of the segmented plan against CompiledGraph on the same graph.
 
 def run_python_nodes_mode(n_nodes, size, repeats, profile, k):
+    """Print the cost of a segmented kernel whose chain holds ``k`` formulas that numba cannot compile.
+
+    compile_kernel cannot fuse such a graph. The kernel's first call searches for the Python formulas and builds a plan
+    of compiled segments with Python steps between them. The function reports the time of that first call and the
+    hot-path time of the plan, against CompiledGraph and NumPy on the same chain.
+    """
     py_idx = python_node_indices(n_nodes, k)
     formulas = load_formulas(n_nodes, profile, py_idx)
     a, b = make_externals(size)
@@ -364,8 +382,8 @@ def run_python_nodes_mode(n_nodes, size, repeats, profile, k):
     ck = compile_kernel(graph, required)
     t_compile = time.perf_counter() - t0
 
-    # First call IS discovery: warm-up + probe that resolves the partition and
-    # builds the segmented plan. Every later call runs that plan.
+    # The first call searches: it compiles each formula separately, finds the Python formulas and builds the plan of
+    # segments. Every later call runs that plan.
     t0 = time.perf_counter()
     first = ck.kernel(a, b)
     t_first = time.perf_counter() - t0
@@ -374,7 +392,7 @@ def run_python_nodes_mode(n_nodes, size, repeats, profile, k):
     n_seg = len([s for s in rep.segments if s.kind == "jit"])
     n_py = len(rep.python_nodes)
 
-    # Correctness: segmented kernel and CompiledGraph must match pure numpy.
+    # The segmented kernel and CompiledGraph must compute the same values as the NumPy evaluation.
     compiled = graph.compile([required])
     last_var = {n.variable.qual_name(): n.variable
                 for n in compiled.ordered_nodes}[required]
@@ -405,17 +423,21 @@ def run_python_nodes_mode(n_nodes, size, repeats, profile, k):
         print(f"  {name:<26}{best / 1e3:10.2f}{med / 1e3:10.2f}{best / seg_best:13.2f}x")
 
 
-# --- compile / cache report (his CPUDispatcher-vs-proxy question) ------------
-# Each measurement runs in a fresh subprocess with an isolated NUMBA_CACHE_DIR so
-# the cache is clean and measurable; the same process re-runs warm to show the
-# cross-process ("post-cache") reload cost.
+# --- compile / cache report (CPUDispatcher against proxy) --------------------
 
 def _cache_size(cache_dir):
+    """Return the total size in bytes and the number of numba's .nbi and .nbc files under ``cache_dir``."""
     files = [p for p in pathlib.Path(cache_dir).rglob("*") if p.suffix in (".nbi", ".nbc")]
     return sum(p.stat().st_size for p in files), len(files)
 
 
 def _compile_worker(n_nodes, kind, profile):
+    """Build, compile and call the kernel once in this process, and print one line of the compile report.
+
+    make_formula wraps the formulas as ``kind`` names. The line reports the time to build the graph, the time of
+    compile_kernel and the first call, their total, the size and number of the cache files under NUMBA_CACHE_DIR, and
+    whether numba warned that it cannot cache a function.
+    """
     cache_dir = os.environ["NUMBA_CACHE_DIR"]
     formulas = load_formulas(n_nodes, profile)
     a, b = make_externals(64)
@@ -445,6 +467,15 @@ def _compile_worker(n_nodes, kind, profile):
 
 
 def run_compile_report(n_nodes, profile):
+    """Print the cold and the warm compile of the kernel for each kind of formula: njit, proxy and proxy_cached.
+
+    The function creates a NUMBA_CACHE_DIR for each kind and deletes it afterwards. A first child process compiles
+    into the empty cache (COLD), and a second child process runs with the cache that the first child wrote (WARM). Each
+    child prints one line.
+
+    The child processes of the proxy and proxy_cached rows raise ValueError. proxy anchors its wrapper at the first line
+    of the decorated function, which must be line 8 or later of its file, and load_formulas writes ``f0`` at line 4.
+    """
     repo_root = pathlib.Path(__file__).resolve().parent.parent
     print(f"\ncompile / cache report, profile={profile}, N={n_nodes} nodes (COLD "
           f"writes cache, WARM is a fresh process reusing it; cold compile can "
@@ -457,8 +488,8 @@ def run_compile_report(n_nodes, profile):
         try:
             for label in ("COLD", "WARM"):
                 print(f"{label} ", end="", flush=True)
-                # cwd=repo_root so `-m test.compile_kernel_benchmark` resolves
-                # regardless of where the parent was launched from.
+                # The child runs in the repository root, so that -m test.compile_kernel_benchmark finds the module
+                # wherever the parent started.
                 subprocess.run(
                     [sys.executable, "-m", "test.compile_kernel_benchmark",
                      "--_worker", kind, "--nodes", str(n_nodes),
@@ -469,42 +500,24 @@ def run_compile_report(n_nodes, profile):
 
 
 # --- recompute report (the --recompute mode) ---------------------------------
-# Seeds a store once with a full call, then drives many `recompute` calls that
-# change a small input subset, and contrasts the steady-state cost against a full
-# `kernel(...)` re-run (the same change applied as a from-scratch evaluation each
-# iteration) and the interpreted `CompiledGraph.recompute`. Three regimes probe
-# the three places recompute can win, break even, or lose:
-#
-#   deep chain      -- a long single-input chain. A change to the FIRST node has a
-#                      cone == the whole chain, so recompute cannot beat a full
-#                      re-run there. To show the real win we change a LATE INTERIOR
-#                      node (an interior override): its downstream cone is a short
-#                      SUFFIX of the chain (the last ~50 nodes), so recompute re-runs
-#                      only that suffix while the full re-run still evaluates all N
-#                      nodes. The win therefore grows with N for a fixed suffix.
-#   diamond         -- x -> {a, b} -> u. Changing the shared root x re-affects the
-#                      whole small graph; this regime measures the boundary-
-#                      persistence machinery cost on a join, not a fusion win.
-#   fan-out columns -- K independent input->chain->output columns. Each recompute
-#                      changes a DIFFERENT single column input, cycling through all
-#                      K so the bounded cone-plan cache is exercised (and, when
-#                      K exceeds the cap, thrashes); recompute touches one column's
-#                      cone while a full re-run evaluates all K columns.
 
 
 def _affine(c, d):
-    """Distinct contractive affine njit formula ``a -> c*a + d`` (|c| < 1)."""
+    """Return an @njit formula that computes ``c * a + d`` for its argument ``a``.
+
+    Each call returns a new function. A chain of such formulas stays bounded if ``|c|`` is below 1.
+    """
     def f(a):
         return c * a + d
     return njit(f)
 
 
 def build_recompute_chain(n_nodes, suffix=50):
-    """Single-input chain of ``n_nodes`` contractive affine nodes over float64 arrays.
+    """Return a chain of ``n_nodes`` affine nodes over float64 arrays, with ext.a as its one input.
 
-    Returns ``(graph, required, late_name)``. ``late_name`` is the qual_name of a node
-    ``suffix`` steps from the end: overriding it makes the affected cone a short suffix
-    of the chain, so recompute re-runs only that suffix.
+    The result is ``(graph, required, late_name)``. ``late_name`` is the name, without its namespace vars, of the node
+    ``suffix`` steps from the end. An override of that node affects only the nodes after it, so recompute runs a short
+    suffix of the chain.
     """
     specs = [{"name": "v0", "inputs": {"a": "ext"}, "formula": _affine(0.5, 0.1)}]
     for i in range(1, n_nodes):
@@ -518,7 +531,10 @@ def build_recompute_chain(n_nodes, suffix=50):
 
 
 def build_recompute_diamond():
-    """The join graph x -> {a, b} -> u; returns ``(graph, required, ext)``."""
+    """Return ``(graph, required, ext)`` for the diamond: x reads basket.y, a and b read x, and u reads a and b.
+
+    ``ext`` holds None for basket.y, a value that the caller replaces with an array.
+    """
     graph = Graph(
         variables_lists={"variables": [
             {"name": "x", "inputs": {"y": "basket"}, "formula": _affine(2.0, 0.0)},
@@ -533,9 +549,12 @@ def build_recompute_diamond():
 
 
 def build_recompute_fanout(width, depth):
-    """``width`` independent columns, each an ``ext.c{k}`` -> depth-long affine chain
-    -> output ``vars.o{k}``. Returns ``(graph, required, ext, col_inputs)`` where
-    ``col_inputs`` is the list of per-column external (src, name) change keys."""
+    """Return ``width`` independent columns, each a chain of ``depth`` affine nodes from an input to an output.
+
+    Column ``k`` reads ``ext.i{k}``, computes ``vars.c{k}_0`` to ``vars.c{k}_{depth - 1}``, and ends at the output
+    ``vars.o{k}``. The result is ``(graph, required, ext, col_inputs)``. ``ext`` holds None for each input, and
+    ``col_inputs`` lists the ``(source, name)`` pair of each column's input.
+    """
     specs = []
     col_inputs = []
     for k in range(width):
@@ -555,11 +574,12 @@ def build_recompute_fanout(width, depth):
 
 
 def _interp_recompute_driver(graph, required, seed_ext, next_change):
-    """Return a 0-arg callable that does ONE interpreted recompute step (warm store).
+    """Return a function without arguments that runs one CompiledGraph.recompute.
 
-    ``next_change`` is a 0-arg getter returning the next ``changed`` dict (e.g. the
-    cyclic getter), so the interpreted path cycles the same change sequence as the
-    kernel path."""
+    The store is a Values instance that CompiledGraph.execute filled from ``seed_ext``. ``next_change`` is a function
+    without arguments that returns the next ``changed`` dict, such as the cyclic function of run_recompute_mode, so
+    that CompiledGraph receives the same sequence of changes as the kernel.
+    """
     req = required if isinstance(required, list) else [required]
     cg = graph.compile(req)
     values = Values()
@@ -571,9 +591,27 @@ def _interp_recompute_driver(graph, required, seed_ext, next_change):
 
 
 def run_recompute_mode(size, repeats, chain_n, fan_width, fan_depth):
+    """Print the steady-state time of recompute in three regimes, against a full call and CompiledGraph.recompute.
+
+    A full call fills the kernel's store once. Each regime then runs recompute calls that change a small part of the
+    input. It compares the time of one recompute with a call of the kernel, which computes the whole graph again, and
+    with CompiledGraph.recompute:
+
+    - deep chain: a chain of ``chain_n`` nodes with one input. A change of the input affects the whole chain, so
+      recompute cannot be faster than a full call there. The regime therefore overrides a node late in the chain, whose
+      dependents are about the last 50 nodes. recompute runs only those, while a full call computes every node, so the
+      gain grows with the length of the chain.
+    - diamond: a and b read x, and u reads a and b. A change of x affects the whole small graph, so the regime measures
+      the cost of the values that the plan writes back into the store at a join, not a gain of fusion.
+    - fan-out: ``fan_width`` independent columns of ``fan_depth`` nodes. Each recompute changes the input of the next
+      column, in turn, so the kernel uses its cache of plans for every column. recompute runs one column, while a full
+      call computes all of them. If there are more columns than the cache's cap of 64 plans, every recompute builds its
+      plan again.
+    """
     a, _ = make_externals(size)
 
     def cyclic(values):
+        """Return a function that returns the elements of ``values`` in turn, starting again after the last."""
         i = [0]
 
         def nxt():
@@ -584,7 +622,7 @@ def run_recompute_mode(size, repeats, chain_n, fan_width, fan_depth):
 
     rows = []
 
-    # --- deep chain: late interior override -> short suffix cone ------------------
+    # --- deep chain: an override of a late node, whose dependents form a short suffix ---
     suffix = 50
     g, req, late = build_recompute_chain(chain_n, suffix)
     ext = {"ext": {"a": a}}
@@ -596,13 +634,13 @@ def run_recompute_mode(size, repeats, chain_n, fan_width, fan_depth):
     print(f"  ready in {time.perf_counter() - t0:.1f}s", flush=True)
     overrides = [a * (0.9 + 0.01 * t) for t in range(8)]
     nxt = cyclic([{"vars": {late: o}} for o in overrides])
-    ck.recompute(nxt())                                  # warm: cone compile
+    # The first recompute fills the store and compiles the plan, and the second reuses the plan.
+    ck.recompute(nxt())
     ck.recompute(nxt())
     steady = best_median(lambda: ck.recompute(nxt()), repeats)[0]
-    # Honest full-re-run baseline: the bare kernel recomputing the whole graph from
-    # the seed external -- exactly the work recompute's suffix cone avoids. (A
-    # from-scratch kernel that took the overridden interior as an external would be a
-    # different, smaller graph, so it is not the apples-to-apples baseline.)
+    # The baseline is a call of the kernel, which computes the whole chain from the external value: the work that
+    # recompute avoids by running only the suffix. A kernel that took the overridden node as an external value would
+    # compute a smaller graph, so it would not be a fair baseline.
     full = best_median(lambda: ck.kernel(a), repeats)[0]
     interp = best_median(
         _interp_recompute_driver(g, req, ext, cyclic(
@@ -638,10 +676,10 @@ def run_recompute_mode(size, repeats, chain_n, fan_width, fan_depth):
     col_changes = [{src: {name: a * (1.0 + 0.01 * k)}}
                    for k, (src, name) in enumerate(col_inputs)]
     nxt = cyclic(col_changes)
-    # Warm a full cycle so every column's cone plan is compiled and cached before
-    # timing. When fan_width <= cap this is a clean steady state (all hits); when
-    # fan_width > cap the LRU evicts and the timed loop pays re-fusion -- the
-    # cache-thrash degradation case, visible as a slow steady-state number.
+    # One recompute per column compiles and caches every column's plan before the timed calls. If fan_width is at most
+    # the cap of 64 plans, every timed recompute reuses a plan. If fan_width exceeds the cap, the kernel discards the
+    # plan used least recently. Every timed recompute then builds its plan again, which makes the steady-state time
+    # larger.
     for _ in range(fan_width):
         ck.recompute(nxt())
     steady = best_median(lambda: ck.recompute(nxt()), repeats)[0]
@@ -664,6 +702,7 @@ def run_recompute_mode(size, repeats, chain_n, fan_width, fan_depth):
 
 
 def main():
+    """Parse the command line and run the modes that it selects, as the module's docstring describes."""
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--nodes", type=int, default=None,
                    help="chain length (default 200 for the perf modes, 600 for "
@@ -692,12 +731,12 @@ def main():
                         "to exercise LRU thrash)")
     p.add_argument("--fan-depth", type=int, default=12,
                    help="fan-out regime: per-column chain depth (default 12)")
-    p.add_argument("--_worker", help=argparse.SUPPRESS)  # internal: one compile measurement
+    p.add_argument("--_worker", help=argparse.SUPPRESS)  # The compile report runs a child with it, for one measurement.
     args = p.parse_args()
 
-    # Graph.compile's topological sort is a recursive DFS; a depth-N chain needs
-    # headroom over the default ~1000 limit. Set here (not at import) so merely
-    # importing this module never perturbs the process-wide recursion limit.
+    # Graph.compile orders the variables with a recursive depth-first walk, so a chain of N nodes needs a recursion
+    # limit above N, and Python's default is 1000. main sets the limit, so that an import of the module leaves it
+    # unchanged.
     sys.setrecursionlimit(20000)
 
     if args._worker:

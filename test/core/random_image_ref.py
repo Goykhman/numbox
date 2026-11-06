@@ -1,3 +1,4 @@
+"""The drawing that ``make_image`` returns for ``random_graph(50)`` after ``numpy.random.seed(137)``."""
 random_image_ref = """
 ntqlobjw--zxztfuixq--hxgpfxgmmv--gr----------hqvbjm---frlstcjerc
           |          |           |           |        |

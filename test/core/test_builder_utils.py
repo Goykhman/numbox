@@ -1,3 +1,9 @@
+"""Tests of ``infer_sources_dependencies``, which maps each node of a graph to the nodes that depend on it.
+
+A node's dependents are the nodes that have it as a source, directly or through other nodes. The tests pass the
+``Work`` nodes that ``make_graph`` returns, or a tuple of specs. They cover a chain of derived nodes, an end node that
+is a source of several nodes, and a graph built in a local registry.
+"""
 from numbox.core.work.builder import End, Derived, make_graph
 from numbox.core.work.builder_utils import infer_sources_dependencies
 from numbox.core.work.print_tree import make_image
@@ -5,6 +11,7 @@ from test.auxiliary_utils import collect_and_run_tests
 
 
 def test_1():
+    """In a graph of one derived node, the end node's only dependent is that node."""
     n10 = End(name="n10", init_value=0.0)
     f10 = Derived(name="f10", init_value=0.0, sources=(n10,), derive=lambda x: x)
     g1 = make_graph(f10)
@@ -13,6 +20,10 @@ def test_1():
 
 
 def test_2():
+    """Each node of a chain of four derived nodes has all the nodes after it as dependents, and the last node has none.
+
+    The two end nodes have all four derived nodes as dependents.
+    """
     n1 = End(name="n1", init_value=0.0)
     n2 = End(name="n2", init_value=0.0)
     f1 = Derived(name="f1", init_value=0.0, sources=(n1, n2), derive=lambda x, y: x + y)
@@ -30,6 +41,7 @@ def test_2():
 
 
 def test_3():
+    """For a tuple of specs, ``infer_sources_dependencies`` returns the dictionary that its docstring shows."""
     m5 = End(name="m5", init_value=0.0)
     m3 = Derived(name="m3", init_value=0.0, sources=(m5,), derive=lambda x: x)
     m2 = Derived(name="m2", init_value=0.0, sources=(m3,), derive=lambda x: x)
@@ -46,6 +58,10 @@ def test_3():
 
 
 def test_4():
+    """An end node that is a source of several nodes has each of them as a dependent.
+
+    The graph is built in a local registry, and ``make_image`` draws such an end node once for each of those nodes.
+    """
     reg = {}
     a = End(name="a", init_value=0.0, registry=reg)
     b = End(name="b", init_value=0.0, registry=reg)

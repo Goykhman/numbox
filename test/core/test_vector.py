@@ -1,3 +1,10 @@
+"""Tests of the growable vector of ``numbox.core.vector.vector``.
+
+The tests cover construction, ``len`` and indexing, ``vector_push`` and ``vector_extend`` with and without growth, and
+the cases of a full buffer and of empty vectors. They check that ``make_vector`` returns the same factory for an
+element type, and that a capacity of 0 and a call of ``Vector`` in jitted code are refused. One test checks that a
+second process can use the accessors that the first process cached.
+"""
 import numpy
 import os
 import pytest
@@ -21,12 +28,17 @@ def _construction_and_len_probe():
 
 
 def test_construction_and_len():
+    """A cached jitted function creates a vector of capacity 8, whose length is 0 and whose buffer holds 8 elements."""
     size, cap = _construction_and_len_probe()
     assert size == 0
     assert cap == 8
 
 
 def test_getitem_setitem():
+    """``v[i]`` reads the buffer, and ``v[i] = x`` writes it.
+
+    ``len(v)`` returns the size that the test sets, and the assignment does not change it.
+    """
     Float64Vec, _ = make_vector(nb_types.float64)
 
     @njit
@@ -45,6 +57,7 @@ def test_getitem_setitem():
 
 
 def test_factory_caching():
+    """``make_vector`` returns the same factory and type for the same element type, stored in ``_vector_cache``."""
     r1 = make_vector(nb_types.float64)
     r2 = make_vector(nb_types.float64)
     assert r1[0] is r2[0]
@@ -53,6 +66,7 @@ def test_factory_caching():
 
 
 def test_vector_push():
+    """Three pushes into a vector of capacity 4 store the elements in order and leave the capacity at 4."""
     Float64Vec, _ = make_vector(nb_types.float64)
 
     @njit
@@ -70,6 +84,7 @@ def test_vector_push():
 
 
 def test_vector_push_growth():
+    """Five pushes into a vector of capacity 2 double its capacity twice, to 8, and keep the elements in order."""
     Float64Vec, _ = make_vector(nb_types.float64)
 
     @njit
@@ -86,6 +101,7 @@ def test_vector_push_growth():
 
 
 def test_vector_extend():
+    """Extending a vector of two elements by three elements doubles its capacity from 4 to 8."""
     Float64Vec, _ = make_vector(nb_types.float64)
 
     @njit
@@ -107,6 +123,7 @@ def test_vector_extend():
 
 
 def test_vector_extend_no_growth():
+    """Extending a vector by elements that fit keeps its capacity of 8."""
     Float64Vec, _ = make_vector(nb_types.float64)
 
     @njit
@@ -126,6 +143,10 @@ def test_vector_extend_no_growth():
 
 
 def test_vector_push_exact_capacity():
+    """Four pushes into a vector of capacity 4 fill the buffer without growing it.
+
+    ``vector_push`` grows the buffer only when the buffer is full before the push.
+    """
     Float64Vec, _ = make_vector(nb_types.float64)
 
     @njit
@@ -144,6 +165,7 @@ def test_vector_push_exact_capacity():
 
 
 def test_vector_extend_empty_src():
+    """Extending a vector by an empty vector leaves its elements and its capacity unchanged."""
     Float64Vec, _ = make_vector(nb_types.float64)
 
     @njit
@@ -162,6 +184,7 @@ def test_vector_extend_empty_src():
 
 
 def test_vector_extend_empty_dst():
+    """Extending an empty vector copies the elements of the source and keeps the capacity when they fit."""
     Float64Vec, _ = make_vector(nb_types.float64)
 
     @njit
@@ -181,6 +204,7 @@ def test_vector_extend_empty_dst():
 
 
 def test_vector_extend_both_empty():
+    """Extending an empty vector by an empty vector leaves the length at 0 and the capacity at 4."""
     Float64Vec, _ = make_vector(nb_types.float64)
 
     @njit
@@ -196,6 +220,7 @@ def test_vector_extend_both_empty():
 
 
 def test_vector_extend_multiple_doublings():
+    """One ``vector_extend`` doubles the capacity three times, from 2 to 16, to fit eleven elements."""
     Float64Vec, _ = make_vector(nb_types.float64)
 
     @njit
@@ -217,6 +242,7 @@ def test_vector_extend_multiple_doublings():
 
 
 def test_vector_push_special_floats():
+    """NaN and the two infinities are stored and read back unchanged."""
     Float64Vec, _ = make_vector(nb_types.float64)
 
     @njit
@@ -235,6 +261,7 @@ def test_vector_push_special_floats():
 
 
 def test_multi_dtype_int64():
+    """A vector of int64 elements grows and stores integers in the same way as a vector of float64 elements."""
     Int64Vec, _ = make_vector(nb_types.int64)
 
     @njit
@@ -252,6 +279,7 @@ def test_multi_dtype_int64():
 
 
 def test_zero_capacity_rejected():
+    """A capacity of 0 fails the assertion in ``create``, because a buffer of capacity 0 cannot grow by doubling."""
     Float64Vec, _ = make_vector(nb_types.float64)
 
     @njit
@@ -263,10 +291,12 @@ def test_zero_capacity_rejected():
 
 
 def test_cache_survives_across_processes(tmp_path):
-    # numbox's make_structref emits @njit(cache=True) proxy accessors. If the
-    # StructRef type class for a vector is created per-process (e.g. via
-    # type(...) inside a function body), run 2 loads cached code that expects
-    # the run-1 class object and fails with "No conversion from X to X".
+    """A second process with the same cache directory creates a vector and reads its size, as the first process did.
+
+    The accessors of ``Vector`` compile with numbox's jit options, which enable caching, so the second process loads
+    the accessor that the first process compiled. ``VectorTypeClass`` is defined once, at module level, so the vector
+    type of the second process matches the type in the cache index. The test checks that both processes exit normally.
+    """
     probe = textwrap.dedent("""
         from numba import types as nb_types
         from numbox.core.vector.vector import make_vector
@@ -288,8 +318,7 @@ def test_cache_survives_across_processes(tmp_path):
 
 
 def test_vector_ctor_raises_numbaerror_in_njit():
-    """Vector(...) from nopython context should raise NumbaError with the
-    make_vector redirect, not a generic typing failure."""
+    """Calling ``Vector`` in jitted code fails to compile with an error that names the factory ``make_vector``."""
     def caller():
         return Vector(5)
 

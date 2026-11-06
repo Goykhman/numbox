@@ -1,3 +1,12 @@
+"""Tests of the libm bindings in numbox.core.bindings.libm, called from Python and from jitted code.
+
+Each test calls a binding directly and from an uncached ``@njit`` function, and checks that the two results agree. It
+compares them with Python's ``math`` module where ``math`` has the function, and with known values where it does not.
+The cases are typical arguments, NaN and the infinities, the sign of a zero result, and the halfway cases of the
+rounding functions. Further cases are poles, such as ``log(0.0)``, where C returns an infinity, and arguments outside
+a function's domain, where C returns NaN; Python's ``math`` raises ``ValueError`` for both. ``test_abi.py`` tests how
+the call helper that the bindings use passes structs.
+"""
 import math
 import numpy as np
 from numba import njit
@@ -26,6 +35,10 @@ NAN = float("nan")
 
 
 def assert_close(actual, expected):
+    """Assert that actual is NaN if expected is NaN, equals expected if it is infinite, and is close to it otherwise.
+
+    The last case uses ``np.isclose`` with its default tolerances.
+    """
     if np.isnan(expected):
         assert np.isnan(actual), f"expected NaN, got {actual}"
     elif np.isinf(expected):
@@ -1079,7 +1092,7 @@ class TestRound:
         def _jit(x):
             return round(x)
 
-        # C round: ties away from zero
+        # C's round rounds a halfway case away from zero: 2.5 gives 3.0, and -2.5 gives -3.0.
         cases = [(2.3, 2.0), (2.5, 3.0),
                  (-2.5, -3.0), (0.0, 0.0)]
         for x, expected in cases:
@@ -1130,7 +1143,7 @@ class TestRint:
         def _jit(x):
             return rint(x)
 
-        # ties to even
+        # In the default rounding mode, a halfway case goes to the even value: 2.5 gives 2.0, and 3.5 gives 4.0.
         for x, expected in [(2.5, 2.0), (3.5, 4.0)]:
             p, j = rint(x), _jit(x)
             assert_close(p, j)
@@ -1179,7 +1192,7 @@ class TestNearbyint:
         def _jit(x):
             return nearbyint(x)
 
-        # ties to even
+        # In the default rounding mode, a halfway case goes to the even value: 2.5 gives 2.0, and 3.5 gives 4.0.
         for x, expected in [(2.5, 2.0), (3.5, 4.0)]:
             p, j = nearbyint(x), _jit(x)
             assert_close(p, j)
@@ -1861,7 +1874,7 @@ class TestCopysign:
 
         p = copysign(0.0, -1.0)
         j = _jit(0.0, -1.0)
-        assert math.copysign(1.0, p) == -1.0  # -0.0
+        assert math.copysign(1.0, p) == -1.0  # p is -0.0, so its sign is negative.
         assert math.copysign(1.0, j) == -1.0
 
     @staticmethod

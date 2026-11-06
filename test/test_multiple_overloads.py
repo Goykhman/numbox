@@ -1,9 +1,9 @@
-""" Demonstrates "compile-time" (in this case, it actually means 'pre-compile' time,
-i.e., Python-level orchestration time before numba actually starts its compilation)
-template instantiation of the `EntityTypeClass` for different 'EntityType's
-determined by different types of the Entity's attribute `x1`. Different `calculate`
-methods associated with the same `EntityTypeClass` but overloaded for different Entity
-types are then created.
+"""Tests of template instantiation for the structref ``Entity`` of ``test/multiple_overloads.py``.
+
+When numba types a call to ``Entity``, the ``@overload`` of ``Entity`` runs in Python and creates an ``EntityTypeClass``
+instance for the type of the attribute ``x1``. Each type of ``x1`` therefore gives a different entity type, before numba
+compiles any code for it. The ``calculate`` method is overloaded on ``EntityTypeClass``, so numba compiles one
+``calculate`` for each entity type.
 """
 
 from numpy import isclose
@@ -20,9 +20,13 @@ def aux(e1_, e2_, e3_, e4_):
 
 
 def test_1():
-    """ 4 overloads for `make_entity`, `_calculate_` and `Entity.calculate` are created and cached """
+    """``calculate`` returns 2.17 for entities whose ``x1`` is a ``float64``, an ``int16``, an ``int64`` and a string.
+
+    numba compiles four overloads each of ``make_entity``, ``Entity.calculate`` and ``_calculate_``, one for each entity
+    type, and caches them when numbox's jit options enable caching.
+    """
     e1 = Entity(3.141)
-    e2 = Entity(int16(137))  # default is int64
+    e2 = Entity(int16(137))  # A plain int is typed as int64, so this int16 value yields a distinct entity type.
     e3 = Entity(2012)
     e4_x1 = "a string"
     e4 = Entity(e4_x1)

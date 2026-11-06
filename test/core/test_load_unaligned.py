@@ -1,3 +1,10 @@
+"""Tests for ``load_unaligned`` and ``store_unaligned`` in ``numbox.utils.lowlevel``.
+
+The tests read an ``int64`` at a misaligned address, ``int32`` values at aligned addresses and a ``float64`` through
+``load_unaligned``. Two tests check in the IR that ``load_unaligned`` and ``store_unaligned`` emit an alignment of 1,
+while ``load_at`` and ``store_at`` emit their type's alignment. A misaligned access through ``load_at`` or ``store_at``
+also reads or writes the correct value on x86-64, so only the IR distinguishes the two pairs of functions.
+"""
 import numpy as np
 from numba import njit
 from numba.core.types import int32, int64, float64
@@ -5,7 +12,7 @@ from numbox.utils.lowlevel import load_unaligned, store_unaligned, load_at, stor
 
 
 def test_load_unaligned_reads_misaligned_int64():
-    # int64 stored at byte offset 1 of a byte buffer (deliberately misaligned).
+    # The int64 starts at byte offset 1 of the buffer, so its address is misaligned.
     buf = np.zeros(16, dtype=np.uint8)
     buf[1:9] = np.frombuffer(np.int64(0x0123456789ABCDEF).tobytes(), dtype=np.uint8)
 
@@ -38,11 +45,9 @@ def test_load_unaligned_float64():
 
 
 def test_store_unaligned_emits_align1_not_natural():
-    # A runtime roundtrip can't distinguish store_unaligned from store_at on x86:
-    # the hardware tolerates a misaligned natural-aligned access, so both pass.
-    # The contract lives in the emitted IR — store_unaligned MUST be align=1.
-    # store_at on a misaligned address is UB; a regression to it would flip the
-    # store to natural alignment, which this asserts against.
+    # On x86-64, store_at at a misaligned address writes the same bytes as store_unaligned, so the stored value does
+    # not distinguish the two. The test therefore reads the IR: store_unaligned must emit its store with align 1, and
+    # store_at, whose store at a misaligned address is undefined behavior, emits the natural alignment.
     @njit
     def w_unaligned(p):
         store_unaligned(p + 1, int64(0x0102030405060708))
@@ -54,7 +59,7 @@ def test_store_unaligned_emits_align1_not_natural():
     buf = np.zeros(16, dtype=np.uint8)
     w_unaligned(array_data_p(buf))
     assert int(np.frombuffer(buf[1:9].tobytes(), dtype=np.int64)[0]) == 0x0102030405060708
-    w_at(array_data_p(buf))  # compiled only for the IR contrast below
+    w_at(array_data_p(buf))  # this call compiles w_at, whose IR the assertions below read
 
     needle = str(0x0102030405060708)  # LLVM prints the i64 constant in decimal
 
@@ -67,7 +72,8 @@ def test_store_unaligned_emits_align1_not_natural():
 
 
 def test_load_unaligned_emits_align1_not_natural():
-    # Same contract on the load side: load_unaligned MUST emit an align=1 load.
+    # The loads follow the rule of the stores above: load_unaligned must emit its load with align 1, and load_at must
+    # emit its load without it.
     buf = np.zeros(16, dtype=np.uint8)
     buf[1:9] = np.frombuffer(np.int64(0x0102030405060708).tobytes(), dtype=np.uint8)
 
@@ -80,7 +86,8 @@ def test_load_unaligned_emits_align1_not_natural():
         return load_at(p + 1, int64)
 
     assert r_unaligned(array_data_p(buf)) == 0x0102030405060708
-    assert r_at(array_data_p(buf)) == 0x0102030405060708  # UB but tolerated on x86
+    # A call of load_at at a misaligned address is undefined behavior, and x86-64 reads the value correctly.
+    assert r_at(array_data_p(buf)) == 0x0102030405060708
 
     def i64_loads(f):
         ir = "\n".join(f.inspect_llvm().values())

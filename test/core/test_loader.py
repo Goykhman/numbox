@@ -1,3 +1,9 @@
+"""Tests of ``Work.load``, which sets the data of named nodes of a graph from a typed dictionary of ``Any`` values.
+
+The tests check the value that ``load`` returns, the new data, and the ``derived`` flags. ``load`` clears the flag of
+each node that it loads and of each node between that node and the node on which it is called, and it keeps the flag
+of every other node. ``test_loader_utils`` covers loading the fields of a structured array.
+"""
 from numba.core.types import unicode_type
 from numba.typed.typeddict import Dict
 from numpy import isclose
@@ -8,6 +14,7 @@ from test.auxiliary_utils import collect_and_run_tests
 
 
 def test_loader_1():
+    """``load`` sets the data of a node from an ``Any`` value and returns True."""
     w1 = make_work_helper("w1", 0.0)
     assert w1.data == 0
     d1 = Dict.empty(key_type=unicode_type, value_type=AnyType)
@@ -18,6 +25,10 @@ def test_loader_1():
 
 
 def test_loader_2():
+    """Loading a source of a calculated node clears the node's ``derived`` flag but leaves its value unchanged.
+
+    The next call of ``calculate`` computes the node from the new value of the source.
+    """
     w1 = make_work_helper("w1", 1.41)
     w2 = make_work_helper("w2", 1.72)
     assert isclose(w1.data, 1.41)
@@ -43,6 +54,11 @@ def test_loader_2():
 
 
 def test_loader_3():
+    """Loading two of three sources, one of which holds a string, clears their flags and the flag of the node that uses
+    them.
+
+    The source that is not loaded keeps its flag, and the next call of ``calculate`` uses the new values.
+    """
     w0 = make_work_helper("w0", 1.72)
     w1 = make_work_helper("w1", 1.41)
     w2 = make_work_helper("w2", "double")

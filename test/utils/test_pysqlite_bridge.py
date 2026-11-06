@@ -1,3 +1,12 @@
+"""Tests for ``numbox.utils.pysqlite_bridge``, which reads the ``sqlite3 *`` handle of a Python ``sqlite3.Connection``.
+
+The tests check that numbox's bindings and Python's ``sqlite3`` module report the same SQLite version. They check
+that ``extract_connection_ptr`` returns a handle that numbox's bindings can use, for an in-memory and for a file
+database. The function must raise ``TypeError`` for an object that is not a connection and ``RuntimeError`` when the
+two versions differ. One test checks the head fields that ``_pyobject_head_fields`` returns when
+``sys.gettotalrefcount`` exists. When the versions differ, the tests that pass a handle to SQLite skip, and the version
+test skips on macOS and fails elsewhere.
+"""
 import ctypes
 import sqlite3
 from platform import system
@@ -9,13 +18,11 @@ from numbox.core.bindings.sqlite.conn import sqlite3_changes, sqlite3_libversion
 
 
 def test_numbox_and_python_use_same_libsqlite3():
-    """Library-coordination check.
+    """numbox's bindings and Python's ``sqlite3`` module report the same SQLite version.
 
-    If numbox's bindings and Python's sqlite3 resolve to different libsqlite3
-    instances, any pointer from :func:`extract_connection_ptr` is unsafe to
-    pass to numbox's bindings.  On macOS this is expected unless the user
-    sets ``DYLD_INSERT_LIBRARIES`` — see the
-    :mod:`numbox.utils.pysqlite_bridge` module docstring.
+    If they differ, a handle from ``extract_connection_ptr`` is unsafe to pass to numbox's bindings. The test skips on
+    macOS, where the versions can differ unless ``DYLD_INSERT_LIBRARIES`` loads Python's SQLite first, as the module
+    docstring of ``numbox.utils.pysqlite_bridge`` describes. On other platforms, a difference fails the test.
     """
     numbox_version = ctypes.c_char_p(sqlite3_libversion()).value.decode()
     if numbox_version != sqlite3.sqlite_version:
@@ -32,7 +39,7 @@ def test_numbox_and_python_use_same_libsqlite3():
 
 
 def test_libraries_coordinated_reflects_version_match(monkeypatch):
-    """:func:`libraries_coordinated` is a plain version-equality predicate."""
+    """``libraries_coordinated`` returns True when the two versions are equal and False when they differ."""
     numbox_version = ctypes.c_char_p(sqlite3_libversion()).value.decode()
     monkeypatch.setattr(sqlite3, "sqlite_version", numbox_version)
     assert libraries_coordinated() is True
@@ -71,13 +78,11 @@ def test_extract_connection_ptr_rejects_non_connection():
 
 
 def test_extract_connection_ptr_raises_on_uncoordinated_libraries(monkeypatch):
-    """Guard: when numbox's bindings and Python's sqlite3 report different
-    libsqlite3 versions, :func:`extract_connection_ptr` raises a helpful
-    ``RuntimeError`` (pointing at the ``DYLD_INSERT_LIBRARIES`` workaround)
-    instead of risking a segfault on its internal validation call.
+    """``extract_connection_ptr`` raises ``RuntimeError`` naming ``DYLD_INSERT_LIBRARIES`` when the versions differ.
 
-    Forces a mismatch via monkeypatch so the guard is exercised on every
-    platform, not just an uncoordinated macOS host.
+    The check runs before the function calls ``sqlite3_errmsg`` through numbox's bindings, which could crash the
+    process with a handle from another copy of SQLite. The test sets Python's version to another value, so the check
+    runs on every platform.
     """
     monkeypatch.setattr(sqlite3, "sqlite_version", "0.0.0-mismatch")
     conn = sqlite3.connect(":memory:")
@@ -89,12 +94,9 @@ def test_extract_connection_ptr_raises_on_uncoordinated_libraries(monkeypatch):
 
 
 def test_extracted_pointer_usable_with_numbox_bindings(tmp_path):
-    """Cross-validation: extract pointer from Python's sqlite3.Connection,
-    use it with numbox's @njit-callable bindings.
+    """Called with the extracted handle, numbox's ``sqlite3_changes`` counts the 3 rows of the connection's last INSERT.
 
-    Skipped when libraries are uncoordinated — passing the pointer to a
-    different sqlite instance would segfault (see the
-    :mod:`numbox.utils.pysqlite_bridge` docstring for the macOS workaround).
+    The test skips when the versions differ, because a handle passed to another copy of SQLite can crash the process.
     """
     if not libraries_coordinated():
         pytest.skip(
@@ -114,10 +116,9 @@ def test_extracted_pointer_usable_with_numbox_bindings(tmp_path):
 
 
 def test_pyobject_head_fields_handles_debug_build(monkeypatch):
-    # On a Py_DEBUG build sys.gettotalrefcount exists and CPython prepends the
-    # _ob_next / _ob_prev trace pointers to PyObject_HEAD; _pyobject_head_fields
-    # must include them so the db-field offset stays correct. A release build
-    # lacks the attribute, so simulate a debug build by adding it.
+    # A release build has no sys.gettotalrefcount, so the test adds the attribute. It checks that _pyobject_head_fields
+    # then puts _ob_next and _ob_prev first. That is the function's rule, and the comment in the function says on which
+    # builds the rule matches CPython's layout.
     import sys
     from numbox.utils.pysqlite_bridge import _pyobject_head_fields
 

@@ -1,3 +1,14 @@
+"""Tests for ``numbox.utils.derive_wap``, the function values whose exceptions propagate to jitted callers.
+
+Many tests build ``Work`` nodes whose derive raises. They check that ``calculate`` propagates the exception with its
+type and message, and that the failing node keeps its ``data`` with ``derived`` unset. The derives are ``cres`` values,
+``CompileResultWAP`` values built with numba directly, ``@njit`` functions and the ``.as_func`` of a ``@proxy``
+function, and the nodes are built from Python and from jitted code. Other tests check ``rewrap_derive``, the relation
+between ``DeriveFunctionType`` and numba's plain ``FunctionType``, the references that the unboxing releases, and a
+case in which the exception is lost. One test runs two subprocesses to check a cached caller that reads a ``cres``
+value as a module-level constant. ``test/core/test_proxy.py`` tests the ``.as_func`` of a ``@proxy`` function in more
+detail.
+"""
 import gc
 import os
 import subprocess
@@ -26,7 +37,10 @@ def _raise_when_positive(a):
 
 
 def test_cres_mints_a_derive_wap():
-    """The propagating convention is only reachable through numbox's own type."""
+    """``cres`` returns a ``DeriveWAP`` with a nonzero ``jit_address``, and numba types it as ``DeriveFunctionType``.
+
+    Jitted code calls a value of that type through its numba entry point, so an exception raised in it propagates.
+    """
     @cres(float64(float64))
     def compiled(x):
         return x + 1.0
@@ -38,10 +52,9 @@ def test_cres_mints_a_derive_wap():
 
 
 def test_raising_derive_propagates_and_leaves_the_node_recalculable():
-    """The whole point: the failure is visible, and it does not poison the node.
+    """A raising derive makes ``calculate`` raise its exception, and the node keeps its ``data`` with ``derived`` unset.
 
-    Previously `calculate` returned normally, `data` was zero-filled and `derived`
-    was set, so the wrong value was cached permanently.
+    The node therefore holds no wrong value, and a later ``calculate`` runs the derive again.
     """
     source = make_work_helper("source", 5.0)
     node = make_work_helper("node", 99.0, sources=(source,), derive_py=_raise_when_positive)
@@ -69,8 +82,10 @@ def test_the_original_exception_type_and_message_survive():
 
 
 def test_the_node_recalculates_once_the_cause_is_addressed():
-    """`derived` staying unset is what makes the retry possible: a cached zero would
-    have made the second call a no-op."""
+    """A later ``calculate`` of a node whose derive raised runs the derive again and succeeds with a new source value.
+
+    The failed call leaves ``derived`` unset, so the later call does not return at once.
+    """
     def raise_on_positive(a):
         if a[0] > 0.0:
             raise ValueError("derive boom")
@@ -83,6 +98,7 @@ def test_the_node_recalculates_once_the_cause_is_addressed():
         node.calculate()
     assert node.derived == 0
 
+    # The data property returns the source's array without a copy, so this assignment changes the source's value.
     source.data[0] = -3.0
     node.calculate()
     assert node.data == -2.0
@@ -90,8 +106,10 @@ def test_the_node_recalculates_once_the_cause_is_addressed():
 
 
 def test_unicode_payload_is_readable_after_a_failure():
-    """A zero-filled `unicode_type` payload has a NULL data pointer, so reading it
-    back from Python used to segfault the interpreter rather than raise."""
+    """After a failed ``calculate``, a node with string data still holds its initial string, which Python can read.
+
+    A zero-filled string holds a null pointer, and reading one from Python ends the process with a segmentation fault.
+    """
     def raise_for_text(a):
         if a > 0.0:
             raise ValueError("no text")
@@ -107,8 +125,10 @@ def test_unicode_payload_is_readable_after_a_failure():
 
 
 def test_make_work_upgrades_a_foreign_compile_result_wap():
-    """A derive built directly against numba carries no callconv entry point, so it
-    has to be re-wrapped before it reaches jitted scope."""
+    """``make_work`` upgrades a ``CompileResultWAP`` built with numba directly, so its exception propagates.
+
+    numba's ``CompileResultWAP`` records only the C entry point, which discards an exception.
+    """
     jitted = njit(float64(float64))(_raise_when_positive)
     foreign = CompileResultWAP(jitted.get_compile_result(jitted.nopython_signatures[0]))
     assert not isinstance(foreign, DeriveWAP)
@@ -123,10 +143,11 @@ def test_make_work_upgrades_a_foreign_compile_result_wap():
 
 
 def test_the_upgraded_wrapper_outlives_the_call_that_made_it():
-    """`py_addr` records the derive's address without taking a reference, so an
-    upgrade minted fresh per call would be freed the moment the caller returned and
-    every `Work` built from it would point at released memory. The upgrade has to be
-    anchored to the object it upgrades."""
+    """The wrapper that ``rewrap_derive`` returns stays alive while the caller holds the original value.
+
+    A function value holds the wrapper's address in ``py_addr`` without a reference. ``rewrap_derive`` therefore stores
+    the wrapper on the original value, so that no ``Work`` built from the wrapper points to freed memory.
+    """
     jitted = njit(float64(float64))(_raise_when_positive)
     foreign = CompileResultWAP(jitted.get_compile_result(jitted.nopython_signatures[0]))
 
@@ -143,8 +164,11 @@ def test_upgrading_the_same_derive_twice_yields_the_same_wrapper():
 
 
 def test_a_foreign_derive_survives_a_round_trip_through_jitted_scope():
-    """Reading the derive back out dereferences `py_addr`, which is where a freed
-    wrapper shows up as a crash rather than as a wrong answer."""
+    """A jitted function returns the derive of a node built from a ``CompileResultWAP`` as a ``DeriveWAP``.
+
+    Boxing the derive reads the Python object at ``py_addr``, so the call would read freed memory if the wrapper that
+    ``make_work`` created had been freed.
+    """
     jitted = njit(float64(float64))(_raise_when_positive)
     foreign = CompileResultWAP(jitted.get_compile_result(jitted.nopython_signatures[0]))
 
@@ -170,8 +194,10 @@ def test_rewrap_derive_leaves_everything_else_alone():
 
 
 def test_array_payload_is_untouched_by_a_failure():
-    """An array payload silently became an empty array under the old behaviour,
-    which carried no signal at all."""
+    """After a failed ``calculate``, a node with array data keeps its array, with the same shape and values.
+
+    A zero-filled array is empty, so a node that stored one would fail the shape check.
+    """
     def raise_for_array(a):
         if a.shape[0] > 0:
             raise ValueError("no array")
@@ -189,10 +215,17 @@ def test_array_payload_is_untouched_by_a_failure():
 
 
 def test_a_parallel_derive_still_propagates():
-    """Compiling the derive itself with `parallel` or `nogil` does not change the
-    contract, including when the raise is inside its own `prange`."""
+    """A derive compiled with ``parallel=True`` that raises in its own ``prange`` loop propagates its exception.
+
+    numba runs that loop serially, as the comment below explains, so the test does not cover a loop that runs in
+    parallel.
+    """
     def raise_inside_prange(a):
         acc = 0.0
+        # The raise is a second exit from the prange loop, so numba runs the loop serially and warns with
+        # NumbaPerformanceWarning. No test covers a derive whose loop runs in parallel and calls a function that
+        # raises. Such a derive returns normally, and calculate stores the incomplete result and sets derived, as the
+        # work page describes under "Exceptions in parallel loops".
         for i in prange(4):
             if a > 0.0:
                 raise ValueError("parallel boom")
@@ -211,11 +244,12 @@ def test_a_parallel_derive_still_propagates():
 
 
 def test_calculate_inside_a_prange_body_keeps_the_node_intact():
-    """What escapes a parallel region is numba's business, and it varies by platform:
-    on Linux the failure arrives as numba's `SystemError` carrying the original as
-    `__cause__`, while on macOS nothing is raised at all. A derive cannot influence
-    either. The invariant that must hold everywhere is that the node is not poisoned,
-    so whatever the caller saw, `data` is intact and `derived` is unset."""
+    """A derive that raises while ``calculate`` runs in a parallel loop leaves ``data`` and ``derived`` unchanged.
+
+    What the call from Python raises depends on numba's threading layer and on the thread that ran the failing
+    iteration, as the work page describes. An exception that escapes must be the ``ValueError`` or have it as its
+    ``__cause__``, as numba's ``SystemError`` does. If nothing escapes, the test checks the node and then skips.
+    """
     source = make_work_helper("source", 5.0)
     node = make_work_helper("node", 99.0, sources=(source,), derive_py=_raise_when_positive)
 
@@ -262,19 +296,10 @@ def test_unicode_derive_still_works_when_it_succeeds():
 
 
 def test_a_plain_function_type_derive_propagates_through_the_runtime_branch():
-    """A derive field typed as a plain ``FunctionType`` must still propagate when
-    the value behind it carries an entry point.
+    """A derive of the plain ``FunctionType`` whose value holds a numba entry point propagates its exception.
 
-    ``rewrap_derive`` can only upgrade from Python scope, so a jitted caller that
-    builds its own ``Work`` fixes the field at whatever type it declared. numba's
-    unboxing populates ``jit_addr`` for an njit dispatcher passed as a
-    ``FunctionType``-typed argument, so the value can propagate even though the
-    numbox-owned type is nowhere in sight, which is why ``_call_derive`` tests the
-    slot at run time instead of selecting purely on the field type.
-
-    Deleting that runtime branch passes the rest of the suite: every other
-    ``_call_derive`` typing in it is a ``DeriveFunctionType``, so the branch is not
-    merely unasserted, it is never compiled.
+    The test covers the branch of ``_call_derive`` that tests ``jit_addr`` at run time, which numbox compiles only for a
+    derive of the plain ``FunctionType``.
     """
     @njit(float64(float64))
     def raising(a):
@@ -286,6 +311,8 @@ def test_a_plain_function_type_derive_propagates_through_the_runtime_branch():
     def succeeding(a):
         return a + 1.0
 
+    # The node is built in jitted code, so the type of its derive is the declared plain FunctionType. numba sets
+    # jit_addr when it unboxes an @njit function passed as that type.
     @njit(float64(FunctionType(float64(float64))))
     def build_and_calculate(f):
         source = make_work("source", 5.0)
@@ -293,8 +320,8 @@ def test_a_plain_function_type_derive_propagates_through_the_runtime_branch():
         node.calculate()
         return node.data
 
-    # Same compiled function for both, because the declared argument type is the
-    # plain FunctionType rather than either dispatcher.
+    # Both calls run one compiled build_and_calculate, because its signature declares the plain FunctionType rather
+    # than the type of either dispatcher.
     assert build_and_calculate(succeeding) == 6.0
 
     with pytest.raises(ValueError, match="plain boom"):
@@ -302,18 +329,10 @@ def test_a_plain_function_type_derive_propagates_through_the_runtime_branch():
 
 
 def test_the_derive_type_stays_distinct_from_the_plain_function_type():
-    """``DeriveFunctionType`` must never compare equal to the ``FunctionType`` of the
-    same signature, however tempting that looks.
+    """``DeriveFunctionType`` and the plain ``FunctionType`` of one signature are distinct types that compare unequal.
 
-    The two already hash alike, because numba hashes a type on its key, and they are kept
-    apart by ``Type.__eq__`` comparing classes. Making them compare equal to smooth over
-    mixed function-value containers would not work: numba interns types in a cache keyed
-    by a weak reference, and a weak reference's equality is the referent's, so two equal
-    types collapse onto whichever was interned first. Measured both ways, the outcome is
-    catastrophic and depends on import order. With the plain type interned first,
-    ``DeriveFunctionType(sig)`` hands back the plain type and every derive silently
-    reverts to discarding its exception; with the derive type first, ``FunctionType(sig)``
-    hands back the derive type and every plain function value fails to unbox.
+    numba interns types in a cache that would return one object for two equal types. The comment above
+    ``DeriveFunctionType`` in ``numbox/utils/derive_wap.py`` describes what fails for each order of creation.
     """
     sig = float64(float64)
     plain = FunctionType(sig)
@@ -329,11 +348,11 @@ def test_the_derive_type_stays_distinct_from_the_plain_function_type():
 
 
 def test_a_container_of_two_derives_still_unifies():
-    """Homogeneous containers of `cres` derives keep working.
+    """A jitted function takes a tuple of two ``cres`` values of one signature and calls both.
 
-    numba unifies the element types of a function-value container before any of numbox's
-    conversions apply, so the supported case is worth pinning separately from the mixed
-    one, which numba refuses (see the limits in the docs).
+    Below numba 0.68.0, numba refuses a tuple that mixes a ``DeriveWAP`` with another kind of function value of the same
+    number of arguments, and ``test/core/test_proxy.py`` checks that case. This test checks a tuple of one kind, which
+    numba accepts.
     """
     @cres(float64(float64))
     def first(x):
@@ -351,13 +370,10 @@ def test_a_container_of_two_derives_still_unifies():
 
 
 def test_a_cres_derive_is_accepted_where_a_plain_function_type_is_declared():
-    """``DeriveFunctionType`` has to remain substitutable for the plain
-    ``FunctionType`` of the same signature.
+    """A ``cres`` value passed from Python to a parameter declared as the plain ``FunctionType`` is accepted and called.
 
-    ``typeof`` on a cres derive now yields the numbox-owned type, so an explicitly
-    typed ``njit`` that names ``FunctionType`` would stop accepting it without the
-    conversion, which is a break in code that predates this change. Disabling
-    ``can_convert_to`` passes the whole suite while breaking exactly this call.
+    ``typeof`` returns ``DeriveFunctionType`` for the value, so the call relies on
+    ``DeriveFunctionType.can_convert_to``.
     """
     @cres(float64(float64))
     def derive(x):
@@ -373,11 +389,10 @@ def test_a_cres_derive_is_accepted_where_a_plain_function_type_is_declared():
 
 
 def test_a_cres_derive_casts_to_plain_function_type_inside_jitted_scope():
-    """The Python-boundary conversion above never reaches the ``lower_cast``
-    registration; a cast emitted in lowering does. A jitted caller holds the
-    derive as `DeriveFunctionType` and hands it to a callee declared with the
-    plain ``FunctionType``; deleting the registration fails exactly this call
-    with ``NumbaNotImplementedError`` while the rest of the suite stays green.
+    """A jitted function passes a ``cres`` value on to a function whose signature declares the plain ``FunctionType``.
+
+    The cast happens in jitted code and relies on the ``lower_cast`` registration in ``numbox.utils.derive_wap``, which
+    the conversion from Python in the test above does not use.
     """
     @cres(float64(float64))
     def derive(x):
@@ -395,24 +410,10 @@ def test_a_cres_derive_casts_to_plain_function_type_inside_jitted_scope():
 
 
 def test_the_unbox_helper_releases_both_temporaries():
-    """Unboxing must not leak a reference per call.
+    """Unboxing a ``DeriveWAP`` releases both new references that ``_lower_get_derive_jit_address`` takes.
 
-    ``_lower_get_derive_jit_address`` takes two new references, the module
-    attribute it calls and the unserialized ``Signature`` it passes, and unboxing
-    runs on every call for a derive passed as an argument, so a missing release
-    grows without bound. Both are checked separately, because dropping either
-    decref alone leaks one per call and the whole suite otherwise passes.
-
-    The module attribute is looked up at run time on each call, so replacing it
-    with a delegating spy both intercepts the ``Signature`` numba unserializes
-    and gives the attribute probe an object nothing else holds.
-
-    The two probes are not symmetric. Nothing but this unboxer touches the spy,
-    so its release is pinned exactly. The ``Signature`` is a single object numba
-    memoizes and hands to ``lower_get_wrapper_address`` as well, which numbox
-    calls for ``c_addr`` and which never releases it, so one reference per call
-    is a floor numba imposes and numbox cannot remove. Failing to release the
-    numbox-side reference would double that, which is what the ceiling catches.
+    The references are the module attribute that the unboxing calls and the ``Signature`` that it passes. numba unboxes
+    a derive on every call that passes it as an argument, so a missing release leaks one reference per call.
     """
     @cres(float64(float64))
     def derive(x):
@@ -422,8 +423,11 @@ def test_the_unbox_helper_releases_both_temporaries():
     def call_derive(f, x):
         return f(x)
 
-    call_derive(derive, 1.0)  # compile the unboxer before measuring
+    call_derive(derive, 1.0)  # compiles call_derive and its unboxing before the counts are taken
 
+    # The unboxing looks _get_derive_jit_address up on the module at every call, so the spy below replaces it for the
+    # counted calls. The spy records the Signature object that it receives. Only the unboxing takes references to the
+    # spy during those calls, so the spy's count measures the release of the module attribute.
     original = derive_wap_module._get_derive_jit_address
     captured, identical = [], []
 
@@ -437,7 +441,7 @@ def test_the_unbox_helper_releases_both_temporaries():
     calls = 200
     derive_wap_module._get_derive_jit_address = spy
     try:
-        call_derive(derive, 1.0)  # capture the signature object
+        call_derive(derive, 1.0)  # records the Signature object in captured
         signature_obj = captured[0]
         before_attr = sys.getrefcount(spy)
         before_sig = sys.getrefcount(signature_obj)
@@ -448,6 +452,10 @@ def test_the_unbox_helper_releases_both_temporaries():
     finally:
         derive_wap_module._get_derive_jit_address = original
 
+    # The unboxing passes the same memoized Signature object on every call, as the list identical records. numba's
+    # own lower_get_wrapper_address, which numbox calls for c_addr, takes a reference to that object and never releases
+    # it, so the object's count grows by one per call. A missing release in numbox would add a second reference per
+    # call and exceed the bound of one reference per call that the last assertion checks.
     assert identical and all(identical), (
         "numba handed a fresh Signature per call, so the refcount probe below "
         "measures nothing"
@@ -474,18 +482,12 @@ def _run_derive_probe(probe, env):
 
 
 def test_a_cached_caller_of_a_derive_caches_and_still_propagates(tmp_path):
-    """Lowering ``jit_addr`` as a symbol rather than a baked address is what lets
-    a caller of a constant-reached derive be cached at all, and the exception
-    contract has to survive the cache hit.
+    """A ``cache=True`` caller that reads a ``cres`` value as a constant is cached, and the exception still propagates.
 
-    A baked address is a dynamic global, so numba refuses to cache the caller and
-    writes nothing. Declaring the entry point symbolically leaves ``c_addr`` and
-    ``py_addr`` dead, they are eliminated before numba scans the final module, and
-    the caller caches. Reverting the constant lowering to a baked address
-    otherwise passes the entire suite.
-
-    Both processes are asserted, because a caller that merely recompiled every
-    time would still propagate and would still report no dynamic globals.
+    The value is a module-level global, which numba reads as a constant. numbox lowers the constant with its numba entry
+    point declared as a symbol, so the caller holds no address that changes between processes. The comments in
+    ``lower_constant_derive_function_type`` explain why numba then caches the caller. Two subprocesses share one cache
+    directory: the first compiles the caller and writes the cache, and the second loads the caller from it.
     """
     probe = tmp_path / "derive_cache_probe.py"
     probe.write_text(textwrap.dedent('''
@@ -516,18 +518,22 @@ def test_a_cached_caller_of_a_derive_caches_and_still_propagates(tmp_path):
         print(f"{value} {dynamic} {hits} {propagated}")
     '''), encoding="utf-8")
 
+    # The cache directory starts empty. PYTHONPATH holds the sys.path of this process, so the subprocesses import the
+    # same numbox.
     env = dict(os.environ)
     env["NUMBA_CACHE_DIR"] = str(tmp_path / "nbcache")
     env["PYTHONPATH"] = os.pathsep.join(sys.path)
 
-    first = _run_derive_probe(probe, env)      # cold: compiles and writes the cache
+    first = _run_derive_probe(probe, env)      # compiles uses_const and writes the cache
     assert first == "-1.0 False 0 True", (
         f"cold run: expected value -1.0, no dynamic globals, 0 cache hits and a "
         f"propagated exception, got {first!r}. A baked `jit_addr` would report "
         f"dynamic globals and numba would refuse to cache the caller."
     )
 
-    second = _run_derive_probe(probe, env)     # warm: must be served from the cache
+    # A caller that compiled again in every process would also propagate and report no dynamic globals, so the second
+    # process must report a cache hit.
+    second = _run_derive_probe(probe, env)     # loads uses_const from the cache
     assert second == "-1.0 False 1 True", (
         f"warm run: expected a cache hit that still propagates, got {second!r}"
     )
@@ -537,11 +543,12 @@ def test_a_cached_caller_of_a_derive_caches_and_still_propagates(tmp_path):
 
 
 def test_a_foreign_wrapper_reached_from_jitted_scope_still_discards():
-    """The residual case the `Work.derive` docstring names, and the only thing that
-    reaches the null arm of `_call_derive`'s runtime dispatch. A `CompileResultWAP`
-    built directly against numba carries no callconv entry point, and one that first
-    becomes visible inside jitted scope cannot be upgraded on the way in, so the
-    exception is discarded. Deleting that arm leaves the rest of the suite green."""
+    """A ``CompileResultWAP`` built with numba directly loses the derive's exception when jitted code builds the node.
+
+    ``calculate`` returns normally, stores a zero-filled value and sets ``derived``, as in each of the three cases that
+    the ``Work.calculate`` docstring lists. The test covers the branch of ``_call_derive`` that calls a derive through
+    its C entry point.
+    """
     jitted = njit(float64(float64))(_raise_when_positive)
     foreign = CompileResultWAP(jitted.get_compile_result(jitted.nopython_signatures[0]))
 
@@ -561,20 +568,11 @@ def test_a_foreign_wrapper_reached_from_jitted_scope_still_discards():
 
 
 def test_a_proxy_binding_reached_from_jitted_scope_propagates():
-    """A `Work` built inside jitted scope whose derive is a `@proxy` binding's `.as_func`.
+    """A node that jitted code builds from a ``@proxy`` function's ``.as_func`` propagates the derive's exception.
 
-    This is the shape the propagating type exists for. A binding used from Python scope
-    propagated already, because `make_work` runs `rewrap_derive` over whatever it is handed
-    and upgrades a plain `CompileResultWAP` on the way in. A jitted builder reaches the
-    overload instead, which takes the value as given, so the `derive` field is fixed at
-    whatever type `.as_func` carried at decoration time and there is nothing left to
-    upgrade. With a plain `CompileResultWAP` there, `jit_addr` is null, `_call_derive`
-    emits the C call, and `calculate` returns normally having zero-filled `data` and set
-    `derived`: a wrong value is cached in the graph permanently and the failure is reported
-    only as an unraisable on stderr.
-
-    Nothing else in the repository builds a `Work` from a binding, so a change to what
-    `.as_func` is minted as shows up here and nowhere else.
+    In jitted code, ``make_work`` uses the derive unchanged, so the result depends on ``.as_func`` being a
+    ``DeriveWAP``. A plain ``CompileResultWAP`` would be called through its C entry point, and ``calculate`` would
+    store a zero-filled value. No other test builds a ``Work`` from a ``.as_func``.
     """
     @proxy(float64(float64))
     def raising_binding(x):
@@ -597,9 +595,10 @@ def test_a_proxy_binding_reached_from_jitted_scope_propagates():
 
 
 def test_propagation_through_a_multi_level_chain():
-    """Every other propagation test uses a two-node graph whose source has no derive of
-    its own, while the mainline shape is a chain. The failure has to surface from depth
-    without poisoning the nodes that already succeeded."""
+    """A chain of three derived nodes propagates the third node's exception, and the first two keep their results.
+
+    The failing node keeps its ``data`` with ``derived`` unset. The other graphs in this file have two nodes.
+    """
     source = make_work_helper("source", -1.0)
     level1 = make_work_helper("level1", 0.0, sources=(source,), derive_py=_raise_when_positive)
     level2 = make_work_helper("level2", 0.0, sources=(level1,), derive_py=_raise_when_positive)

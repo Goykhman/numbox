@@ -1,10 +1,14 @@
-"""compile_kernel cache-correctness regression tests.
+"""Tests that numba never loads stale code for a kernel from its cache.
 
-Folding jit flags into the outer ``_kernel_<digest>`` name cannot, by itself,
-invalidate an independently numba-cached unit the kernel links against, nor
-cover values the digest fingerprint misses. Each test pins one such hazard --
-fingerprint-level where the mechanism is deterministic, and a two-process
-shared-``NUMBA_CACHE_DIR`` probe where the failure is cross-process.
+numba finds a cached kernel by the kernel's name, which is a digest of its formulas and of what they read. The digest
+must therefore hold every value that changes the compiled code: the target options of a @vectorize formula, the module
+attributes that a formula reads, the declared types, and the ``NUMBA_*`` settings that change the emitted code. A
+formula that is or calls a dispatcher compiled with ``cache=True`` must leave the kernel uncached, because the kernel's
+name cannot make numba refresh that dispatcher's own cache. Most tests compare fingerprints, kernel names or the cache
+of a compiled dispatcher in one process. Three tests run a probe script in two processes that share one
+``NUMBA_CACHE_DIR``; a stale kernel would make the second process print the first process's result, or would leave a
+cached kernel file. The last test checks that the record of passed return-type checks is keyed on the jit options.
+test_compile_kernel.py tests the other inputs of the digest and the cache in general.
 """
 import os
 import subprocess
@@ -23,21 +27,22 @@ from numbox.core.variable.compile_kernel import (
 from numbox.utils.fingerprint import _fingerprint_function
 
 
-# A module-level cache=True dispatcher has a real locator (this file), so numba
-# enables its FunctionCache -- the self-cached formula the fix must detect.
+# A dispatcher compiled with cache=True in this file has a source file that numba can locate, so numba assigns it a
+# FunctionCache. _is_self_cached must detect it as a formula with a cache of its own.
 _cached_formula = njit(cache=True)(lambda y: y + 1.0)
-_plain_formula = njit(lambda y: y + 1.0)                     # cache=False -> safe
+_plain_formula = njit(lambda y: y + 1.0)  # Without cache=True, the dispatcher has no cache of its own.
+# _KERNEL_SRC is the source of a kernel with one formula, f_x, for the tests that call _compile directly.
 _KERNEL_SRC = "def _kernel(a0):\n    return (f_x(a0),)\n"
 
 
-# A plain formula that CALLS a module-level cache=True dispatcher (rather than
-# being one) -- the transitive case CK1's top-level check would miss.
+# _formula_calls_cached is a plain formula that calls the cache=True dispatcher and is not itself a dispatcher.
+# _is_self_cached, which inspects the formula alone, does not detect it; _references_self_cached follows the call.
 def _formula_calls_cached(x):
     return _cached_formula(x)
 
 
-# The cached dispatcher reached only through a default argument, or nested in a
-# container global -- channels the digest folds, so the guard must too.
+# The next two formulas reach the cache=True dispatcher only through a default argument or through a tuple held in a
+# global. The digest folds both channels, so _references_self_cached must follow them as well.
 def _formula_default_arg(x, h=_cached_formula):
     return h(x)
 
@@ -49,7 +54,7 @@ def _formula_container_global(x):
     return _HELPERS[0](x)
 
 
-# The cached dispatcher reached as a module attribute (helpers.helper(x)).
+# _formula_module_attr reaches the cache=True dispatcher as a module attribute, as in helpers.helper(x).
 _helpers_mod = types.ModuleType("test_ck_helpers_mod")
 _helpers_mod.helper = _cached_formula
 
@@ -59,6 +64,10 @@ def _formula_module_attr(x):
 
 
 def _run_probe(probe, env):
+    """Run ``probe`` in a new process with the environment ``env``, and return its stdout with ``str.strip`` applied.
+
+    The test fails with the probe's stderr if the probe exits with a status other than 0.
+    """
     r = subprocess.run(
         [sys.executable, str(probe)],
         capture_output=True, text=True, encoding="utf-8", env=env,
@@ -68,6 +77,10 @@ def _run_probe(probe, env):
 
 
 def _shared_cache_env(tmp_path):
+    """Return a copy of the environment in which every probe uses one cache directory and imports this numbox.
+
+    ``NUMBA_CACHE_DIR`` is ``tmp_path / "nbcache"``, and ``PYTHONPATH`` holds this process's ``sys.path``.
+    """
     env = dict(os.environ)
     env["NUMBA_CACHE_DIR"] = str(tmp_path / "nbcache")
     env["PYTHONPATH"] = os.pathsep.join(sys.path)
@@ -75,18 +88,20 @@ def _shared_cache_env(tmp_path):
 
 
 def _body(x):
-    # fastmath's nnan/reassociation makes (x + 1e308) - 1e308 collapse to x
-    # instead of 0.0 -- a visible, one-line flag-sensitive result.
+    # Under fastmath, LLVM reduces (x + 1e308) - 1e308 to x. Without fastmath, x + 1e308 rounds to 1e308 for x = 1.0,
+    # and the result is 0.0. The result therefore shows whether numba compiled the body under fastmath.
     return (x + 1e308) - 1e308
 
 
-# DUFunc (@vectorize) formula targetoptions must enter the digest
+# The digest holds the target options of a @vectorize formula.
 # ---------------------------------------------------------------------------
 
 def test_dufunc_targetoptions_distinguish_fingerprint():
-    """A @vectorize formula's targetoptions must enter the fingerprint, else two
-    kernels differing only in a DUFunc flag share one digest and the outer cached
-    kernel is served stale on a cache hit."""
+    """The fingerprint of a @vectorize formula holds its target options, so fastmath changes it.
+
+    If the fingerprint left the options out, two kernels that differ only in the formula's options would share one
+    digest, and numba would load the kernel cached for the other options.
+    """
     f_plain = vectorize(["float64(float64)"], nopython=True)(_body)
     f_fast = vectorize(["float64(float64)"], nopython=True, fastmath=True)(_body)
     fp_plain, cacheable_plain = _formula_fingerprint(f_plain)
@@ -96,9 +111,11 @@ def test_dufunc_targetoptions_distinguish_fingerprint():
 
 
 def test_dufunc_fastmath_flip_not_stale_across_processes(tmp_path):
-    """Two processes sharing one cache dir, a @vectorize formula whose fastmath
-    flips between runs: the second process must recompile, not serve the first's
-    stale binary. Without the targetoptions fold both runs share one digest."""
+    """A kernel with a @vectorize formula compiles again when the formula's fastmath option changes between processes.
+
+    The second process shares the first process's NUMBA_CACHE_DIR and must print 1.0; a kernel that it loaded from the
+    first process's cache would print 0.0.
+    """
     probe = tmp_path / "dufunc_probe.py"
     probe.write_text(textwrap.dedent('''
         import os
@@ -121,19 +138,22 @@ def test_dufunc_fastmath_flip_not_stale_across_processes(tmp_path):
 
     env = _shared_cache_env(tmp_path)
     env["FASTMATH"] = "0"
-    assert _run_probe(probe, env) == "0.0"             # cold: caches under its digest
+    # The first process compiles the kernel without fastmath and caches it.
+    assert _run_probe(probe, env) == "0.0"
     env["FASTMATH"] = "1"
-    got = _run_probe(probe, env)                        # shared cache, flag flipped
+    # The second process uses the same cache directory and compiles the formula with fastmath.
+    got = _run_probe(probe, env)
     assert got == "1.0", f"DUFunc fastmath flip served a stale cached kernel: got {got}, expected 1.0"
 
 
-# A value read through module indirection (cfg.SCALE) must enter the fingerprint
+# The fingerprint holds the value of a module attribute that a formula reads, such as cfg.SCALE.
 # ---------------------------------------------------------------------------
 
 def _func_reading_module_attr(scale_value):
-    """Build a fresh function ``f(x): return x * cfg.SCALE`` whose globals hold a
-    module ``cfg`` with ``SCALE = scale_value`` -- the one-level indirection that
-    was invisible to the fingerprint."""
+    """Return a new function ``f(x): return x * cfg.SCALE`` whose global ``cfg`` is a module.
+
+    The module's ``SCALE`` is ``scale_value``. The function reads it as a module attribute, not as a global.
+    """
     cfg = types.ModuleType("cfg_probe_mod")
     cfg.SCALE = scale_value
     code = compile("def f(x):\n    return x * cfg.SCALE\n", "<probe>", "exec").co_consts[0]
@@ -141,16 +161,22 @@ def _func_reading_module_attr(scale_value):
 
 
 def test_module_attribute_value_change_rekeys_fingerprint():
-    """cfg.SCALE is baked into the compiled binary by numba but is one module hop
-    from a global, so its value must enter the fingerprint or a change is stale."""
+    """The fingerprint of a function changes with the value of cfg.SCALE, a module attribute that it reads.
+
+    numba compiles the attribute's value into the code as a constant, so if the fingerprint left the value out, numba
+    would load a kernel compiled with the old value.
+    """
     assert _fingerprint_function(_func_reading_module_attr(2.0), set()) \
         != _fingerprint_function(_func_reading_module_attr(3.0), set())
 
 
 def test_module_function_attr_stays_a_stable_reference():
-    """A module attribute that is a function/ufunc (np.sqrt) is resolved by
-    identity, not frozen as data -- it must not be folded (which would recurse
-    into numpy) nor make the formula uncacheable."""
+    """The fingerprint leaves out np.sqrt, a ufunc that a function reads as a module attribute.
+
+    numba resolves a ufunc by identity, so leaving it out of the fingerprint loses no information, and the function
+    stays cacheable. The fingerprint is the same for two copies of the function, and the walk does not descend into
+    numpy.
+    """
     import numpy as np
 
     def mk():
@@ -158,14 +184,16 @@ def test_module_function_attr_stays_a_stable_reference():
         return types.FunctionType(code, {"np": np})
 
     fp = _fingerprint_function(mk(), set())
-    assert fp == _fingerprint_function(mk(), set())     # stable
-    assert "sqrt=function" not in fp                    # ufunc not folded as a value
+    assert fp == _fingerprint_function(mk(), set())
+    assert "sqrt=function" not in fp
 
 
 def test_module_constant_change_not_stale_across_processes(tmp_path):
-    """Two processes sharing one cache dir, a formula reading a module constant
-    whose value changes between runs: the second must recompile, not serve the
-    first's baked-in value."""
+    """A kernel compiles again when a module attribute that its formula reads changes between processes.
+
+    The second process shares the first process's NUMBA_CACHE_DIR and reads ck_cfg_probe.SCALE as 3.0 instead of 2.0.
+    It must print 30.0; a kernel loaded from the first process's cache would print 20.0.
+    """
     probe = tmp_path / "modattr_probe.py"
     probe.write_text(textwrap.dedent('''
         import os
@@ -194,57 +222,73 @@ def test_module_constant_change_not_stale_across_processes(tmp_path):
 
     env = _shared_cache_env(tmp_path)
     env["SCALE"] = "2.0"
-    assert _run_probe(probe, env) == "20.0"            # cold: caches with SCALE=2
+    # The first process compiles the kernel with SCALE = 2.0 and caches it.
+    assert _run_probe(probe, env) == "20.0"
     env["SCALE"] = "3.0"
-    got = _run_probe(probe, env)                        # shared cache, constant changed
+    # The second process uses the same cache directory with SCALE = 3.0.
+    got = _run_probe(probe, env)
     assert got == "30.0", f"module constant change served a stale kernel: got {got}, expected 30.0"
 
 
-# A self-cached formula makes the unit uncacheable (no poisoned artifact)
+# A formula with a cache of its own leaves the kernel uncached.
 # ---------------------------------------------------------------------------
 
 def test_is_self_cached_detects_only_cache_true_dispatchers():
+    """_is_self_cached is True for a dispatcher compiled with ``cache=True`` and False for one compiled without it."""
     assert _is_self_cached(_cached_formula) is True
     assert _is_self_cached(_plain_formula) is False
 
 
 def test_self_cached_dispatcher_formula_makes_unit_uncacheable():
-    """A user @njit(cache=True) formula keeps its own flag/global-blind numba
-    cache; folding flags into the outer name cannot invalidate it, and a fresh
-    outer would link + serialize the stale inner binary (permanent poisoning).
-    The unit must compile uncached, with a warning."""
-    assert not isinstance(_cached_formula._cache, NullCache)   # precondition
+    """A formula compiled with ``@njit(cache=True)`` makes _compile warn and compile the kernel without a cache.
+
+    numba's key for the formula's own cache leaves out its jit options and the globals that it reads, so that cache can
+    hold stale code. The kernel's digest cannot make numba refresh the formula's cache, and a kernel cached with the
+    stale code would contain that code as well.
+    """
+    assert not isinstance(_cached_formula._cache, NullCache)  # The formula has a cache of its own.
     with pytest.warns(UserWarning, match="a @njit.cache=True. dispatcher"):
         disp = _compile(_KERNEL_SRC, {"f_x": _cached_formula}, None, None)
     assert isinstance(disp._cache, NullCache), "outer kernel must not be disk-cached"
 
 
 def test_plain_formula_unit_stays_cacheable():
-    """A cache=False formula has no independent on-disk cache and re-keys with the
-    flag-folded outer, so the unit must still cache (no false-positive uncaching)."""
+    """A formula compiled without ``cache=True`` leaves the kernel cached.
+
+    Such a formula has no cache of its own, and the kernel's digest holds its code and options. Compiling the kernel
+    without a cache would add a compilation to every process and would not prevent a stale result.
+    """
     disp = _compile(_KERNEL_SRC, {"f_x": _plain_formula}, None, None)
     assert not isinstance(disp._cache, NullCache), "plain-formula kernel should cache"
 
 
 def test_references_self_cached_detects_a_cached_callee():
+    """_references_self_cached finds a ``cache=True`` dispatcher that a formula calls.
+
+    It finds none in a dispatcher compiled without ``cache=True``.
+    """
     assert _references_self_cached(_formula_calls_cached, set()) is True
     assert _references_self_cached(_plain_formula, set()) is False
 
 
 def test_formula_calling_cache_true_dispatcher_makes_unit_uncacheable():
-    """A plain formula that CALLS a @njit(cache=True) dispatcher links the callee's
-    flag/global-blind binary; the unit must be uncacheable too, else a stale inner
-    is serialized into a fresh-digest artifact (poisoning one call deeper)."""
+    """A formula that calls a ``cache=True`` dispatcher makes _compile warn and compile the kernel without a cache.
+
+    The kernel links the callee's code from the callee's own cache, which can be stale. A cached kernel would store
+    that code in its own cache entry, under a new digest.
+    """
     with pytest.warns(UserWarning, match="reference, a @njit"):
         disp = _compile(_KERNEL_SRC, {"f_x": njit(_formula_calls_cached)}, None, None)
     assert isinstance(disp._cache, NullCache), "unit linking a cache=True callee must not cache"
 
 
 def test_formula_calling_cache_true_dispatcher_not_poisoned(tmp_path):
-    """End-to-end: a plain formula calling a cache=True dispatcher whose flags flip
-    between processes must leave NO numbox-owned outer cache artifact (no poisoning
-    surface). numba still serves the user dispatcher's own stale binary in-process
-    -- an accepted numba limitation, not a numbox defect."""
+    """numbox writes no cached kernel when a formula calls a ``cache=True`` dispatcher whose error model changes.
+
+    The two processes share one NUMBA_CACHE_DIR. The second process still runs the dispatcher's code compiled under
+    the first process's error model, because numba's key for the dispatcher's own cache leaves the error model out.
+    The test does not check the value that the second process prints.
+    """
     probe = tmp_path / "calls_cached_probe.py"
     probe.write_text(textwrap.dedent('''
         import os
@@ -280,31 +324,32 @@ def test_formula_calling_cache_true_dispatcher_not_poisoned(tmp_path):
 
 
 def test_references_self_cached_through_default_argument():
+    """_references_self_cached follows a default argument to the ``cache=True`` dispatcher."""
     assert _references_self_cached(_formula_default_arg, set()) is True
 
 
 def test_references_self_cached_through_container_global():
+    """_references_self_cached follows a tuple held in a global to the ``cache=True`` dispatcher."""
     assert _references_self_cached(_formula_container_global, set()) is True
 
 
 def test_references_self_cached_through_module_attribute():
+    """_references_self_cached follows a module attribute to the ``cache=True`` dispatcher."""
     assert _references_self_cached(_formula_module_attr, set()) is True
 
 
 def test_default_arg_cached_dispatcher_makes_unit_uncacheable():
+    """A ``cache=True`` dispatcher in a default argument also makes _compile warn and compile without a cache."""
     with pytest.warns(UserWarning, match="reference, a @njit"):
         disp = _compile(_KERNEL_SRC, {"f_x": njit(_formula_default_arg)}, None, None)
     assert isinstance(disp._cache, NullCache)
 
 
 def test_dispatcher_typed_declared_sig_makes_unit_uncacheable():
-    """A declared signature carrying a Dispatcher type (a function-typed external)
-    makes the unit uncacheable. ``declared_sigs`` folded raw ``repr`` of each type;
-    a Dispatcher's ``type(CPUDispatcher(<function f at 0x...>))`` carried an ASLR
-    address, orphaning a ``_kernel_`` cache pair per run, and numba cannot
-    cross-process-cache a Dispatcher signature anyway. The
-    declared types now route through ``_type_identity``, which reports a Dispatcher
-    un-cacheable, so ``_compile`` drops the on-disk cache.
+    """A declared signature that holds a dispatcher type, the type of an @njit function, leaves the kernel uncached.
+
+    numba's cache index misses such a signature in every process and adds an entry each time, so _type_identity marks
+    the type uncacheable and _compile compiles the kernel without a cache.
     """
     disp = _compile(
         _KERNEL_SRC, {"f_x": _plain_formula}, None, None,
@@ -314,10 +359,11 @@ def test_dispatcher_typed_declared_sig_makes_unit_uncacheable():
         "a Dispatcher-typed declared signature must make the unit uncacheable")
 
 
-# Chained (cfg.sub.SCALE) and closure-captured module attributes must fold too
+# The fingerprint holds a module attribute reached through a submodule, or through a module in a closure.
 # ---------------------------------------------------------------------------
 
 def _func_reading_chained_module_attr(scale):
+    """Return a new function ``f(x): return x * cfg.sub.SCALE`` whose ``cfg.sub.SCALE`` is ``scale``."""
     cfg = types.ModuleType("cfg_chain_probe")
     sub = types.ModuleType("cfg_chain_probe.sub")
     cfg.sub = sub
@@ -327,11 +373,13 @@ def _func_reading_chained_module_attr(scale):
 
 
 def test_chained_module_attribute_rekeys_fingerprint():
+    """The fingerprint changes with the value of cfg.sub.SCALE, which the function reaches through a submodule."""
     assert _fingerprint_function(_func_reading_chained_module_attr(2.0), set()) \
         != _fingerprint_function(_func_reading_chained_module_attr(3.0), set())
 
 
 def _closure_module_formula(scale):
+    """Return a function that reads ``m.SCALE`` from a module ``m`` in its closure; ``m.SCALE`` is ``scale``."""
     mod = types.ModuleType("cmod_closure_probe")
     mod.SCALE = scale
 
@@ -343,14 +391,17 @@ def _closure_module_formula(scale):
 
 
 def test_closure_captured_module_attribute_rekeys_fingerprint():
+    """The fingerprint changes with the value of m.SCALE, which the function reads from a module in its closure."""
     assert _fingerprint_function(_closure_module_formula(2.0), set()) \
         != _fingerprint_function(_closure_module_formula(3.0), set())
 
 
 def _module_attr_dispatcher_formula(other_val):
-    """f(x) = cfg.compute(x), where cfg.compute is a Dispatcher capturing the
-    module global OTHER -- numba links it and freezes OTHER, so the digest must
-    fold the module-attr dispatcher's fingerprint (as it does a direct global)."""
+    """Return a function that calls ``cfg.compute``, a dispatcher whose global ``OTHER`` is ``other_val``.
+
+    numba links the dispatcher's code into the kernel and compiles in the value of OTHER, so the digest must fold a
+    dispatcher reached as a module attribute, as it folds a dispatcher read as a global.
+    """
     disp_code = compile("def compute(z):\n    return z + OTHER\n", "<d>", "exec").co_consts[0]
     compute = njit(cache=False)(types.FunctionType(disp_code, {"OTHER": other_val}))
     cfg = types.ModuleType("cfg_disp_fp_probe")
@@ -360,13 +411,17 @@ def _module_attr_dispatcher_formula(other_val):
 
 
 def test_module_attr_dispatcher_captured_value_rekeys_fingerprint():
+    """The fingerprint changes with a global of the dispatcher that the function calls as cfg.compute."""
     assert _fingerprint_function(_module_attr_dispatcher_formula(10.0), set()) \
         != _fingerprint_function(_module_attr_dispatcher_formula(999.0), set())
 
 
 def _module_attr_dufunc_formula(other_val):
-    """f(x) = cfg.uf(x), where cfg.uf is a @vectorize DUFunc capturing OTHER --
-    numba links its loop and freezes OTHER, so the digest must fold it too."""
+    """Return a function that calls ``cfg.uf``, a @vectorize function whose scalar body reads the global ``OTHER``.
+
+    ``OTHER`` is ``other_val``. numba links the function's compiled loop and compiles in the value of OTHER, so the
+    digest must fold it as well.
+    """
     wrapped = types.FunctionType(
         compile("def uf(z):\n    return z + OTHER\n", "<d>", "exec").co_consts[0], {"OTHER": other_val})
     uf = vectorize(["float64(float64)"], nopython=True)(wrapped)
@@ -377,21 +432,23 @@ def _module_attr_dufunc_formula(other_val):
 
 
 def test_module_attr_dufunc_captured_value_rekeys_fingerprint():
+    """The fingerprint changes with a global of the @vectorize function that the function calls as cfg.uf."""
     assert _fingerprint_function(_module_attr_dufunc_formula(10.0), set()) \
         != _fingerprint_function(_module_attr_dufunc_formula(999.0), set())
 
 
-# A value a module exposes ONLY via a PEP 562 __getattr__ is deliberately NOT
-# folded: resolving referenced names via getattr would fire an unrelated module's
-# __getattr__ (numpy's) on co-name collisions, importing submodules and emitting
-# deprecation warnings on every compile. Documented limitation -- no test asserts
-# the lazy-attribute case is covered.
+# The digest does not hold a value that a module provides only through a module-level __getattr__ (PEP 562). If the
+# fingerprint looked a referenced name up with getattr, it would run the __getattr__ of an unrelated module, such as
+# numpy's, for every name of co_names that the module lacks. numpy's __getattr__ imports submodules and emits
+# deprecation warnings, so every compilation would do the same. No test covers such a value, because the digest leaves
+# it out deliberately; the variable documentation lists the limit.
 
 
-# Result-affecting numba codegen env knobs beyond BOUNDSCHECK enter the digest
+# The digest holds the NUMBA_* settings that change the emitted code.
 # ---------------------------------------------------------------------------
 
 def test_vectorize_env_knob_enters_digest(monkeypatch):
+    """``NUMBA_LOOP_VECTORIZE``, which numba reads into ``numba.config.LOOP_VECTORIZE``, changes the kernel's name."""
     src = "def _kernel(a0):\n    return (a0,)\n"
     monkeypatch.setattr(numba_config, "LOOP_VECTORIZE", 0, raising=False)
     name0 = _compile(src, {}, None, None).py_func.__name__
@@ -400,13 +457,15 @@ def test_vectorize_env_knob_enters_digest(monkeypatch):
     assert name0 != name1, "LOOP_VECTORIZE absent from the cache digest"
 
 
-# NUMBA_BOUNDSCHECK is an env codegen knob outside the jit flags and numba's key
+# NUMBA_BOUNDSCHECK and NUMBA_DISABLE_INTEL_SVML change the code, and the jit options and numba's key leave them out.
 # ---------------------------------------------------------------------------
 
 def test_boundscheck_env_enters_digest(monkeypatch):
-    """NUMBA_BOUNDSCHECK overrides even an explicit boundscheck flag at lowering
-    but is in neither the jit flags nor numba's cache key; it must enter the
-    digest so a bounds-check flip does not cache-hit the unchecked binary."""
+    """``NUMBA_BOUNDSCHECK`` changes the kernel's name.
+
+    The setting overrides even an explicit boundscheck option, and neither the jit options nor numba's key holds it.
+    If the digest left it out, numba would load a kernel compiled under the other setting.
+    """
     src = "def _kernel(a0):\n    return (a0,)\n"
     monkeypatch.setattr(numba_config, "BOUNDSCHECK", None)
     name_off = _compile(src, {}, None, None).py_func.__name__
@@ -416,8 +475,11 @@ def test_boundscheck_env_enters_digest(monkeypatch):
 
 
 def test_svml_env_enters_digest(monkeypatch):
-    """NUMBA_DISABLE_INTEL_SVML decides whether numba calls Intel's SVML for
-    vectorized math, and numba's cache key does not hold it."""
+    """``NUMBA_DISABLE_INTEL_SVML`` changes the kernel's name.
+
+    If Intel's SVML library is installed, the setting determines whether numba calls SVML for vectorized math. numba's
+    key does not hold the setting.
+    """
     src = "def _kernel(a0):\n    return (a0,)\n"
     monkeypatch.setattr(numba_config, "DISABLE_INTEL_SVML", 0)
     name_svml = _compile(src, {}, None, None).py_func.__name__
@@ -426,10 +488,14 @@ def test_svml_env_enters_digest(monkeypatch):
     assert name_svml != name_plain, "DISABLE_INTEL_SVML absent from the cache digest"
 
 
-# Un-canonicalizable jit flags must warn, not silently disable caching
+# A jit option without a canonical form makes _compile warn and compile without a cache.
 # ---------------------------------------------------------------------------
 
 def test_uncanonicalizable_flags_warn_and_disable_cache():
+    """A ``pipeline_class`` option has no canonical form, so _compile warns and compiles the kernel without a cache.
+
+    A digest without the option could not distinguish the kernels that two pipelines compile.
+    """
     from numba.core.compiler import Compiler
     src = "def _kernel(a0):\n    return (a0,)\n"
     with pytest.warns(UserWarning, match="no canonical"):
@@ -437,13 +503,15 @@ def test_uncanonicalizable_flags_warn_and_disable_cache():
     assert isinstance(disp._cache, NullCache)
 
 
-# The declared-return probe memo must key on flags, not skip a flag-dependent probe
+# The record of passed return-type checks is keyed on the jit options.
 # ---------------------------------------------------------------------------
 
 def _declared_locals_graph():
-    """A declared float64 node whose formula returns a local `m`. Under
-    ``locals={'m': float32}`` the natural return type becomes float32, which
-    violates the declared float64 -- caught by the build-time probe."""
+    """Return a graph with one variable declared float64, whose formula returns its local ``m``.
+
+    Under the jit option ``locals={'m': float32}``, numba infers float32 as the return type, and the return-type check
+    refuses the declaration.
+    """
     from numba.core.types import float64
     from numbox.core.variable.variable import Graph, Params
 
@@ -458,16 +526,19 @@ def _declared_locals_graph():
 
 
 def test_validated_returns_memo_keys_on_flags():
-    """A prior default-flags build must not let a later build under a
-    return-type-affecting flag skip the declared-return probe via a flag-blind
-    memo key -- else a float32-under-declared-float64 violation is accepted."""
+    """A return-type check that passed under the default options runs again under an option that changes the type.
+
+    The record of passed checks is keyed on the jit options, so the second compile_kernel checks again and refuses
+    float32 for the float64 declaration.
+    """
     from numba.core.types import float32
     from numbox.core.variable.compile_kernel import compile_kernel, _validated_returns
 
     saved = set(_validated_returns)
     _validated_returns.clear()
     try:
-        compile_kernel(_declared_locals_graph(), "variables.a")   # default flags: OK, memoized
+        # The check passes under the default options, and compile_kernel records it.
+        compile_kernel(_declared_locals_graph(), "variables.a")
         with pytest.raises(ValueError, match="float32"):
             compile_kernel(_declared_locals_graph(), "variables.a",
                            jit_options={"locals": {"m": float32}})

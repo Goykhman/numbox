@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for SQLite binding tests."""
+"""pytest fixtures that the SQLite tests of test/core share."""
 from ctypes import addressof, c_int64
 
 import pytest
@@ -10,8 +10,7 @@ from numbox.utils.cstrings import c_string
 
 @pytest.fixture
 def memory_db():
-    """Open ``:memory:`` via the raw bindings; yield the connection pointer;
-    close on teardown."""
+    """Yield the handle of a connection to a new in-memory database, and close the connection after the test."""
     db_p = c_int64(0)
     with c_string(":memory:") as name_p:
         assert sqlite3_open(name_p, addressof(db_p)) == SQLITE_OK
