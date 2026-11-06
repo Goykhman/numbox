@@ -1,0 +1,209 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.sqlite.exec &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/sqlite/exec.html" />
+      <script src="../../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.sqlite.exec</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.sqlite.exec</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Bindings for ``sqlite3_exec``, which runs SQL text in one call, and for SQLite's memory allocator.</span>
+
+<span class="sd">``sqlite3_exec`` prepares, steps and finalizes each statement of a SQL text, which may hold several statements. It can</span>
+<span class="sd">call a C function once for each result row, with this type::</span>
+
+<span class="sd">    int (*callback)(void *ctx, int ncol, char **col_values, char **col_names)</span>
+
+<span class="sd">``ctx`` is the pointer that the caller passed to ``sqlite3_exec``. ``col_values`` and ``col_names`` are arrays of</span>
+<span class="sd">``ncol`` addresses of NUL-terminated UTF-8 strings, valid only during the call, and a NULL value has the address 0. The</span>
+<span class="sd">callback returns 0 to continue. Any other value stops ``sqlite3_exec``, which then returns ``SQLITE_ABORT``. numba's</span>
+<span class="sd">``cfunc`` compiles such a function, and its ``.address`` is the value to pass. Here the callback stores the number of</span>
+<span class="sd">rows in a NumPy array::</span>
+
+<span class="sd">    from ctypes import addressof, c_int64</span>
+
+<span class="sd">    import numpy as np</span>
+<span class="sd">    from numba import carray, cfunc, types</span>
+
+<span class="sd">    from numbox.core.bindings.sqlite.conn import sqlite3_close, sqlite3_open</span>
+<span class="sd">    from numbox.core.bindings.sqlite.exec import sqlite3_exec</span>
+<span class="sd">    from numbox.utils.cstrings import c_string</span>
+
+
+<span class="sd">    @cfunc(types.int32(types.voidptr, types.int32, types.intp, types.intp))</span>
+<span class="sd">    def count_rows(ctx, ncol, col_values, col_names):</span>
+<span class="sd">        count = carray(ctx, 1, dtype=np.int64)</span>
+<span class="sd">        count[0] += 1</span>
+<span class="sd">        return 0</span>
+
+
+<span class="sd">    db_p = c_int64(0)</span>
+<span class="sd">    with c_string(":memory:") as path_p:</span>
+<span class="sd">        sqlite3_open(path_p, addressof(db_p))</span>
+<span class="sd">    count = np.zeros(1, dtype=np.int64)</span>
+<span class="sd">    with c_string("SELECT 1 UNION ALL SELECT 2") as sql_p:</span>
+<span class="sd">        rc = sqlite3_exec(db_p.value, sql_p, count_rows.address, count.ctypes.data, 0)</span>
+<span class="sd">    print(rc, count[0])   # 0 2</span>
+<span class="sd">    sqlite3_close(db_p.value)</span>
+
+<span class="sd">``sqlite3_free`` releases memory that SQLite allocated for the caller, such as the error message of ``sqlite3_exec``</span>
+<span class="sd">and the text of ``sqlite3_expanded_sql``. ``sqlite3_malloc`` allocates such memory; numbox's virtual tables allocate</span>
+<span class="sd">their ``sqlite3_vtab`` and cursor structs with it.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.call</span><span class="w"> </span><span class="kn">import</span> <span class="n">_call_lib_func</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.signatures</span><span class="w"> </span><span class="kn">import</span> <span class="n">signatures</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_lib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">"sqlite3_exec"</span><span class="p">,</span> <span class="s2">"sqlite3_free"</span><span class="p">,</span> <span class="s2">"sqlite3_malloc"</span><span class="p">,</span>
+<span class="p">]</span>
+
+
+<span class="n">load_lib</span><span class="p">(</span><span class="s2">"sqlite3"</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="sqlite3_exec">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.exec.sqlite3_exec">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_exec"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_exec</span><span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">sql_p</span><span class="p">,</span> <span class="n">cb_p</span><span class="p">,</span> <span class="n">ctx_p</span><span class="p">,</span> <span class="n">errmsg_pp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Run each SQL statement of the UTF-8 text at ``sql_p`` on the connection ``db_p``, and return a result code.</span>
+
+<span class="sd">    C reference: `sqlite3_exec &lt;https://sqlite.org/c3ref/exec.html&gt;`_.</span>
+
+<span class="sd">    ``cb_p`` is 0, or the address of a row callback of the type that the module docstring gives, and SQLite passes</span>
+<span class="sd">    ``ctx_p`` to that callback. If a statement fails, SQLite stops and skips the statements after it. Unless</span>
+<span class="sd">    ``errmsg_pp`` is 0, SQLite then writes to it the address of an error message, which the caller frees with</span>
+<span class="sd">    :func:`sqlite3_free`. If every statement succeeds, SQLite writes 0 there. Returns ``SQLITE_OK``, ``SQLITE_ABORT``</span>
+<span class="sd">    when the callback returned a nonzero value, or the error code of the statement that failed.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span>
+        <span class="s2">"sqlite3_exec"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">sql_p</span><span class="p">,</span> <span class="n">cb_p</span><span class="p">,</span> <span class="n">ctx_p</span><span class="p">,</span> <span class="n">errmsg_pp</span><span class="p">)</span>
+    <span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_free">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.exec.sqlite3_free">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_free"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_free</span><span class="p">(</span><span class="n">mem_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Free memory that SQLite allocated, such as the error message of :func:`sqlite3_exec`.</span>
+
+<span class="sd">    C reference: `sqlite3_free &lt;https://sqlite.org/c3ref/free.html&gt;`_.</span>
+
+<span class="sd">    A call with a pointer of 0 does nothing. Freeing a pointer that SQLite's allocator did not return can corrupt</span>
+<span class="sd">    memory or crash the process. Reading the memory after it is freed can have the same effect.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_free"</span><span class="p">,</span> <span class="p">(</span><span class="n">mem_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_malloc">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.exec.sqlite3_malloc">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_malloc"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_malloc</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Allocate at least ``n`` bytes with SQLite's allocator and return their address, or 0 if the allocation fails.</span>
+
+<span class="sd">    C reference: `sqlite3_malloc &lt;https://sqlite.org/c3ref/free.html&gt;`_.</span>
+
+<span class="sd">    Returns 0 as well for an ``n`` of 0 or less, and numba converts ``n`` to int32 without a check. The memory is not</span>
+<span class="sd">    zeroed. It is aligned to at least 8 bytes unless SQLite was built with ``SQLITE_4_BYTE_ALIGNED_MALLOC``, and the</span>
+<span class="sd">    caller frees it with :func:`sqlite3_free`.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_malloc"</span><span class="p">,</span> <span class="p">(</span><span class="n">n</span><span class="p">,))</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

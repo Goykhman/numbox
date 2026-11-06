@@ -1,0 +1,332 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.sqlite.column &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/sqlite/column.html" />
+      <script src="../../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.sqlite.column</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.sqlite.column</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Bindings that read the current result row of a prepared SQLite statement and describe its columns.</span>
+
+<span class="sd">Each binding takes the statement's handle and a column index that counts from 0. A binding that reads a value may be</span>
+<span class="sd">called only after ``sqlite3_step`` returned ``SQLITE_ROW``, and before the statement is stepped again, reset or</span>
+<span class="sd">finalized. ``sqlite3_column_database_name``, ``sqlite3_column_table_name`` and ``sqlite3_column_origin_name`` exist</span>
+<span class="sd">only in a SQLite compiled with ``SQLITE_ENABLE_COLUMN_METADATA``. CPython's ``sqlite3.dll`` on Windows has them, and</span>
+<span class="sd">numbox loads only that DLL on Windows. On Linux and macOS, numbox loads the system's SQLite, and whether that library</span>
+<span class="sd">has them depends on the distribution. If the loaded library lacks one of them, its binding is a stub, as its docstring</span>
+<span class="sd">describes. Every other binding of the module exists in every SQLite that numbox supports.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.call</span><span class="w"> </span><span class="kn">import</span> <span class="n">_call_lib_func</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.signatures</span><span class="w"> </span><span class="kn">import</span> <span class="n">signatures</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_lib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span><span class="p">,</span> <span class="n">proxy_if_available</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">"sqlite3_column_int"</span><span class="p">,</span> <span class="s2">"sqlite3_column_int64"</span><span class="p">,</span> <span class="s2">"sqlite3_column_double"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_column_text"</span><span class="p">,</span> <span class="s2">"sqlite3_column_blob"</span><span class="p">,</span> <span class="s2">"sqlite3_column_bytes"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_column_type"</span><span class="p">,</span> <span class="s2">"sqlite3_column_count"</span><span class="p">,</span> <span class="s2">"sqlite3_column_name"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_column_decltype"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_column_database_name"</span><span class="p">,</span> <span class="s2">"sqlite3_column_table_name"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_column_origin_name"</span><span class="p">,</span>
+<span class="p">]</span>
+
+
+<span class="n">_sqlite3_lib</span> <span class="o">=</span> <span class="n">load_lib</span><span class="p">(</span><span class="s2">"sqlite3"</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="sqlite3_column_int">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.column.sqlite3_column_int">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_column_int"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_column_int</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the value of column ``idx`` of the current row of ``stmt_p``, counted from 0, as an int32.</span>
+
+<span class="sd">    C reference: `sqlite3_column_int &lt;https://sqlite.org/c3ref/column_blob.html&gt;`_.</span>
+
+<span class="sd">    SQLite converts a value of another type, and the binding returns 0 for NULL. A value outside the int32 range is</span>
+<span class="sd">    truncated to its low 32 bits; :func:`sqlite3_column_int64` reads all 64 bits.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_column_int"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_column_int64">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.column.sqlite3_column_int64">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_column_int64"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_column_int64</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the value of column ``idx`` of the current row of ``stmt_p``, counted from 0, as an int64.</span>
+
+<span class="sd">    C reference: `sqlite3_column_int64 &lt;https://sqlite.org/c3ref/column_blob.html&gt;`_.</span>
+
+<span class="sd">    The binding returns 0 for NULL. SQLite converts a REAL or a text value as SQL's ``CAST`` to ``INTEGER`` does.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_column_int64"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_column_double">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.column.sqlite3_column_double">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_column_double"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_column_double</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the value of column ``idx`` of the current row of ``stmt_p``, counted from 0, as a float64.</span>
+
+<span class="sd">    C reference: `sqlite3_column_double &lt;https://sqlite.org/c3ref/column_blob.html&gt;`_.</span>
+
+<span class="sd">    The binding returns 0.0 for NULL. SQLite converts an integer or a text value as SQL's ``CAST`` to ``REAL`` does.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_column_double"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_column_text">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.column.sqlite3_column_text">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_column_text"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_column_text</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the value of column ``idx`` as NUL-terminated UTF-8 text, or 0 for NULL.</span>
+
+<span class="sd">    C reference: `sqlite3_column_text &lt;https://sqlite.org/c3ref/column_blob.html&gt;`_.</span>
+
+<span class="sd">    SQLite owns the text. It stays valid until the statement is stepped, reset or finalized, or until another</span>
+<span class="sd">    accessor converts the same column. Call :func:`sqlite3_column_bytes` after this call for the length in bytes.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_column_text"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_column_blob">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.column.sqlite3_column_blob">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_column_blob"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_column_blob</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the bytes of column ``idx`` of the current row, or 0 for NULL and for an empty BLOB.</span>
+
+<span class="sd">    C reference: `sqlite3_column_blob &lt;https://sqlite.org/c3ref/column_blob.html&gt;`_.</span>
+
+<span class="sd">    SQLite owns the bytes. They stay valid until the statement is stepped, reset or finalized, or until another</span>
+<span class="sd">    accessor converts the same column. Call :func:`sqlite3_column_bytes` after this call for their number.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_column_blob"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_column_bytes">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.column.sqlite3_column_bytes">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_column_bytes"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_column_bytes</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the length in bytes of column ``idx`` as a BLOB or as UTF-8 text, without a NUL, and 0 for NULL.</span>
+
+<span class="sd">    C reference: `sqlite3_column_bytes &lt;https://sqlite.org/c3ref/column_blob.html&gt;`_.</span>
+
+<span class="sd">    Call it after :func:`sqlite3_column_text` or :func:`sqlite3_column_blob`, because either of them can convert the</span>
+<span class="sd">    value and change its length.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_column_bytes"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_column_type">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.column.sqlite3_column_type">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_column_type"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_column_type</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the type code of the value of column ``idx`` of the current row of ``stmt_p``, counted from 0.</span>
+
+<span class="sd">    C reference: `sqlite3_column_type &lt;https://sqlite.org/c3ref/column_blob.html&gt;`_.</span>
+
+<span class="sd">    The code is ``SQLITE_INTEGER``, ``SQLITE_FLOAT``, ``SQLITE_TEXT``, ``SQLITE_BLOB`` or ``SQLITE_NULL``, and it</span>
+<span class="sd">    describes the value before any conversion. After another accessor converts the value, the result is undefined, so</span>
+<span class="sd">    read the type first.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_column_type"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_column_count">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.column.sqlite3_column_count">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_column_count"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_column_count</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the number of columns in the result of the statement ``stmt_p``, 0 for a statement that returns no data.</span>
+
+<span class="sd">    C reference: `sqlite3_column_count &lt;https://sqlite.org/c3ref/column_count.html&gt;`_.</span>
+
+<span class="sd">    A positive count does not mean that the statement returns any rows.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_column_count"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_column_name">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.column.sqlite3_column_name">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_column_name"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_column_name</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the UTF-8 name of column ``idx`` of the result of the statement ``stmt_p``.</span>
+
+<span class="sd">    C reference: `sqlite3_column_name &lt;https://sqlite.org/c3ref/column_name.html&gt;`_.</span>
+
+<span class="sd">    The name is the one that the column's ``AS`` clause sets. If the column has no ``AS`` clause, SQLite does not</span>
+<span class="sd">    specify its name. The text is valid until the statement is finalized, until its first step prepares it again, or</span>
+<span class="sd">    until the next call for the same column. Returns 0 when an allocation fails.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_column_name"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_column_decltype">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.column.sqlite3_column_decltype">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_column_decltype"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_column_decltype</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the declared type of column ``idx`` of the result, or 0 when the column is an expression.</span>
+
+<span class="sd">    C reference: `sqlite3_column_decltype &lt;https://sqlite.org/c3ref/column_decltype.html&gt;`_.</span>
+
+<span class="sd">    The UTF-8 text is the type in the table's definition. SQLite assigns a type to each value, not to each column, so a</span>
+<span class="sd">    value need not have the declared type of its column.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_column_decltype"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">))</span></div>
+
+
+
+<span class="c1"># These three exist only in a SQLite compiled with SQLITE_ENABLE_COLUMN_METADATA. numbox loads only the sqlite3.dll</span>
+<span class="c1"># that CPython bundles on Windows, and that DLL has them (_resolve_lib_path in numbox/core/bindings/utils.py).</span>
+<span class="c1"># proxy_if_available makes each a stub where the loaded library lacks it.</span>
+<div class="viewcode-block" id="sqlite3_column_database_name">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.column.sqlite3_column_database_name">[docs]</a>
+<span class="nd">@proxy_if_available</span><span class="p">(</span><span class="n">_sqlite3_lib</span><span class="p">,</span> <span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_column_database_name"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_column_database_name</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the name of the database from which column ``idx`` of the statement ``stmt_p`` comes.</span>
+
+<span class="sd">    C reference: `sqlite3_column_database_name &lt;https://sqlite.org/c3ref/column_database_name.html&gt;`_.</span>
+
+<span class="sd">    Returns 0 for a column that is an expression or a subquery. The UTF-8 text is valid until the statement is</span>
+<span class="sd">    finalized or prepared again. SQLite has the function only when it is compiled with</span>
+<span class="sd">    ``SQLITE_ENABLE_COLUMN_METADATA``. If the loaded library lacks it, this binding is a stub: a call from Python</span>
+<span class="sd">    raises ``NotImplementedError``, and a jitted call fails to compile with a ``TypingError``. A stub has no</span>
+<span class="sd">    ``as_func``, so ``hasattr(sqlite3_column_database_name, "as_func")`` is true only when the binding is present.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_column_database_name"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_column_table_name">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.column.sqlite3_column_table_name">[docs]</a>
+<span class="nd">@proxy_if_available</span><span class="p">(</span><span class="n">_sqlite3_lib</span><span class="p">,</span> <span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_column_table_name"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_column_table_name</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the name of the table from which column ``idx`` of the statement ``stmt_p`` comes.</span>
+
+<span class="sd">    C reference: `sqlite3_column_table_name &lt;https://sqlite.org/c3ref/column_database_name.html&gt;`_.</span>
+
+<span class="sd">    Returns 0 for a column that is an expression or a subquery. The name is the table's original name, not an alias.</span>
+<span class="sd">    If the loaded library lacks the function, this binding is a stub, as :func:`sqlite3_column_database_name`</span>
+<span class="sd">    describes.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_column_table_name"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_column_origin_name">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.column.sqlite3_column_origin_name">[docs]</a>
+<span class="nd">@proxy_if_available</span><span class="p">(</span><span class="n">_sqlite3_lib</span><span class="p">,</span> <span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_column_origin_name"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_column_origin_name</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the name of the table column from which column ``idx`` of the statement ``stmt_p`` comes.</span>
+
+<span class="sd">    C reference: `sqlite3_column_origin_name &lt;https://sqlite.org/c3ref/column_database_name.html&gt;`_.</span>
+
+<span class="sd">    Returns 0 for a column that is an expression or a subquery. The name is the column's original name, not an alias.</span>
+<span class="sd">    If the loaded library lacks the function, this binding is a stub, as :func:`sqlite3_column_database_name`</span>
+<span class="sd">    describes.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_column_origin_name"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,</span> <span class="n">idx</span><span class="p">))</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

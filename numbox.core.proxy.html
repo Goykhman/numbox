@@ -1,0 +1,629 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.proxy &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/numbox.core.proxy.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="numbox.core.variable" href="numbox.core.variable.html" />
+    <link rel="prev" title="numbox.core.configurations" href="numbox.core.configurations.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">numbox</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.any.html">numbox.core.any</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.html">numbox.core.bindings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.sqlite.html">numbox.core.bindings.sqlite</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.cache_key.html">numbox.core.cache_key</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.configurations.html">numbox.core.configurations</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbox.core.proxy</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#using-the-decorator">Using the decorator</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#where-the-function-may-start">Where the function may start</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#default-arguments">Default arguments</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#exceptions">Exceptions</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#passing-the-function-as-a-value">Passing the function as a value</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#optional-c-symbols">Optional C symbols</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#caching">Caching</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#after-you-edit-a-proxied-function">After you edit a proxied function</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#after-you-upgrade-numbox">After you upgrade numbox</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#if-numbox-warns-of-an-alias-collision">If numbox warns of an alias collision</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#if-a-c-symbol-disappears">If a C symbol disappears</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#strict-mode">Strict mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#if-numbox-cannot-check-a-cache-entry">If numbox cannot check a cache entry</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#holding-the-function-as-a-module-level-constant">Holding the function as a module-level constant</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#modules">Modules</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#module-numbox.core.proxy.proxy">numbox.core.proxy.proxy</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.variable.html">numbox.core.variable</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.vector.html">numbox.core.vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.work.html">numbox.core.work</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.utils.html">numbox.utils</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">numbox</a></li>
+      <li class="breadcrumb-item active">numbox.core.proxy</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbox.core.proxy.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbox-core-proxy">
+<h1>numbox.core.proxy<a class="headerlink" href="#numbox-core-proxy" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>When one numba function calls another, numba links a copy of the callee’s compiled code into the caller. For a few
+small functions, the cost of these copies is negligible. For a function that many jitted callers share, each caller’s
+compiled code embeds its own copy of the callee, and each cached caller stores that copy on disk.</p>
+<p><a class="reference internal" href="#numbox.core.proxy.proxy.proxy" title="numbox.core.proxy.proxy.proxy"><code class="xref py py-func docutils literal notranslate"><span class="pre">proxy()</span></code></a> separates the caller from the callee. The decorated function, called the proxied
+function below, is compiled when its module is imported, for the signature passed to the decorator. A caller’s compiled
+code holds a declaration of the compiled function and a call to it, not a copy. The compiled function therefore exists
+in one place. The module-level constant form described in <a class="reference internal" href="#holding-the-function-as-a-module-level-constant">Holding the function as a module-level constant</a> is the
+exception: it embeds a copy.</p>
+<p>The drawback is that LLVM cannot inline the call. The decorator is therefore suited to functions whose work takes longer
+than the call itself. numbox uses it mainly for its bindings: a binding is a proxied function that wraps one C function,
+such as the bindings to libc and to SQLite in <a class="reference internal" href="numbox.core.bindings.html"><span class="doc">numbox.core.bindings</span></a>. Any function that many cached callers share
+is a candidate.</p>
+</section>
+<section id="using-the-decorator">
+<h2>Using the decorator<a class="headerlink" href="#using-the-decorator" title="Link to this heading"></a></h2>
+<p>Decorate the function with its signature. The signature is required, because the body is compiled at import time,
+before any call could supply argument types. <a class="reference internal" href="#where-the-function-may-start">Where the function may start</a> explains the length of the module docstring
+below. The following example is saved as <code class="docutils literal notranslate"><span class="pre">mymodule.py</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="sd">"""A module with a proxied function and a cached caller.</span>
+
+<span class="sd">The @proxy line must be on line 8 of the file or later; this docstring makes the room.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">float64</span><span class="p">,</span> <span class="n">njit</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span>
+
+
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">float64</span><span class="p">(</span><span class="n">float64</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="p">{</span><span class="s2">"cache"</span><span class="p">:</span> <span class="kc">True</span><span class="p">})</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">scale</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="mf">2.0</span> <span class="o">*</span> <span class="n">x</span>
+
+
+<span class="nd">@njit</span><span class="p">(</span><span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">total</span><span class="p">(</span><span class="n">xs</span><span class="p">):</span>
+    <span class="n">acc</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">xs</span><span class="p">:</span>
+        <span class="n">acc</span> <span class="o">+=</span> <span class="n">scale</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">acc</span>
+</pre></div>
+</div>
+<p>After the decoration, the name <code class="docutils literal notranslate"><span class="pre">scale</span></code> refers to a numba dispatcher for a small wrapper that numbox generates around
+the compiled body. The wrapper is named <code class="docutils literal notranslate"><span class="pre">__scale</span></code>, so expect that name, not <code class="docutils literal notranslate"><span class="pre">scale</span></code>, in numba’s messages. Python
+code calls <code class="docutils literal notranslate"><span class="pre">scale</span></code> as before. Jitted code such as <code class="docutils literal notranslate"><span class="pre">total</span></code> calls the body by a name that numbox registers in every
+process, the alias that <a class="reference internal" href="#caching">Caching</a> describes. When <code class="docutils literal notranslate"><span class="pre">total</span></code> is cached, its cache entry holds that name instead of a
+copy of the body’s code. A call succeeds when numba can convert the argument to the signature’s type, such as an <code class="docutils literal notranslate"><span class="pre">int</span></code>
+for a <code class="docutils literal notranslate"><span class="pre">float64</span></code>. A call from Python with any other type raises numba’s <code class="docutils literal notranslate"><span class="pre">TypeError:</span> <span class="pre">No</span> <span class="pre">matching</span> <span class="pre">definition</span> <span class="pre">for</span>
+<span class="pre">argument</span> <span class="pre">type(s)</span></code>; from jitted code, such a call fails to compile, and numba reports a failed cast to the signature’s
+type.</p>
+<p>The body is cached only on request. The second argument, <code class="docutils literal notranslate"><span class="pre">jit_options</span></code>, is passed to <code class="docutils literal notranslate"><span class="pre">njit</span></code> for the body and for
+the generated wrapper. Pass <code class="docutils literal notranslate"><span class="pre">{&quot;cache&quot;:</span> <span class="pre">True}</span></code> as above, or pass <code class="docutils literal notranslate"><span class="pre">numbox.core.configurations.jit_options</span></code>, the
+setting numbox’s own bindings use. That setting enables caching unless the <code class="docutils literal notranslate"><span class="pre">NUMBOX_JIT_OPTIONS</span></code> environment variable
+disables it. It also disables caching when numba can write no cache for numbox’s own files, and your function is then
+not cached either (<a class="reference internal" href="numbox.core.configurations.html"><span class="doc">numbox.core.configurations</span></a>). Under <code class="docutils literal notranslate"><span class="pre">NUMBA_OPT=0</span></code>, a debugging setting, numba does not cache
+a caller of a proxied function and warns that the caller uses dynamic globals; the caller then compiles on every run.</p>
+<section id="where-the-function-may-start">
+<span id="proxy-where-the-function-may-start"></span><h3>Where the function may start<a class="headerlink" href="#where-the-function-may-start" title="Link to this heading"></a></h3>
+<p>The function’s first decorator line must be on line 8 of its file or later. That line is the <code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code> line, or the
+topmost decorator when others are stacked above it, because Python records the line of a decorated function as the line
+of its first decorator. numbox compiles the generated wrapper as though it were defined at that line of your file, so
+that numba caches the wrapper with your module and detects your edits. The wrapper’s own source has seven lines of
+helper code above its decorator. That decorator therefore cannot be above line 8. A function nearer the top is refused
+at import with a <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> that says where to move it. In the example, the module docstring moves the <code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code>
+line to line 8 or later.</p>
+<p>Other decorators may be stacked above <code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code>. A decorator between <code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code> and <code class="docutils literal notranslate"><span class="pre">def</span></code> runs first, so numba
+compiles whatever that decorator returns in place of your function. Put a decorator there only if it returns the
+function unchanged.</p>
+<p>A proxied function cannot take <code class="docutils literal notranslate"><span class="pre">*args</span></code> or <code class="docutils literal notranslate"><span class="pre">**kwargs</span></code>. Such a function fails at import.</p>
+</section>
+<section id="default-arguments">
+<h3>Default arguments<a class="headerlink" href="#default-arguments" title="Link to this heading"></a></h3>
+<p>For a function with default arguments, pass <code class="docutils literal notranslate"><span class="pre">&#64;proxy</span></code> a list of signatures. The first is the main signature. Each
+further signature describes a call that omits trailing defaulted parameters. In such a signature, each omitted parameter
+appears as numba’s <code class="docutils literal notranslate"><span class="pre">Omitted</span></code> type, constructed with the default value:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="sd">"""A proxied function with a default argument.</span>
+
+<span class="sd">The @proxy line must be on line 8 of the file or later; this docstring makes the room.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">float64</span><span class="p">,</span> <span class="n">njit</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">Omitted</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span>
+
+
+<span class="nd">@proxy</span><span class="p">([</span><span class="n">float64</span><span class="p">(</span><span class="n">float64</span><span class="p">,</span> <span class="n">float64</span><span class="p">),</span> <span class="n">float64</span><span class="p">(</span><span class="n">float64</span><span class="p">,</span> <span class="n">Omitted</span><span class="p">(</span><span class="mf">1.3</span><span class="p">))])</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">shift</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="mf">1.3</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+
+
+<span class="nd">@njit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">use</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">shift</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">+</span> <span class="n">shift</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">)</span>   <span class="c1"># 2.3 + 3.0 for x = 1.0</span>
+</pre></div>
+</div>
+</section>
+<section id="exceptions">
+<h3>Exceptions<a class="headerlink" href="#exceptions" title="Link to this heading"></a></h3>
+<p>If the body raises an exception, a call to <code class="docutils literal notranslate"><span class="pre">scale</span></code>, from Python or from jitted code, does not propagate it. The call
+reaches the body through its C entry point, of the kind that <code class="docutils literal notranslate"><span class="pre">&#64;cfunc</span></code> builds. That entry point cannot propagate a
+Python exception to its caller. Python prints the exception to stderr below a line that begins
+<code class="docutils literal notranslate"><span class="pre">Exception</span> <span class="pre">ignored</span> <span class="pre">in:</span></code>. The call returns a zero of the signature’s return type. If the body can raise, pass the
+function as a value, as the next section shows, or report failure through the return value.</p>
+</section>
+</section>
+<section id="passing-the-function-as-a-value">
+<span id="proxy-passing-as-value"></span><h2>Passing the function as a value<a class="headerlink" href="#passing-the-function-as-a-value" title="Link to this heading"></a></h2>
+<p>Jitted code that takes a function as an argument needs a function value, not a dispatcher. The dispatcher’s attribute
+<code class="docutils literal notranslate"><span class="pre">.as_func</span></code> is such a value for the main signature: a <a class="reference external" href="https://numba.readthedocs.io/en/stable/reference/types.html#functions">first-class function value</a>. When you pass <code class="docutils literal notranslate"><span class="pre">.as_func</span></code>, an exception
+raised in the body propagates. The receiving function also remains cacheable. The following example is saved in a second
+file, <code class="docutils literal notranslate"><span class="pre">callers.py</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">njit</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">mymodule</span><span class="w"> </span><span class="kn">import</span> <span class="n">scale</span>
+
+
+<span class="nd">@njit</span><span class="p">(</span><span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">apply</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">f</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+
+
+<span class="n">apply</span><span class="p">(</span><span class="n">scale</span><span class="o">.</span><span class="n">as_func</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Read <code class="docutils literal notranslate"><span class="pre">.as_func</span></code> in Python and pass the value to the jitted function as an argument. Jitted code cannot read an
+attribute of a dispatcher, and <code class="docutils literal notranslate"><span class="pre">scale.as_func</span></code> inside a jitted function fails to compile. The value has only the main
+signature, so a call through it must pass every parameter: <code class="docutils literal notranslate"><span class="pre">shift.as_func</span></code> takes two arguments, and the default for
+<code class="docutils literal notranslate"><span class="pre">y</span></code> applies only to calls of <code class="docutils literal notranslate"><span class="pre">shift</span></code> itself.</p>
+<p>An exception raised inside the body propagates out of a call made through <code class="docutils literal notranslate"><span class="pre">.as_func</span></code>. To keep that propagation, let
+numba infer the type of the parameter that receives the value, as <code class="docutils literal notranslate"><span class="pre">apply</span></code> does. The value then keeps its own type,
+which numba prints as <code class="docutils literal notranslate"><span class="pre">DeriveFunctionType[float64(float64)]</span></code>, and the exception propagates.</p>
+<p>If the parameter is declared as a plain numba function type instead, numba converts the value to a plain function
+value when Python code passes it to the jitted function. The jitted function calls the body through its C entry point.
+An exception is then discarded, as it is for a call to the dispatcher. Such a declaration is
+<code class="docutils literal notranslate"><span class="pre">&#64;njit(float64(FunctionType(float64(float64)),</span> <span class="pre">float64))</span></code>, with <code class="docutils literal notranslate"><span class="pre">FunctionType</span></code> from <code class="docutils literal notranslate"><span class="pre">numba.types</span></code>.</p>
+<p>Do not pass the dispatcher itself, as in <code class="docutils literal notranslate"><span class="pre">apply(scale,</span> <span class="pre">3.0)</span></code>. numba derives the type of that parameter from the
+dispatcher object. The type’s name includes the memory address of the function that the dispatcher wraps, an address
+that differs in every process. A cached <code class="docutils literal notranslate"><span class="pre">apply</span></code> then recompiles on every run and adds a cache entry each time.
+<code class="docutils literal notranslate"><span class="pre">.as_func</span></code> has the same type in every process, so <code class="docutils literal notranslate"><span class="pre">apply</span></code> compiles once and loads from the cache after that.</p>
+<p>Below numba 0.68.0, a tuple that mixes <code class="docutils literal notranslate"><span class="pre">.as_func</span></code> with a function value of another type, such as a <code class="docutils literal notranslate"><span class="pre">&#64;cfunc</span></code>, an
+<code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code> function compiled for a signature, numba’s own <code class="docutils literal notranslate"><span class="pre">CompileResultWAP</span></code> or an <code class="docutils literal notranslate"><span class="pre">.as_func</span></code> of another signature,
+can fail with an <code class="docutils literal notranslate"><span class="pre">AssertionError</span></code> that has no message. numba 0.68.0 accepts such a tuple. A lazily compiled <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code>
+function that takes as many arguments as an <code class="docutils literal notranslate"><span class="pre">.as_func</span></code> cannot share a tuple with it on any numba version: the call
+raises a <code class="docutils literal notranslate"><span class="pre">TypeError</span></code>. The <a class="reference internal" href="numbox.core.work.html#derive-mixed-function-values"><span class="std std-ref">work page</span></a> lists this limit alongside related ones.
+For reference, the value’s class is <a class="reference internal" href="numbox.utils.html#numbox.utils.derive_wap.DeriveWAP" title="numbox.utils.derive_wap.DeriveWAP"><code class="xref py py-class docutils literal notranslate"><span class="pre">DeriveWAP</span></code></a> and its numba type is
+<a class="reference internal" href="numbox.utils.html#numbox.utils.derive_wap.DeriveFunctionType" title="numbox.utils.derive_wap.DeriveFunctionType"><code class="xref py py-class docutils literal notranslate"><span class="pre">DeriveFunctionType</span></code></a>.</p>
+</section>
+<section id="optional-c-symbols">
+<span id="proxy-optional-c-symbols"></span><h2>Optional C symbols<a class="headerlink" href="#optional-c-symbols" title="Link to this heading"></a></h2>
+<p>A binding to a C library can name a symbol that older versions of the library lack.
+<a class="reference internal" href="#numbox.core.proxy.proxy.proxy_if_available" title="numbox.core.proxy.proxy.proxy_if_available"><code class="xref py py-func docutils literal notranslate"><span class="pre">proxy_if_available()</span></code></a> takes the loaded library and first checks it for an attribute with
+the decorated function’s name. The function must therefore be named after the C symbol. The following example is saved
+as <code class="docutils literal notranslate"><span class="pre">mybindings.py</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="sd">"""A binding to a C symbol that may be absent.</span>
+
+<span class="sd">The decorator line must be on line 8 of the file or later; this docstring makes the room.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">float64</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExternalFunction</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_lib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy_if_available</span>
+
+<span class="n">lib</span> <span class="o">=</span> <span class="n">load_lib</span><span class="p">(</span><span class="s2">"m"</span><span class="p">)</span>
+<span class="n">_cos</span> <span class="o">=</span> <span class="n">ExternalFunction</span><span class="p">(</span><span class="s2">"cos"</span><span class="p">,</span> <span class="n">float64</span><span class="p">(</span><span class="n">float64</span><span class="p">))</span>
+
+
+<span class="nd">@proxy_if_available</span><span class="p">(</span><span class="n">lib</span><span class="p">,</span> <span class="n">float64</span><span class="p">(</span><span class="n">float64</span><span class="p">))</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">cos</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">_cos</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><a class="reference internal" href="numbox.core.bindings.html#numbox.core.bindings.utils.load_lib" title="numbox.core.bindings.utils.load_lib"><code class="xref py py-func docutils literal notranslate"><span class="pre">load_lib()</span></code></a> opens the library in global symbol mode, so that compiled code can resolve
+its symbols; a <code class="docutils literal notranslate"><span class="pre">ctypes.CDLL</span></code> opened without that mode is not visible to the compiled code. The body calls the C
+function through numba’s <code class="docutils literal notranslate"><span class="pre">ExternalFunction</span></code>, which names the symbol and its C signature. numbox’s own bindings call a
+private helper instead, <code class="docutils literal notranslate"><span class="pre">_call_lib_func</span></code>, which serves only the symbols in numbox’s table
+<code class="docutils literal notranslate"><span class="pre">numbox.core.bindings.signatures</span></code>. Every libm has <code class="docutils literal notranslate"><span class="pre">cos</span></code>, so <code class="docutils literal notranslate"><span class="pre">proxy_if_available</span></code> never returns a stub in this
+example. The example uses <code class="docutils literal notranslate"><span class="pre">cos</span></code> in place of a symbol such as <code class="docutils literal notranslate"><span class="pre">sqlite3_changes64</span></code>, which SQLite added in
+version 3.37. numbox guards that symbol in the same way.</p>
+<p>If the symbol is present, the result is an ordinary proxied function. If it is absent, the result is a stub: a Python
+call raises <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code>, and a jitted caller fails to compile with a <code class="docutils literal notranslate"><span class="pre">TypingError</span></code> that names the binding
+and says that its C symbol is missing. The stub has no <code class="docutils literal notranslate"><span class="pre">.as_func</span></code>, so code that passes the function as a value checks
+for it first:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">callers</span><span class="w"> </span><span class="kn">import</span> <span class="n">apply</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mybindings</span><span class="w"> </span><span class="kn">import</span> <span class="n">cos</span>
+
+<span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">cos</span><span class="p">,</span> <span class="s2">"as_func"</span><span class="p">):</span>
+    <span class="n">apply</span><span class="p">(</span><span class="n">cos</span><span class="o">.</span><span class="n">as_func</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="caching">
+<h2>Caching<a class="headerlink" href="#caching" title="Link to this heading"></a></h2>
+<p>After a caller is cached, three things can change: the proxied function, when you edit it; numbox, when you upgrade it;
+and the C library that a binding calls. numbox repairs the first two cases automatically and reports the third. The one
+form it cannot repair is the module-level constant of <a class="reference internal" href="#holding-the-function-as-a-module-level-constant">Holding the function as a module-level constant</a>.</p>
+<section id="after-you-edit-a-proxied-function">
+<h3>After you edit a proxied function<a class="headerlink" href="#after-you-edit-a-proxied-function" title="Link to this heading"></a></h3>
+<p>Cached callers in other files still refer to the old version. On the next run, numbox recompiles each of them and
+warns once per stale cache entry:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">StaleProxyCacheWarning</span><span class="p">:</span> <span class="n">numbox</span><span class="p">:</span> <span class="n">discarding</span> <span class="n">a</span> <span class="n">stale</span> <span class="n">numba</span> <span class="n">cache</span> <span class="n">entry</span> <span class="ow">and</span> <span class="n">recompiling</span><span class="p">:</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">vec_scale</span><span class="o">-</span><span class="mf">7.</span><span class="n">py312</span>
+<span class="n">references</span> <span class="nd">@proxy</span> <span class="n">cfunc</span> <span class="n">alias</span><span class="p">(</span><span class="n">es</span><span class="p">)</span> <span class="n">this</span> <span class="n">process</span> <span class="n">cannot</span> <span class="n">call</span> <span class="p">(</span><span class="n">the</span> <span class="n">proxied</span> <span class="n">body</span><span class="p">,</span> <span class="n">signature</span> <span class="ow">or</span> <span class="n">jit_options</span> <span class="n">changed</span>
+<span class="n">since</span> <span class="n">the</span> <span class="n">caller</span> <span class="n">was</span> <span class="n">cached</span><span class="p">,</span> <span class="ow">or</span> <span class="n">the</span> <span class="n">binding</span> <span class="ow">is</span> <span class="n">no</span> <span class="n">longer</span> <span class="n">available</span><span class="p">):</span> <span class="n">numbox_pxy_scale_e653de386ea6678b</span>
+</pre></div>
+</div>
+<p>The first name in the warning is the caller’s cache entry: its module, its function, the line of its decorator and the
+Python version, here a caller <code class="docutils literal notranslate"><span class="pre">vec_scale</span></code> in a module <code class="docutils literal notranslate"><span class="pre">pipeline</span></code>. In later runs, numbox issues no such warning. You
+do not need to clear the cache. numba itself recompiles the callers in the same file as the proxied function, because it
+detects that the file has changed. The repair covers callers decorated with <code class="docutils literal notranslate"><span class="pre">&#64;njit</span></code>, <code class="docutils literal notranslate"><span class="pre">&#64;vectorize</span></code>, <code class="docutils literal notranslate"><span class="pre">&#64;guvectorize</span></code>
+and <code class="docutils literal notranslate"><span class="pre">&#64;cfunc</span></code>. The exception is a caller that holds <code class="docutils literal notranslate"><span class="pre">.as_func</span></code> as a module-level constant; see <a class="reference internal" href="#holding-the-function-as-a-module-level-constant">Holding the function
+as a module-level constant</a>.</p>
+<p>The name at the end of the warning is the alias of the compiled body: a symbol that numbox registers in each process,
+through which callers reach the body. numbox computes the alias from the body’s code and the values it captures
+(closure variables, defaults and the globals it reads), from the function’s module and name, and from its signature and
+jit options. The same body therefore has the same alias in every process. Any change to those inputs renames the alias.</p>
+<p>numba’s cache key for a caller <a class="reference internal" href="numbox.core.cache_key.html#cache-key-leaves-out"><span class="std std-ref">does not include the callees</span></a>, so numbox checks each cache
+entry as numba loads it, and discards and recompiles an entry that refers to an alias this process has not registered.
+Without the check, the entry would load with the old alias, and the process would end in a segmentation fault or an
+<code class="docutils literal notranslate"><span class="pre">LLVM</span> <span class="pre">ERROR:</span> <span class="pre">Symbol</span> <span class="pre">not</span> <span class="pre">found</span></code> abort. The check does not depend on import order: a caller imports the module of the
+function it calls, that module imports <code class="docutils literal notranslate"><span class="pre">numbox.core.proxy.proxy</span></code>, and the check is installed when that module is
+imported.</p>
+</section>
+<section id="after-you-upgrade-numbox">
+<span id="proxy-after-upgrade"></span><h3>After you upgrade numbox<a class="headerlink" href="#after-you-upgrade-numbox" title="Link to this heading"></a></h3>
+<p>numbox’s version is part of the cache key of every proxied function, as <a class="reference internal" href="numbox.core.cache_key.html"><span class="doc">numbox.core.cache_key</span></a> explains. The first
+run after an upgrade therefore compiles each proxied body and its wrapper once more and caches them again. The alias
+does not include the version, so cached callers load as before. A release that changes the code of one of numbox’s
+bindings renames that binding’s alias. A release that changes how aliases are computed renames every alias, including
+the aliases of your own proxied functions. numbox repairs each affected cached caller in the first run after such a
+release and issues one warning of the kind shown above per caller. The recompilation and the repairs are one-time costs.
+A caller that holds a numbox binding as a module-level constant is again the exception. You must clear its cache entry
+manually, as <a class="reference internal" href="#holding-the-function-as-a-module-level-constant">Holding the function as a module-level constant</a> explains.</p>
+</section>
+<section id="if-numbox-warns-of-an-alias-collision">
+<span id="proxy-alias-collision"></span><h3>If numbox warns of an alias collision<a class="headerlink" href="#if-numbox-warns-of-an-alias-collision" title="Link to this heading"></a></h3>
+<p>An <a class="reference internal" href="#numbox.core.proxy.proxy.AliasCollisionWarning" title="numbox.core.proxy.proxy.AliasCollisionWarning"><code class="xref py py-class docutils literal notranslate"><span class="pre">AliasCollisionWarning</span></code></a> means that two different proxied functions computed the
+same alias. The alias can include a captured value only if the value is the same in every process. A numba
+<code class="docutils literal notranslate"><span class="pre">ExternalFunction</span></code> is the same in every process, and so is a C function reached as an attribute of the loaded
+library, such as <code class="docutils literal notranslate"><span class="pre">lib.strlen</span></code>. A ctypes function built from a raw integer address is not the same in every process,
+because address space layout randomization changes the address from one process to the next. numbox therefore excludes
+such a function from the alias. Two bodies that differ only in such a value then have the same alias, because numbox
+cannot distinguish them.</p>
+<p>The remedy is to reach the C function as an attribute of the loaded library rather than through a pointer built from
+an address. Until you apply it, numbox assigns the second body a name that is used only in this process and stops using
+the shared alias. Cached callers of either body then recompile in every process instead of running the wrong body.
+Registering the same body twice is not a collision. After a module reload, or when a function that builds proxied
+functions is called twice with equal arguments, the alias is pointed at the new compilation and numbox keeps using it.</p>
+<p>The same warning can also report a <code class="docutils literal notranslate"><span class="pre">proxy_if_available</span></code> symbol whose availability differs between two decorations in
+the same process; the message says which body callers reach.</p>
+</section>
+<section id="if-a-c-symbol-disappears">
+<h3>If a C symbol disappears<a class="headerlink" href="#if-a-c-symbol-disappears" title="Link to this heading"></a></h3>
+<p>Suppose a caller of a <code class="docutils literal notranslate"><span class="pre">proxy_if_available</span></code> binding was cached where the library has the symbol, and later runs where
+it does not. numbox discards the caller’s cache entry with a <code class="docutils literal notranslate"><span class="pre">StaleProxyCacheWarning</span></code>. The recompilation then fails
+with the same <code class="docutils literal notranslate"><span class="pre">TypingError</span></code> as a compilation with an empty cache.</p>
+</section>
+<section id="strict-mode">
+<h3>Strict mode<a class="headerlink" href="#strict-mode" title="Link to this heading"></a></h3>
+<p>Set <code class="docutils literal notranslate"><span class="pre">NUMBOX_PROXY_CACHE_STRICT</span></code> to make a stale entry fail instead of being repaired, for example to make a test run
+fail or to keep the entry on disk for inspection. Any value except <code class="docutils literal notranslate"><span class="pre">0</span></code>, <code class="docutils literal notranslate"><span class="pre">false</span></code>, <code class="docutils literal notranslate"><span class="pre">no</span></code>, <code class="docutils literal notranslate"><span class="pre">off</span></code> or the empty
+string, in upper or lower case, enables strict mode. For a stale alias, numbox then raises
+<a class="reference internal" href="#numbox.core.proxy.proxy.StaleProxyCacheError" title="numbox.core.proxy.proxy.StaleProxyCacheError"><code class="xref py py-class docutils literal notranslate"><span class="pre">StaleProxyCacheError</span></code></a> instead of discarding the entry. A test run can also turn the
+warning itself into an error with pytest’s <code class="docutils literal notranslate"><span class="pre">-W</span> <span class="pre">error::numbox.core.proxy.proxy.StaleProxyCacheWarning</span></code>.</p>
+</section>
+<section id="if-numbox-cannot-check-a-cache-entry">
+<h3>If numbox cannot check a cache entry<a class="headerlink" href="#if-numbox-cannot-check-a-cache-entry" title="Link to this heading"></a></h3>
+<p>The check reads the compiled code in each cache entry to find the aliases it refers to. If the check cannot read an
+entry, because a numba release changed the entry’s layout or the file is damaged, numbox loads the entry unchecked and
+warns once per process with <a class="reference internal" href="#numbox.core.proxy.proxy.UnvalidatedProxyCacheWarning" title="numbox.core.proxy.proxy.UnvalidatedProxyCacheWarning"><code class="xref py py-class docutils literal notranslate"><span class="pre">UnvalidatedProxyCacheWarning</span></code></a>. In strict mode the load
+raises <a class="reference internal" href="#numbox.core.proxy.proxy.UnvalidatedProxyCacheError" title="numbox.core.proxy.proxy.UnvalidatedProxyCacheError"><code class="xref py py-class docutils literal notranslate"><span class="pre">UnvalidatedProxyCacheError</span></code></a> instead.</p>
+</section>
+</section>
+<section id="holding-the-function-as-a-module-level-constant">
+<span id="proxy-module-level-constant"></span><h2>Holding the function as a module-level constant<a class="headerlink" href="#holding-the-function-as-a-module-level-constant" title="Link to this heading"></a></h2>
+<p>numba reads a module-level variable as a compile-time constant, so jitted code can read <code class="docutils literal notranslate"><span class="pre">.as_func</span></code> from one, although
+it cannot read <code class="docutils literal notranslate"><span class="pre">scale.as_func</span></code> itself. The following example is saved as <code class="docutils literal notranslate"><span class="pre">constant.py</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">njit</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">mymodule</span><span class="w"> </span><span class="kn">import</span> <span class="n">scale</span>
+
+<span class="n">SCALE</span> <span class="o">=</span> <span class="n">scale</span><span class="o">.</span><span class="n">as_func</span>
+
+
+<span class="nd">@njit</span><span class="p">(</span><span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">twice</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">SCALE</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">+</span> <span class="n">SCALE</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>In this form, the caller makes a direct call to the body. LLVM can inline that call. An exception raised in the body
+propagates, as it does when <code class="docutils literal notranslate"><span class="pre">.as_func</span></code> is passed as an argument. <code class="docutils literal notranslate"><span class="pre">twice</span></code> is cacheable: when numbox lowers the
+constant, it links the body’s compiled code into the caller, as numba does for an ordinary callee. Because of the two
+costs below, prefer passing <code class="docutils literal notranslate"><span class="pre">.as_func</span></code> as an argument unless the inlining matters.</p>
+<p>The first cost is the one the overview describes: <code class="docutils literal notranslate"><span class="pre">twice</span></code> embeds its own copy of the compiled body. The second is that
+the copy becomes stale silently. The caller’s compiled code names no alias, so numbox’s check cannot detect an edit to
+the body, and numba checks only the caller’s own source file for changes. After you edit the body, <code class="docutils literal notranslate"><span class="pre">twice</span></code> may keep
+returning the old result, and numbox gives no warning. The same happens after a numbox upgrade when the constant is a
+numbox binding. A <code class="docutils literal notranslate"><span class="pre">StaleProxyCacheWarning</span></code> in the same run names other callers, but it never names this caller.</p>
+<p>The remedy is to delete the caller’s cache files. Their names are the module, the function, the line of its decorator
+and the Python version, here <code class="docutils literal notranslate"><span class="pre">constant.twice-8.py312.nbi</span></code> and <code class="docutils literal notranslate"><span class="pre">constant.twice-8.py312.1.nbc</span></code>. They are:</p>
+<ul class="simple">
+<li><p>in a subdirectory of <code class="docutils literal notranslate"><span class="pre">NUMBA_CACHE_DIR</span></code> named after the source’s directory, if that variable is set;</p></li>
+<li><p>otherwise in the <code class="docutils literal notranslate"><span class="pre">__pycache__</span></code> directory beside the caller’s source;</p></li>
+<li><p>or in numba’s user cache directory, if numba could not write that <code class="docutils literal notranslate"><span class="pre">__pycache__</span></code>; the configurations page explains
+<a class="reference internal" href="numbox.core.configurations.html#where-the-cache-lands"><span class="std std-ref">where numba writes the cache</span></a>.</p></li>
+</ul>
+<p>Even when <code class="docutils literal notranslate"><span class="pre">twice</span></code> and <code class="docutils literal notranslate"><span class="pre">scale</span></code> return the same result, the cache entry may still hold the old body, so delete the
+files after every edit of the body.</p>
+<p>A binding that <code class="docutils literal notranslate"><span class="pre">proxy_if_available</span></code> may find absent needs care in this form. Where the symbol is missing, a caller
+that was cached while the symbol was present still loads. When that caller runs, the process can end in a segmentation
+fault without any message on stderr. With an empty cache, a caller such as <code class="docutils literal notranslate"><span class="pre">use_const</span></code> below fails to compile with a
+<code class="docutils literal notranslate"><span class="pre">TypingError</span></code>. A run with a warm cache and a run with an empty cache therefore behave differently. Strict mode cannot
+detect this case, because the caller’s compiled code names no alias for the check to find.</p>
+<p>Two forms cannot become stale. In the first form, your module reads <code class="docutils literal notranslate"><span class="pre">.as_func</span></code> with no check and therefore requires
+the symbol: where the symbol is absent, the import fails on the missing attribute before any cache is reached. In the
+second form, the caller receives <code class="docutils literal notranslate"><span class="pre">.as_func</span></code> as an argument, as <code class="docutils literal notranslate"><span class="pre">apply</span></code> does: the value is supplied at call time, and
+a stub has no value to pass.</p>
+<p>Of the two guarded forms below, one is safe and one is not:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">njit</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">mybindings</span><span class="w"> </span><span class="kn">import</span> <span class="n">cos</span>
+
+<span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">cos</span><span class="p">,</span> <span class="s2">"as_func"</span><span class="p">):</span>
+    <span class="n">COS</span> <span class="o">=</span> <span class="n">cos</span><span class="o">.</span><span class="n">as_func</span>
+
+    <span class="nd">@njit</span><span class="p">(</span><span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">use</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">COS</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>              <span class="c1"># safe: the caller exists only where the binding does</span>
+
+
+<span class="n">MAYBE_COS</span> <span class="o">=</span> <span class="n">cos</span><span class="o">.</span><span class="n">as_func</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">cos</span><span class="p">,</span> <span class="s2">"as_func"</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span>
+
+
+<span class="nd">@njit</span><span class="p">(</span><span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">use_const</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">MAYBE_COS</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>            <span class="c1"># not safe: the cached entry loads the binding from the run that had it</span>
+</pre></div>
+</div>
+<p>The last form is unsafe because numba’s cache key does not include the value of a module-level variable such as
+<code class="docutils literal notranslate"><span class="pre">MAYBE_COS</span></code>. The cached <code class="docutils literal notranslate"><span class="pre">use_const</span></code> loads with the body it embedded when it was compiled, whatever <code class="docutils literal notranslate"><span class="pre">MAYBE_COS</span></code> now
+holds.</p>
+</section>
+<section id="modules">
+<h2>Modules<a class="headerlink" href="#modules" title="Link to this heading"></a></h2>
+<section id="module-numbox.core.proxy.proxy">
+<span id="numbox-core-proxy-proxy"></span><h3>numbox.core.proxy.proxy<a class="headerlink" href="#module-numbox.core.proxy.proxy" title="Link to this heading"></a></h3>
+<p>A decorator that compiles a function once and lets jitted callers call that copy instead of embedding their own.</p>
+<p><a class="reference internal" href="#numbox.core.proxy.proxy.proxy" title="numbox.core.proxy.proxy.proxy"><code class="xref py py-func docutils literal notranslate"><span class="pre">proxy()</span></code></a> compiles the decorated function at import. A jitted caller of the result holds a declaration of the
+compiled function and a call to it, not a copy of its code. <a class="reference internal" href="#numbox.core.proxy.proxy.proxy_if_available" title="numbox.core.proxy.proxy.proxy_if_available"><code class="xref py py-func docutils literal notranslate"><span class="pre">proxy_if_available()</span></code></a> does the same for a binding to a
+C symbol that the loaded library may lack. numbox registers each compiled function under an alias that is the same in
+every process. It also checks the entries of numba’s CPU cache as numba loads them. If an entry refers to an alias
+that this process cannot call, numbox discards the entry, and numba compiles the caller again. The warning and error
+classes report what the check finds, and <a class="reference internal" href="#numbox.core.proxy.proxy.AliasCollisionWarning" title="numbox.core.proxy.proxy.AliasCollisionWarning"><code class="xref py py-class docutils literal notranslate"><span class="pre">AliasCollisionWarning</span></code></a> reports two functions that computed the same
+alias.</p>
+<dl class="py exception">
+<dt class="sig sig-object py" id="numbox.core.proxy.proxy.AliasCollisionWarning">
+<em class="property"><span class="pre">exception</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.proxy.proxy.</span></span><span class="sig-name descname"><span class="pre">AliasCollisionWarning</span></span><a class="reference internal" href="_modules/numbox/core/proxy/proxy.html#AliasCollisionWarning"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.proxy.proxy.AliasCollisionWarning" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">RuntimeWarning</span></code></p>
+<p>Warning that two different proxied functions computed the same alias, so that the alias identifies neither.</p>
+<p>numbox publishes the second function under a name of its own, used only in this process, and treats both names as
+stale in cache entries. Cached callers of either function therefore compile again in every process. The usual cause
+is a captured value that differs between processes, such as a ctypes function built from a raw address, which
+numbox leaves out of the alias. Access the C function as an attribute of the loaded library instead. The warning
+also reports a <a class="reference internal" href="#numbox.core.proxy.proxy.proxy_if_available" title="numbox.core.proxy.proxy.proxy_if_available"><code class="xref py py-func docutils literal notranslate"><span class="pre">proxy_if_available()</span></code></a> binding that is absent in one decoration and present in another in the
+same process. In that case, the message says which body a call through the alias runs.</p>
+</dd></dl>
+
+<dl class="py exception">
+<dt class="sig sig-object py" id="numbox.core.proxy.proxy.StaleProxyCacheError">
+<em class="property"><span class="pre">exception</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.proxy.proxy.</span></span><span class="sig-name descname"><span class="pre">StaleProxyCacheError</span></span><a class="reference internal" href="_modules/numbox/core/proxy/proxy.html#StaleProxyCacheError"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.proxy.proxy.StaleProxyCacheError" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">RuntimeError</span></code></p>
+<p>Error that strict mode raises in place of <a class="reference internal" href="#numbox.core.proxy.proxy.StaleProxyCacheWarning" title="numbox.core.proxy.proxy.StaleProxyCacheWarning"><code class="xref py py-class docutils literal notranslate"><span class="pre">StaleProxyCacheWarning</span></code></a> for a cache entry with a stale alias.</p>
+<p><code class="docutils literal notranslate"><span class="pre">NUMBOX_PROXY_CACHE_STRICT</span></code> enables strict mode. numbox raises the error before it discards the entry, so the
+stale entry stays on disk for inspection. By default, numbox discards the entry with the warning, and numba
+overwrites it with the code it compiles again. To recover, delete the caller’s numba cache files, or unset
+<code class="docutils literal notranslate"><span class="pre">NUMBOX_PROXY_CACHE_STRICT</span></code>.</p>
+</dd></dl>
+
+<dl class="py exception">
+<dt class="sig sig-object py" id="numbox.core.proxy.proxy.StaleProxyCacheWarning">
+<em class="property"><span class="pre">exception</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.proxy.proxy.</span></span><span class="sig-name descname"><span class="pre">StaleProxyCacheWarning</span></span><a class="reference internal" href="_modules/numbox/core/proxy/proxy.html#StaleProxyCacheWarning"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.proxy.proxy.StaleProxyCacheWarning" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">RuntimeWarning</span></code></p>
+<p>Warning that numbox discarded a cached function because it refers to an alias that this process cannot call.</p>
+<p>numba then compiles the function again and saves the new code over the stale entry. An alias is stale if the
+proxied function, its signature or its <code class="docutils literal notranslate"><span class="pre">jit_options</span></code> changed after the caller was cached, if a
+<a class="reference internal" href="#numbox.core.proxy.proxy.proxy_if_available" title="numbox.core.proxy.proxy.proxy_if_available"><code class="xref py py-func docutils literal notranslate"><span class="pre">proxy_if_available()</span></code></a> binding is absent in this process, or if an alias collision retired the alias. To make
+the warning an error, call <code class="docutils literal notranslate"><span class="pre">warnings.filterwarnings(&quot;error&quot;,</span> <span class="pre">category=StaleProxyCacheWarning)</span></code>, or run pytest
+with <code class="docutils literal notranslate"><span class="pre">-W</span> <span class="pre">error::numbox.core.proxy.proxy.StaleProxyCacheWarning</span></code>. The interpreter’s own <code class="docutils literal notranslate"><span class="pre">-W</span></code> option and
+<code class="docutils literal notranslate"><span class="pre">PYTHONWARNINGS</span></code> cannot name this class. Python reads them at startup, before site-packages is on the module
+path, so the class cannot be imported, and Python ignores the filter. <code class="docutils literal notranslate"><span class="pre">-W</span> <span class="pre">error::RuntimeWarning</span></code> works, because
+the class derives from <code class="docutils literal notranslate"><span class="pre">RuntimeWarning</span></code>.</p>
+</dd></dl>
+
+<dl class="py exception">
+<dt class="sig sig-object py" id="numbox.core.proxy.proxy.UnvalidatedProxyCacheError">
+<em class="property"><span class="pre">exception</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.proxy.proxy.</span></span><span class="sig-name descname"><span class="pre">UnvalidatedProxyCacheError</span></span><a class="reference internal" href="_modules/numbox/core/proxy/proxy.html#UnvalidatedProxyCacheError"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.proxy.proxy.UnvalidatedProxyCacheError" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">RuntimeError</span></code></p>
+<p>Error that strict mode raises in place of <a class="reference internal" href="#numbox.core.proxy.proxy.UnvalidatedProxyCacheWarning" title="numbox.core.proxy.proxy.UnvalidatedProxyCacheWarning"><code class="xref py py-class docutils literal notranslate"><span class="pre">UnvalidatedProxyCacheWarning</span></code></a> for an entry it cannot read.</p>
+<p><code class="docutils literal notranslate"><span class="pre">NUMBOX_PROXY_CACHE_STRICT</span></code> enables strict mode. Strict mode refuses to load an entry that numbox could not check,
+so that a gap in the check becomes visible. The cause can be a numba release that changed the layout of cache
+entries, or a damaged object. An entry that numbox reads without error, and in which it finds no stale alias, loads
+normally in strict mode too. A reader that missed the entry’s imports could produce the same result, but numbox
+cannot distinguish that case from a valid entry that holds the alias prefix only in a string constant.</p>
+</dd></dl>
+
+<dl class="py exception">
+<dt class="sig sig-object py" id="numbox.core.proxy.proxy.UnvalidatedProxyCacheWarning">
+<em class="property"><span class="pre">exception</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.proxy.proxy.</span></span><span class="sig-name descname"><span class="pre">UnvalidatedProxyCacheWarning</span></span><a class="reference internal" href="_modules/numbox/core/proxy/proxy.html#UnvalidatedProxyCacheWarning"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.proxy.proxy.UnvalidatedProxyCacheWarning" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">RuntimeWarning</span></code></p>
+<p>Warning that numbox could not read a numba cache entry and loaded it without checking it for stale aliases.</p>
+<p>numbox warns once per process, because the cause, such as a numba release that changed the layout of cache
+entries, usually affects every entry. In the strict mode that <code class="docutils literal notranslate"><span class="pre">NUMBOX_PROXY_CACHE_STRICT</span></code> enables, numbox raises
+<a class="reference internal" href="#numbox.core.proxy.proxy.UnvalidatedProxyCacheError" title="numbox.core.proxy.proxy.UnvalidatedProxyCacheError"><code class="xref py py-class docutils literal notranslate"><span class="pre">UnvalidatedProxyCacheError</span></code></a> instead.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.proxy.proxy.make_proxy_name">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.proxy.proxy.</span></span><span class="sig-name descname"><span class="pre">make_proxy_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/proxy/proxy.html#make_proxy_name"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.proxy.proxy.make_proxy_name" title="Link to this definition"></a></dt>
+<dd><p>Return the name of the wrapper that <a class="reference internal" href="#numbox.core.proxy.proxy.proxy" title="numbox.core.proxy.proxy.proxy"><code class="xref py py-func docutils literal notranslate"><span class="pre">proxy()</span></code></a> generates for a function named <code class="docutils literal notranslate"><span class="pre">name</span></code>.</p>
+<p>The name is <code class="docutils literal notranslate"><span class="pre">name</span></code> with two leading underscores. The dispatcher that <a class="reference internal" href="#numbox.core.proxy.proxy.proxy" title="numbox.core.proxy.proxy.proxy"><code class="xref py py-func docutils literal notranslate"><span class="pre">proxy()</span></code></a> returns has this name, and so
+does the stub that <a class="reference internal" href="#numbox.core.proxy.proxy.proxy_if_available" title="numbox.core.proxy.proxy.proxy_if_available"><code class="xref py py-func docutils literal notranslate"><span class="pre">proxy_if_available()</span></code></a> returns for an absent symbol. numba’s error messages use this name,
+not the function’s own.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.proxy.proxy.proxy">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.proxy.proxy.</span></span><span class="sig-name descname"><span class="pre">proxy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sig</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">jit_options</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/proxy/proxy.html#proxy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.proxy.proxy.proxy" title="Link to this definition"></a></dt>
+<dd><p>Compile the decorated function once, at import, so that jitted callers call it instead of embedding a copy.</p>
+<p><code class="docutils literal notranslate"><span class="pre">sig</span></code> is a numba signature such as <code class="docutils literal notranslate"><span class="pre">float64(float64)</span></code>, or a list of signatures for a function with default
+arguments. The first signature in a list is the main signature. Each further signature describes a call that omits
+trailing defaulted parameters, and it types each omitted parameter as numba’s <code class="docutils literal notranslate"><span class="pre">Omitted</span></code> of its default value. A
+signature given as a string fails with an <code class="docutils literal notranslate"><span class="pre">AttributeError</span></code>. <code class="docutils literal notranslate"><span class="pre">jit_options</span></code> is passed to <code class="docutils literal notranslate"><span class="pre">njit</span></code> for the
+function and for the wrapper that numbox generates around it. A value that is not a <code class="docutils literal notranslate"><span class="pre">dict</span></code> is ignored. The
+function is cached only if <code class="docutils literal notranslate"><span class="pre">jit_options</span></code> enables caching, as <code class="docutils literal notranslate"><span class="pre">{&quot;cache&quot;:</span> <span class="pre">True}</span></code> and
+<code class="docutils literal notranslate"><span class="pre">numbox.core.configurations.jit_options</span></code> do.</p>
+<p>The decorator returns the dispatcher of the wrapper. The dispatcher’s name is <code class="docutils literal notranslate"><span class="pre">__</span></code> followed by the function’s
+name, and its docstring is the function’s docstring. A call through the dispatcher, from Python or from jitted
+code, enters the compiled function through its C entry point, under an alias that numbox registers in every
+process. If the function raises, such a call does not propagate the exception: Python prints it to stderr, and the
+call returns a zero of the return type. The wrapper takes every parameter as positional-or-keyword, so a
+keyword-only parameter can also be passed by position.</p>
+<p>The dispatcher’s <code class="docutils literal notranslate"><span class="pre">.as_func</span></code> is the compiled function as a first-class function value, a
+<a class="reference internal" href="numbox.utils.html#numbox.utils.derive_wap.DeriveWAP" title="numbox.utils.derive_wap.DeriveWAP"><code class="xref py py-class docutils literal notranslate"><span class="pre">DeriveWAP</span></code></a>. It has only the main signature, so a call through it passes every
+parameter. Read it in Python and pass it to a jitted function as an argument, because jitted code cannot read it
+from the dispatcher. An exception raised in the function propagates out of a call through <code class="docutils literal notranslate"><span class="pre">.as_func</span></code>, unless
+Python passes the value into a parameter that the jitted function declares as a plain <code class="docutils literal notranslate"><span class="pre">FunctionType</span></code>.</p>
+<p>numbox computes the alias from the function’s module, qualified name, code and docstring, the values it captures,
+the main signature and <code class="docutils literal notranslate"><span class="pre">jit_options</span></code>. An edit to any of these renames the alias. numbox then discards each cached
+caller that refers to the old alias, and numba compiles the caller again. numbox warns once for each discarded entry
+with <a class="reference internal" href="#numbox.core.proxy.proxy.StaleProxyCacheWarning" title="numbox.core.proxy.proxy.StaleProxyCacheWarning"><code class="xref py py-class docutils literal notranslate"><span class="pre">StaleProxyCacheWarning</span></code></a>, or raises <a class="reference internal" href="#numbox.core.proxy.proxy.StaleProxyCacheError" title="numbox.core.proxy.proxy.StaleProxyCacheError"><code class="xref py py-class docutils literal notranslate"><span class="pre">StaleProxyCacheError</span></code></a> in the strict mode that
+<code class="docutils literal notranslate"><span class="pre">NUMBOX_PROXY_CACHE_STRICT</span></code> enables. A jitted caller that reads <code class="docutils literal notranslate"><span class="pre">.as_func</span></code> from a module-level variable embeds a
+copy of the function instead, and the check cannot see that copy. After an edit, such a cached caller can continue
+to run the old code without a warning, so delete its cache files after every edit. If the C symbol of a
+<a class="reference internal" href="#numbox.core.proxy.proxy.proxy_if_available" title="numbox.core.proxy.proxy.proxy_if_available"><code class="xref py py-func docutils literal notranslate"><span class="pre">proxy_if_available()</span></code></a> binding is missing, such a caller can return the missing binding’s result or crash with
+a segmentation fault.</p>
+<p>Decoration raises a <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> if the function’s first decorator line is above line 8 of its file, or if its
+module defines a global named <code class="docutils literal notranslate"><span class="pre">__</span></code> followed by the function’s name. A function that takes <code class="docutils literal notranslate"><span class="pre">*args</span></code> or
+<code class="docutils literal notranslate"><span class="pre">**kwargs</span></code> cannot be proxied: with a signature for its other parameters, decoration fails with numba’s
+signature-mismatch <code class="docutils literal notranslate"><span class="pre">TypeError</span></code>. Under <code class="docutils literal notranslate"><span class="pre">NUMBA_DISABLE_JIT=1</span></code>, decoration fails with an <code class="docutils literal notranslate"><span class="pre">AttributeError</span></code>. The
+documentation page <code class="docutils literal notranslate"><span class="pre">numbox.core.proxy</span></code> shows examples.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.proxy.proxy.proxy_if_available">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.proxy.proxy.</span></span><span class="sig-name descname"><span class="pre">proxy_if_available</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lib</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sig</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">jit_options</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">dict</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/proxy/proxy.html#proxy_if_available"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.proxy.proxy.proxy_if_available" title="Link to this definition"></a></dt>
+<dd><p>Apply <a class="reference internal" href="#numbox.core.proxy.proxy.proxy" title="numbox.core.proxy.proxy.proxy"><code class="xref py py-func docutils literal notranslate"><span class="pre">proxy()</span></code></a> if <code class="docutils literal notranslate"><span class="pre">lib</span></code> has a C symbol named after the decorated function, and return a stub if not.</p>
+<p>The decorated function must have the C symbol’s name, because the check is <code class="docutils literal notranslate"><span class="pre">hasattr(lib,</span> <span class="pre">name)</span></code>. This suits a
+binding to a symbol that only newer versions of a library provide. If the symbol is present, the result is what
+<a class="reference internal" href="#numbox.core.proxy.proxy.proxy" title="numbox.core.proxy.proxy.proxy"><code class="xref py py-func docutils literal notranslate"><span class="pre">proxy()</span></code></a> returns, <code class="docutils literal notranslate"><span class="pre">.as_func</span></code> included. If it is absent, the result is a stub with the name that
+<a class="reference internal" href="#numbox.core.proxy.proxy.make_proxy_name" title="numbox.core.proxy.proxy.make_proxy_name"><code class="xref py py-func docutils literal notranslate"><span class="pre">make_proxy_name()</span></code></a> returns, and with the function’s qualified name and docstring. A call to the stub from
+Python raises <code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code>. A jitted caller of the stub fails to compile with a <code class="docutils literal notranslate"><span class="pre">TypingError</span></code> that
+names the binding and says that its C symbol is missing. <a class="reference internal" href="numbox.utils.html#numbox.utils.highlevel.cres_if_available" title="numbox.utils.highlevel.cres_if_available"><code class="xref py py-func docutils literal notranslate"><span class="pre">cres_if_available()</span></code></a> makes
+the same check for <a class="reference internal" href="numbox.utils.html#numbox.utils.highlevel.cres" title="numbox.utils.highlevel.cres"><code class="xref py py-func docutils literal notranslate"><span class="pre">cres()</span></code></a>.</p>
+<p>The stub has no <code class="docutils literal notranslate"><span class="pre">.as_func</span></code>, so code that passes the function as a value checks for the attribute first:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">my_binding</span><span class="p">,</span> <span class="s2">"as_func"</span><span class="p">):</span>
+    <span class="n">use</span><span class="p">(</span><span class="n">my_binding</span><span class="o">.</span><span class="n">as_func</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>A caller cached in a process where the symbol was present refers to the binding’s alias. Where the symbol is
+absent, numbox discards that cache entry with a <a class="reference internal" href="#numbox.core.proxy.proxy.StaleProxyCacheWarning" title="numbox.core.proxy.proxy.StaleProxyCacheWarning"><code class="xref py py-class docutils literal notranslate"><span class="pre">StaleProxyCacheWarning</span></code></a>, and the recompilation fails with
+the same <code class="docutils literal notranslate"><span class="pre">TypingError</span></code>.</p>
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="numbox.core.configurations.html" class="btn btn-neutral float-left" title="numbox.core.configurations" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="numbox.core.variable.html" class="btn btn-neutral float-right" title="numbox.core.variable" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

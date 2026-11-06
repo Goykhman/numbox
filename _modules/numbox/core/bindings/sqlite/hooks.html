@@ -1,0 +1,233 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.sqlite.hooks &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/sqlite/hooks.html" />
+      <script src="../../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.sqlite.hooks</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.sqlite.hooks</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Bindings that install SQLite's callback hooks on a connection.</span>
+
+<span class="sd">The module binds ``sqlite3_update_hook``, ``sqlite3_progress_handler``, ``sqlite3_busy_handler``,</span>
+<span class="sd">``sqlite3_commit_hook``, ``sqlite3_rollback_hook`` and ``sqlite3_trace_v2``. Each takes the callback as the ``intp``</span>
+<span class="sd">address of a C function, such as the ``.address`` of a function that numba's ``cfunc`` compiles. Each binding's</span>
+<span class="sd">docstring gives the C type that its callback must have, and neither numbox nor SQLite checks that type. A connection</span>
+<span class="sd">has at most one callback of each kind, and installing a callback replaces the previous one. Keep the ``cfunc`` object</span>
+<span class="sd">referenced for as long as its hook is installed, for example at module level in the caller's code. numba keeps a</span>
+<span class="sd">cfunc's compiled code for the life of the process even after the object is collected, but it does not document that</span>
+<span class="sd">behavior.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.call</span><span class="w"> </span><span class="kn">import</span> <span class="n">_call_lib_func</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.signatures</span><span class="w"> </span><span class="kn">import</span> <span class="n">signatures</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_lib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">"sqlite3_update_hook"</span><span class="p">,</span> <span class="s2">"sqlite3_progress_handler"</span><span class="p">,</span> <span class="s2">"sqlite3_busy_handler"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_commit_hook"</span><span class="p">,</span> <span class="s2">"sqlite3_rollback_hook"</span><span class="p">,</span> <span class="s2">"sqlite3_trace_v2"</span><span class="p">,</span>
+<span class="p">]</span>
+
+
+<span class="n">load_lib</span><span class="p">(</span><span class="s2">"sqlite3"</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="sqlite3_update_hook">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.hooks.sqlite3_update_hook">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_update_hook"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_update_hook</span><span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">cb_p</span><span class="p">,</span> <span class="n">ctx_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Install ``cb_p`` to be called for every row inserted, updated or deleted in a rowid table on ``db_p``.</span>
+
+<span class="sd">    C reference: `sqlite3_update_hook &lt;https://sqlite.org/c3ref/update_hook.html&gt;`_.</span>
+
+<span class="sd">    The callback has the C type ``void (*)(void *ctx, int op, const char *db, const char *table, sqlite3_int64)``.</span>
+<span class="sd">    It receives ``ctx_p``, the operation, the addresses of the database's and the table's names, and the rowid. The</span>
+<span class="sd">    operation is ``SQLITE_INSERT`` (18), ``SQLITE_DELETE`` (9) or ``SQLITE_UPDATE`` (23), three codes that</span>
+<span class="sd">    :mod:`~numbox.core.bindings.sqlite.constants` does not define. The callback must not change the connection, and</span>
+<span class="sd">    preparing or stepping a statement counts as a change. A ``cb_p`` of 0 removes the hook. Keep the ``cfunc`` whose</span>
+<span class="sd">    address is ``cb_p`` referenced while the hook is installed. Returns the ``ctx_p`` of the previous call on the</span>
+<span class="sd">    connection, or 0 for the first call.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_update_hook"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">cb_p</span><span class="p">,</span> <span class="n">ctx_p</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_progress_handler">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.hooks.sqlite3_progress_handler">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_progress_handler"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_progress_handler</span><span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">n_ops</span><span class="p">,</span> <span class="n">cb_p</span><span class="p">,</span> <span class="n">ctx_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Install ``cb_p`` to be called about every ``n_ops`` virtual machine instructions during long calls on ``db_p``.</span>
+
+<span class="sd">    C reference: `sqlite3_progress_handler &lt;https://sqlite.org/c3ref/progress_handler.html&gt;`_.</span>
+
+<span class="sd">    The callback has the C type ``int (*)(void *ctx)`` and receives ``ctx_p``. A nonzero return value interrupts the</span>
+<span class="sd">    operation. An ``n_ops`` below 1 or a ``cb_p`` of 0 removes the handler. The callback must not change the</span>
+<span class="sd">    connection. Keep the ``cfunc`` whose address is ``cb_p`` referenced while the handler is installed.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_progress_handler"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">n_ops</span><span class="p">,</span> <span class="n">cb_p</span><span class="p">,</span> <span class="n">ctx_p</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_busy_handler">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.hooks.sqlite3_busy_handler">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_busy_handler"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_busy_handler</span><span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">cb_p</span><span class="p">,</span> <span class="n">ctx_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Install ``cb_p`` to be called when ``db_p`` tries to access a table that another thread or process has locked.</span>
+
+<span class="sd">    C reference: `sqlite3_busy_handler &lt;https://sqlite.org/c3ref/busy_handler.html&gt;`_.</span>
+
+<span class="sd">    The callback has the C type ``int (*)(void *ctx, int count)``. It receives ``ctx_p`` and the number of earlier</span>
+<span class="sd">    calls for the same lock. A return value of 0 makes the waiting call fail with ``SQLITE_BUSY``, and a nonzero return</span>
+<span class="sd">    value makes SQLite try again. A ``cb_p`` of 0 removes the handler, and ``sqlite3_busy_timeout`` or</span>
+<span class="sd">    ``PRAGMA busy_timeout`` replaces it. The callback must neither change the connection nor close it. Keep the</span>
+<span class="sd">    ``cfunc`` whose address is ``cb_p`` referenced while the handler is installed. Returns a result code.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_busy_handler"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">cb_p</span><span class="p">,</span> <span class="n">ctx_p</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_commit_hook">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.hooks.sqlite3_commit_hook">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_commit_hook"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_commit_hook</span><span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">cb_p</span><span class="p">,</span> <span class="n">ctx_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Install ``cb_p`` to be called whenever a transaction on ``db_p`` commits.</span>
+
+<span class="sd">    C reference: `sqlite3_commit_hook &lt;https://sqlite.org/c3ref/commit_hook.html&gt;`_.</span>
+
+<span class="sd">    The callback has the C type ``int (*)(void *ctx)`` and receives ``ctx_p``. A nonzero return value converts the</span>
+<span class="sd">    commit into a rollback. The callback must not change the connection, and running any statement counts as a change. A</span>
+<span class="sd">    ``cb_p`` of 0 removes the hook. Keep the ``cfunc`` whose address is ``cb_p`` referenced while the hook is</span>
+<span class="sd">    installed. Returns the ``ctx_p`` of the previous call on the connection, or 0 for the first call.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_commit_hook"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">cb_p</span><span class="p">,</span> <span class="n">ctx_p</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_rollback_hook">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.hooks.sqlite3_rollback_hook">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_rollback_hook"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_rollback_hook</span><span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">cb_p</span><span class="p">,</span> <span class="n">ctx_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Install ``cb_p`` to be called whenever a transaction on ``db_p`` rolls back.</span>
+
+<span class="sd">    C reference: `sqlite3_rollback_hook &lt;https://sqlite.org/c3ref/commit_hook.html&gt;`_.</span>
+
+<span class="sd">    The callback has the C type ``void (*)(void *ctx)`` and receives ``ctx_p``. SQLite does not call it for the</span>
+<span class="sd">    rollback that closing the connection causes. The callback must not change the connection. A ``cb_p`` of 0 removes</span>
+<span class="sd">    the hook. Keep the ``cfunc`` whose address is ``cb_p`` referenced while the hook is installed. Returns the</span>
+<span class="sd">    ``ctx_p`` of the previous call on the connection, or 0 for the first call.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_rollback_hook"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">cb_p</span><span class="p">,</span> <span class="n">ctx_p</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_trace_v2">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.hooks.sqlite3_trace_v2">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_trace_v2"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_trace_v2</span><span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">mask</span><span class="p">,</span> <span class="n">cb_p</span><span class="p">,</span> <span class="n">ctx_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Install ``cb_p`` to be called for the trace events in ``mask`` on ``db_p``, and return a result code.</span>
+
+<span class="sd">    C reference: `sqlite3_trace_v2 &lt;https://sqlite.org/c3ref/trace_v2.html&gt;`_.</span>
+
+<span class="sd">    ``mask`` combines ``SQLITE_TRACE_STMT``, ``SQLITE_TRACE_PROFILE``, ``SQLITE_TRACE_ROW`` and</span>
+<span class="sd">    ``SQLITE_TRACE_CLOSE`` with a bitwise OR. The callback has the C type</span>
+<span class="sd">    ``int (*)(unsigned event, void *ctx, void *p, void *x)``. It receives the event, ``ctx_p`` and two pointers whose</span>
+<span class="sd">    meaning depends on the event, and it should return 0. A ``mask`` of 0 or a ``cb_p`` of 0 disables tracing. Keep</span>
+<span class="sd">    the ``cfunc`` whose address is ``cb_p`` referenced while tracing is enabled.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_trace_v2"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">mask</span><span class="p">,</span> <span class="n">cb_p</span><span class="p">,</span> <span class="n">ctx_p</span><span class="p">))</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

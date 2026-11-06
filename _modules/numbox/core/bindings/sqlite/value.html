@@ -1,0 +1,319 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.sqlite.value &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/sqlite/value.html" />
+      <script src="../../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.sqlite.value</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.sqlite.value</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Bindings that read a ``sqlite3_value``, such as an argument of a SQL function or a value of a virtual table's filter.</span>
+
+<span class="sd">A SQL function's ``xFunc``, ``xStep`` and ``xInverse`` callbacks receive their arguments as ``argv_pp``, the address</span>
+<span class="sd">of an array of ``sqlite3_value *``, and a virtual table's ``xFilter`` receives its values the same way. Each binding</span>
+<span class="sd">of this module takes one element of that array, the ``intp`` at the argument's index. A value is valid while the</span>
+<span class="sd">callback that received it runs, and it must be read in that callback's thread.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.call</span><span class="w"> </span><span class="kn">import</span> <span class="n">_call_lib_func</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.signatures</span><span class="w"> </span><span class="kn">import</span> <span class="n">signatures</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_lib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span><span class="p">,</span> <span class="n">proxy_if_available</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">"sqlite3_value_int"</span><span class="p">,</span> <span class="s2">"sqlite3_value_int64"</span><span class="p">,</span> <span class="s2">"sqlite3_value_double"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_value_text"</span><span class="p">,</span> <span class="s2">"sqlite3_value_blob"</span><span class="p">,</span> <span class="s2">"sqlite3_value_bytes"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_value_type"</span><span class="p">,</span> <span class="s2">"sqlite3_value_numeric_type"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_value_nochange"</span><span class="p">,</span> <span class="s2">"sqlite3_value_frombind"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_value_subtype"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_value_dup"</span><span class="p">,</span> <span class="s2">"sqlite3_value_free"</span><span class="p">,</span>
+<span class="p">]</span>
+
+
+<span class="n">_sqlite3_lib</span> <span class="o">=</span> <span class="n">load_lib</span><span class="p">(</span><span class="s2">"sqlite3"</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="sqlite3_value_int">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.value.sqlite3_value_int">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_value_int"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_int</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the ``sqlite3_value`` at ``value_p`` as an int32.</span>
+
+<span class="sd">    C reference: `sqlite3_value_int &lt;https://sqlite.org/c3ref/value_blob.html&gt;`_.</span>
+
+<span class="sd">    SQLite converts a value of another type, and the binding returns 0 for NULL. A value outside the int32 range is</span>
+<span class="sd">    truncated to its low 32 bits; :func:`sqlite3_value_int64` reads all 64 bits.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_value_int"</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_int64">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.value.sqlite3_value_int64">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_value_int64"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_int64</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the ``sqlite3_value`` at ``value_p`` as an int64.</span>
+
+<span class="sd">    C reference: `sqlite3_value_int64 &lt;https://sqlite.org/c3ref/value_blob.html&gt;`_.</span>
+
+<span class="sd">    The binding returns 0 for NULL. SQLite converts a REAL or a text value as SQL's ``CAST`` to ``INTEGER`` does.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_value_int64"</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_double">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.value.sqlite3_value_double">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_value_double"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_double</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the ``sqlite3_value`` at ``value_p`` as a float64.</span>
+
+<span class="sd">    C reference: `sqlite3_value_double &lt;https://sqlite.org/c3ref/value_blob.html&gt;`_.</span>
+
+<span class="sd">    The binding returns 0.0 for NULL. SQLite converts an integer or a text value as SQL's ``CAST`` to ``REAL`` does.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_value_double"</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_text">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.value.sqlite3_value_text">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_value_text"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_text</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the ``sqlite3_value`` at ``value_p`` as NUL-terminated UTF-8 text, or 0 for NULL.</span>
+
+<span class="sd">    C reference: `sqlite3_value_text &lt;https://sqlite.org/c3ref/value_blob.html&gt;`_.</span>
+
+<span class="sd">    SQLite owns the text. A later call that converts the same value can free it, so call</span>
+<span class="sd">    :func:`sqlite3_value_bytes` after this call for the length in bytes, and use the text in the same callback.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_value_text"</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_blob">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.value.sqlite3_value_blob">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_value_blob"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_blob</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the bytes of the ``sqlite3_value`` at ``value_p``, or 0 for NULL and for an empty BLOB.</span>
+
+<span class="sd">    C reference: `sqlite3_value_blob &lt;https://sqlite.org/c3ref/value_blob.html&gt;`_.</span>
+
+<span class="sd">    SQLite owns the bytes. A later call that converts the same value can free them, so call</span>
+<span class="sd">    :func:`sqlite3_value_bytes` after this call for their number, and use the bytes in the same callback.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_value_blob"</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_bytes">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.value.sqlite3_value_bytes">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_value_bytes"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_bytes</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the length in bytes of the ``sqlite3_value`` at ``value_p`` as a BLOB or as UTF-8 text, 0 for NULL.</span>
+
+<span class="sd">    C reference: `sqlite3_value_bytes &lt;https://sqlite.org/c3ref/value_blob.html&gt;`_.</span>
+
+<span class="sd">    Call it after :func:`sqlite3_value_text` or :func:`sqlite3_value_blob`, because either of them can convert the</span>
+<span class="sd">    value and change its length.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_value_bytes"</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_type">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.value.sqlite3_value_type">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_value_type"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_type</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the type code of the ``sqlite3_value`` at ``value_p``, such as ``SQLITE_INTEGER`` or ``SQLITE_NULL``.</span>
+
+<span class="sd">    C reference: `sqlite3_value_type &lt;https://sqlite.org/c3ref/value_blob.html&gt;`_.</span>
+
+<span class="sd">    The code is ``SQLITE_INTEGER``, ``SQLITE_FLOAT``, ``SQLITE_TEXT``, ``SQLITE_BLOB`` or ``SQLITE_NULL``, and it</span>
+<span class="sd">    describes the value before any conversion. A later call that converts the value may change the code that this</span>
+<span class="sd">    binding returns, so read the type first.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_value_type"</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_numeric_type">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.value.sqlite3_value_numeric_type">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_value_numeric_type"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_numeric_type</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Apply numeric affinity to the ``sqlite3_value`` at ``value_p``, and return its type code after the conversion.</span>
+
+<span class="sd">    C reference: `sqlite3_value_numeric_type &lt;https://sqlite.org/c3ref/value_blob.html&gt;`_.</span>
+
+<span class="sd">    SQLite converts the value only if no information is lost. Text that represents a number becomes</span>
+<span class="sd">    ``SQLITE_INTEGER`` or ``SQLITE_FLOAT``, and any other value keeps its type.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_value_numeric_type"</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_nochange">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.value.sqlite3_value_nochange">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_value_nochange"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_nochange</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return a nonzero value if, in a virtual table's ``xUpdate``, the UPDATE leaves the value's column unchanged.</span>
+
+<span class="sd">    C reference: `sqlite3_value_nochange &lt;https://sqlite.org/c3ref/value_blob.html&gt;`_.</span>
+
+<span class="sd">    In every other respect, such a value appears to be NULL. Outside an ``xUpdate`` call, the result is arbitrary.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_value_nochange"</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<span class="c1"># SQLite added sqlite3_value_frombind in version 3.28. proxy_if_available makes the binding a stub where the loaded</span>
+<span class="c1"># library lacks it.</span>
+<div class="viewcode-block" id="sqlite3_value_frombind">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.value.sqlite3_value_frombind">[docs]</a>
+<span class="nd">@proxy_if_available</span><span class="p">(</span><span class="n">_sqlite3_lib</span><span class="p">,</span> <span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_value_frombind"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_frombind</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return a nonzero value if the ``sqlite3_value`` at ``value_p`` came from a bound parameter, and 0 otherwise.</span>
+
+<span class="sd">    C reference: `sqlite3_value_frombind &lt;https://sqlite.org/c3ref/value_blob.html&gt;`_.</span>
+
+<span class="sd">    The binding returns 0 for a value from a SQL literal, a table column or an expression. SQLite added the function in</span>
+<span class="sd">    version 3.28. If the loaded library is older, this binding is a stub: a call from Python raises</span>
+<span class="sd">    ``NotImplementedError``, and a jitted call fails to compile with a ``TypingError``.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_value_frombind"</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_subtype">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.value.sqlite3_value_subtype">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_value_subtype"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_subtype</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the subtype of the SQL function argument at ``value_p``, or 0 if it has none.</span>
+
+<span class="sd">    C reference: `sqlite3_value_subtype &lt;https://sqlite.org/c3ref/value_subtype.html&gt;`_.</span>
+
+<span class="sd">    Register the function that reads it with ``SQLITE_SUBTYPE``. Without that flag, the call may return 0 in some</span>
+<span class="sd">    cases where the argument has a subtype.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_value_subtype"</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_dup">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.value.sqlite3_value_dup">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_value_dup"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_dup</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of a copy of the ``sqlite3_value`` at ``value_p``, or 0 if ``value_p`` is 0 or the copy fails.</span>
+
+<span class="sd">    C reference: `sqlite3_value_dup &lt;https://sqlite.org/c3ref/value_dup.html&gt;`_.</span>
+
+<span class="sd">    The copy outlives the callback, and the caller frees it with :func:`sqlite3_value_free`.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_value_dup"</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_value_free">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.value.sqlite3_value_free">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_value_free"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_value_free</span><span class="p">(</span><span class="n">value_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Free a ``sqlite3_value`` that :func:`sqlite3_value_dup` returned; a call with a ``value_p`` of 0 does nothing.</span>
+
+<span class="sd">    C reference: `sqlite3_value_free &lt;https://sqlite.org/c3ref/value_dup.html&gt;`_.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_value_free"</span><span class="p">,</span> <span class="p">(</span><span class="n">value_p</span><span class="p">,))</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

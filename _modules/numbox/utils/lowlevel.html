@@ -1,0 +1,656 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.utils.lowlevel &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/utils/lowlevel.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.utils.lowlevel</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.utils.lowlevel</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Helpers for raw memory in jitted code: addresses held as integers, loads and stores, and casts between structrefs.</span>
+
+<span class="sd">Most helpers are jitted functions that Python code can call too, usually built on an ``@intrinsic`` of the same name</span>
+<span class="sd">with a leading underscore. An address is an ``intp``, the integer type that numbox's bindings take for a pointer. The</span>
+<span class="sd">helpers check neither that an address points to live memory nor that the memory has the layout of the given type;</span>
+<span class="sd">the caller must ensure both for as long as the address is used. The functions that take a context and a builder,</span>
+<span class="sd">such as :func:`extract_struct_member`, are for code inside an ``@intrinsic``.</span>
+
+<span class="sd">None of the jitted helpers has a fingerprint, because each one calls an ``@intrinsic`` or reads a numba type. If a</span>
+<span class="sd">struct method, a ``compile_kernel`` formula or a derive calls one of them by its name, the code that numbox generates</span>
+<span class="sd">for it compiles without an on-disk cache. ``digest`` computes the weaker fingerprint that the utils page describes for</span>
+<span class="sd">a SQLite callback that calls one of them.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llvmlite</span><span class="w"> </span><span class="kn">import</span> <span class="n">ir</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llvmlite.ir.builder</span><span class="w"> </span><span class="kn">import</span> <span class="n">IRBuilder</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">carray</span><span class="p">,</span> <span class="n">njit</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseContext</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.cgutils</span><span class="w"> </span><span class="kn">import</span> <span class="n">int32_t</span><span class="p">,</span> <span class="n">intp_t</span><span class="p">,</span> <span class="n">is_not_null</span> <span class="k">as</span> <span class="n">cgutils_is_not_null</span><span class="p">,</span> <span class="n">pack_array</span><span class="p">,</span> <span class="n">voidptr_t</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.experimental.jitclass.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">imp_dtor</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.experimental.structref</span><span class="w"> </span><span class="kn">import</span> <span class="n">_Utils</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">boolean</span><span class="p">,</span> <span class="n">FunctionType</span><span class="p">,</span> <span class="n">intp</span><span class="p">,</span> <span class="n">StructRef</span><span class="p">,</span> <span class="n">TypeRef</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">uint8</span><span class="p">,</span>
+    <span class="n">UnicodeType</span><span class="p">,</span> <span class="n">unicode_type</span><span class="p">,</span> <span class="n">uintp</span><span class="p">,</span> <span class="n">UniTuple</span><span class="p">,</span> <span class="n">void</span><span class="p">,</span> <span class="n">voidptr</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types.misc</span><span class="w"> </span><span class="kn">import</span> <span class="n">unliteral</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">TypingError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.typing.context</span><span class="w"> </span><span class="kn">import</span> <span class="n">Context</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">intrinsic</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">function_struct_size</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">,</span> <span class="n">MAX_STR_LENGTH</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">numba_version</span>  <span class="c1"># noqa: F401  re-exported for existing importers</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.void_type</span><span class="w"> </span><span class="kn">import</span> <span class="n">VoidType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.highlevel</span><span class="w"> </span><span class="kn">import</span> <span class="n">determine_field_index</span>
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_cast</span><span class="p">(</span><span class="n">typingctx</span><span class="p">:</span> <span class="n">Context</span><span class="p">,</span> <span class="n">source_ty</span><span class="p">,</span> <span class="n">dest_ty_ref</span><span class="p">:</span> <span class="n">TypeRef</span><span class="p">):</span>
+    <span class="n">dest_ty</span> <span class="o">=</span> <span class="n">dest_ty_ref</span><span class="o">.</span><span class="n">instance_type</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">dest_ty</span><span class="p">(</span><span class="n">source_ty</span><span class="p">,</span> <span class="n">dest_ty_ref</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">:</span> <span class="n">BaseContext</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Emit the cast of the structref to the destination type, with a new reference to the result."""</span>
+        <span class="n">source_ty_ll</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">source_ty</span><span class="p">)</span>
+        <span class="n">dest_ty_ll</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">dest_ty</span><span class="p">)</span>
+        <span class="n">val</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">source_ty_ll</span><span class="p">,</span> <span class="n">dest_ty_ll</span><span class="p">)</span>
+        <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">incref</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">dest_ty</span><span class="p">,</span> <span class="n">val</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">val</span>
+    <span class="k">return</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span>
+
+
+<div class="viewcode-block" id="cast">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.cast">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">cast</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">dest_ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the structref ``source`` as a value of the structref type ``dest_ty``, over the same memory.</span>
+
+<span class="sd">    The data is not converted, so the fields of ``dest_ty`` must match the leading fields of the memory that ``source``</span>
+<span class="sd">    refers to; a type with no fields, such as ``VoidType``, always matches. The result holds a reference of its own.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_cast</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="n">dest_ty</span><span class="p">)</span></div>
+
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_cast_int_to_void_p</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">p_ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the integer address ``p`` as a ``voidptr``, in jitted code."""</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">arguments</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Emit the ``inttoptr`` of the integer to ``i8*``."""</span>
+        <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">inttoptr</span><span class="p">(</span><span class="n">arguments</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">voidptr_t</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">voidptr</span><span class="p">(</span><span class="n">p_ty</span><span class="p">),</span> <span class="n">codegen</span>
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_cast_void_p_to_int</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">p_ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the pointer ``p`` as an ``intp`` address, in jitted code."""</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Emit the ``ptrtoint`` of the pointer to ``intp``."""</span>
+        <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">ptrtoint</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">intp_t</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">intp</span><span class="p">(</span><span class="n">p_ty</span><span class="p">),</span> <span class="n">codegen</span>
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_load_at</span><span class="p">(</span><span class="n">typingctx</span><span class="p">:</span> <span class="n">Context</span><span class="p">,</span> <span class="n">p_ty</span><span class="p">,</span> <span class="n">ty_ref</span><span class="p">:</span> <span class="n">TypeRef</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">unliteral</span><span class="p">(</span><span class="n">p_ty</span><span class="p">)</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="n">intp</span><span class="p">,</span> <span class="n">uintp</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"load_at: pointer argument must be intp or uintp, got </span><span class="si">{</span><span class="n">p_ty</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="n">ty</span> <span class="o">=</span> <span class="n">ty_ref</span><span class="o">.</span><span class="n">instance_type</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">ty</span><span class="p">(</span><span class="n">p_ty</span><span class="p">,</span> <span class="n">ty_ref</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">:</span> <span class="n">BaseContext</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Emit the ``inttoptr`` of the address and a load of the value at it."""</span>
+        <span class="n">ty_ll</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">ty</span><span class="p">)</span>
+        <span class="n">ptr</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">inttoptr</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">ty_ll</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">())</span>
+        <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">ptr</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span>
+
+
+<div class="viewcode-block" id="load_at">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.load_at">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">load_at</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the value of the numba type ``ty`` stored at the address ``p``, an ``intp`` or a ``uintp``.</span>
+
+<span class="sd">    The caller must ensure that ``p`` points to live memory that holds a value in the LLVM layout of ``ty``, aligned</span>
+<span class="sd">    for that type; :func:`load_unaligned` reads from an address that may be misaligned. An address of another integer</span>
+<span class="sd">    type raises ``TypingError``.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_load_at</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">ty</span><span class="p">)</span></div>
+
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_store_at</span><span class="p">(</span><span class="n">typingctx</span><span class="p">:</span> <span class="n">Context</span><span class="p">,</span> <span class="n">p_ty</span><span class="p">,</span> <span class="n">v_ty</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">unliteral</span><span class="p">(</span><span class="n">p_ty</span><span class="p">)</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="n">intp</span><span class="p">,</span> <span class="n">uintp</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"store_at: pointer argument must be intp or uintp, got </span><span class="si">{</span><span class="n">p_ty</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">void</span><span class="p">(</span><span class="n">p_ty</span><span class="p">,</span> <span class="n">v_ty</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">:</span> <span class="n">BaseContext</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Emit the ``inttoptr`` of the address and a store of the value at it."""</span>
+        <span class="n">p</span><span class="p">,</span> <span class="n">v</span> <span class="o">=</span> <span class="n">args</span>
+        <span class="n">ty_ll</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">v_ty</span><span class="p">)</span>
+        <span class="n">ptr</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">inttoptr</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">ty_ll</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">())</span>
+        <span class="n">builder</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">ptr</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span>
+
+
+<div class="viewcode-block" id="store_at">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.store_at">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">store_at</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">v</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Store ``v`` at the address ``p``, an ``intp`` or a ``uintp``, in the LLVM layout of the numba type of ``v``.</span>
+
+<span class="sd">    The numba type of ``v`` determines how many bytes are written. A Python ``int`` is an ``int64``, so the function</span>
+<span class="sd">    writes eight bytes for it. To write fewer, convert ``v`` first: ``store_at(p, int32(value))`` writes four bytes.</span>
+<span class="sd">    The caller must ensure that ``p`` points to writable memory with room for the value, aligned for its type;</span>
+<span class="sd">    :func:`store_unaligned` writes to an address that may be misaligned. An address of another integer type raises</span>
+<span class="sd">    ``TypingError``.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_store_at</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span></div>
+
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_store_unaligned</span><span class="p">(</span><span class="n">typingctx</span><span class="p">:</span> <span class="n">Context</span><span class="p">,</span> <span class="n">p_ty</span><span class="p">,</span> <span class="n">v_ty</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">unliteral</span><span class="p">(</span><span class="n">p_ty</span><span class="p">)</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="n">intp</span><span class="p">,</span> <span class="n">uintp</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"store_unaligned: pointer argument must be intp or uintp, got </span><span class="si">{</span><span class="n">p_ty</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">void</span><span class="p">(</span><span class="n">p_ty</span><span class="p">,</span> <span class="n">v_ty</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">:</span> <span class="n">BaseContext</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Emit the ``inttoptr`` of the address and a store with an alignment of 1."""</span>
+        <span class="n">p</span><span class="p">,</span> <span class="n">v</span> <span class="o">=</span> <span class="n">args</span>
+        <span class="n">ty_ll</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">v_ty</span><span class="p">)</span>
+        <span class="n">ptr</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">inttoptr</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">ty_ll</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">())</span>
+        <span class="n">builder</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">ptr</span><span class="p">,</span> <span class="n">align</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span>
+
+
+<div class="viewcode-block" id="store_unaligned">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.store_unaligned">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">store_unaligned</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">v</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Store ``v`` at the address ``p`` as :func:`store_at` does, without assuming any alignment.</span>
+
+<span class="sd">    The store is correct at a misaligned address, such as a field of a packed structured dtype, where</span>
+<span class="sd">    :func:`store_at` has undefined behavior.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_store_unaligned</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span></div>
+
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_load_unaligned</span><span class="p">(</span><span class="n">typingctx</span><span class="p">:</span> <span class="n">Context</span><span class="p">,</span> <span class="n">p_ty</span><span class="p">,</span> <span class="n">ty_ref</span><span class="p">:</span> <span class="n">TypeRef</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">unliteral</span><span class="p">(</span><span class="n">p_ty</span><span class="p">)</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="n">intp</span><span class="p">,</span> <span class="n">uintp</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"load_unaligned: pointer argument must be intp or uintp, got </span><span class="si">{</span><span class="n">p_ty</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="n">ty</span> <span class="o">=</span> <span class="n">ty_ref</span><span class="o">.</span><span class="n">instance_type</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">ty</span><span class="p">(</span><span class="n">p_ty</span><span class="p">,</span> <span class="n">ty_ref</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">:</span> <span class="n">BaseContext</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Emit the ``inttoptr`` of the address and a load with an alignment of 1."""</span>
+        <span class="n">ty_ll</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">ty</span><span class="p">)</span>
+        <span class="n">ptr</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">inttoptr</span><span class="p">(</span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">ty_ll</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">())</span>
+        <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">ptr</span><span class="p">,</span> <span class="n">align</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span>
+
+
+<div class="viewcode-block" id="load_unaligned">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.load_unaligned">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">load_unaligned</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the value of the type ``ty`` at the address ``p`` as :func:`load_at` does, without assuming any alignment.</span>
+
+<span class="sd">    The load is correct at a misaligned address, such as a field of a packed structured dtype, where :func:`load_at`</span>
+<span class="sd">    has undefined behavior.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_load_unaligned</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">ty</span><span class="p">)</span></div>
+
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_deref_payload</span><span class="p">(</span><span class="n">typingctx</span><span class="p">:</span> <span class="n">Context</span><span class="p">,</span> <span class="n">struct_ty</span><span class="p">,</span> <span class="n">ty_ref</span><span class="p">:</span> <span class="n">TypeRef</span><span class="p">):</span>
+    <span class="n">ty</span> <span class="o">=</span> <span class="n">ty_ref</span><span class="o">.</span><span class="n">instance_type</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">ty</span><span class="p">(</span><span class="n">struct_ty</span><span class="p">,</span> <span class="n">ty_ref</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">:</span> <span class="n">BaseContext</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Emit a load of the structref's data as the type, with a new reference to the loaded value."""</span>
+        <span class="n">ty_ll</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">ty</span><span class="p">)</span>
+        <span class="n">struct_</span> <span class="o">=</span> <span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">meminfo_p</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">get_meminfos</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">struct_ty</span><span class="p">,</span> <span class="n">struct_</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">payload_p</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">meminfo_data</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">meminfo_p</span><span class="p">)</span>
+        <span class="n">x_as_ty_p</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">bitcast</span><span class="p">(</span><span class="n">payload_p</span><span class="p">,</span> <span class="n">ty_ll</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">())</span>
+        <span class="n">val</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">x_as_ty_p</span><span class="p">)</span>
+        <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">incref</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">ty</span><span class="p">,</span> <span class="n">val</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">val</span>
+    <span class="k">return</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span>
+
+
+<div class="viewcode-block" id="deref_payload">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.deref_payload">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">deref_payload</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the data of the structref ``p`` read as the numba type ``ty``, with a reference of its own.</span>
+
+<span class="sd">    The data is read from its start without conversion, so ``ty`` must match the layout of the data or of its leading</span>
+<span class="sd">    part, such as the type of the structref's first field.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_deref_payload</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">ty</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="extract_struct_member">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.extract_struct_member">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">extract_struct_member</span><span class="p">(</span>
+    <span class="n">context</span><span class="p">:</span> <span class="n">BaseContext</span><span class="p">,</span>
+    <span class="n">builder</span><span class="p">:</span> <span class="n">IRBuilder</span><span class="p">,</span>
+    <span class="n">struct_fe_ty</span><span class="p">:</span> <span class="n">StructRef</span><span class="p">,</span>
+    <span class="n">struct_obj</span><span class="p">,</span>
+    <span class="n">member_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">incref</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Emit a load of the field ``member_name`` of the structref ``struct_obj``, of the numba type ``struct_fe_ty``.</span>
+
+<span class="sd">    The function is for code inside an ``@intrinsic``. ``member_name`` is a Python string known when the code is</span>
+<span class="sd">    generated, and a name that is not a field raises ``KeyError``. The loaded value is borrowed from the structref and</span>
+<span class="sd">    must not outlive it. If ``incref`` is True, it holds a new reference instead, as a value that an intrinsic returns</span>
+<span class="sd">    must hold.</span>
+<span class="sd">    """</span>
+    <span class="n">member_ty</span> <span class="o">=</span> <span class="n">struct_fe_ty</span><span class="o">.</span><span class="n">field_dict</span><span class="p">[</span><span class="n">member_name</span><span class="p">]</span>
+    <span class="n">payload_ty</span> <span class="o">=</span> <span class="n">struct_fe_ty</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">()</span>
+    <span class="n">meminfo</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">get_meminfos</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">struct_fe_ty</span><span class="p">,</span> <span class="n">struct_obj</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">_</span><span class="p">,</span> <span class="n">meminfo_p</span> <span class="o">=</span> <span class="n">meminfo</span>
+    <span class="n">payload_p</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">meminfo_data</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">meminfo_p</span><span class="p">)</span>
+    <span class="n">payload_ty_ll</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">payload_ty</span><span class="p">)</span>
+    <span class="n">payload_ty_p_ll</span> <span class="o">=</span> <span class="n">payload_ty_ll</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">()</span>
+    <span class="n">payload_p</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">bitcast</span><span class="p">(</span><span class="n">payload_p</span><span class="p">,</span> <span class="n">payload_ty_p_ll</span><span class="p">)</span>
+    <span class="n">member_ind</span> <span class="o">=</span> <span class="n">determine_field_index</span><span class="p">(</span><span class="n">struct_fe_ty</span><span class="p">,</span> <span class="n">member_name</span><span class="p">)</span>
+    <span class="n">data_p</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">gep</span><span class="p">(</span><span class="n">payload_p</span><span class="p">,</span> <span class="p">(</span><span class="n">int32_t</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="n">int32_t</span><span class="p">(</span><span class="n">member_ind</span><span class="p">)))</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">data_p</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">incref</span><span class="p">:</span>
+        <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">incref</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">member_ty</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">data</span></div>
+
+
+
+<div class="viewcode-block" id="get_func_p_from_func_struct">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.get_func_p_from_func_struct">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_func_p_from_func_struct</span><span class="p">(</span><span class="n">builder</span><span class="p">:</span> <span class="n">IRBuilder</span><span class="p">,</span> <span class="n">func_struct</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Emit the extraction of the C entry point, the first of the three addresses, from a first-class function value.</span>
+
+<span class="sd">    The function is for code inside an ``@intrinsic``. ``func_struct`` is the LLVM value of the function value, and the</span>
+<span class="sd">    result is an ``i8*``.</span>
+<span class="sd">    """</span>
+    <span class="n">func_raw_p_ind</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">extract_value</span><span class="p">(</span><span class="n">func_struct</span><span class="p">,</span> <span class="n">func_raw_p_ind</span><span class="p">)</span></div>
+
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_get_func_p_as_int_from_func_struct</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">func_ty</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Emit the ``ptrtoint`` of the value's C entry point to ``intp``."""</span>
+        <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">ptrtoint</span><span class="p">(</span><span class="n">get_func_p_from_func_struct</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">intp_t</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">intp</span><span class="p">(</span><span class="n">func_ty</span><span class="p">),</span> <span class="n">codegen</span>
+
+
+<div class="viewcode-block" id="get_func_p_as_int_from_func_struct">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.get_func_p_as_int_from_func_struct">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_func_p_as_int_from_func_struct</span><span class="p">(</span><span class="n">func_</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the C entry point of the first-class function value ``func_``, as an ``intp``."""</span>
+    <span class="k">return</span> <span class="n">_get_func_p_as_int_from_func_struct</span><span class="p">(</span><span class="n">func_</span><span class="p">)</span></div>
+
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_get_func_tuple</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">func_ty</span><span class="p">):</span>
+    <span class="n">return_tuple_type</span> <span class="o">=</span> <span class="n">UniTuple</span><span class="p">(</span><span class="n">intp</span><span class="p">,</span> <span class="n">function_struct_size</span><span class="p">)</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">return_tuple_type</span><span class="p">(</span><span class="n">func_ty</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">args</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Emit the ``ptrtoint`` of each address in the function value, and return the results as a tuple."""</span>
+        <span class="n">func_struct</span> <span class="o">=</span> <span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">lst</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">function_struct_size</span><span class="p">):</span>
+            <span class="n">lst</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">builder</span><span class="o">.</span><span class="n">ptrtoint</span><span class="p">(</span><span class="n">builder</span><span class="o">.</span><span class="n">extract_value</span><span class="p">(</span><span class="n">func_struct</span><span class="p">,</span> <span class="n">i</span><span class="p">),</span> <span class="n">intp_t</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">context</span><span class="o">.</span><span class="n">make_tuple</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">return_tuple_type</span><span class="p">,</span> <span class="n">lst</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span>
+
+
+<div class="viewcode-block" id="get_func_tuple">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.get_func_tuple">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_func_tuple</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the three addresses that the first-class function value ``func`` holds, as a tuple of ``intp``.</span>
+
+<span class="sd">    The addresses are its C entry point, its Python object and its numba entry point. The numba entry point is 0 if the</span>
+<span class="sd">    value has none, as for a ``@cfunc``; :mod:`numbox.utils.derive_wap` describes the two entry points.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_get_func_tuple</span><span class="p">(</span><span class="n">func</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="get_ll_func_sig">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.get_ll_func_sig">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_ll_func_sig</span><span class="p">(</span><span class="n">context</span><span class="p">:</span> <span class="n">BaseContext</span><span class="p">,</span> <span class="n">func_ty</span><span class="p">:</span> <span class="n">FunctionType</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the LLVM function type whose return and argument types are the data types of the signature of ``func_ty``.</span>
+
+<span class="sd">    The function is for code inside an ``@intrinsic``. numbox casts the C entry point of a first-class function value</span>
+<span class="sd">    to this type before it calls the entry point.</span>
+<span class="sd">    """</span>
+    <span class="n">func_sig</span> <span class="o">=</span> <span class="n">func_ty</span><span class="o">.</span><span class="n">signature</span>
+    <span class="n">arg_types</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">arg</span> <span class="ow">in</span> <span class="n">func_sig</span><span class="o">.</span><span class="n">args</span><span class="p">:</span>
+        <span class="n">arg_types</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">arg</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">ir</span><span class="o">.</span><span class="n">FunctionType</span><span class="p">(</span><span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">func_sig</span><span class="o">.</span><span class="n">return_type</span><span class="p">),</span> <span class="n">arg_types</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="get_str_from_p_as_int">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.get_str_from_p_as_int">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="n">unicode_type</span><span class="p">(</span><span class="n">intp</span><span class="p">),</span> <span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_str_from_p_as_int</span><span class="p">(</span><span class="n">p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return a copy of the NUL-terminated C string at the address ``p`` as a ``str``, with one character per byte.</span>
+
+<span class="sd">    Each byte becomes the character of the same code, 0 to 255, as Latin-1 decoding gives. The UTF-8 bytes of a</span>
+<span class="sd">    non-ASCII text are therefore returned undecoded; for a returned string ``s``,</span>
+<span class="sd">    ``s.encode("latin-1").decode("utf-8")`` gives the text. The function reads at most ``MAX_STR_LENGTH`` bytes,</span>
+<span class="sd">    ``2**31 - 1``, and returns what it has read if it finds no NUL before that.</span>
+<span class="sd">    """</span>
+    <span class="n">void_p</span> <span class="o">=</span> <span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">p</span><span class="p">)</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="s2">""</span>
+    <span class="n">mem_view</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">void_p</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">MAX_STR_LENGTH</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">uint8</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">char_as_code_p</span> <span class="ow">in</span> <span class="n">mem_view</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">char_as_code_p</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">s</span>
+        <span class="n">s</span> <span class="o">+=</span> <span class="nb">chr</span><span class="p">(</span><span class="n">char_as_code_p</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">s</span></div>
+
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_get_unicode_data_p</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">str_ty</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">arguments</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Emit the extraction of the string's data pointer, as an ``intp``."""</span>
+        <span class="n">str_</span> <span class="o">=</span> <span class="n">arguments</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="c1"># The data pointer is field 0 of numba's unicode structure:</span>
+        <span class="c1"># https://github.com/numba/numba/blob/0.64.0/numba/cpython/unicode.py#L86</span>
+        <span class="n">data_p_ind</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">data_p</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">extract_value</span><span class="p">(</span><span class="n">str_</span><span class="p">,</span> <span class="n">data_p_ind</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">ptrtoint</span><span class="p">(</span><span class="n">data_p</span><span class="p">,</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">intp</span><span class="p">))</span>
+    <span class="c1"># numba types some string expressions as optional, such as the product "A" * n, whose type is</span>
+    <span class="c1"># OptionalType(unicode_type). Such an argument fails this assert with a bare AssertionError.</span>
+    <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">str_ty</span><span class="p">,</span> <span class="n">UnicodeType</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">intp</span><span class="p">(</span><span class="n">str_ty</span><span class="p">),</span> <span class="n">codegen</span>
+
+
+<div class="viewcode-block" id="get_unicode_data_p">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.get_unicode_data_p">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_unicode_data_p</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the character data of the string ``s``, as an ``intp``, without a copy.</span>
+
+<span class="sd">    The string stores one, two or four bytes per character, as its widest character needs, followed by a NUL, so the</span>
+<span class="sd">    bytes are the text's UTF-8 only for ASCII text; :func:`numbox.utils.cstrings.c_string` makes a UTF-8 copy. The</span>
+<span class="sd">    address is valid only while ``s`` is alive. A string that numba types as optional, such as ``"A" * n``, raises a</span>
+<span class="sd">    bare ``AssertionError``. numba's unicode structure is defined in</span>
+<span class="sd">    https://github.com/numba/numba/blob/release0.61/numba/cpython/unicode.py#L83.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_get_unicode_data_p</span><span class="p">(</span><span class="n">s</span><span class="p">)</span></div>
+
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">is_not_null</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">struct_ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return whether a structref has a MemInfo, that is, whether its MemInfo pointer is not NULL, in jitted code."""</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">arguments</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Emit the comparison of the structref's MemInfo pointer with NULL."""</span>
+        <span class="n">struct_</span> <span class="o">=</span> <span class="n">arguments</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">meminfo</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">get_meminfos</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">struct_ty</span><span class="p">,</span> <span class="n">struct_</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">type_data</span><span class="p">,</span> <span class="n">meminfo_p</span> <span class="o">=</span> <span class="n">meminfo</span>
+        <span class="k">return</span> <span class="n">cgutils_is_not_null</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">meminfo_p</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">boolean</span><span class="p">(</span><span class="n">struct_ty</span><span class="p">),</span> <span class="n">codegen</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_new</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">struct_ty_</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Emit the allocation of a new structref of the type ``struct_ty_``, and return it with a pointer to its data.</span>
+
+<span class="sd">    The structref is a structure whose one member is the pointer to its MemInfo. The code follows numba's</span>
+<span class="sd">    `new &lt;https://github.com/numba/numba/blob/release0.61/numba/experimental/structref.py#L301&gt;`_, except that the data</span>
+<span class="sd">    is not zeroed, so the caller must store every field before the structref is used.</span>
+<span class="sd">    """</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">data_model_manager</span><span class="p">[</span><span class="n">struct_ty_</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">()]</span>
+    <span class="n">alloc_type</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">get_value_type</span><span class="p">()</span>
+    <span class="n">alloc_size</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">get_abi_sizeof</span><span class="p">(</span><span class="n">alloc_type</span><span class="p">)</span>
+    <span class="n">meminfo</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">meminfo_alloc_dtor</span><span class="p">(</span>
+        <span class="n">builder</span><span class="p">,</span>
+        <span class="n">context</span><span class="o">.</span><span class="n">get_constant</span><span class="p">(</span><span class="n">uintp</span><span class="p">,</span> <span class="n">alloc_size</span><span class="p">),</span>
+        <span class="n">imp_dtor</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="o">.</span><span class="n">module</span><span class="p">,</span> <span class="n">struct_ty_</span><span class="p">),</span>
+    <span class="p">)</span>
+    <span class="n">data_pointer</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">meminfo_data</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">meminfo</span><span class="p">)</span>
+    <span class="n">data_pointer</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">bitcast</span><span class="p">(</span><span class="n">data_pointer</span><span class="p">,</span> <span class="n">alloc_type</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">())</span>
+    <span class="c1"># numba's new zeroes the data at this point with builder.store(get_null_value(alloc_type), data_pointer). _new</span>
+    <span class="c1"># leaves the data uninitialized, so the caller must store every field before the structref is used, and</span>
+    <span class="c1"># populate_structref must not release the old values.</span>
+    <span class="n">work_</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">make_helper</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">struct_ty_</span><span class="p">)</span>
+    <span class="n">work_</span><span class="o">.</span><span class="n">meminfo</span> <span class="o">=</span> <span class="n">meminfo</span>
+    <span class="k">return</span> <span class="n">work_</span><span class="o">.</span><span class="n">_getvalue</span><span class="p">(),</span> <span class="n">data_pointer</span>
+
+
+<div class="viewcode-block" id="populate_structref">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.populate_structref">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">populate_structref</span><span class="p">(</span>
+    <span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">structref_type_</span><span class="p">,</span> <span class="n">structref_</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">ordered_args_names</span><span class="p">,</span> <span class="n">decref_old</span><span class="o">=</span><span class="kc">False</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Emit the stores of ``args`` into the fields named by ``ordered_args_names`` of the structref ``structref_``.</span>
+
+<span class="sd">    The function is for code inside an ``@intrinsic``. ``structref_type_`` is the structref's numba type, and each</span>
+<span class="sd">    argument is cast from its type in ``signature.args`` to the type of its field, which takes a new reference to it.</span>
+<span class="sd">    With ``decref_old=True``, the old value of each field is released after the new value is referenced. Leave it False</span>
+<span class="sd">    for a structref that ``_new`` has just allocated, because its fields hold no values to release. The code follows</span>
+<span class="sd">    numba's ``struct_setattr_impl`` in ``numba.experimental.structref.define_attributes``.</span>
+<span class="sd">    """</span>
+    <span class="n">field_dict</span> <span class="o">=</span> <span class="n">structref_type_</span><span class="o">.</span><span class="n">field_dict</span>
+
+    <span class="n">utils</span> <span class="o">=</span> <span class="n">_Utils</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">structref_type_</span><span class="p">)</span>
+    <span class="n">dataval</span> <span class="o">=</span> <span class="n">utils</span><span class="o">.</span><span class="n">get_data_struct</span><span class="p">(</span><span class="n">structref_</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">arg_i</span><span class="p">,</span> <span class="p">(</span><span class="n">arg_name</span><span class="p">,</span> <span class="n">arg</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">ordered_args_names</span><span class="p">,</span> <span class="n">args</span><span class="p">)):</span>
+        <span class="n">arg_ty</span> <span class="o">=</span> <span class="n">signature</span><span class="o">.</span><span class="n">args</span><span class="p">[</span><span class="n">arg_i</span><span class="p">]</span>
+        <span class="n">field_type</span> <span class="o">=</span> <span class="n">field_dict</span><span class="p">[</span><span class="n">arg_name</span><span class="p">]</span>
+        <span class="n">casted</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">arg</span><span class="p">,</span> <span class="n">arg_ty</span><span class="p">,</span> <span class="n">field_type</span><span class="p">)</span>
+        <span class="n">old_value</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">dataval</span><span class="p">,</span> <span class="n">arg_name</span><span class="p">)</span>
+        <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">incref</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">arg_ty</span><span class="p">,</span> <span class="n">casted</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">decref_old</span><span class="p">:</span>
+            <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">decref</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">arg_ty</span><span class="p">,</span> <span class="n">old_value</span><span class="p">)</span>
+        <span class="nb">setattr</span><span class="p">(</span><span class="n">dataval</span><span class="p">,</span> <span class="n">arg_name</span><span class="p">,</span> <span class="n">casted</span><span class="p">)</span></div>
+
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_tuple_of_struct_ptrs_as_int</span><span class="p">(</span><span class="n">typingctx</span><span class="p">:</span> <span class="n">Context</span><span class="p">,</span> <span class="n">tup_ty</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the MemInfo addresses of the structrefs in a tuple, as a tuple of ``intp``, in jitted code.</span>
+
+<span class="sd">    The addresses take no reference. Prefer :func:`uniformize_tuple_of_structs` where possible: its result holds</span>
+<span class="sd">    references, so numba keeps the structrefs alive and releases them.</span>
+<span class="sd">    """</span>
+    <span class="n">tup_size</span> <span class="o">=</span> <span class="n">tup_ty</span><span class="o">.</span><span class="n">count</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">arguments</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Emit the ``ptrtoint`` of each element's MemInfo pointer, and return the results as a tuple."""</span>
+        <span class="n">array_values</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">tup</span> <span class="o">=</span> <span class="n">arguments</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">tup_ind</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">tup_size</span><span class="p">):</span>
+            <span class="n">tup_item</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">extract_value</span><span class="p">(</span><span class="n">tup</span><span class="p">,</span> <span class="n">tup_ind</span><span class="p">)</span>
+            <span class="n">tup_item_meminfo</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">get_meminfos</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">tup_ty</span><span class="p">[</span><span class="n">tup_ind</span><span class="p">],</span> <span class="n">tup_item</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">_</span><span class="p">,</span> <span class="n">tup_item_meminfo_p</span> <span class="o">=</span> <span class="n">tup_item_meminfo</span>
+            <span class="n">tup_item_p_as_int</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">ptrtoint</span><span class="p">(</span><span class="n">tup_item_meminfo_p</span><span class="p">,</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">intp</span><span class="p">))</span>
+            <span class="n">array_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">tup_item_p_as_int</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">pack_array</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">array_values</span><span class="p">)</span>
+    <span class="n">ret_type</span> <span class="o">=</span> <span class="n">UniTuple</span><span class="p">(</span><span class="n">intp</span><span class="p">,</span> <span class="n">tup_size</span><span class="p">)</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">ret_type</span><span class="p">(</span><span class="n">tup_ty</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span>
+
+
+<div class="viewcode-block" id="tuple_of_struct_ptrs_as_int">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.tuple_of_struct_ptrs_as_int">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">tuple_of_struct_ptrs_as_int</span><span class="p">(</span><span class="n">tup</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the MemInfo addresses of the structrefs in the tuple ``tup``, as a tuple of ``intp``.</span>
+
+<span class="sd">    The addresses take no reference, so they are valid only while the structrefs are alive.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_tuple_of_struct_ptrs_as_int</span><span class="p">(</span><span class="n">tup</span><span class="p">)</span></div>
+
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_uniformize_tuple_of_structs</span><span class="p">(</span><span class="n">typingctx</span><span class="p">:</span> <span class="n">Context</span><span class="p">,</span> <span class="n">tup_ty</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">uniform_ty_ref</span><span class="p">:</span> <span class="n">TypeRef</span><span class="p">):</span>
+    <span class="n">tup_size</span> <span class="o">=</span> <span class="n">tup_ty</span><span class="o">.</span><span class="n">count</span>
+    <span class="k">for</span> <span class="n">tup_ind</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">tup_size</span><span class="p">):</span>
+        <span class="n">item_ty</span> <span class="o">=</span> <span class="n">tup_ty</span><span class="p">[</span><span class="n">tup_ind</span><span class="p">]</span>
+        <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">item_ty</span><span class="p">,</span> <span class="n">StructRef</span><span class="p">),</span> <span class="s2">"Only Tuple of StructRef supported"</span>
+    <span class="n">uniform_ty</span> <span class="o">=</span> <span class="n">uniform_ty_ref</span><span class="o">.</span><span class="n">instance_type</span>
+    <span class="n">ret_type</span> <span class="o">=</span> <span class="n">UniTuple</span><span class="p">(</span><span class="n">uniform_ty</span><span class="p">,</span> <span class="n">tup_size</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">arguments</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Emit the cast of each element to the uniform type, with a new reference, and return the casts as a tuple."""</span>
+        <span class="n">array_values</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">tup</span> <span class="o">=</span> <span class="n">arguments</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">tup_ind</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">tup_size</span><span class="p">):</span>
+            <span class="n">tup_item</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">extract_value</span><span class="p">(</span><span class="n">tup</span><span class="p">,</span> <span class="n">tup_ind</span><span class="p">)</span>
+            <span class="n">source_ty_ll</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">tup_ty</span><span class="p">[</span><span class="n">tup_ind</span><span class="p">])</span>
+            <span class="n">dest_ty_ll</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">uniform_ty</span><span class="p">)</span>
+            <span class="n">val</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">tup_item</span><span class="p">,</span> <span class="n">source_ty_ll</span><span class="p">,</span> <span class="n">dest_ty_ll</span><span class="p">)</span>
+            <span class="n">context</span><span class="o">.</span><span class="n">nrt</span><span class="o">.</span><span class="n">incref</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">uniform_ty</span><span class="p">,</span> <span class="n">val</span><span class="p">)</span>
+            <span class="n">array_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">val</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">pack_array</span><span class="p">(</span><span class="n">builder</span><span class="p">,</span> <span class="n">array_values</span><span class="p">,</span> <span class="n">context</span><span class="o">.</span><span class="n">get_data_type</span><span class="p">(</span><span class="n">uniform_ty</span><span class="p">))</span>
+    <span class="n">sig</span> <span class="o">=</span> <span class="n">ret_type</span><span class="p">(</span><span class="n">tup_ty</span><span class="p">,</span> <span class="n">uniform_ty_ref</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sig</span><span class="p">,</span> <span class="n">codegen</span>
+
+
+<div class="viewcode-block" id="uniformize_tuple_of_structs">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.uniformize_tuple_of_structs">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">uniformize_tuple_of_structs</span><span class="p">(</span><span class="n">tup</span><span class="p">,</span> <span class="n">uniform_ty</span><span class="o">=</span><span class="n">VoidType</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the structrefs of ``tup`` as a tuple of the one structref type ``uniform_ty``, by default ``VoidType``.</span>
+
+<span class="sd">    The function casts each element as :func:`cast` does, over the same memory, and each result holds a reference of</span>
+<span class="sd">    its own. An element that is not a structref raises ``AssertionError`` when the function is compiled.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_uniformize_tuple_of_structs</span><span class="p">(</span><span class="n">tup</span><span class="p">,</span> <span class="n">uniform_ty</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="array_data_p">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.lowlevel.array_data_p">[docs]</a>
+<span class="nd">@njit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">array_data_p</span><span class="p">(</span><span class="n">arr</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the data of the NumPy array ``arr`` as an ``intp``, the type of a pointer in the bindings.</span>
+
+<span class="sd">    Python code and jitted code can call it. The address takes no reference, so it is valid only while ``arr`` is</span>
+<span class="sd">    alive. If ``NUMBA_DISABLE_JIT=1`` is set, the function runs as Python and returns a ``numpy.int64``, which ctypes</span>
+<span class="sd">    functions such as ``ctypes.memmove`` reject.</span>
+<span class="sd">    """</span>
+    <span class="c1"># numba types arr.ctypes.data as uintp. The conversion gives the signed intp that numbox's binding signatures use</span>
+    <span class="c1"># for a pointer.</span>
+    <span class="k">return</span> <span class="n">intp</span><span class="p">(</span><span class="n">arr</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

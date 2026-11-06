@@ -1,0 +1,193 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.utils.digest &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/utils/digest.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.utils.digest</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.utils.digest</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""A short hash that names generated code after the subject it serves and the user functions it calls.</span>
+
+<span class="sd">:func:`digest` hashes the ``repr`` of a subject, such as a type, with the fingerprints of a list of functions. It also</span>
+<span class="sd">folds numbox's default jit options and the versions of numba and numbox. Two functions with the same source but</span>
+<span class="sd">different closure values or globals have different hashes, whereas a hash of the bare code object would be the same for</span>
+<span class="sd">both. numbox names the anchors of the SQLite aggregate, window and table-valued functions with the hash. Any cache that</span>
+<span class="sd">combines a type or an identifier with user callbacks can use it the same way.</span>
+<span class="sd">"""</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">types</span><span class="w"> </span><span class="kn">import</span> <span class="n">FunctionType</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numba</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.serialize</span><span class="w"> </span><span class="kn">import</span> <span class="n">cloudpickle</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numbox</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.dispatcher</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dispatcher</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.np.ufunc.dufunc</span><span class="w"> </span><span class="kn">import</span> <span class="n">DUFunc</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.fingerprint</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">_Unfingerprintable</span><span class="p">,</span> <span class="n">_canon_value</span><span class="p">,</span> <span class="n">_fingerprint_function</span><span class="p">,</span> <span class="n">_fingerprint_function_best_effort</span><span class="p">,</span>
+<span class="p">)</span>
+
+
+<div class="viewcode-block" id="digest">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.digest.digest">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">digest</span><span class="p">(</span><span class="n">subject</span><span class="p">,</span> <span class="n">fns</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return a hash of 16 hexadecimal digits that changes when ``subject`` or one of the functions ``fns`` changes.</span>
+
+<span class="sd">    The hash covers ``repr(subject)``, numba's version, numbox's version, numbox's default jit options and each entry</span>
+<span class="sd">    of ``fns``. numbox's version is the empty string in a checkout or an editable install, so in those cases the hash</span>
+<span class="sd">    does not change with the version. A released package holds its version, and the hash folds it. Each entry of ``fns``</span>
+<span class="sd">    is folded as follows:</span>
+
+<span class="sd">    - a dispatcher or a ``@vectorize`` function: the fingerprint of its Python function and the options it compiles</span>
+<span class="sd">      under. If the Python function has no fingerprint, the options are folded with the weaker fingerprint below for a</span>
+<span class="sd">      dispatcher, and with a cloudpickle of the object for a ``@vectorize`` function;</span>
+<span class="sd">    - a Python function: its fingerprint, or the weaker fingerprint if the function reads a value that has none;</span>
+<span class="sd">    - any other callable, such as a ``functools.partial``, a builtin or a callable object: a cloudpickle of it.</span>
+
+<span class="sd">    For a Python function or a dispatcher, the hash is the same in every process. The weaker fingerprint puts the name</span>
+<span class="sd">    of a value's type in place of each value without a fingerprint, and it leaves out module attributes, so an edit to</span>
+<span class="sd">    such a value or attribute leaves the hash unchanged. A cloudpickle can differ in every process, as it does for an</span>
+<span class="sd">    object whose class is defined in the script that runs.</span>
+<span class="sd">    """</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">()</span>
+    <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="nb">repr</span><span class="p">(</span><span class="n">subject</span><span class="p">)</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">))</span>
+    <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">numba</span><span class="o">.</span><span class="n">__version__</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">))</span>
+    <span class="c1"># numbox.__version__ is "" in a checkout and in an editable install, because the packaging takes the version from</span>
+    <span class="c1"># this attribute and the repository leaves it empty. The release workflow writes the version into</span>
+    <span class="c1"># numbox/__init__.py before it builds the package, so a released package folds its version here.</span>
+    <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">((</span><span class="n">numbox</span><span class="o">.</span><span class="n">__version__</span> <span class="ow">or</span> <span class="s2">""</span><span class="p">)</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">))</span>
+    <span class="c1"># A change of numbox's default jit options, such as NUMBOX_JIT_OPTIONS turning the cache off, changes the digest</span>
+    <span class="c1"># and so the name of the anchor. numba's own cache key leaves out the jit options; numbox adds them to the key of</span>
+    <span class="c1"># the code it keys (numbox.core.cache_key).</span>
+    <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="nb">repr</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">jit_options</span><span class="o">.</span><span class="n">items</span><span class="p">()))</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">))</span>
+    <span class="k">for</span> <span class="n">fn</span> <span class="ow">in</span> <span class="n">fns</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">fn</span><span class="p">,</span> <span class="p">(</span><span class="n">Dispatcher</span><span class="p">,</span> <span class="n">DUFunc</span><span class="p">)):</span>
+            <span class="c1"># _canon_value folds the fingerprint of the Python function with the options that the function compiles</span>
+            <span class="c1"># under; for a @proxy function it folds the alias, which covers both. The Python function alone would give</span>
+            <span class="c1"># one hash for two dispatchers of one body compiled with different options, such as nogil, fastmath,</span>
+            <span class="c1"># error_model or boundscheck.</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">_canon_value</span><span class="p">(</span><span class="n">fn</span><span class="p">,</span> <span class="nb">set</span><span class="p">())</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">))</span>
+                <span class="k">continue</span>
+            <span class="k">except</span> <span class="p">(</span><span class="n">_Unfingerprintable</span><span class="p">,</span> <span class="ne">RecursionError</span><span class="p">):</span>
+                <span class="c1"># The body has no fingerprint. The options are folded separately, so that a change of an option still</span>
+                <span class="c1"># changes the digest. The weaker fingerprint below is then computed for a dispatcher's Python</span>
+                <span class="c1"># function, and a @vectorize function, which has no py_func, is pickled.</span>
+                <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="nb">repr</span><span class="p">(</span><span class="nb">sorted</span><span class="p">((</span><span class="nb">getattr</span><span class="p">(</span><span class="n">fn</span><span class="p">,</span> <span class="s2">"targetoptions"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{})</span><span class="o">.</span><span class="n">items</span><span class="p">()))</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">))</span>
+        <span class="n">py</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">fn</span><span class="p">,</span> <span class="s2">"py_func"</span><span class="p">,</span> <span class="n">fn</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">py</span><span class="p">,</span> <span class="n">FunctionType</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">_fingerprint_function</span><span class="p">(</span><span class="n">py</span><span class="p">,</span> <span class="nb">set</span><span class="p">())</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">))</span>
+            <span class="k">except</span> <span class="p">(</span><span class="n">_Unfingerprintable</span><span class="p">,</span> <span class="ne">RecursionError</span><span class="p">):</span>
+                <span class="c1"># A value without a fingerprint makes _fingerprint_function raise. The best-effort fingerprint still</span>
+                <span class="c1"># folds the constants, closure values, defaults and globals that have one, and it sorts the elements</span>
+                <span class="c1"># of sets, so the result does not depend on PYTHONHASHSEED. It puts the name of the type in place of</span>
+                <span class="c1"># each value without a fingerprint, and it omits the module attributes that the function reads.</span>
+                <span class="c1"># An edit to such a value, or to such an attribute, therefore leaves the digest unchanged, and a</span>
+                <span class="c1"># SQLite registration named after the digest loads the code compiled before the edit.</span>
+                <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">_fingerprint_function_best_effort</span><span class="p">(</span><span class="n">py</span><span class="p">)</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">))</span>
+            <span class="k">continue</span>
+        <span class="c1"># A callable without code, such as a functools.partial, a builtin or a callable object, is hashed as a</span>
+        <span class="c1"># cloudpickle of the object, which holds its bound state. cloudpickle assigns a random uuid4 identifier to a</span>
+        <span class="c1"># class defined in __main__, so the pickle of such an object, and the digest, differ in every process. Only</span>
+        <span class="c1"># these callables, and a @vectorize function without a fingerprint, take that path.</span>
+        <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">cloudpickle</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">py</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">h</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()[:</span><span class="mi">16</span><span class="p">]</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

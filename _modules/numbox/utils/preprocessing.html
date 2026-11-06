@@ -1,0 +1,406 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.utils.preprocessing &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/utils/preprocessing.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.utils.preprocessing</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.utils.preprocessing</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Cache anchors, the files to which numbox writes the code that it generates at run time so that numba can cache it.</span>
+
+<span class="sd">numba caches a function only if it can find the function's source file. Its key for a cache entry covers the</span>
+<span class="sd">function's bytecode but not the constants or names that the bytecode refers to. numbox therefore writes each piece of</span>
+<span class="sd">generated code to an anchor whose name ends in a digest of the code, and it compiles the code under that file name.</span>
+<span class="sd">Two versions of the code that differ only in a literal or a name then have anchors, and cache files, of their own.</span>
+<span class="sd">The anchors are under ``NUMBA_CACHE_DIR`` or numba's user cache directory. Before cached code compiles, numbox asks</span>
+<span class="sd">numba whether it can cache a function of the anchor. If numba cannot cache it, the code compiles without a cache after</span>
+<span class="sd">one warning that names the remedy. The utils page explains the anchors in its section on the cache-anchor mechanism.</span>
+<span class="sd">"""</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">ast</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">errno</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span><span class="n">LONGEST_CACHE_FILE_NAME</span><span class="p">,</span> <span class="n">_OVERLOAD_DIGITS</span><span class="p">,</span> <span class="n">cache_remedy</span><span class="p">,</span> <span class="n">check_cache_location</span><span class="p">,</span>
+                                        <span class="n">is_a_cache_error</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_anchor_root</span><span class="p">(</span><span class="n">subdir</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"numbox-structref"</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">config</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">numba.misc.appdirs</span><span class="w"> </span><span class="kn">import</span> <span class="n">AppDirs</span>
+    <span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">CACHE_DIR</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">CACHE_DIR</span><span class="p">)</span> <span class="o">/</span> <span class="n">subdir</span>
+    <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="n">AppDirs</span><span class="p">(</span><span class="n">appname</span><span class="o">=</span><span class="s2">"numba"</span><span class="p">,</span> <span class="n">appauthor</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">user_cache_dir</span><span class="p">)</span> <span class="o">/</span> <span class="n">subdir</span>
+
+
+<span class="c1"># The bound, in bytes, on each name that numbox puts into a file name (bounded_stem). The longest of numba's file</span>
+<span class="c1"># names for a struct's code is the cache file of a method's jitted helper. With the bound, that name holds the</span>
+<span class="c1"># anchor's stem of at most 57 bytes, the bounded names of the struct and the method, the method's 64-digit hash,</span>
+<span class="c1"># numba's line number and its suffixes. That is under 230 bytes for names of any length, and within 255 bytes with</span>
+<span class="c1"># the 21 bytes that numba's temporary name adds.</span>
+<span class="n">_STEM_MAX</span> <span class="o">=</span> <span class="mi">40</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_longest_cache_file_name</span><span class="p">(</span><span class="n">stem</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Return the length in bytes of the longest cache file name that numba writes for a function of ``code_txt``.</span>
+
+<span class="sd">    ``code_txt`` is the code anchored at a file whose name without its suffix is ``stem``. numba names a function's</span>
+<span class="sd">    cache files after that stem, the function's qualified name without the angle brackets of ``&lt;locals&gt;``, the line of</span>
+<span class="sd">    its first decorator and Python's version and ABI flags. A data file's name also holds the overload's number. numba</span>
+<span class="sd">    writes each file first under a temporary name that is 21 bytes longer: ``.tmp.`` and sixteen hexadecimal digits.</span>
+<span class="sd">    The length counts that temporary name. It counts the overload's number as ``_OVERLOAD_DIGITS`` digits, three,</span>
+<span class="sd">    because numba numbers the overloads from one without a bound. The result is 0 if no function of the code is</span>
+<span class="sd">    decorated.</span>
+
+<span class="sd">    The anchor's check writes a file name of this length in the location that numba picks, as the package's check</span>
+<span class="sd">    does with ``LONGEST_CACHE_FILE_NAME`` for numbox's own modules. A cache directory too close to the path limit then</span>
+<span class="sd">    fails the check, and the code compiles without a cache after one warning. numba's own test of a location creates a</span>
+<span class="sd">    temporary file that is unnamed on Linux and has a short name elsewhere. Such a directory accepts that file, so</span>
+<span class="sd">    without this length the first save would fail while the struct is made. A fixed bound for every struct, such as</span>
+<span class="sd">    251 bytes, would disable caching on a file system with a lower name limit, such as the 143 bytes of eCryptfs. It</span>
+<span class="sd">    would do so even for a struct whose names need 58.</span>
+<span class="sd">    """</span>
+    <span class="n">names</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">walk</span><span class="p">(</span><span class="n">node</span><span class="p">,</span> <span class="n">outer</span><span class="p">,</span> <span class="n">jitted</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Append the qualified name and line of each function under ``node`` that numba caches to ``names``."""</span>
+        <span class="k">for</span> <span class="n">child</span> <span class="ow">in</span> <span class="n">ast</span><span class="o">.</span><span class="n">iter_child_nodes</span><span class="p">(</span><span class="n">node</span><span class="p">):</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">child</span><span class="p">,</span> <span class="p">(</span><span class="n">ast</span><span class="o">.</span><span class="n">FunctionDef</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">AsyncFunctionDef</span><span class="p">)):</span>
+                <span class="n">qualname</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">outer</span><span class="si">}{</span><span class="n">child</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">"</span>
+                <span class="c1"># A function is included if it is decorated, or if it is defined inside a decorated function. numba</span>
+                <span class="c1"># caches the constructor that an overload returns under the overload's qualified name and &lt;locals&gt;,</span>
+                <span class="c1"># with the overload's options. A decorator of any kind qualifies, so the work builder's derive, which a</span>
+                <span class="c1"># numbox decorator jits, is included. A plain function, at the top or in a class body, has no cache</span>
+                <span class="c1"># file and is not included. A struct's method under its own name is such a function: it only calls the</span>
+                <span class="c1"># jitted helper. Including a method name of two hundred characters would raise the length above 255</span>
+                <span class="c1"># and disable the struct's cache needlessly.</span>
+                <span class="n">counts</span> <span class="o">=</span> <span class="n">jitted</span> <span class="ow">or</span> <span class="nb">bool</span><span class="p">(</span><span class="n">child</span><span class="o">.</span><span class="n">decorator_list</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">counts</span><span class="p">:</span>
+                    <span class="c1"># child.lineno is the line of the def statement. numba uses the line of the first decorator, which</span>
+                    <span class="c1"># is earlier or the same, so the number of digits counted is never too small.</span>
+                    <span class="n">names</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">qualname</span><span class="p">,</span> <span class="n">child</span><span class="o">.</span><span class="n">lineno</span><span class="p">))</span>
+                <span class="n">walk</span><span class="p">(</span><span class="n">child</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">qualname</span><span class="si">}</span><span class="s2">.&lt;locals&gt;."</span><span class="p">,</span> <span class="n">counts</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">child</span><span class="p">,</span> <span class="n">ast</span><span class="o">.</span><span class="n">ClassDef</span><span class="p">):</span>
+                <span class="n">walk</span><span class="p">(</span><span class="n">child</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">outer</span><span class="si">}{</span><span class="n">child</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">."</span><span class="p">,</span> <span class="n">jitted</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">walk</span><span class="p">(</span><span class="n">child</span><span class="p">,</span> <span class="n">outer</span><span class="p">,</span> <span class="n">jitted</span><span class="p">)</span>
+
+    <span class="n">walk</span><span class="p">(</span><span class="n">ast</span><span class="o">.</span><span class="n">parse</span><span class="p">(</span><span class="n">code_txt</span><span class="p">),</span> <span class="s2">""</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+    <span class="n">version</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"py</span><span class="si">{</span><span class="n">sys</span><span class="o">.</span><span class="n">version_info</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}{</span><span class="n">sys</span><span class="o">.</span><span class="n">version_info</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">}{</span><span class="nb">getattr</span><span class="p">(</span><span class="n">sys</span><span class="p">,</span><span class="w"> </span><span class="s1">'abiflags'</span><span class="p">,</span><span class="w"> </span><span class="s1">''</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span>
+    <span class="k">return</span> <span class="nb">max</span><span class="p">(</span>
+        <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">qualname</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">'&lt;'</span><span class="p">,</span><span class="w"> </span><span class="s1">''</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">'&gt;'</span><span class="p">,</span><span class="w"> </span><span class="s1">''</span><span class="p">)</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">lineno</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">version</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="s1">'9'</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">_OVERLOAD_DIGITS</span><span class="si">}</span><span class="s2">.nbc.tmp."</span>
+             <span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">))</span> <span class="o">+</span> <span class="mi">16</span>
+         <span class="k">for</span> <span class="n">qualname</span><span class="p">,</span> <span class="n">lineno</span> <span class="ow">in</span> <span class="n">names</span><span class="p">),</span> <span class="n">default</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+
+<span class="c1"># The text that ends each remedy in this module's warnings. Generated code compiles under the package's default jit</span>
+<span class="c1"># options unless the caller passes options of its own, as make_structref, compile_kernel and the work builder accept,</span>
+<span class="c1"># and compile_kernel's cache argument overrides both. NUMBOX_JIT_OPTIONS changes only the package's defaults, so the</span>
+<span class="c1"># text names each of the three ways to disable the cache.</span>
+<span class="n">_SILENCE</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="s2">"compile without a cache to silence this warning: </span><span class="se">\"</span><span class="s2">cache</span><span class="se">\"</span><span class="s2"> off in the jit options this code was given, or "</span>
+    <span class="s2">"in its cache argument where it takes one, or NUMBOX_JIT_OPTIONS='{</span><span class="se">\"</span><span class="s2">cache</span><span class="se">\"</span><span class="s2">: false}' where the options are "</span>
+    <span class="s2">"the package's"</span>
+<span class="p">)</span>
+
+
+<div class="viewcode-block" id="bounded_stem">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.preprocessing.bounded_stem">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">bounded_stem</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Return ``name`` shortened to at most 40 bytes of UTF-8, for use in a file name.</span>
+
+<span class="sd">    A name of 40 bytes or fewer is returned unchanged; nearly every name is that short. A longer name is truncated to</span>
+<span class="sd">    the whole characters that fit in 31 bytes, followed by an underscore and the first eight hexadecimal digits of the</span>
+<span class="sd">    SHA-256 of the whole name. The length is measured in UTF-8, as file systems measure it, so a character of another</span>
+<span class="sd">    script counts for up to four bytes.</span>
+
+<span class="sd">    numbox puts the names of a struct, its fields and its methods, and of the functions it generates code for, into</span>
+<span class="sd">    the names of the anchors and of numba's cache files. Most file systems allow a name of at most 255 bytes, and</span>
+<span class="sd">    numba's names repeat the anchor's name and add the function's name. Without this bound, a struct name of about 93</span>
+<span class="sd">    characters would make them too long.</span>
+<span class="sd">    """</span>
+    <span class="n">encoded</span> <span class="o">=</span> <span class="n">name</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">encoded</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">_STEM_MAX</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">name</span>
+    <span class="n">head</span> <span class="o">=</span> <span class="n">encoded</span><span class="p">[:</span><span class="n">_STEM_MAX</span> <span class="o">-</span> <span class="mi">9</span><span class="p">]</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">"ignore"</span><span class="p">)</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">head</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">(</span><span class="n">encoded</span><span class="p">)</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()[:</span><span class="mi">8</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_anchor_path</span><span class="p">(</span><span class="n">subdir</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">stem</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Return the path of the anchor for ``code_txt``: ``&lt;stem&gt;_&lt;digest&gt;.py`` in the subdirectory ``subdir``.</span>
+
+<span class="sd">    The stem is ``stem`` shortened by :func:`bounded_stem`, and the digest is the first 16 hexadecimal digits of the</span>
+<span class="sd">    SHA-256 of the code, so each version of the code has a file of its own. The subdirectory is under</span>
+<span class="sd">    ``NUMBA_CACHE_DIR`` if it is set, and under numba's user cache directory otherwise. The utils page explains why</span>
+<span class="sd">    in its section on the cache-anchor mechanism.</span>
+<span class="sd">    """</span>
+    <span class="c1"># numba's key for a cache entry hashes co_code and the closure values, but not co_consts or co_names (_index_key</span>
+    <span class="c1"># in numba/core/caching.py). On Python 3.10 to 3.13, an edit that changes only a literal or a name leaves co_code</span>
+    <span class="c1"># unchanged, because the bytecode refers to both by index. Python 3.14 writes the integers 0 to 255 into the</span>
+    <span class="c1"># bytecode with LOAD_SMALL_INT, and 3.15 also writes -1, with LOAD_COMMON_CONSTANT; other integers, such as -2</span>
+    <span class="c1"># and 256, still go through LOAD_CONST. The digest covers the whole code text, so it separates every version.</span>
+    <span class="n">digest</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">(</span><span class="n">code_txt</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">))</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()[:</span><span class="mi">16</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">_anchor_root</span><span class="p">(</span><span class="n">subdir</span><span class="p">)</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">bounded_stem</span><span class="p">(</span><span class="n">stem</span><span class="p">)</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">digest</span><span class="si">}</span><span class="s2">.py"</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_structref_anchor_path</span><span class="p">(</span><span class="n">struct_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">_anchor_path</span><span class="p">(</span><span class="s2">"numbox-structref"</span><span class="p">,</span> <span class="n">struct_name</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_materialize_anchor</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># An anchor that exists is never written again, because its name holds the digest of its code.</span>
+    <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="k">return</span>
+    <span class="c1"># The code is written to a temporary file in the same directory, which is then renamed to the anchor's name, so</span>
+    <span class="c1"># that another process finds either no anchor or a complete one. The temporary file is removed if the write fails.</span>
+    <span class="n">fd</span><span class="p">,</span> <span class="n">tmp_str</span> <span class="o">=</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">mkstemp</span><span class="p">(</span><span class="nb">dir</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">parent</span><span class="p">),</span> <span class="n">prefix</span><span class="o">=</span><span class="n">path</span><span class="o">.</span><span class="n">name</span> <span class="o">+</span> <span class="s2">".tmp-"</span><span class="p">)</span>
+    <span class="n">tmp</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">tmp_str</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">os</span><span class="o">.</span><span class="n">fdopen</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="s2">"w"</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">""</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">code_txt</span><span class="p">)</span>
+        <span class="n">tmp</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">BaseException</span><span class="p">:</span>
+        <span class="n">tmp</span><span class="o">.</span><span class="n">unlink</span><span class="p">(</span><span class="n">missing_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">raise</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_anchor_or_error</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Write the anchor at ``path`` and check that numba can cache a function of it; return the error, or None.</span>
+
+<span class="sd">    Any ``OSError`` from creating the directory or writing the file is returned, whatever its cause, because numba</span>
+<span class="sd">    itself skips a cache location on any ``OSError``. The causes include ``NUMBA_CACHE_DIR`` pointing into a file, a</span>
+<span class="sd">    full disk, and a path too long for the file system, through the directory or through a name that numbox made. The</span>
+<span class="sd">    check is :func:`~numbox.core.configurations.check_cache_location`, the one that the package runs for its own</span>
+<span class="sd">    modules. numba may choose the user's cache directory for the anchor if the anchor's own directory cannot hold its</span>
+<span class="sd">    cache. The check's error is returned when it is a cache error, as</span>
+<span class="sd">    :func:`~numbox.core.configurations.is_a_cache_error` determines: no locator for the file, a location that numba</span>
+<span class="sd">    cannot use, or the ``UnicodeEncodeError`` that numba raises for a directory path that is not valid UTF-8. Any</span>
+<span class="sd">    other error propagates.</span>
+<span class="sd">    """</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">path</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">_materialize_anchor</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">error</span>
+    <span class="c1"># The check writes a file name as long as the longest that numba will write for the code's functions</span>
+    <span class="c1"># (_longest_cache_file_name), so that a directory too close to the path limit fails this check instead of failing</span>
+    <span class="c1"># at numba's first save.</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">check_cache_location</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">_longest_cache_file_name</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">stem</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">))</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">RuntimeError</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">)</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">is_a_cache_error</span><span class="p">(</span><span class="n">error</span><span class="p">):</span>
+            <span class="k">raise</span>
+        <span class="k">return</span> <span class="n">error</span>
+    <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_anchored_or_uncached</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Write the anchor of ``code_txt`` at ``path``, and return the jit options to compile the code under.</span>
+
+<span class="sd">    numba reads the anchor to cache the code, and it quotes the code from the anchor in its messages, such as a typing</span>
+<span class="sd">    error. The anchor is therefore written whether or not caching is enabled. With caching disabled, a failed write is</span>
+<span class="sd">    ignored, and the code still compiles under ``path`` as its file name; ``jit_options`` is returned unchanged. With</span>
+<span class="sd">    caching enabled, :func:`_anchor_or_error` writes the anchor and checks the location. If it reports an error, the</span>
+<span class="sd">    function warns once with a ``RuntimeWarning`` that names the remedy, and it returns the options with ``cache`` set</span>
+<span class="sd">    to False. The code then compiles without a cache instead of failing at the write or at the first decorated</span>
+<span class="sd">    function.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">jit_options</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"cache"</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">path</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="n">_materialize_anchor</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="k">return</span> <span class="n">jit_options</span>
+    <span class="n">error</span> <span class="o">=</span> <span class="n">_anchor_or_error</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">error</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">jit_options</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">error</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">error</span><span class="p">,</span> <span class="s2">"longest_file_name"</span><span class="p">,</span> <span class="mi">0</span><span class="p">):</span>
+        <span class="c1"># The file system that holds the location allows no name as long as the longest name that numba writes for the</span>
+        <span class="c1"># anchor's functions, which is the length that the check tried. A shorter path does not avoid the error, so the</span>
+        <span class="c1"># remedy is NUMBA_CACHE_DIR on another file system.</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">_name_limit</span>
+        <span class="n">remedy</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"numba's cache files for the functions anchored here have names of up to </span><span class="si">{</span><span class="n">error</span><span class="o">.</span><span class="n">longest_file_name</span><span class="si">}</span><span class="s2"> "</span>
+            <span class="sa">f</span><span class="s2">"bytes, longer than a name can be on that file system (</span><span class="si">{</span><span class="n">_name_limit</span><span class="p">(</span><span class="n">error</span><span class="o">.</span><span class="n">filename</span><span class="p">)</span><span class="si">}</span><span class="s2">): NUMBA_CACHE_DIR "</span>
+            <span class="sa">f</span><span class="s2">"at a directory on a file system that takes a name that long, or </span><span class="si">{</span><span class="n">_SILENCE</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">error</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">)</span> <span class="ow">and</span> <span class="n">error</span><span class="o">.</span><span class="n">errno</span> <span class="o">==</span> <span class="n">errno</span><span class="o">.</span><span class="n">ENAMETOOLONG</span><span class="p">:</span>
+        <span class="c1"># numbox bounds the names that it makes, so the part of the path that is too long is the directory:</span>
+        <span class="c1"># NUMBA_CACHE_DIR or the user's cache directory. A shorter NUMBA_CACHE_DIR moves the anchor out of either</span>
+        <span class="c1"># directory.</span>
+        <span class="n">remedy</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"The path is too long for the file system: NUMBA_CACHE_DIR at a shorter path, or </span><span class="si">{</span><span class="n">_SILENCE</span><span class="si">}</span><span class="s2">"</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">error</span><span class="p">,</span> <span class="ne">UnicodeEncodeError</span><span class="p">):</span>
+        <span class="c1"># numba hashes the anchor's directory path as UTF-8 to name its cache directory under NUMBA_CACHE_DIR or the</span>
+        <span class="c1"># user's cache directory, and it raises for a path that is not valid UTF-8. The anchor's directory is writable,</span>
+        <span class="c1"># because numbox has just written the anchor there, so the remedy is NUMBA_CACHE_DIR at a UTF-8 path rather than</span>
+        <span class="c1"># a writable directory.</span>
+        <span class="n">remedy</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"numba hashes the anchor's directory path as UTF-8 to name its cache directory, and </span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">parent</span><span class="si">}</span><span class="s2"> is "</span>
+            <span class="sa">f</span><span class="s2">"not: NUMBA_CACHE_DIR at a UTF-8 path, or </span><span class="si">{</span><span class="n">_SILENCE</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">remedy</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"Set NUMBA_CACHE_DIR to a writable directory, or </span><span class="si">{</span><span class="n">_SILENCE</span><span class="si">}</span><span class="s2">"</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"numba cannot cache </span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2"> here (</span><span class="si">{</span><span class="n">error</span><span class="si">}</span><span class="s2">); it compiles without a cache. </span><span class="si">{</span><span class="n">remedy</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span>
+        <span class="ne">RuntimeWarning</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="o">**</span><span class="n">jit_options</span><span class="p">,</span> <span class="s2">"cache"</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_cached_at_or_uncached</span><span class="p">(</span><span class="n">py_file</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Return the jit options to compile code under that numbox compiles as part of the module file ``py_file``.</span>
+
+<span class="sd">    ``jit_options`` is returned unchanged if caching is disabled or if numba can cache a function of ``py_file``.</span>
+<span class="sd">    Otherwise the function warns once, with the remedy that :func:`~numbox.core.configurations.cache_remedy` returns</span>
+<span class="sd">    for the file, and returns the options with ``cache`` set to False. ``make_graph`` compiles its kernel as part of</span>
+<span class="sd">    ``builder.py``, and numba caches the kernel beside that file. Options that a caller passes are passed to numba</span>
+<span class="sd">    unchanged, without the check that the package's default options undergo at import, so this function runs the same</span>
+<span class="sd">    check for the file. It checks with ``LONGEST_CACHE_FILE_NAME``, which covers the kernel's names.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">jit_options</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"cache"</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">jit_options</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">check_cache_location</span><span class="p">(</span><span class="n">py_file</span><span class="p">,</span> <span class="n">LONGEST_CACHE_FILE_NAME</span><span class="p">)</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">RuntimeError</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">,</span> <span class="ne">KeyError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">)</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">is_a_cache_error</span><span class="p">(</span><span class="n">error</span><span class="p">):</span>
+            <span class="k">raise</span>
+        <span class="n">failure</span> <span class="o">=</span> <span class="n">error</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">jit_options</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">"numba cannot cache the code generated at </span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">py_file</span><span class="p">)</span><span class="si">}</span><span class="s2"> here (</span><span class="si">{</span><span class="n">failure</span><span class="si">}</span><span class="s2">); it compiles "</span>
+        <span class="sa">f</span><span class="s2">"without a cache. </span><span class="si">{</span><span class="n">cache_remedy</span><span class="p">(</span><span class="n">py_file</span><span class="p">,</span><span class="w"> </span><span class="n">failure</span><span class="p">,</span><span class="w"> </span><span class="n">_SILENCE</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span>
+        <span class="ne">RuntimeWarning</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="o">**</span><span class="n">jit_options</span><span class="p">,</span> <span class="s2">"cache"</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
+
+
+<span class="n">_ORPHAN_AGE_SECONDS</span> <span class="o">=</span> <span class="mi">60</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_orphan_anchor_sweep</span><span class="p">(</span><span class="n">subdir</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Delete the temporary anchor files, ``*.tmp-*``, that a killed writer left in the anchor subdirectory ``subdir``.</span>
+
+<span class="sd">    Each module that writes anchors calls this function at import for its own subdirectory. A leftover file only uses</span>
+<span class="sd">    disk space, so every error here is ignored. Only files older than ``_ORPHAN_AGE_SECONDS`` are deleted, because a</span>
+<span class="sd">    call of :func:`_materialize_anchor` in another process has a temporary file of the same name pattern between</span>
+<span class="sd">    ``mkstemp`` and ``replace``. Deleting that file would make its ``replace`` raise ``FileNotFoundError``, and the</span>
+<span class="sd">    other process's import would fail.</span>
+<span class="sd">    """</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">root</span> <span class="o">=</span> <span class="n">_anchor_root</span><span class="p">(</span><span class="n">subdir</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">root</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">return</span>
+        <span class="n">cutoff</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">_ORPHAN_AGE_SECONDS</span>
+        <span class="k">for</span> <span class="n">orphan</span> <span class="ow">in</span> <span class="n">root</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">"*.tmp-*"</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">orphan</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_mtime</span> <span class="o">&lt;</span> <span class="n">cutoff</span><span class="p">:</span>
+                    <span class="n">orphan</span><span class="o">.</span><span class="n">unlink</span><span class="p">()</span>
+            <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+                <span class="k">pass</span>
+    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+        <span class="k">pass</span>
+
+
+<span class="n">_orphan_anchor_sweep</span><span class="p">(</span><span class="s2">"numbox-structref"</span><span class="p">)</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

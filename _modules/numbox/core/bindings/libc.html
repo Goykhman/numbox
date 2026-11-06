@@ -1,0 +1,541 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.libc &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/libc.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.libc</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.libc</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Bindings for C standard library functions on strings, memory, streams, random numbers and the environment.</span>
+
+<span class="sd">Each binding has the C function's name and takes its arguments in C's order, with the types of the function's entry in</span>
+<span class="sd">:mod:`numbox.core.bindings.signatures`: C's ``int`` as ``int32``, and ``size_t`` and every pointer as ``intp``. A</span>
+<span class="sd">pointer is an address that the caller keeps alive while C uses it, and numba converts another numeric argument to the</span>
+<span class="sd">entry's type without a warning. Each binding is a proxied function that jitted code and Python can call, and its</span>
+<span class="sd">docstring links the C function's Linux manual page. The section "Bindings module conventions" on the bindings page</span>
+<span class="sd">describes the conventions that all binding modules share.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.call</span><span class="w"> </span><span class="kn">import</span> <span class="n">_call_lib_func</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.signatures</span><span class="w"> </span><span class="kn">import</span> <span class="n">signatures</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_lib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">"rand"</span><span class="p">,</span> <span class="s2">"srand"</span><span class="p">,</span>
+    <span class="s2">"strlen"</span><span class="p">,</span> <span class="s2">"puts"</span><span class="p">,</span> <span class="s2">"fputs"</span><span class="p">,</span> <span class="s2">"fputc"</span><span class="p">,</span> <span class="s2">"putchar"</span><span class="p">,</span>
+    <span class="s2">"fwrite"</span><span class="p">,</span> <span class="s2">"fread"</span><span class="p">,</span> <span class="s2">"fflush"</span><span class="p">,</span>
+    <span class="s2">"fopen"</span><span class="p">,</span> <span class="s2">"fclose"</span><span class="p">,</span>
+    <span class="s2">"feof"</span><span class="p">,</span> <span class="s2">"ferror"</span><span class="p">,</span> <span class="s2">"clearerr"</span><span class="p">,</span>
+    <span class="s2">"strcmp"</span><span class="p">,</span> <span class="s2">"strncmp"</span><span class="p">,</span> <span class="s2">"strchr"</span><span class="p">,</span> <span class="s2">"strrchr"</span><span class="p">,</span> <span class="s2">"strstr"</span><span class="p">,</span> <span class="s2">"strncpy"</span><span class="p">,</span> <span class="s2">"strerror"</span><span class="p">,</span>
+    <span class="s2">"memcpy"</span><span class="p">,</span> <span class="s2">"memmove"</span><span class="p">,</span> <span class="s2">"memset"</span><span class="p">,</span> <span class="s2">"memcmp"</span><span class="p">,</span> <span class="s2">"memchr"</span><span class="p">,</span>
+    <span class="s2">"getenv"</span><span class="p">,</span>
+<span class="p">]</span>
+
+<span class="n">load_lib</span><span class="p">(</span><span class="s2">"c"</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="rand">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.rand">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"rand"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">rand</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Return the next pseudo-random integer, from 0 to ``RAND_MAX``, of the generator that ``srand`` seeds.</span>
+
+<span class="sd">    C reference: `rand(3) &lt;https://man7.org/linux/man-pages/man3/rand.3.html&gt;`_.</span>
+
+<span class="sd">    ``RAND_MAX`` is 2147483647 with glibc and on macOS, and 32767 on Windows. C does not require ``rand`` to be safe to</span>
+<span class="sd">    call from several threads concurrently.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"rand"</span><span class="p">,</span> <span class="p">())</span></div>
+
+
+
+<div class="viewcode-block" id="srand">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.srand">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"srand"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">srand</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Seed the generator that ``rand`` uses with ``s``.</span>
+
+<span class="sd">    C reference: `srand(3) &lt;https://man7.org/linux/man-pages/man3/srand.3.html&gt;`_.</span>
+
+<span class="sd">    C takes the seed as an ``unsigned int``: numba converts an integer argument to ``int32`` without a warning, and C</span>
+<span class="sd">    reads its 32 bits as unsigned.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"srand"</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="strlen">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.strlen">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"strlen"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strlen</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the number of bytes in the NUL-terminated string at address ``s``, the NUL excluded.</span>
+
+<span class="sd">    C reference: `strlen(3) &lt;https://man7.org/linux/man-pages/man3/strlen.3.html&gt;`_.</span>
+
+<span class="sd">    ``s`` is an ``intp`` address, such as one from :func:`~numbox.utils.lowlevel.get_unicode_data_p`, and the caller</span>
+<span class="sd">    keeps the string alive during the call.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"strlen"</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="puts">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.puts">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"puts"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">puts</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Write the NUL-terminated string at address ``s`` and a newline to C's stdout.</span>
+
+<span class="sd">    C reference: `puts(3) &lt;https://man7.org/linux/man-pages/man3/puts.3.html&gt;`_.</span>
+
+<span class="sd">    The result is non-negative on success and ``EOF`` on error. ``s`` is an ``intp`` address that the caller keeps alive</span>
+<span class="sd">    during the call.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"puts"</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="fputs">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.fputs">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"fputs"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fputs</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Write the NUL-terminated string at address ``s`` to the stream ``fp``, without a newline.</span>
+
+<span class="sd">    C reference: `fputs(3) &lt;https://man7.org/linux/man-pages/man3/fputs.3.html&gt;`_.</span>
+
+<span class="sd">    The result is non-negative on success and ``EOF`` on error. ``s`` is an ``intp`` address that the caller keeps alive</span>
+<span class="sd">    during the call, and ``fp`` is a ``FILE *`` as an ``intp``, from ``fopen`` or from</span>
+<span class="sd">    :mod:`numbox.core.bindings.stdio`.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"fputs"</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">fp</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fputc">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.fputc">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"fputc"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fputc</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Write ``c``, converted to ``unsigned char``, to the stream ``fp``, and return the byte written.</span>
+
+<span class="sd">    C reference: `fputc(3) &lt;https://man7.org/linux/man-pages/man3/fputc.3.html&gt;`_.</span>
+
+<span class="sd">    The result is ``EOF`` on error. ``fp`` is a ``FILE *`` as an ``intp``.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"fputc"</span><span class="p">,</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">fp</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="putchar">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.putchar">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"putchar"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">putchar</span><span class="p">(</span><span class="n">c</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Write ``c``, converted to ``unsigned char``, to C's stdout, and return the byte written.</span>
+
+<span class="sd">    C reference: `putchar(3) &lt;https://man7.org/linux/man-pages/man3/putchar.3.html&gt;`_.</span>
+
+<span class="sd">    The result is ``EOF`` on error.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"putchar"</span><span class="p">,</span> <span class="p">(</span><span class="n">c</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="fwrite">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.fwrite">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"fwrite"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fwrite</span><span class="p">(</span><span class="n">ptr</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">nmemb</span><span class="p">,</span> <span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Write ``nmemb`` elements of ``size`` bytes each from address ``ptr`` to the stream ``fp``.</span>
+
+<span class="sd">    C reference: `fwrite(3) &lt;https://man7.org/linux/man-pages/man3/fwrite.3.html&gt;`_.</span>
+
+<span class="sd">    The result is the number of elements written, which is less than ``nmemb`` only on error. ``ptr`` is an ``intp``</span>
+<span class="sd">    address that the caller keeps alive during the call, and ``fp`` is a ``FILE *`` as an ``intp``.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"fwrite"</span><span class="p">,</span> <span class="p">(</span><span class="n">ptr</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">nmemb</span><span class="p">,</span> <span class="n">fp</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fread">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.fread">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"fread"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fread</span><span class="p">(</span><span class="n">ptr</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">nmemb</span><span class="p">,</span> <span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Read up to ``nmemb`` elements of ``size`` bytes each from the stream ``fp`` into memory at address ``ptr``.</span>
+
+<span class="sd">    C reference: `fread(3) &lt;https://man7.org/linux/man-pages/man3/fread.3.html&gt;`_.</span>
+
+<span class="sd">    The result is the number of elements read, which is less than ``nmemb`` at the end of the file or on an error;</span>
+<span class="sd">    ``feof`` and ``ferror`` distinguish the two cases. ``ptr`` is the ``intp`` address of at least ``size * nmemb``</span>
+<span class="sd">    bytes, which the caller keeps alive during the call.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"fread"</span><span class="p">,</span> <span class="p">(</span><span class="n">ptr</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">nmemb</span><span class="p">,</span> <span class="n">fp</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fflush">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.fflush">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"fflush"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fflush</span><span class="p">(</span><span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Flush the buffered output of the stream ``fp``, or of every output stream if ``fp`` is 0.</span>
+
+<span class="sd">    C reference: `fflush(3) &lt;https://man7.org/linux/man-pages/man3/fflush.3.html&gt;`_.</span>
+
+<span class="sd">    The result is 0 on success and ``EOF`` on error. Because C buffers its stdout apart from Python's ``sys.stdout``,</span>
+<span class="sd">    text from jitted code and text from Python can appear out of order when stdout is a file or a pipe, until both are</span>
+<span class="sd">    flushed.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"fflush"</span><span class="p">,</span> <span class="p">(</span><span class="n">fp</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="fopen">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.fopen">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"fopen"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fopen</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">mode</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Open the file whose name is the string at ``path``, in the mode given by the string at ``mode``, as a stream.</span>
+
+<span class="sd">    C reference: `fopen(3) &lt;https://man7.org/linux/man-pages/man3/fopen.3.html&gt;`_.</span>
+
+<span class="sd">    ``path`` and ``mode``, such as ``"r"``, ``"wb"`` or ``"a+"``, are ``intp`` addresses of NUL-terminated strings. The</span>
+<span class="sd">    result is a ``FILE *`` as an ``intp``, or 0 on error, with the reason in ``errno``. The caller closes the stream</span>
+<span class="sd">    with ``fclose``. On Windows, a mode without ``b`` opens the file in text mode, which translates line endings.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"fopen"</span><span class="p">,</span> <span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">mode</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fclose">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.fclose">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"fclose"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fclose</span><span class="p">(</span><span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Flush the buffered output of the stream ``fp``, close the stream, and return 0, or ``EOF`` on error.</span>
+
+<span class="sd">    C reference: `fclose(3) &lt;https://man7.org/linux/man-pages/man3/fclose.3.html&gt;`_.</span>
+
+<span class="sd">    ``fp`` is invalid after the call, whatever the result, and must not be used again.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"fclose"</span><span class="p">,</span> <span class="p">(</span><span class="n">fp</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="feof">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.feof">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"feof"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">feof</span><span class="p">(</span><span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return a nonzero value if the end-of-file indicator of the stream ``fp`` is set, and 0 if it is not.</span>
+
+<span class="sd">    C reference: `feof(3) &lt;https://man7.org/linux/man-pages/man3/feof.3.html&gt;`_.</span>
+
+<span class="sd">    ``clearerr`` clears the indicator, as do C's ``fseek``, ``fsetpos`` and ``rewind`` when they succeed; numbox binds</span>
+<span class="sd">    none of those three.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"feof"</span><span class="p">,</span> <span class="p">(</span><span class="n">fp</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="ferror">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.ferror">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"ferror"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ferror</span><span class="p">(</span><span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return a nonzero value if the error indicator of the stream ``fp`` is set, and 0 if it is not.</span>
+
+<span class="sd">    C reference: `ferror(3) &lt;https://man7.org/linux/man-pages/man3/ferror.3.html&gt;`_.</span>
+
+<span class="sd">    ``clearerr`` clears the indicator, as does C's ``rewind``, which numbox does not bind.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"ferror"</span><span class="p">,</span> <span class="p">(</span><span class="n">fp</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="clearerr">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.clearerr">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"clearerr"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">clearerr</span><span class="p">(</span><span class="n">fp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Clear the end-of-file and error indicators of the stream ``fp``.</span>
+
+<span class="sd">    C reference: `clearerr(3) &lt;https://man7.org/linux/man-pages/man3/clearerr.3.html&gt;`_.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"clearerr"</span><span class="p">,</span> <span class="p">(</span><span class="n">fp</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="strcmp">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.strcmp">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"strcmp"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strcmp</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Compare the NUL-terminated strings at addresses ``a`` and ``b`` byte by byte, as unsigned bytes.</span>
+
+<span class="sd">    C reference: `strcmp(3) &lt;https://man7.org/linux/man-pages/man3/strcmp.3.html&gt;`_.</span>
+
+<span class="sd">    The result is negative if ``a`` sorts first, 0 if the strings are equal, and positive if ``b`` sorts first.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"strcmp"</span><span class="p">,</span> <span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="strncmp">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.strncmp">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"strncmp"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strncmp</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Compare at most the first ``n`` bytes of the NUL-terminated strings at addresses ``a`` and ``b``.</span>
+
+<span class="sd">    C reference: `strncmp(3) &lt;https://man7.org/linux/man-pages/man3/strncmp.3.html&gt;`_.</span>
+
+<span class="sd">    The comparison stops at the first NUL in either string, and the result follows the sign convention of ``strcmp``. An</span>
+<span class="sd">    ``n`` of 0 gives 0.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"strncmp"</span><span class="p">,</span> <span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="strchr">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.strchr">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"strchr"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strchr</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the first byte equal to ``c`` in the NUL-terminated string at ``s``, or 0 if none.</span>
+
+<span class="sd">    C reference: `strchr(3) &lt;https://man7.org/linux/man-pages/man3/strchr.3.html&gt;`_.</span>
+
+<span class="sd">    C converts ``c`` to ``char``, and a ``c`` of 0 finds the terminating NUL. numba converts an integer argument to</span>
+<span class="sd">    ``int32`` without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"strchr"</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="strrchr">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.strrchr">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"strrchr"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strrchr</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the last byte equal to ``c`` in the NUL-terminated string at ``s``, or 0 if none.</span>
+
+<span class="sd">    C reference: `strrchr(3) &lt;https://man7.org/linux/man-pages/man3/strrchr.3.html&gt;`_.</span>
+
+<span class="sd">    C converts ``c`` to ``char``, and a ``c`` of 0 finds the terminating NUL. numba converts an integer argument to</span>
+<span class="sd">    ``int32`` without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"strrchr"</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="strstr">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.strstr">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"strstr"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strstr</span><span class="p">(</span><span class="n">haystack</span><span class="p">,</span> <span class="n">needle</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the first occurrence of the string ``needle`` in the string ``haystack``, or 0 if none.</span>
+
+<span class="sd">    C reference: `strstr(3) &lt;https://man7.org/linux/man-pages/man3/strstr.3.html&gt;`_.</span>
+
+<span class="sd">    Both arguments are ``intp`` addresses of NUL-terminated strings. An empty ``needle`` gives ``haystack``.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"strstr"</span><span class="p">,</span> <span class="p">(</span><span class="n">haystack</span><span class="p">,</span> <span class="n">needle</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="strncpy">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.strncpy">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"strncpy"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strncpy</span><span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Copy at most ``n`` bytes of the NUL-terminated string at ``src`` to ``dst``, and return ``dst``.</span>
+
+<span class="sd">    C reference: `strncpy(3) &lt;https://man7.org/linux/man-pages/man3/strncpy.3.html&gt;`_.</span>
+
+<span class="sd">    If ``src`` is shorter than ``n`` bytes, C fills the rest of the ``n`` bytes with NULs. If it is ``n`` bytes or</span>
+<span class="sd">    longer, ``dst`` receives ``n`` bytes and no terminating NUL. A caller that needs a NUL-terminated result reserves</span>
+<span class="sd">    one more byte, and either zeroes the buffer first or writes a NUL at offset ``n`` of ``dst`` after the call.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"strncpy"</span><span class="p">,</span> <span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="strerror">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.strerror">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"strerror"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strerror</span><span class="p">(</span><span class="n">errnum</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the message string for the error number ``errnum``.</span>
+
+<span class="sd">    C reference: `strerror(3) &lt;https://man7.org/linux/man-pages/man3/strerror.3.html&gt;`_.</span>
+
+<span class="sd">    C does not require ``strerror`` to be thread-safe: the string may be in a buffer that a later call overwrites.</span>
+<span class="sd">    :func:`~numbox.core.bindings.strerror.strerror_safe` writes the message into the caller's buffer instead.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"strerror"</span><span class="p">,</span> <span class="p">(</span><span class="n">errnum</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="memcpy">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.memcpy">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"memcpy"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">memcpy</span><span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Copy ``n`` bytes from address ``src`` to address ``dst``, and return ``dst``.</span>
+
+<span class="sd">    C reference: `memcpy(3) &lt;https://man7.org/linux/man-pages/man3/memcpy.3.html&gt;`_.</span>
+
+<span class="sd">    The two regions must not overlap; ``memmove`` copies between overlapping regions. The caller keeps both regions</span>
+<span class="sd">    alive during the call.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"memcpy"</span><span class="p">,</span> <span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="memmove">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.memmove">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"memmove"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">memmove</span><span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Copy ``n`` bytes from address ``src`` to address ``dst``, which may overlap, and return ``dst``.</span>
+
+<span class="sd">    C reference: `memmove(3) &lt;https://man7.org/linux/man-pages/man3/memmove.3.html&gt;`_.</span>
+
+<span class="sd">    The caller keeps both regions alive during the call.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"memmove"</span><span class="p">,</span> <span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="memset">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.memset">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"memset"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">memset</span><span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Fill the ``n`` bytes at address ``dst`` with ``c``, converted to ``unsigned char``, and return ``dst``.</span>
+
+<span class="sd">    C reference: `memset(3) &lt;https://man7.org/linux/man-pages/man3/memset.3.html&gt;`_.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"memset"</span><span class="p">,</span> <span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="memcmp">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.memcmp">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"memcmp"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">memcmp</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Compare the first ``n`` bytes at addresses ``a`` and ``b``, as unsigned bytes.</span>
+
+<span class="sd">    C reference: `memcmp(3) &lt;https://man7.org/linux/man-pages/man3/memcmp.3.html&gt;`_.</span>
+
+<span class="sd">    The result follows the sign convention of ``strcmp``, and the comparison does not stop at a NUL.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"memcmp"</span><span class="p">,</span> <span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="memchr">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.memchr">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"memchr"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">memchr</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the first byte equal to ``c`` in the ``n`` bytes at address ``s``, or 0 if none.</span>
+
+<span class="sd">    C reference: `memchr(3) &lt;https://man7.org/linux/man-pages/man3/memchr.3.html&gt;`_.</span>
+
+<span class="sd">    C converts ``c`` to ``unsigned char``, so it compares ``c &amp; 0xff``.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"memchr"</span><span class="p">,</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="getenv">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libc.getenv">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"getenv"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">getenv</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the value of the environment variable named by the string at ``name``, or 0 if unset.</span>
+
+<span class="sd">    C reference: `getenv(3) &lt;https://man7.org/linux/man-pages/man3/getenv.3.html&gt;`_.</span>
+
+<span class="sd">    The environment owns the value: the caller must not modify or free it, and a later ``setenv``, ``putenv`` or</span>
+<span class="sd">    ``unsetenv`` can invalidate it. To keep the value, copy it into a ``str`` with</span>
+<span class="sd">    :func:`~numbox.utils.lowlevel.get_str_from_p_as_int` before the environment changes.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"getenv"</span><span class="p">,</span> <span class="p">(</span><span class="n">name</span><span class="p">,))</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

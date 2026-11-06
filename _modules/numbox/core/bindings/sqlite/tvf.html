@@ -1,0 +1,620 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.sqlite.tvf &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/sqlite/tvf.html" />
+      <script src="../../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.sqlite.tvf</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.sqlite.tvf</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Register a SQLite table-valued function whose rows a Python or jitted function computes for each query.</span>
+
+<span class="sd">:func:`register_tvf` registers ``fn`` under a name on a connection. ``SELECT * FROM name(2, 5)`` then calls</span>
+<span class="sd">``fn(2, 5)`` and returns the rows of the structured array that ``fn`` returns. Each registration generates and</span>
+<span class="sd">compiles its own ``xFilter`` implementation, the code that calls ``fn``, and builds its own ``sqlite3_module``. The</span>
+<span class="sd">structs, the function that sets a cell as a column's result, and the registration come from</span>
+<span class="sd">:mod:`~numbox.core.bindings.sqlite.vtable`.</span>
+<span class="sd">"""</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">ctypes</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">cfunc</span><span class="p">,</span> <span class="n">types</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.constants</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">SQLITE_OK</span><span class="p">,</span> <span class="n">SQLITE_ERROR</span><span class="p">,</span> <span class="n">SQLITE_NOMEM</span><span class="p">,</span> <span class="n">SQLITE_CONSTRAINT</span><span class="p">,</span>
+    <span class="n">SQLITE_INDEX_CONSTRAINT_EQ</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite._typemap</span><span class="w"> </span><span class="kn">import</span> <span class="n">_col_tag</span><span class="p">,</span> <span class="n">_SQL_TYPE</span><span class="p">,</span> <span class="n">tags_buf_t</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.vtable</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">_Sqlite3Module</span><span class="p">,</span> <span class="n">_SQLITE3_VTAB_CURSOR_DTYPE</span><span class="p">,</span> <span class="n">_VTAB_DTYPE</span><span class="p">,</span> <span class="n">_VTAB_SIZE</span><span class="p">,</span>
+    <span class="n">_IDX_INFO_DTYPE</span><span class="p">,</span> <span class="n">_CONSTRAINT_DTYPE</span><span class="p">,</span> <span class="n">_USAGE_DTYPE</span><span class="p">,</span>
+    <span class="n">_emit_cell</span><span class="p">,</span> <span class="n">_register_with_destroy</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.digest</span><span class="w"> </span><span class="kn">import</span> <span class="n">digest</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.preprocessing</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">_anchor_path</span><span class="p">,</span> <span class="n">_anchored_or_uncached</span><span class="p">,</span> <span class="n">_orphan_anchor_sweep</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1"># The generated code names these. Importing them here puts them in this module's __dict__, from which</span>
+<span class="c1"># _compile_xfilter seeds the namespace of the generated code.</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">carray</span><span class="p">,</span> <span class="n">njit</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>  <span class="c1"># noqa: F401</span>
+    <span class="n">int32</span><span class="p">,</span> <span class="n">int64</span><span class="p">,</span> <span class="n">float64</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.vtable</span><span class="w"> </span><span class="kn">import</span> <span class="n">sqlite3_declare_vtab</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.exec</span><span class="w"> </span><span class="kn">import</span> <span class="n">sqlite3_malloc</span><span class="p">,</span> <span class="n">sqlite3_free</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.value</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>  <span class="c1"># noqa: F401</span>
+    <span class="n">sqlite3_value_int64</span><span class="p">,</span> <span class="n">sqlite3_value_double</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.result</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>  <span class="c1"># noqa: F401</span>
+    <span class="n">sqlite3_result_int64</span><span class="p">,</span> <span class="n">sqlite3_result_double</span><span class="p">,</span>
+    <span class="n">sqlite3_result_text</span><span class="p">,</span> <span class="n">sqlite3_result_blob</span><span class="p">,</span> <span class="n">sqlite3_result_error</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite._typemap</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>  <span class="c1"># noqa: F401</span>
+    <span class="n">_TAG_I8</span><span class="p">,</span> <span class="n">_TAG_I16</span><span class="p">,</span> <span class="n">_TAG_I32</span><span class="p">,</span> <span class="n">_TAG_I64</span><span class="p">,</span> <span class="n">_TAG_U8</span><span class="p">,</span> <span class="n">_TAG_U16</span><span class="p">,</span> <span class="n">_TAG_U32</span><span class="p">,</span> <span class="n">_TAG_U64</span><span class="p">,</span>
+    <span class="n">_TAG_F32</span><span class="p">,</span> <span class="n">_TAG_F64</span><span class="p">,</span> <span class="n">_TAG_BOOL</span><span class="p">,</span> <span class="n">_TAG_S</span><span class="p">,</span> <span class="n">_TAG_U</span><span class="p">,</span> <span class="n">_TAG_BLOB</span><span class="p">,</span>
+    <span class="n">_nul_trimmed_len</span><span class="p">,</span> <span class="n">utf32_to_utf8</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>  <span class="c1"># noqa: F401</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.lowlevel</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>  <span class="c1"># noqa: F401</span>
+    <span class="n">_cast_int_to_void_p</span><span class="p">,</span> <span class="n">get_unicode_data_p</span><span class="p">,</span> <span class="n">load_unaligned</span><span class="p">,</span> <span class="n">store_at</span><span class="p">,</span> <span class="n">array_data_p</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.utils.meminfo</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>  <span class="c1"># noqa: F401</span>
+    <span class="n">structref_meminfo</span><span class="p">,</span> <span class="n">_incref_meminfo</span><span class="p">,</span> <span class="n">release_meminfo</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"register_tvf"</span><span class="p">]</span>
+
+<span class="c1"># The callbacks below compile with the cache option alone, taken from numbox's jit options and treated as enabled when</span>
+<span class="c1"># the key is absent; no other jit option applies to them. The generated xFilter implementation compiles under all of</span>
+<span class="c1"># numbox's jit options.</span>
+<span class="n">_CACHE</span> <span class="o">=</span> <span class="n">jit_options</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"cache"</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+<span class="n">_SQLITE_TRANSIENT</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>
+
+<span class="n">_ANCHOR_SUBDIR</span> <span class="o">=</span> <span class="s2">"numbox-sqlite-tvf"</span>
+<span class="n">_orphan_anchor_sweep</span><span class="p">(</span><span class="n">_ANCHOR_SUBDIR</span><span class="p">)</span>
+
+
+<span class="c1"># _TVF_DESC_DTYPE describes the descriptor of a registration, whose address SQLite passes to xConnect as the module's</span>
+<span class="c1"># client data. xConnect, xBestIndex, xOpen and xColumn read its fields by name through</span>
+<span class="c1"># carray(ptr, (1,), dtype=_TVF_DESC_DTYPE). The schema</span>
+<span class="c1"># declares the visible columns of out_dtype first and the n_hidden argument columns after them. col_tags has an entry</span>
+<span class="c1"># for every column of the schema, the hidden ones included; col_offsets and col_widths cover only the visible ones.</span>
+<span class="n">_TVF_DESC_DTYPE</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">([</span>
+    <span class="p">(</span><span class="s2">"ncols"</span><span class="p">,</span> <span class="s2">"i4"</span><span class="p">),</span> <span class="p">(</span><span class="s2">"n_hidden"</span><span class="p">,</span> <span class="s2">"i4"</span><span class="p">),</span> <span class="p">(</span><span class="s2">"itemsize"</span><span class="p">,</span> <span class="s2">"i8"</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">"col_offsets"</span><span class="p">,</span> <span class="s2">"i8"</span><span class="p">),</span> <span class="p">(</span><span class="s2">"col_tags"</span><span class="p">,</span> <span class="s2">"i8"</span><span class="p">),</span> <span class="p">(</span><span class="s2">"col_widths"</span><span class="p">,</span> <span class="s2">"i8"</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">"schema_ptr"</span><span class="p">,</span> <span class="s2">"i8"</span><span class="p">),</span> <span class="p">(</span><span class="s2">"scratch_bytes"</span><span class="p">,</span> <span class="s2">"i8"</span><span class="p">),</span>
+<span class="p">],</span> <span class="n">align</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="c1"># _TVF_CUR_DTYPE describes the cursor. mi_p and data_p hold the MemInfo and the data address of the array that fn</span>
+<span class="c1"># returned for the current filter, and n_rows and row_stride describe that array. scratch_p is the scratch buffer for</span>
+<span class="c1"># 'U' cells, and args_p is the buffer of decoded arguments. The cursor holds a reference to each array from the moment</span>
+<span class="c1"># that xFilter stores the array until the next xFilter or xClose releases it, so each array is released once.</span>
+<span class="n">_TVF_CUR_DTYPE</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">([</span>
+    <span class="p">(</span><span class="s2">"base"</span><span class="p">,</span> <span class="n">_SQLITE3_VTAB_CURSOR_DTYPE</span><span class="p">),</span> <span class="p">(</span><span class="s2">"descriptor"</span><span class="p">,</span> <span class="s2">"i8"</span><span class="p">),</span> <span class="p">(</span><span class="s2">"rowid"</span><span class="p">,</span> <span class="s2">"i8"</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">"mi_p"</span><span class="p">,</span> <span class="s2">"i8"</span><span class="p">),</span> <span class="p">(</span><span class="s2">"data_p"</span><span class="p">,</span> <span class="s2">"i8"</span><span class="p">),</span> <span class="p">(</span><span class="s2">"n_rows"</span><span class="p">,</span> <span class="s2">"i8"</span><span class="p">),</span> <span class="p">(</span><span class="s2">"row_stride"</span><span class="p">,</span> <span class="s2">"i8"</span><span class="p">),</span> <span class="p">(</span><span class="s2">"scratch_p"</span><span class="p">,</span> <span class="s2">"i8"</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">"args_p"</span><span class="p">,</span> <span class="s2">"i8"</span><span class="p">),</span>
+<span class="p">],</span> <span class="n">align</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">_TVF_CUR_SIZE</span> <span class="o">=</span> <span class="n">_TVF_CUR_DTYPE</span><span class="o">.</span><span class="n">itemsize</span>
+<span class="c1"># _ARG_SLOT is the number of bytes for each hidden argument in the cursor's args_p buffer, which holds each argument as</span>
+<span class="c1"># the int64 or float64 that xFilter decoded.</span>
+<span class="n">_ARG_SLOT</span> <span class="o">=</span> <span class="mi">8</span>
+
+<span class="n">_INT_TAGS</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">((</span><span class="n">_TAG_I8</span><span class="p">,</span> <span class="n">_TAG_I16</span><span class="p">,</span> <span class="n">_TAG_I32</span><span class="p">,</span> <span class="n">_TAG_I64</span><span class="p">,</span>
+                       <span class="n">_TAG_U8</span><span class="p">,</span> <span class="n">_TAG_U16</span><span class="p">,</span> <span class="n">_TAG_U32</span><span class="p">,</span> <span class="n">_TAG_U64</span><span class="p">,</span> <span class="n">_TAG_BOOL</span><span class="p">))</span>
+<span class="n">_FLOAT_TAGS</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">((</span><span class="n">_TAG_F32</span><span class="p">,</span> <span class="n">_TAG_F64</span><span class="p">))</span>
+
+
+<span class="c1"># --- generated-source templates -------------------------------------------</span>
+<span class="c1"># The template of a registration's xFilter implementation. The code runs in a namespace seeded from this module's</span>
+<span class="c1"># globals, which hold every helper imported above, with _fn (the caller's function), _N_HIDDEN and jit_options added.</span>
+<span class="c1"># {arg_decode} and {fn_call} are the only parts that vary with the number of arguments. _compile_xfilter fills them</span>
+<span class="c1"># from arg_types before it compiles the code, as udf_helpers does for an aggregate.</span>
+<span class="c1"># The implementation first releases the array of the cursor's previous filter. It then decodes each argument from</span>
+<span class="c1"># argv, keeps it in the cursor for xColumn, and calls _fn. _incref_meminfo takes a reference to the returned array for</span>
+<span class="c1"># the cursor, so the array survives the function's return. The intrinsic marks its function so that numba's</span>
+<span class="c1"># pass that prunes reference counts, which numba 0.66 removed, cannot delete the increment.</span>
+<span class="c1"># Registrations with different out_dtypes never share compiled code: each compiles from an anchor of its own, named</span>
+<span class="c1"># after the code and digest((out_dtype, tuple(arg_tags)), [fn]).</span>
+<span class="n">_XFILTER_SRC</span> <span class="o">=</span> <span class="s1">'''</span>
+<span class="s1">@njit(**jit_options)</span>
+<span class="s1">def _tvf_xfilter_impl(cur, argc, argv):</span>
+<span class="s1">    c = carray(_cast_int_to_void_p(cur), (1,), dtype=_TVF_CUR_DTYPE)</span>
+<span class="s1">    if c[0].mi_p != 0:</span>
+<span class="s1">        release_meminfo(c[0].mi_p)</span>
+<span class="s1">        c[0].mi_p = 0</span>
+<span class="s1">        c[0].data_p = 0</span>
+<span class="s1">        c[0].n_rows = 0</span>
+<span class="s1">        c[0].row_stride = 0</span>
+<span class="s1">    c[0].rowid = 0</span>
+<span class="s1">    if argc &lt; _N_HIDDEN:</span>
+<span class="s1">        return</span>
+<span class="s1">    vals = carray(_cast_int_to_void_p(argv), (argc,), dtype=np.intp)</span>
+<span class="si">{arg_decode}</span>
+<span class="s1">    result = </span><span class="si">{fn_call}</span>
+<span class="s1">    mi_p, _base = structref_meminfo(result)</span>
+<span class="s1">    _incref_meminfo(mi_p)</span>
+<span class="s1">    c[0].mi_p = mi_p</span>
+<span class="s1">    c[0].data_p = array_data_p(result)</span>
+<span class="s1">    c[0].n_rows = result.shape[0]</span>
+<span class="s1">    c[0].row_stride = result.strides[0]</span>
+<span class="s1">'''</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_gen_arg_decode</span><span class="p">(</span><span class="n">arg_tags</span><span class="p">):</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">tag</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">arg_tags</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">_INT_TAGS</span><span class="p">:</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">"    a</span><span class="si">%d</span><span class="s2"> = sqlite3_value_int64(vals[</span><span class="si">%d</span><span class="s2">])"</span> <span class="o">%</span> <span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">i</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">"    a</span><span class="si">%d</span><span class="s2"> = sqlite3_value_double(vals[</span><span class="si">%d</span><span class="s2">])"</span> <span class="o">%</span> <span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">i</span><span class="p">))</span>
+        <span class="c1"># The cursor keeps the value for xColumn, which returns it for the hidden column.</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">"    store_at(c[0].args_p + </span><span class="si">%d</span><span class="s2">, a</span><span class="si">%d</span><span class="s2">)"</span> <span class="o">%</span> <span class="p">(</span><span class="n">_ARG_SLOT</span> <span class="o">*</span> <span class="n">i</span><span class="p">,</span> <span class="n">i</span><span class="p">))</span>
+    <span class="k">return</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+
+
+<span class="c1"># --- per-registration cfunc factories -------------------------------------</span>
+<span class="c1"># Each call of a factory compiles new cfunc objects for one registration. Their code is the same for every</span>
+<span class="c1"># registration, because each callback reads the registration's layout from its descriptor. With caching enabled,</span>
+<span class="c1"># numba therefore loads the compiled code from its cache after the first compilation.</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_make_xconnect</span><span class="p">():</span>
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">),</span>
+           <span class="n">cache</span><span class="o">=</span><span class="n">_CACHE</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_tvf_xconnect</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">p_aux</span><span class="p">,</span> <span class="n">argc</span><span class="p">,</span> <span class="n">argv</span><span class="p">,</span> <span class="n">pp_vtab</span><span class="p">,</span> <span class="n">pz_err</span><span class="p">):</span>
+        <span class="n">vtab</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">d</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">p_aux</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_TVF_DESC_DTYPE</span><span class="p">)</span>
+            <span class="n">rc</span> <span class="o">=</span> <span class="n">sqlite3_declare_vtab</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">d</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">schema_ptr</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">rc</span> <span class="o">!=</span> <span class="n">SQLITE_OK</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">rc</span>
+            <span class="n">vtab</span> <span class="o">=</span> <span class="n">sqlite3_malloc</span><span class="p">(</span><span class="n">int32</span><span class="p">(</span><span class="n">_VTAB_SIZE</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">vtab</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">SQLITE_NOMEM</span>
+            <span class="c1"># SQLite zeroes the sqlite3_vtab base after this callback returns and then sets its fields, so the code</span>
+            <span class="c1"># sets only descriptor, numbox's own member.</span>
+            <span class="n">v</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">vtab</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_VTAB_DTYPE</span><span class="p">)</span>
+            <span class="n">v</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">descriptor</span> <span class="o">=</span> <span class="n">p_aux</span>
+            <span class="n">slot</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">pp_vtab</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">intp</span><span class="p">)</span>
+            <span class="n">slot</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">vtab</span>
+            <span class="k">return</span> <span class="n">SQLITE_OK</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="n">sqlite3_free</span><span class="p">(</span><span class="n">vtab</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">SQLITE_ERROR</span>
+    <span class="k">return</span> <span class="n">_tvf_xconnect</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_make_xbestindex</span><span class="p">():</span>
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">),</span> <span class="n">cache</span><span class="o">=</span><span class="n">_CACHE</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_tvf_xbestindex</span><span class="p">(</span><span class="n">vtab</span><span class="p">,</span> <span class="n">idx_info</span><span class="p">):</span>
+        <span class="c1"># Every hidden argument column needs a usable EQ constraint. Each one is bound to argv in declaration order:</span>
+        <span class="c1"># argvIndex is the argument's index plus 1, and omit=1 makes SQLite pass the value and drop the constraint</span>
+        <span class="c1"># that the call syntax created. If an argument is unbound, the callback returns SQLITE_CONSTRAINT, so SQLite</span>
+        <span class="c1"># rejects the plan and never calls xFilter with too few arguments. If no plan binds every argument, the</span>
+        <span class="c1"># statement fails to prepare with SQLite's error "no query solution".</span>
+        <span class="n">v</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">vtab</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_VTAB_DTYPE</span><span class="p">)</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">descriptor</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_TVF_DESC_DTYPE</span><span class="p">)</span>
+        <span class="n">ii</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">idx_info</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_IDX_INFO_DTYPE</span><span class="p">)</span>
+        <span class="n">ncols</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">ncols</span>
+        <span class="n">n_hidden</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">n_hidden</span>
+        <span class="n">n_constraint</span> <span class="o">=</span> <span class="n">ii</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">nConstraint</span>
+        <span class="n">cons</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">ii</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">aConstraint</span><span class="p">),</span> <span class="p">(</span><span class="n">n_constraint</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_CONSTRAINT_DTYPE</span><span class="p">)</span>
+        <span class="n">usage</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">ii</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">aConstraintUsage</span><span class="p">),</span> <span class="p">(</span><span class="n">n_constraint</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_USAGE_DTYPE</span><span class="p">)</span>
+
+        <span class="c1"># Each hidden argument is bound separately, to the first usable EQ constraint on its column. A running count</span>
+        <span class="c1"># of bound constraints would count a duplicate EQ on one argument, and so miss another argument that is</span>
+        <span class="c1"># unbound. A 64-bit mask would limit a function to 63 arguments. A second EQ on the same argument, as in</span>
+        <span class="c1"># f(1) WHERE arg0 = 1, receives no argvIndex, because SQLite refuses a plan in which two constraints share one.</span>
+        <span class="c1"># It is not omitted either, so SQLite checks it against the hidden column. The scan takes</span>
+        <span class="c1"># n_hidden * n_constraint steps: microseconds for a few arguments, and about a millisecond at SQLite's</span>
+        <span class="c1"># default limit of 2000 columns. It runs only when SQLite plans a query.</span>
+        <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_hidden</span><span class="p">):</span>
+            <span class="n">bound</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_constraint</span><span class="p">):</span>
+                <span class="k">if</span> <span class="p">(</span><span class="n">cons</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">usable</span> <span class="o">!=</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">cons</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">op</span> <span class="o">==</span> <span class="n">SQLITE_INDEX_CONSTRAINT_EQ</span>
+                        <span class="ow">and</span> <span class="n">cons</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">iColumn</span> <span class="o">-</span> <span class="n">ncols</span> <span class="o">==</span> <span class="n">h</span><span class="p">):</span>
+                    <span class="n">usage</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">argvIndex</span> <span class="o">=</span> <span class="n">int32</span><span class="p">(</span><span class="n">h</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+                    <span class="n">usage</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">omit</span> <span class="o">=</span> <span class="mi">1</span>
+                    <span class="n">bound</span> <span class="o">=</span> <span class="kc">True</span>
+                    <span class="k">break</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">bound</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">SQLITE_CONSTRAINT</span>
+        <span class="n">ii</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">idxNum</span> <span class="o">=</span> <span class="n">int32</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">ii</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">estimatedCost</span> <span class="o">=</span> <span class="n">float64</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">ii</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">estimatedRows</span> <span class="o">=</span> <span class="mi">16</span>
+        <span class="k">return</span> <span class="n">SQLITE_OK</span>
+    <span class="k">return</span> <span class="n">_tvf_xbestindex</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_make_static_cfuncs</span><span class="p">():</span>
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">),</span> <span class="n">cache</span><span class="o">=</span><span class="n">_CACHE</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_tvf_xdisconnect</span><span class="p">(</span><span class="n">vtab</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">sqlite3_free</span><span class="p">(</span><span class="n">vtab</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">SQLITE_OK</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">SQLITE_ERROR</span>
+
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">),</span> <span class="n">cache</span><span class="o">=</span><span class="n">_CACHE</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_tvf_xopen</span><span class="p">(</span><span class="n">vtab</span><span class="p">,</span> <span class="n">pp_cursor</span><span class="p">):</span>
+        <span class="n">cur</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">scratch_p</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">args_p</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">v</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">vtab</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_VTAB_DTYPE</span><span class="p">)</span>
+            <span class="n">desc</span> <span class="o">=</span> <span class="n">v</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">descriptor</span>
+            <span class="n">d</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">desc</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_TVF_DESC_DTYPE</span><span class="p">)</span>
+            <span class="n">scratch</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">scratch_bytes</span>
+            <span class="n">n_hidden</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">n_hidden</span>
+            <span class="n">cur</span> <span class="o">=</span> <span class="n">sqlite3_malloc</span><span class="p">(</span><span class="n">int32</span><span class="p">(</span><span class="n">_TVF_CUR_SIZE</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">cur</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">SQLITE_NOMEM</span>
+            <span class="k">if</span> <span class="n">scratch</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">scratch_p</span> <span class="o">=</span> <span class="n">sqlite3_malloc</span><span class="p">(</span><span class="n">int32</span><span class="p">(</span><span class="n">scratch</span><span class="p">))</span>
+                <span class="k">if</span> <span class="n">scratch_p</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">sqlite3_free</span><span class="p">(</span><span class="n">cur</span><span class="p">)</span>
+                    <span class="k">return</span> <span class="n">SQLITE_NOMEM</span>
+            <span class="k">if</span> <span class="n">n_hidden</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">args_p</span> <span class="o">=</span> <span class="n">sqlite3_malloc</span><span class="p">(</span><span class="n">int32</span><span class="p">(</span><span class="n">_ARG_SLOT</span> <span class="o">*</span> <span class="n">n_hidden</span><span class="p">))</span>
+                <span class="k">if</span> <span class="n">args_p</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">sqlite3_free</span><span class="p">(</span><span class="n">scratch_p</span><span class="p">)</span>
+                    <span class="n">sqlite3_free</span><span class="p">(</span><span class="n">cur</span><span class="p">)</span>
+                    <span class="k">return</span> <span class="n">SQLITE_NOMEM</span>
+            <span class="n">c</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">cur</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_TVF_CUR_DTYPE</span><span class="p">)</span>
+            <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">base</span><span class="o">.</span><span class="n">pVtab</span> <span class="o">=</span> <span class="n">vtab</span>
+            <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">descriptor</span> <span class="o">=</span> <span class="n">desc</span>
+            <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">rowid</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">mi_p</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">data_p</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">n_rows</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">row_stride</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">scratch_p</span> <span class="o">=</span> <span class="n">scratch_p</span>
+            <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">args_p</span> <span class="o">=</span> <span class="n">args_p</span>
+            <span class="n">slot</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">pp_cursor</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">intp</span><span class="p">)</span>
+            <span class="n">slot</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">cur</span>
+            <span class="k">return</span> <span class="n">SQLITE_OK</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="n">sqlite3_free</span><span class="p">(</span><span class="n">args_p</span><span class="p">)</span>
+            <span class="n">sqlite3_free</span><span class="p">(</span><span class="n">scratch_p</span><span class="p">)</span>
+            <span class="n">sqlite3_free</span><span class="p">(</span><span class="n">cur</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">SQLITE_ERROR</span>
+
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">),</span> <span class="n">cache</span><span class="o">=</span><span class="n">_CACHE</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_tvf_xclose</span><span class="p">(</span><span class="n">cur</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">c</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">cur</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_TVF_CUR_DTYPE</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">mi_p</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">release_meminfo</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">mi_p</span><span class="p">)</span>
+                <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">mi_p</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">data_p</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">n_rows</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">row_stride</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">sqlite3_free</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">args_p</span><span class="p">)</span>
+            <span class="n">sqlite3_free</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">scratch_p</span><span class="p">)</span>
+            <span class="n">sqlite3_free</span><span class="p">(</span><span class="n">cur</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">SQLITE_OK</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">SQLITE_ERROR</span>
+
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">),</span> <span class="n">cache</span><span class="o">=</span><span class="n">_CACHE</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_tvf_xnext</span><span class="p">(</span><span class="n">cur</span><span class="p">):</span>
+        <span class="n">c</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">cur</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_TVF_CUR_DTYPE</span><span class="p">)</span>
+        <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">rowid</span> <span class="o">=</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">rowid</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="k">return</span> <span class="n">SQLITE_OK</span>
+
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">),</span> <span class="n">cache</span><span class="o">=</span><span class="n">_CACHE</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_tvf_xeof</span><span class="p">(</span><span class="n">cur</span><span class="p">):</span>
+        <span class="n">c</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">cur</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_TVF_CUR_DTYPE</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">data_p</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">or</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">rowid</span> <span class="o">&gt;=</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">n_rows</span><span class="p">:</span>
+            <span class="k">return</span> <span class="mi">1</span>
+        <span class="k">return</span> <span class="mi">0</span>
+
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">),</span> <span class="n">cache</span><span class="o">=</span><span class="n">_CACHE</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_tvf_xrowid</span><span class="p">(</span><span class="n">cur</span><span class="p">,</span> <span class="n">p_rowid</span><span class="p">):</span>
+        <span class="n">c</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">cur</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_TVF_CUR_DTYPE</span><span class="p">)</span>
+        <span class="n">store_at</span><span class="p">(</span><span class="n">p_rowid</span><span class="p">,</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">rowid</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">SQLITE_OK</span>
+
+    <span class="k">return</span> <span class="n">_tvf_xdisconnect</span><span class="p">,</span> <span class="n">_tvf_xopen</span><span class="p">,</span> <span class="n">_tvf_xclose</span><span class="p">,</span> <span class="n">_tvf_xnext</span><span class="p">,</span> <span class="n">_tvf_xeof</span><span class="p">,</span> <span class="n">_tvf_xrowid</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_make_xcolumn</span><span class="p">():</span>
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">),</span> <span class="n">cache</span><span class="o">=</span><span class="n">_CACHE</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_tvf_xcolumn</span><span class="p">(</span><span class="n">cur</span><span class="p">,</span> <span class="n">ctx</span><span class="p">,</span> <span class="n">j</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">c</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">cur</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_TVF_CUR_DTYPE</span><span class="p">)</span>
+            <span class="n">data_p</span> <span class="o">=</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">data_p</span>
+            <span class="k">if</span> <span class="n">data_p</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">SQLITE_OK</span>
+            <span class="n">rowid</span> <span class="o">=</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">rowid</span>
+            <span class="n">d</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">descriptor</span><span class="p">),</span> <span class="p">(</span><span class="mi">1</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">_TVF_DESC_DTYPE</span><span class="p">)</span>
+            <span class="n">ncols</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">ncols</span>
+            <span class="n">tags</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">col_tags</span><span class="p">),</span> <span class="p">(</span><span class="n">ncols</span> <span class="o">+</span> <span class="n">d</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">n_hidden</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">tags_buf_t</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">j</span> <span class="o">&gt;=</span> <span class="n">ncols</span><span class="p">:</span>
+                <span class="c1"># A hidden argument column returns the argument that xFilter decoded for fn, as SQLite's own</span>
+                <span class="c1"># table-valued functions do.</span>
+                <span class="n">arg_p</span> <span class="o">=</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">args_p</span> <span class="o">+</span> <span class="n">_ARG_SLOT</span> <span class="o">*</span> <span class="p">(</span><span class="n">j</span> <span class="o">-</span> <span class="n">ncols</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">tags</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="o">==</span> <span class="n">_TAG_F32</span> <span class="ow">or</span> <span class="n">tags</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="o">==</span> <span class="n">_TAG_F64</span><span class="p">:</span>
+                    <span class="n">sqlite3_result_double</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">load_unaligned</span><span class="p">(</span><span class="n">arg_p</span><span class="p">,</span> <span class="n">float64</span><span class="p">))</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">sqlite3_result_int64</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">load_unaligned</span><span class="p">(</span><span class="n">arg_p</span><span class="p">,</span> <span class="n">int64</span><span class="p">))</span>
+                <span class="k">return</span> <span class="n">SQLITE_OK</span>
+            <span class="n">offsets</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">col_offsets</span><span class="p">),</span> <span class="p">(</span><span class="n">ncols</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+            <span class="n">widths</span> <span class="o">=</span> <span class="n">carray</span><span class="p">(</span><span class="n">_cast_int_to_void_p</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">col_widths</span><span class="p">),</span> <span class="p">(</span><span class="n">ncols</span><span class="p">,),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+            <span class="n">addr</span> <span class="o">=</span> <span class="n">data_p</span> <span class="o">+</span> <span class="n">rowid</span> <span class="o">*</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">row_stride</span> <span class="o">+</span> <span class="n">offsets</span><span class="p">[</span><span class="n">j</span><span class="p">]</span>
+            <span class="c1"># register_table passes 'S' and BLOB results as SQLITE_STATIC, but every result here is SQLITE_TRANSIENT.</span>
+            <span class="c1"># It points into the cursor's array, or into its scratch buffer, and the next xFilter releases the array</span>
+            <span class="c1"># and replaces it, so a static pointer could outlive its memory.</span>
+            <span class="k">return</span> <span class="n">_emit_cell</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">addr</span><span class="p">,</span> <span class="n">tags</span><span class="p">[</span><span class="n">j</span><span class="p">],</span> <span class="n">widths</span><span class="p">[</span><span class="n">j</span><span class="p">],</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">scratch_p</span><span class="p">,</span> <span class="n">_SQLITE_TRANSIENT</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="n">sqlite3_result_error</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">get_unicode_data_p</span><span class="p">(</span><span class="s2">"error reading tvf column"</span><span class="p">),</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">SQLITE_ERROR</span>
+    <span class="k">return</span> <span class="n">_tvf_xcolumn</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_prepare_fn</span><span class="p">(</span><span class="n">fn</span><span class="p">):</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">numba.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">is_jitted</span>
+    <span class="k">if</span> <span class="n">is_jitted</span><span class="p">(</span><span class="n">fn</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">fn</span>
+    <span class="k">if</span> <span class="nb">callable</span><span class="p">(</span><span class="n">fn</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">njit</span><span class="p">(</span><span class="n">fn</span><span class="p">)</span>
+    <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s2">"fn must be a callable (plain Python or @njit), got </span><span class="si">%r</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">fn</span><span class="p">,))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_compile_xfilter</span><span class="p">(</span><span class="n">stem</span><span class="p">,</span> <span class="n">arg_tags</span><span class="p">,</span> <span class="n">out_dtype</span><span class="p">,</span> <span class="n">fn</span><span class="p">):</span>
+    <span class="n">n_hidden</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">arg_tags</span><span class="p">)</span>
+    <span class="n">arg_decode</span> <span class="o">=</span> <span class="n">_gen_arg_decode</span><span class="p">(</span><span class="n">arg_tags</span><span class="p">)</span>
+    <span class="n">fn_call</span> <span class="o">=</span> <span class="s2">"_fn(</span><span class="si">%s</span><span class="s2">)"</span> <span class="o">%</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">"a</span><span class="si">%d</span><span class="s2">"</span> <span class="o">%</span> <span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_hidden</span><span class="p">))</span>
+    <span class="n">src</span> <span class="o">=</span> <span class="n">_XFILTER_SRC</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">arg_decode</span><span class="o">=</span><span class="n">arg_decode</span><span class="p">,</span> <span class="n">fn_call</span><span class="o">=</span><span class="n">fn_call</span><span class="p">)</span>
+    <span class="c1"># The digest covers out_dtype, the argument tags, numba's and numbox's versions, numbox's jit options and the</span>
+    <span class="c1"># fingerprint of fn. The anchor's name ends in a hash of the code text, which starts with the digest, so an edit</span>
+    <span class="c1"># that changes the digest compiles new code. If fn reads a value without a fingerprint, digest falls back to a</span>
+    <span class="c1"># weaker fingerprint. It names the type of such a value instead of the value and omits the module attributes that</span>
+    <span class="c1"># fn reads, so an edit to such a value or to such an attribute keeps the anchor and the cached code. The utils page</span>
+    <span class="c1"># describes the case under "If a SQLite function keeps returning old results".</span>
+    <span class="n">tvf_digest</span> <span class="o">=</span> <span class="n">digest</span><span class="p">((</span><span class="n">out_dtype</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">arg_tags</span><span class="p">)),</span> <span class="p">[</span><span class="n">fn</span><span class="p">])</span>
+    <span class="n">code_txt</span> <span class="o">=</span> <span class="s2">"# tvf-digest: </span><span class="si">%s</span><span class="se">\n</span><span class="si">%s</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">tvf_digest</span><span class="p">,</span> <span class="n">src</span><span class="p">)</span>
+    <span class="n">anchor</span> <span class="o">=</span> <span class="n">_anchor_path</span><span class="p">(</span><span class="n">_ANCHOR_SUBDIR</span><span class="p">,</span> <span class="n">stem</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">)</span>
+    <span class="n">ns</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="nb">globals</span><span class="p">(),</span> <span class="s2">"_fn"</span><span class="p">:</span> <span class="n">fn</span><span class="p">,</span> <span class="s2">"_N_HIDDEN"</span><span class="p">:</span> <span class="n">n_hidden</span><span class="p">,</span>
+          <span class="s2">"jit_options"</span><span class="p">:</span> <span class="n">_anchored_or_uncached</span><span class="p">(</span><span class="n">anchor</span><span class="p">,</span> <span class="n">code_txt</span><span class="p">,</span> <span class="n">jit_options</span><span class="p">)}</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="nb">compile</span><span class="p">(</span><span class="n">code_txt</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">anchor</span><span class="p">),</span> <span class="n">mode</span><span class="o">=</span><span class="s2">"exec"</span><span class="p">)</span>
+    <span class="n">exec</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="n">ns</span><span class="p">)</span>  <span class="c1"># nosec B102 - JIT codegen of internal source</span>
+    <span class="k">return</span> <span class="n">ns</span><span class="p">[</span><span class="s2">"_tvf_xfilter_impl"</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_build_tvf_descriptor</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">arg_types</span><span class="p">,</span> <span class="n">out_dtype</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">out_dtype</span><span class="o">.</span><span class="n">fields</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">out_dtype</span><span class="o">.</span><span class="n">names</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s2">"out_dtype must be a structured numpy dtype, got </span><span class="si">%r</span><span class="s2">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">out_dtype</span><span class="p">,))</span>
+    <span class="n">names</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">out_dtype</span><span class="o">.</span><span class="n">names</span><span class="p">)</span>
+    <span class="n">subs</span> <span class="o">=</span> <span class="p">[</span><span class="n">out_dtype</span><span class="o">.</span><span class="n">fields</span><span class="p">[</span><span class="n">nm</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">nm</span> <span class="ow">in</span> <span class="n">names</span><span class="p">]</span>
+    <span class="n">offs</span> <span class="o">=</span> <span class="p">[</span><span class="n">out_dtype</span><span class="o">.</span><span class="n">fields</span><span class="p">[</span><span class="n">nm</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">nm</span> <span class="ow">in</span> <span class="n">names</span><span class="p">]</span>
+    <span class="n">vis_tags</span> <span class="o">=</span> <span class="p">[</span><span class="n">_col_tag</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">subs</span><span class="p">]</span>
+    <span class="n">vis_widths</span> <span class="o">=</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">itemsize</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">subs</span><span class="p">]</span>
+
+    <span class="n">arg_dtypes</span> <span class="o">=</span> <span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="n">t</span><span class="p">)</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">arg_types</span><span class="p">]</span>
+    <span class="n">arg_tags</span> <span class="o">=</span> <span class="p">[</span><span class="n">_col_tag</span><span class="p">(</span><span class="n">dt</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span> <span class="k">for</span> <span class="n">dt</span> <span class="ow">in</span> <span class="n">arg_dtypes</span><span class="p">]</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">t</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_INT_TAGS</span> <span class="ow">and</span> <span class="n">t</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_FLOAT_TAGS</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">arg_tags</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+            <span class="s2">"register_tvf arg_types must be integer or float scalar dtypes; "</span>
+            <span class="s2">"string/bytes hidden args are not supported"</span><span class="p">)</span>
+
+    <span class="n">offsets_buf</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">offs</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+    <span class="c1"># tags_buf holds one tag for each column of the schema, in the order that the schema below declares them: the</span>
+    <span class="c1"># visible columns, then the hidden arguments.</span>
+    <span class="n">tags_buf</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">vis_tags</span> <span class="o">+</span> <span class="n">arg_tags</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">tags_buf_t</span><span class="p">)</span>
+    <span class="n">widths_buf</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">vis_widths</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span>
+    <span class="n">scratch</span> <span class="o">=</span> <span class="nb">max</span><span class="p">([</span><span class="n">w</span> <span class="o">+</span> <span class="mi">1</span> <span class="k">for</span> <span class="n">w</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">vis_widths</span><span class="p">,</span> <span class="n">vis_tags</span><span class="p">)</span> <span class="k">if</span> <span class="n">t</span> <span class="o">==</span> <span class="n">_TAG_U</span><span class="p">],</span> <span class="n">default</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="n">vis_sql</span> <span class="o">=</span> <span class="p">[</span><span class="s1">'"</span><span class="si">%s</span><span class="s1">" </span><span class="si">%s</span><span class="s1">'</span> <span class="o">%</span> <span class="p">(</span><span class="n">n</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">'"'</span><span class="p">,</span> <span class="s1">'""'</span><span class="p">),</span> <span class="n">_SQL_TYPE</span><span class="p">[</span><span class="n">t</span><span class="p">])</span> <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">names</span><span class="p">,</span> <span class="n">vis_tags</span><span class="p">)]</span>
+    <span class="n">hid_sql</span> <span class="o">=</span> <span class="p">[</span><span class="s1">'"arg</span><span class="si">%d</span><span class="s1">" </span><span class="si">%s</span><span class="s1"> HIDDEN'</span> <span class="o">%</span> <span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">_SQL_TYPE</span><span class="p">[</span><span class="n">t</span><span class="p">])</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">arg_tags</span><span class="p">)]</span>
+    <span class="n">schema</span> <span class="o">=</span> <span class="p">(</span><span class="s2">"CREATE TABLE x(</span><span class="si">%s</span><span class="s2">)"</span> <span class="o">%</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">vis_sql</span> <span class="o">+</span> <span class="n">hid_sql</span><span class="p">))</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">)</span> <span class="o">+</span> <span class="sa">b</span><span class="s2">"</span><span class="se">\x00</span><span class="s2">"</span>
+
+    <span class="n">c</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">_TVF_DESC_DTYPE</span><span class="p">)</span>
+    <span class="n">c</span><span class="p">[</span><span class="s2">"ncols"</span><span class="p">]</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">names</span><span class="p">)</span>
+    <span class="n">c</span><span class="p">[</span><span class="s2">"n_hidden"</span><span class="p">]</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">arg_tags</span><span class="p">)</span>
+    <span class="n">c</span><span class="p">[</span><span class="s2">"itemsize"</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">out_dtype</span><span class="o">.</span><span class="n">itemsize</span><span class="p">)</span>
+    <span class="n">c</span><span class="p">[</span><span class="s2">"col_offsets"</span><span class="p">]</span> <span class="o">=</span> <span class="n">offsets_buf</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data</span>
+    <span class="n">c</span><span class="p">[</span><span class="s2">"col_tags"</span><span class="p">]</span> <span class="o">=</span> <span class="n">tags_buf</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data</span>
+    <span class="n">c</span><span class="p">[</span><span class="s2">"col_widths"</span><span class="p">]</span> <span class="o">=</span> <span class="n">widths_buf</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data</span>
+    <span class="n">c</span><span class="p">[</span><span class="s2">"schema_ptr"</span><span class="p">]</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">c_char_p</span><span class="p">(</span><span class="n">schema</span><span class="p">),</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_void_p</span><span class="p">)</span><span class="o">.</span><span class="n">value</span>
+    <span class="n">c</span><span class="p">[</span><span class="s2">"scratch_bytes"</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">scratch</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">c</span><span class="p">,</span> <span class="n">offsets_buf</span><span class="p">,</span> <span class="n">tags_buf</span><span class="p">,</span> <span class="n">widths_buf</span><span class="p">,</span> <span class="n">schema</span><span class="p">,</span> <span class="n">arg_tags</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_TvfHandle</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""The objects that a registration needs while SQLite can call it: its module struct, descriptor, buffers and code.</span>
+
+<span class="sd">    The handle holds the ``sqlite3_module`` struct, the descriptor, the buffers that the descriptor points into, the</span>
+<span class="sd">    schema text, ``fn``, the generated ``xFilter`` implementation and every callback. SQLite and the callbacks read</span>
+<span class="sd">    the struct, the descriptor and its buffers through their addresses, so these must stay alive. numba keeps a</span>
+<span class="sd">    cfunc's compiled code after the cfunc object is collected, but it does not document that behavior, so the handle</span>
+<span class="sd">    holds the callbacks as well. ``_DATA_ANCHOR`` holds the handle until SQLite calls the destructor that the</span>
+<span class="sd">    registration passed to ``sqlite3_create_module_v2``.</span>
+<span class="sd">    """</span>
+    <span class="vm">__slots__</span> <span class="o">=</span> <span class="p">(</span><span class="s2">"_keep"</span><span class="p">,)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">objs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_keep</span> <span class="o">=</span> <span class="n">objs</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_stem</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+    <span class="k">return</span> <span class="s2">"tvf_"</span> <span class="o">+</span> <span class="s2">""</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">c</span> <span class="k">if</span> <span class="n">c</span><span class="o">.</span><span class="n">isalnum</span><span class="p">()</span> <span class="k">else</span> <span class="s2">"_"</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">name</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="register_tvf">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.tvf.register_tvf">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">register_tvf</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">arg_types</span><span class="p">,</span> <span class="n">out_dtype</span><span class="p">,</span> <span class="n">fn</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Register ``fn`` on the connection ``db`` as the eponymous table-valued function ``name``.</span>
+
+<span class="sd">    ``SELECT * FROM name(a, b)`` calls ``fn(a, b)`` and returns the rows of the array that ``fn`` returns, a 1-D</span>
+<span class="sd">    NumPy structured array of ``out_dtype``. ``fn`` is a plain Python function, which numbox compiles with ``njit``,</span>
+<span class="sd">    or a jitted one. ``arg_types`` holds one integer, float or ``bool`` NumPy dtype for each argument. ``fn``</span>
+<span class="sd">    receives an integer or ``bool`` argument as an int64, and a float argument as a float64. Each argument is also a</span>
+<span class="sd">    hidden column of the table, after the columns of ``out_dtype``, and the hidden columns are named ``arg0``,</span>
+<span class="sd">    ``arg1``, ``arg2``, in the order of the arguments. Selecting a hidden column returns the value that ``fn``</span>
+<span class="sd">    received. A query must supply every argument: one that leaves an argument unbound, such as</span>
+<span class="sd">    ``SELECT * FROM name``, fails to prepare with SQLite's error "no query solution".</span>
+
+<span class="sd">    ``fn`` must return an array whose dtype is ``out_dtype``. A slice, a strided view or an offset view is read</span>
+<span class="sd">    correctly, because the row stride is honored. An array of another dtype is read through the layout of</span>
+<span class="sd">    ``out_dtype`` and yields undefined values. A query returns SQL NULL for a NaN float cell, because SQLite converts a</span>
+<span class="sd">    NaN REAL to NULL, as in :func:`~numbox.core.bindings.sqlite.vtable.register_table`. If ``fn`` raises, the query</span>
+<span class="sd">    fails with ``SQLITE_ERROR``.</span>
+
+<span class="sd">    numba compiles ``fn`` and the generated code that calls it during this call, so numba raises a typing error in</span>
+<span class="sd">    ``fn`` from this call. The generated code compiles under numbox's jit options, and numbox names its cache after a</span>
+<span class="sd">    digest of ``out_dtype``, the argument types and ``fn``. If ``fn`` reads a value without a fingerprint, the digest</span>
+<span class="sd">    misses some edits. The registration can then run code compiled before an edit, as the section "If a SQLite</span>
+<span class="sd">    function keeps returning old results" of :doc:`numbox.utils` explains.</span>
+
+<span class="sd">    numbox keeps the registration's objects, ``fn`` included, until SQLite drops the module, when the connection</span>
+<span class="sd">    closes or when the name is registered again. Close the connection before the interpreter exits: if Python closes</span>
+<span class="sd">    a ``sqlite3.Connection`` during its shutdown after a query of the function, the process can end with a</span>
+<span class="sd">    segmentation fault.</span>
+
+<span class="sd">    Raises ``TypeError`` when ``out_dtype`` is not a structured dtype or has a field without a SQLite type, when an</span>
+<span class="sd">    argument type is not an integer, float or ``bool`` dtype, and when ``fn`` is not callable. Raises</span>
+<span class="sd">    ``RuntimeError``, with SQLite's message, when SQLite refuses the registration.</span>
+<span class="sd">    """</span>
+    <span class="n">c</span><span class="p">,</span> <span class="n">offsets_buf</span><span class="p">,</span> <span class="n">tags_buf</span><span class="p">,</span> <span class="n">widths_buf</span><span class="p">,</span> <span class="n">schema</span><span class="p">,</span> <span class="n">arg_tags</span> <span class="o">=</span> <span class="n">_build_tvf_descriptor</span><span class="p">(</span>
+        <span class="n">name</span><span class="p">,</span> <span class="n">arg_types</span><span class="p">,</span> <span class="n">out_dtype</span><span class="p">)</span>
+
+    <span class="n">xfilter_impl</span> <span class="o">=</span> <span class="n">_compile_xfilter</span><span class="p">(</span><span class="n">_stem</span><span class="p">(</span><span class="n">name</span><span class="p">),</span> <span class="n">arg_tags</span><span class="p">,</span> <span class="n">out_dtype</span><span class="p">,</span> <span class="n">_prepare_fn</span><span class="p">(</span><span class="n">fn</span><span class="p">))</span>
+
+    <span class="c1"># cache=False, unlike every other callback here: this one closes over xfilter_impl, a dispatcher made for each</span>
+    <span class="c1"># registration, so its cache key never repeats. With cache=True, each registration in each process writes an</span>
+    <span class="c1"># index entry that no later lookup reads. Three identical processes produced one, two and three overloads, and four</span>
+    <span class="c1"># registrations in one process produced four, while each of the other callbacks had one. The anchor of</span>
+    <span class="c1"># xfilter_impl, which _compile_xfilter writes, is what caches this path.</span>
+    <span class="nd">@cfunc</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">(</span><span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">int32</span><span class="p">,</span> <span class="n">types</span><span class="o">.</span><span class="n">intp</span><span class="p">),</span> <span class="n">cache</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_tvf_xfilter</span><span class="p">(</span><span class="n">cur</span><span class="p">,</span> <span class="n">idx_num</span><span class="p">,</span> <span class="n">idx_str</span><span class="p">,</span> <span class="n">argc</span><span class="p">,</span> <span class="n">argv</span><span class="p">):</span>
+        <span class="c1"># The try/except converts an exception from fn into SQLITE_ERROR, xFilter's own return code. Without it, the</span>
+        <span class="c1"># cfunc boundary would catch the exception and return the zero default, SQLITE_OK, and SQLite would report a</span>
+        <span class="c1"># successful query with no rows. A try/finally with no except clause does not prevent this: numba 0.65.1</span>
+        <span class="c1"># fails on its re-raise, and the cfunc boundary catches that error too. xfilter_impl empties the cursor before</span>
+        <span class="c1"># it calls fn, so the cursor is left consistent and empty when fn raises.</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">xfilter_impl</span><span class="p">(</span><span class="n">cur</span><span class="p">,</span> <span class="n">argc</span><span class="p">,</span> <span class="n">argv</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">SQLITE_ERROR</span>
+        <span class="k">return</span> <span class="n">SQLITE_OK</span>
+
+    <span class="n">xconnect</span> <span class="o">=</span> <span class="n">_make_xconnect</span><span class="p">()</span>
+    <span class="n">xbestindex</span> <span class="o">=</span> <span class="n">_make_xbestindex</span><span class="p">()</span>
+    <span class="n">xdisconnect</span><span class="p">,</span> <span class="n">xopen</span><span class="p">,</span> <span class="n">xclose</span><span class="p">,</span> <span class="n">xnext</span><span class="p">,</span> <span class="n">xeof</span><span class="p">,</span> <span class="n">xrowid</span> <span class="o">=</span> <span class="n">_make_static_cfuncs</span><span class="p">()</span>
+    <span class="n">xcolumn</span> <span class="o">=</span> <span class="n">_make_xcolumn</span><span class="p">()</span>
+
+    <span class="n">module</span> <span class="o">=</span> <span class="n">_Sqlite3Module</span><span class="p">()</span>
+    <span class="n">module</span><span class="o">.</span><span class="n">iVersion</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="n">module</span><span class="o">.</span><span class="n">xCreate</span> <span class="o">=</span> <span class="n">xconnect</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">module</span><span class="o">.</span><span class="n">xConnect</span> <span class="o">=</span> <span class="n">xconnect</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">module</span><span class="o">.</span><span class="n">xBestIndex</span> <span class="o">=</span> <span class="n">xbestindex</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">module</span><span class="o">.</span><span class="n">xDisconnect</span> <span class="o">=</span> <span class="n">xdisconnect</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">module</span><span class="o">.</span><span class="n">xDestroy</span> <span class="o">=</span> <span class="n">xdisconnect</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">module</span><span class="o">.</span><span class="n">xOpen</span> <span class="o">=</span> <span class="n">xopen</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">module</span><span class="o">.</span><span class="n">xClose</span> <span class="o">=</span> <span class="n">xclose</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">module</span><span class="o">.</span><span class="n">xFilter</span> <span class="o">=</span> <span class="n">_tvf_xfilter</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">module</span><span class="o">.</span><span class="n">xNext</span> <span class="o">=</span> <span class="n">xnext</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">module</span><span class="o">.</span><span class="n">xEof</span> <span class="o">=</span> <span class="n">xeof</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">module</span><span class="o">.</span><span class="n">xColumn</span> <span class="o">=</span> <span class="n">xcolumn</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">module</span><span class="o">.</span><span class="n">xRowid</span> <span class="o">=</span> <span class="n">xrowid</span><span class="o">.</span><span class="n">address</span>
+    <span class="n">module_p</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">addressof</span><span class="p">(</span><span class="n">module</span><span class="p">)</span>
+
+    <span class="n">handle</span> <span class="o">=</span> <span class="n">_TvfHandle</span><span class="p">(</span>
+        <span class="n">module</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">offsets_buf</span><span class="p">,</span> <span class="n">tags_buf</span><span class="p">,</span> <span class="n">widths_buf</span><span class="p">,</span> <span class="n">schema</span><span class="p">,</span> <span class="n">fn</span><span class="p">,</span>
+        <span class="n">xfilter_impl</span><span class="p">,</span> <span class="n">_tvf_xfilter</span><span class="p">,</span> <span class="n">xconnect</span><span class="p">,</span> <span class="n">xbestindex</span><span class="p">,</span> <span class="n">xdisconnect</span><span class="p">,</span>
+        <span class="n">xopen</span><span class="p">,</span> <span class="n">xclose</span><span class="p">,</span> <span class="n">xnext</span><span class="p">,</span> <span class="n">xeof</span><span class="p">,</span> <span class="n">xrowid</span><span class="p">,</span> <span class="n">xcolumn</span><span class="p">)</span>
+    <span class="n">_register_with_destroy</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">module_p</span><span class="p">,</span> <span class="n">c</span><span class="o">.</span><span class="n">ctypes</span><span class="o">.</span><span class="n">data</span><span class="p">,</span> <span class="n">handle</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

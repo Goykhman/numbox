@@ -1,0 +1,388 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.sqlite.conn &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/sqlite/conn.html" />
+      <script src="../../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.sqlite.conn</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.sqlite.conn</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Bindings that open and close a SQLite connection and report its state.</span>
+
+<span class="sd">The module binds ``sqlite3_open``, ``sqlite3_open_v2`` and ``sqlite3_close``, and the functions that report the</span>
+<span class="sd">library's version, the error of the most recent failed call, a database's file name and read-only state, and the counts</span>
+<span class="sd">of changed rows. SQLite added ``sqlite3_changes64`` and ``sqlite3_total_changes64`` in version 3.37, released in</span>
+<span class="sd">November 2021. Older libraries lack them, such as the SQLite 3.34 that CPython 3.10 ships on Windows, or a system</span>
+<span class="sd">SQLite on Linux or macOS older than 3.37. Each of the two bindings is a stub if the loaded library lacks its function,</span>
+<span class="sd">as its docstring describes.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.call</span><span class="w"> </span><span class="kn">import</span> <span class="n">_call_lib_func</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.signatures</span><span class="w"> </span><span class="kn">import</span> <span class="n">signatures</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_lib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span><span class="p">,</span> <span class="n">proxy_if_available</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">"sqlite3_open"</span><span class="p">,</span> <span class="s2">"sqlite3_open_v2"</span><span class="p">,</span> <span class="s2">"sqlite3_close"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_libversion"</span><span class="p">,</span> <span class="s2">"sqlite3_libversion_number"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_errmsg"</span><span class="p">,</span> <span class="s2">"sqlite3_errcode"</span><span class="p">,</span> <span class="s2">"sqlite3_extended_errcode"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_threadsafe"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_db_handle"</span><span class="p">,</span> <span class="s2">"sqlite3_db_filename"</span><span class="p">,</span> <span class="s2">"sqlite3_db_readonly"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_changes"</span><span class="p">,</span> <span class="s2">"sqlite3_last_insert_rowid"</span><span class="p">,</span> <span class="s2">"sqlite3_total_changes"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_changes64"</span><span class="p">,</span> <span class="s2">"sqlite3_total_changes64"</span><span class="p">,</span>
+<span class="p">]</span>
+
+
+<span class="c1"># load_lib caches the handle of each library, so every binding module of this subpackage calls it for "sqlite3" and</span>
+<span class="c1"># receives the same handle; no module depends on another having loaded the library first. conn, column and value keep</span>
+<span class="c1"># the handle, because proxy_if_available looks up their optional symbols in it.</span>
+<span class="n">_sqlite3_lib</span> <span class="o">=</span> <span class="n">load_lib</span><span class="p">(</span><span class="s2">"sqlite3"</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="sqlite3_open">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_open">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_open"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_open</span><span class="p">(</span><span class="n">filename_p</span><span class="p">,</span> <span class="n">db_pp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Open the database file named at ``filename_p`` and write the new connection's handle to ``db_pp``.</span>
+
+<span class="sd">    C reference: `sqlite3_open &lt;https://sqlite.org/c3ref/open.html&gt;`_.</span>
+
+<span class="sd">    ``filename_p`` is the address of a NUL-terminated UTF-8 file name, and ``":memory:"`` opens a private in-memory</span>
+<span class="sd">    database. SQLite opens the file for reading and writing and creates it if it does not exist. ``db_pp`` is the</span>
+<span class="sd">    address of an ``intp`` that receives the handle, such as ``ctypes.addressof`` of a ``ctypes.c_int64``. Returns</span>
+<span class="sd">    ``SQLITE_OK``, or an error code that :func:`sqlite3_errmsg` explains. SQLite writes a handle even when the open</span>
+<span class="sd">    fails, unless it cannot allocate one, and the caller closes it with :func:`sqlite3_close` in either case.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_open"</span><span class="p">,</span> <span class="p">(</span><span class="n">filename_p</span><span class="p">,</span> <span class="n">db_pp</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_open_v2">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_open_v2">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_open_v2"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_open_v2</span><span class="p">(</span><span class="n">filename_p</span><span class="p">,</span> <span class="n">db_pp</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="n">vfs_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Open the database file named at ``filename_p`` in the mode that ``flags`` sets; write the handle to ``db_pp``.</span>
+
+<span class="sd">    C reference: `sqlite3_open_v2 &lt;https://sqlite.org/c3ref/open.html&gt;`_.</span>
+
+<span class="sd">    ``flags`` holds ``SQLITE_OPEN_READONLY``, ``SQLITE_OPEN_READWRITE``, or ``SQLITE_OPEN_READWRITE`` with</span>
+<span class="sd">    ``SQLITE_OPEN_CREATE``, and may add other ``SQLITE_OPEN_*`` flags of</span>
+<span class="sd">    :mod:`~numbox.core.bindings.sqlite.constants` with a bitwise OR. ``vfs_p`` is the address of the name of a VFS,</span>
+<span class="sd">    or 0 for the default one. The file name, the handle and the result code have the meaning that</span>
+<span class="sd">    :func:`sqlite3_open` describes.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_open_v2"</span><span class="p">,</span> <span class="p">(</span><span class="n">filename_p</span><span class="p">,</span> <span class="n">db_pp</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="n">vfs_p</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_close">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_close">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_close"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_close</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Close the connection ``db_p`` and free its resources, and return ``SQLITE_OK``.</span>
+
+<span class="sd">    C reference: `sqlite3_close &lt;https://sqlite.org/c3ref/close.html&gt;`_.</span>
+
+<span class="sd">    SQLite returns ``SQLITE_BUSY`` and leaves the connection open while a prepared statement on it is not finalized</span>
+<span class="sd">    or a BLOB handle is not closed. It rolls back a transaction that is still open. A call with a handle of 0 does</span>
+<span class="sd">    nothing.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_close"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_libversion">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_libversion">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_libversion"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_libversion</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Return the address of the loaded library's version string, such as ``"3.45.1"``.</span>
+
+<span class="sd">    C reference: `sqlite3_libversion &lt;https://sqlite.org/c3ref/libversion.html&gt;`_.</span>
+
+<span class="sd">    The string is a constant of the library, valid for the life of the process. Python code reads it with</span>
+<span class="sd">    :func:`~numbox.utils.lowlevel.get_str_from_p_as_int`.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_libversion"</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_libversion_number">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_libversion_number">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_libversion_number"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_libversion_number</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Return the loaded library's version as an integer, such as 3045001 for version 3.45.1.</span>
+
+<span class="sd">    C reference: `sqlite3_libversion_number &lt;https://sqlite.org/c3ref/libversion.html&gt;`_.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_libversion_number"</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_errmsg">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_errmsg">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_errmsg"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_errmsg</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of SQLite's English message, in UTF-8, for the most recent error on the connection ``db_p``.</span>
+
+<span class="sd">    C reference: `sqlite3_errmsg &lt;https://sqlite.org/c3ref/errcode.html&gt;`_.</span>
+
+<span class="sd">    SQLite owns the text, and the next call on the connection may overwrite or free it, so copy it at once, as</span>
+<span class="sd">    :func:`~numbox.utils.lowlevel.get_str_from_p_as_int` does. Returns 0 when no message is available.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_errmsg"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_errcode">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_errcode">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_errcode"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_errcode</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the result code of the most recent failed call on the connection ``db_p``.</span>
+
+<span class="sd">    C reference: `sqlite3_errcode &lt;https://sqlite.org/c3ref/errcode.html&gt;`_.</span>
+
+<span class="sd">    The code is a primary one, such as ``SQLITE_CONSTRAINT``, unless the connection uses extended result codes. Any</span>
+<span class="sd">    later call on the connection may change it.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_errcode"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_extended_errcode">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_extended_errcode">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_extended_errcode"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_extended_errcode</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the extended result code of the most recent failed call on the connection ``db_p``.</span>
+
+<span class="sd">    C reference: `sqlite3_extended_errcode &lt;https://sqlite.org/c3ref/errcode.html&gt;`_.</span>
+
+<span class="sd">    The low 8 bits of an extended code are its primary code, one of the result codes of</span>
+<span class="sd">    :mod:`~numbox.core.bindings.sqlite.constants`.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_extended_errcode"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_threadsafe">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_threadsafe">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_threadsafe"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_threadsafe</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Return 0 if the loaded library was compiled without its mutexes, and a nonzero value otherwise.</span>
+
+<span class="sd">    C reference: `sqlite3_threadsafe &lt;https://sqlite.org/c3ref/threadsafe.html&gt;`_.</span>
+
+<span class="sd">    The value reports the compile-time setting ``SQLITE_THREADSAFE``, not a threading mode set later at run time.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_threadsafe"</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_db_handle">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_db_handle">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_db_handle"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_db_handle</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the handle of the connection on which the statement ``stmt_p`` was prepared.</span>
+
+<span class="sd">    C reference: `sqlite3_db_handle &lt;https://sqlite.org/c3ref/db_handle.html&gt;`_.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_db_handle"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_db_filename">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_db_filename">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_db_filename"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_db_filename</span><span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">name_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the absolute file name of the database named at ``name_p`` on the connection ``db_p``.</span>
+
+<span class="sd">    C reference: `sqlite3_db_filename &lt;https://sqlite.org/c3ref/db_filename.html&gt;`_.</span>
+
+<span class="sd">    ``name_p`` is the address of the database's name: ``"main"``, ``"temp"`` or the name of an attached database.</span>
+<span class="sd">    Returns 0 or an empty string for a temporary or in-memory database, and for a name that the connection lacks. The</span>
+<span class="sd">    connection owns the text, which stays valid until the database is detached or the connection closes.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_db_filename"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">name_p</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_db_readonly">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_db_readonly">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_db_readonly"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_db_readonly</span><span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">name_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return 1 if the database named at ``name_p`` is read-only, 0 if it is writable, and -1 if ``db_p`` lacks it.</span>
+
+<span class="sd">    C reference: `sqlite3_db_readonly &lt;https://sqlite.org/c3ref/db_readonly.html&gt;`_.</span>
+
+<span class="sd">    ``name_p`` is the address of the database's name, as for :func:`sqlite3_db_filename`.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_db_readonly"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">name_p</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_changes">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_changes">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_changes"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_changes</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the number of rows that the most recent completed INSERT, UPDATE or DELETE on ``db_p`` changed.</span>
+
+<span class="sd">    C reference: `sqlite3_changes &lt;https://sqlite.org/c3ref/changes.html&gt;`_.</span>
+
+<span class="sd">    The count excludes the rows that triggers, foreign key actions and REPLACE conflict resolution changed. Above</span>
+<span class="sd">    the int32 range the value is undefined; :func:`sqlite3_changes64` returns it as an int64.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_changes"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_last_insert_rowid">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_last_insert_rowid">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_last_insert_rowid"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_last_insert_rowid</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the rowid of the most recent successful INSERT into a rowid table on ``db_p``, or 0 if there was none.</span>
+
+<span class="sd">    C reference: `sqlite3_last_insert_rowid &lt;https://sqlite.org/c3ref/last_insert_rowid.html&gt;`_.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_last_insert_rowid"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_total_changes">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_total_changes">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_total_changes"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_total_changes</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the number of rows changed by every INSERT, UPDATE and DELETE on ``db_p`` since the connection opened.</span>
+
+<span class="sd">    C reference: `sqlite3_total_changes &lt;https://sqlite.org/c3ref/total_changes.html&gt;`_.</span>
+
+<span class="sd">    The count includes the rows that triggers and foreign key actions changed, and it excludes the rows that REPLACE</span>
+<span class="sd">    conflict resolution changed. Above the int32 range the value is undefined; :func:`sqlite3_total_changes64` returns</span>
+<span class="sd">    it as an int64.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_total_changes"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<span class="c1"># SQLite has these two from version 3.37. proxy_if_available makes each a stub where the loaded library lacks it.</span>
+<div class="viewcode-block" id="sqlite3_changes64">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_changes64">[docs]</a>
+<span class="nd">@proxy_if_available</span><span class="p">(</span><span class="n">_sqlite3_lib</span><span class="p">,</span> <span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_changes64"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_changes64</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the count of :func:`sqlite3_changes` as an int64.</span>
+
+<span class="sd">    C reference: `sqlite3_changes64 &lt;https://sqlite.org/c3ref/changes.html&gt;`_.</span>
+
+<span class="sd">    SQLite added the function in version 3.37. If the loaded library is older, this binding is a stub: a call from</span>
+<span class="sd">    Python raises ``NotImplementedError``, and a jitted call fails to compile with a ``TypingError``. A stub has no</span>
+<span class="sd">    ``as_func``, so ``hasattr(sqlite3_changes64, "as_func")`` is true only when the binding is present.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_changes64"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_total_changes64">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.conn.sqlite3_total_changes64">[docs]</a>
+<span class="nd">@proxy_if_available</span><span class="p">(</span><span class="n">_sqlite3_lib</span><span class="p">,</span> <span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_total_changes64"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_total_changes64</span><span class="p">(</span><span class="n">db_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the count of :func:`sqlite3_total_changes` as an int64.</span>
+
+<span class="sd">    C reference: `sqlite3_total_changes64 &lt;https://sqlite.org/c3ref/total_changes.html&gt;`_.</span>
+
+<span class="sd">    SQLite added the function in version 3.37. If the loaded library is older, this binding is a stub, as</span>
+<span class="sd">    :func:`sqlite3_changes64` describes.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_total_changes64"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,))</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

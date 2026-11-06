@@ -1,0 +1,154 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.utils.cstrings &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/utils/cstrings.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.utils.cstrings</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.utils.cstrings</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""NUL-terminated UTF-8 C strings, created from Python strings, for numbox's bindings.</span>
+
+<span class="sd">numbox's bindings, such as those in ``numbox.core.bindings.libc`` and ``numbox.core.bindings.sqlite``, take every</span>
+<span class="sd">text argument as an ``intp`` address of a NUL-terminated C string. :func:`c_string` copies the UTF-8 encoding of a</span>
+<span class="sd">``str`` into a new C buffer and yields the buffer's address for the duration of a ``with`` block.</span>
+<span class="sd">:func:`numbox.utils.lowlevel.get_unicode_data_p` returns the address of a string's own data without a copy. CPython</span>
+<span class="sd">stores one, two or four bytes per character there, so those bytes are the text's UTF-8 only for ASCII text.</span>
+
+<span class="sd">``c_string`` works only in Python: numba raises ``UnsupportedBytecodeError`` for a ``with`` statement that uses it as</span>
+<span class="sd">the context manager, and numba cannot use the ctypes buffer either. For jitted code, encode the text in Python, add a</span>
+<span class="sd">NUL byte, store the bytes in a NumPy ``uint8`` array, and take the array's address in the jitted code with</span>
+<span class="sd">:func:`numbox.utils.lowlevel.array_data_p`.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">contextlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">contextmanager</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ctypes</span><span class="w"> </span><span class="kn">import</span> <span class="n">addressof</span><span class="p">,</span> <span class="n">create_string_buffer</span>
+
+
+<div class="viewcode-block" id="c_string">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.cstrings.c_string">[docs]</a>
+<span class="nd">@contextmanager</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">c_string</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Yield the ``intp`` address of a new NUL-terminated C string that holds the UTF-8 encoding of ``s``.</span>
+
+<span class="sd">    The C buffer exists until the ``with`` block ends. The generator then drops its reference to the buffer and ctypes</span>
+<span class="sd">    frees it, so the address must not be used after the block. ``ValueError`` is raised if ``s`` contains a NUL</span>
+<span class="sd">    character, because the C string would end there; CPython's ``sqlite3.connect`` refuses such a file name in the same</span>
+<span class="sd">    way. Several strings can be open at once, in one ``with`` statement or, when their number is known only at run</span>
+<span class="sd">    time, through a ``contextlib.ExitStack``::</span>
+
+<span class="sd">        from contextlib import ExitStack</span>
+
+<span class="sd">        from numbox.core.bindings.libc import strlen</span>
+<span class="sd">        from numbox.utils.cstrings import c_string</span>
+
+<span class="sd">        with c_string("pear") as p:</span>
+<span class="sd">            print(strlen(p))   # 4</span>
+
+<span class="sd">        with ExitStack() as stack:</span>
+<span class="sd">            pointers = [stack.enter_context(c_string(word)) for word in ["pear", "apple"]]</span>
+<span class="sd">            print([strlen(p) for p in pointers])   # [4, 5]</span>
+
+<span class="sd">    ``c_string`` works only in Python; the module docstring describes how to pass a string to jitted code.</span>
+<span class="sd">    """</span>
+    <span class="n">encoded</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">"utf-8"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="sa">b</span><span class="s2">"</span><span class="se">\x00</span><span class="s2">"</span> <span class="ow">in</span> <span class="n">encoded</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="s2">"c_string: input contains an embedded NUL byte; would truncate "</span>
+            <span class="s2">"the C string at the first NUL"</span>
+        <span class="p">)</span>
+    <span class="n">buf</span> <span class="o">=</span> <span class="n">create_string_buffer</span><span class="p">(</span><span class="n">encoded</span><span class="p">)</span>
+    <span class="k">yield</span> <span class="n">addressof</span><span class="p">(</span><span class="n">buf</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

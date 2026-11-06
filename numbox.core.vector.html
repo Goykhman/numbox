@@ -1,0 +1,222 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.vector &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/numbox.core.vector.html" />
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="numbox.core.work" href="numbox.core.work.html" />
+    <link rel="prev" title="numbox.core.variable" href="numbox.core.variable.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">numbox</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.any.html">numbox.core.any</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.html">numbox.core.bindings</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.bindings.sqlite.html">numbox.core.bindings.sqlite</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.cache_key.html">numbox.core.cache_key</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.configurations.html">numbox.core.configurations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.proxy.html">numbox.core.proxy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.variable.html">numbox.core.variable</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">numbox.core.vector</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#modules">Modules</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#module-numbox.core.vector.vector">numbox.core.vector.vector</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.core.work.html">numbox.core.work</a></li>
+<li class="toctree-l2"><a class="reference internal" href="numbox.utils.html">numbox.utils</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">numbox</a></li>
+      <li class="breadcrumb-item active">numbox.core.vector</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/numbox.core.vector.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="numbox-core-vector">
+<h1>numbox.core.vector<a class="headerlink" href="#numbox-core-vector" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>Generic growable numba vector backed by a numpy array.</p>
+<p>Compared to <code class="docutils literal notranslate"><span class="pre">numba.typed.List</span></code>:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">List</span></code> supports arbitrary element types (including other structrefs)
+and exposes a richer API (<code class="docutils literal notranslate"><span class="pre">append</span></code>, <code class="docutils literal notranslate"><span class="pre">pop</span></code>, <code class="docutils literal notranslate"><span class="pre">insert</span></code>, <code class="docutils literal notranslate"><span class="pre">remove</span></code>,
+slicing).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Vector</span></code> is restricted to scalar element types where <code class="docutils literal notranslate"><span class="pre">str(elem_type)</span></code>
+matches a numpy dtype (<code class="docutils literal notranslate"><span class="pre">float64</span></code>, <code class="docutils literal notranslate"><span class="pre">int64</span></code>, etc.).
+<code class="docutils literal notranslate"><span class="pre">make_vector</span></code> memoises instances by <code class="docutils literal notranslate"><span class="pre">elem_type.key</span></code>, so cached code
+keeps the same type identity across processes. Storage is a single
+<code class="docutils literal notranslate"><span class="pre">numpy.ndarray</span></code>, so per-element overhead is the scalar itself plus
+amortised geometric growth.</p></li>
+</ul>
+</section>
+<section id="modules">
+<h2>Modules<a class="headerlink" href="#modules" title="Link to this heading"></a></h2>
+<section id="module-numbox.core.vector.vector">
+<span id="numbox-core-vector-vector"></span><h3>numbox.core.vector.vector<a class="headerlink" href="#module-numbox.core.vector.vector" title="Link to this heading"></a></h3>
+<p>A growable vector of one numba scalar type for jitted code, stored in a NumPy array.</p>
+<p><a class="reference internal" href="#numbox.core.vector.vector.make_vector" title="numbox.core.vector.vector.make_vector"><code class="xref py py-func docutils literal notranslate"><span class="pre">make_vector()</span></code></a> returns a jitted factory of vectors of one element type, and their numba type. In jitted code,
+<code class="docutils literal notranslate"><span class="pre">len(v)</span></code>, <code class="docutils literal notranslate"><span class="pre">v[i]</span></code> and <code class="docutils literal notranslate"><span class="pre">v[i]</span> <span class="pre">=</span> <span class="pre">x</span></code> work on a vector, <a class="reference internal" href="#numbox.core.vector.vector.vector_push" title="numbox.core.vector.vector.vector_push"><code class="xref py py-func docutils literal notranslate"><span class="pre">vector_push()</span></code></a> appends an element and
+<a class="reference internal" href="#numbox.core.vector.vector.vector_extend" title="numbox.core.vector.vector.vector_extend"><code class="xref py py-func docutils literal notranslate"><span class="pre">vector_extend()</span></code></a> appends the elements of another vector. If the elements to append do not fit, the buffer is
+replaced by one whose capacity is the old capacity doubled until they fit.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.Vector">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.vector.vector.</span></span><span class="sig-name descname"><span class="pre">Vector</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/vector/vector.html#Vector"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.vector.vector.Vector" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">StructRefProxy</span></code></p>
+<p>The Python object for a vector of one numba scalar type, whose buffer grows as elements are appended.</p>
+<p>Create one with the <code class="docutils literal notranslate"><span class="pre">create</span></code> function that <a class="reference internal" href="#numbox.core.vector.vector.make_vector" title="numbox.core.vector.vector.make_vector"><code class="xref py py-func docutils literal notranslate"><span class="pre">make_vector()</span></code></a> returns. Calling the class raises
+<code class="docutils literal notranslate"><span class="pre">NotImplementedError</span></code> in Python, and jitted code that calls it fails to compile.</p>
+<dl class="py property">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.Vector.buf">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">buf</span></span><a class="headerlink" href="#numbox.core.vector.vector.Vector.buf" title="Link to this definition"></a></dt>
+<dd><p>The NumPy array that holds the elements.</p>
+<p>Its length is the capacity of the vector, and only its first <code class="docutils literal notranslate"><span class="pre">size</span></code> elements are set.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.Vector.size">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">size</span></span><a class="headerlink" href="#numbox.core.vector.vector.Vector.size" title="Link to this definition"></a></dt>
+<dd><p>The number of elements in the vector.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.VectorTypeClass">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">numbox.core.vector.vector.</span></span><span class="sig-name descname"><span class="pre">VectorTypeClass</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/vector/vector.html#VectorTypeClass"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.vector.vector.VectorTypeClass" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">StructRef</span></code></p>
+<p>The numba type class of <code class="docutils literal notranslate"><span class="pre">Vector</span></code>.</p>
+<p>Each element type has an instance of its own, a structref type with the fields <code class="docutils literal notranslate"><span class="pre">buf</span></code> and <code class="docutils literal notranslate"><span class="pre">size</span></code>.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.VectorTypeClass.preprocess_fields">
+<span class="sig-name descname"><span class="pre">preprocess_fields</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fields</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/vector/vector.html#VectorTypeClass.preprocess_fields"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.vector.vector.VectorTypeClass.preprocess_fields" title="Link to this definition"></a></dt>
+<dd><p>Return <code class="docutils literal notranslate"><span class="pre">fields</span></code> with each literal field type replaced by its non-literal type.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.make_vector">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.vector.vector.</span></span><span class="sig-name descname"><span class="pre">make_vector</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">elem_type</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/vector/vector.html#make_vector"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.vector.vector.make_vector" title="Link to this definition"></a></dt>
+<dd><p>Return <code class="docutils literal notranslate"><span class="pre">(create,</span> <span class="pre">vector_type)</span></code>: a jitted factory of vectors of <code class="docutils literal notranslate"><span class="pre">elem_type</span></code>, and their numba type.</p>
+<p><code class="docutils literal notranslate"><span class="pre">create(capacity)</span></code> returns an empty vector whose buffer holds <code class="docutils literal notranslate"><span class="pre">capacity</span></code> elements. It takes no buffer, so the
+buffer’s dtype always follows from <code class="docutils literal notranslate"><span class="pre">elem_type</span></code>. A capacity below 1 fails an <code class="docutils literal notranslate"><span class="pre">assert</span></code> in <code class="docutils literal notranslate"><span class="pre">create</span></code>. A buffer of
+capacity 0 would never grow, because each growth doubles it: <code class="docutils literal notranslate"><span class="pre">vector_extend</span></code> would loop forever, and
+<code class="docutils literal notranslate"><span class="pre">vector_push</span></code> would write past the end of the buffer. A vector grows and never shrinks, so a positive capacity
+stays positive.</p>
+<p>The buffer’s dtype is <code class="docutils literal notranslate"><span class="pre">numpy.dtype(str(elem_type))</span></code>, so <code class="docutils literal notranslate"><span class="pre">elem_type</span></code> must be a scalar type whose name NumPy
+accepts, such as <code class="docutils literal notranslate"><span class="pre">float64</span></code> or <code class="docutils literal notranslate"><span class="pre">int64</span></code>. For another type, such as <code class="docutils literal notranslate"><span class="pre">unicode_type</span></code>, NumPy raises <code class="docutils literal notranslate"><span class="pre">TypeError</span></code>.
+The pair is stored in <code class="docutils literal notranslate"><span class="pre">_vector_cache</span></code> under <code class="docutils literal notranslate"><span class="pre">elem_type.key</span></code>, and a later call with the same key returns it.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.vector_extend">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.vector.vector.</span></span><span class="sig-name descname"><span class="pre">vector_extend</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dst</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">src</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/vector/vector.html#vector_extend"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.vector.vector.vector_extend" title="Link to this definition"></a></dt>
+<dd><p>Append the elements of the vector <code class="docutils literal notranslate"><span class="pre">src</span></code> to the vector <code class="docutils literal notranslate"><span class="pre">dst</span></code>, doubling the capacity of <code class="docutils literal notranslate"><span class="pre">dst</span></code> until they fit.</p>
+<p>numba converts the elements to the element type of <code class="docutils literal notranslate"><span class="pre">dst</span></code> as it does for an array assignment.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="numbox.core.vector.vector.vector_push">
+<span class="sig-prename descclassname"><span class="pre">numbox.core.vector.vector.</span></span><span class="sig-name descname"><span class="pre">vector_push</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">v</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">val</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/numbox/core/vector/vector.html#vector_push"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#numbox.core.vector.vector.vector_push" title="Link to this definition"></a></dt>
+<dd><p>Append <code class="docutils literal notranslate"><span class="pre">val</span></code> to the vector <code class="docutils literal notranslate"><span class="pre">v</span></code>, doubling the buffer’s capacity first if the buffer is full.</p>
+<p>numba converts <code class="docutils literal notranslate"><span class="pre">val</span></code> to the element type as it does for an array assignment, so a float appended to an integer
+vector is truncated.</p>
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="numbox.core.variable.html" class="btn btn-neutral float-left" title="numbox.core.variable" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="numbox.core.work.html" class="btn btn-neutral float-right" title="numbox.core.work" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
