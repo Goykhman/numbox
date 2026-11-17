@@ -6,6 +6,11 @@ caching enabled: numbox's version, the jit options that numba compiles under, an
 :data:`KEYED_SETTINGS`. :func:`numbox_njit` and :func:`numbox_cfunc` add the same part to the functions you decorate,
 and :func:`explain_cache_key` returns it. numbox installs the part by wrapping numba's cache functions once per
 process, when ``numbox.core`` is first imported.
+
+The wrapper around numba's save also skips a save that fails because the cache directory can be read but not written.
+It does so for every function that numba caches in the process, and it issues a warning for the first such save in a
+process. A wrapper around numba's flush disables the cache of a function whose index ``Dispatcher.recompile`` cannot
+empty in such a directory. :mod:`numbox.core.read_only_cache` describes that case.
 """
 import contextlib
 import functools
@@ -26,6 +31,7 @@ from numba.core.dispatcher import Dispatcher
 from numba.core.types import Type as NumbaType
 
 import numbox
+from numbox.core.read_only_cache import cannot_be_written
 
 
 #: The ``NUMBA_*`` settings that change the code numba emits, each with the ``numba.config`` attribute numba reads it
@@ -274,6 +280,8 @@ def explain_cache_key(func) -> dict:
             f"{func!r} has no cache numbox keys: it is cached under numba's key alone, or not cached; decorate it "
             "with numbox_njit or numbox_cfunc and cache=True"
         )
+    if not cache._enabled:
+        raise ValueError(f"{func!r} compiles without an on-disk cache: its cache is disabled")
     try:
         flags = _flags_text(*keyed)
     except _Unkeyable as exc:
@@ -352,6 +360,8 @@ def numbox_cfunc(*args, **kwargs):
 
 # Each pair of a cache's name and a reason is reported once per process.
 _uncached_reported = set()
+# Whether this process has warned of a save that numbox skipped in a cache directory that cannot be written.
+_unsaved_reported = False
 
 
 def _qualname(cache) -> str:
@@ -397,6 +407,19 @@ def _wrap_load_overload(original):
     return load_overload
 
 
+def _warn_unsaved(cache, error):
+    global _unsaved_reported
+    if _unsaved_reported:
+        return
+    _unsaved_reported = True
+    warnings.warn(
+        f"numbox: numba compiled {_qualname(cache)} but cannot save its cache entry in the cache directory "
+        f"{cache.cache_path} ({error.strerror}), so the function compiles again in every process. numbox skips each "
+        "save that fails in this way. It warns only once per process, for the first skipped save.",
+        RuntimeWarning, stacklevel=4,
+    )
+
+
 def _wrap_save_overload(original):
     @functools.wraps(original)
     def save_overload(self, sig, data):
@@ -404,7 +427,32 @@ def _wrap_save_overload(original):
             original(self, sig, data)
         except _Unkeyable as exc:
             _warn_uncached(self, exc)
+        except OSError as error:
+            # A cache directory that is read-only at run time holds the entries that it was built with, and numba
+            # loads them. numba compiles a function or a signature that the directory holds no entry for, and then
+            # saves it. numba raises the error of that save, except for a permission error on Windows, which it
+            # ignores. The call that compiled the function would fail with that error. numbox skips the save
+            # instead, so the call returns its result.
+            if not cannot_be_written(error, self.cache_path):
+                raise
+            _warn_unsaved(self, error)
     return save_overload
+
+
+def _wrap_flush(original):
+    @functools.wraps(original)
+    def flush(self):
+        try:
+            original(self)
+        except OSError as error:
+            # Dispatcher.recompile calls flush to empty the function's index, and then compiles each signature of the
+            # function again. The index cannot be rewritten in a cache directory that is read-only at run time. Each
+            # of those compilations would then load the entry that recompile was called to replace. numbox disables
+            # the function's cache instead, so numba neither loads nor saves an entry of the function afterward.
+            if not cannot_be_written(error, self.cache_path):
+                raise
+            self.disable()
+    return flush
 
 
 def _wrap_enable_caching(original, kind, py_func_of):
@@ -437,6 +485,7 @@ def _install():
         (caching.Cache, "_index_key", _wrap_index_key(caching.Cache._index_key)),
         (caching.Cache, "load_overload", _wrap_load_overload(caching.Cache.load_overload)),
         (caching.Cache, "save_overload", _wrap_save_overload(caching.Cache.save_overload)),
+        (caching.Cache, "flush", _wrap_flush(caching.Cache.flush)),
         (Dispatcher, "enable_caching", _wrap_enable_caching(Dispatcher.enable_caching, "njit", lambda d: d.py_func)),
         # The kind separates the cache entries of a C callback from those of an njit. numba keys an eager njit by the
         # signature as it is given (Dispatcher.compile). It keys a C callback by the Signature that it builds

@@ -35,6 +35,8 @@ from numba.core.datamodel import default_manager
 from numba.misc.appdirs import AppDirs
 from numba.core.types import FunctionType, void
 
+from numbox.core.read_only_cache import cannot_be_written
+
 
 numba_version = int(version("numba").split(".")[1])
 assert numba_version >= 63, numba_version
@@ -192,6 +194,15 @@ def check_cache_location(py_file, longest_file_name=0):
       location does not exist.
     - If ``longest_file_name`` is not 0, it creates and removes a file with a name of that many bytes in the location.
 
+    A location that exists and cannot be written passes the check, whichever of these steps tries to write in it:
+    the function returns as it does for a location that can be written. Such a location is a cache that was built
+    earlier and is read-only now. numba loads the entries that it holds, and numbox skips each save that fails there,
+    as :mod:`numbox.core.read_only_cache` describes. :func:`~numbox.core.read_only_cache.cannot_be_written` defines
+    the errors of such a write. A location that the process cannot search does not pass, because numba cannot open a
+    cache file in it. Of numba's own locators, only the ``.zip`` locator takes a location that it cannot write in. A
+    locator listed in ``NUMBA_CACHE_LOCATOR_CLASSES`` can also take such a location, as
+    :class:`~numbox.core.read_only_cache.ReadOnlyCacheLocator` does.
+
     Nothing is compiled, and no file remains afterward. The directories that numba creates while it tries the locations
     are not removed. An IPython that can write neither its cache directory nor its own directory also creates a new
     temporary directory on every call, and the check causes three such calls.
@@ -227,9 +238,13 @@ def check_cache_location(py_file, longest_file_name=0):
     try:
         locator.ensure_cache_path()
     except OSError as error:
+        location = locator.get_cache_path()
+        if cannot_be_written(error, location):
+            # The location holds a cache that numba can load from and cannot add to.
+            return
         # The error names the file that failed, possibly a temporary file. The reader can act on the location that
         # holds it, so the error raised here names the location.
-        raise OSError(error.errno, error.strerror, locator.get_cache_path()) from error
+        raise OSError(error.errno, error.strerror, location) from error
     # The location is asked for once more, as numba asks at every save. numba's IPython locator asks IPython for it.
     # An IPython that can write neither its cache directory nor its own directory gives a new temporary directory on
     # every call, so numba creates numba_cache in one and saves in another. That save fails although numba's own test
@@ -245,6 +260,10 @@ def check_cache_location(py_file, longest_file_name=0):
             with tempfile.NamedTemporaryFile(dir=location, prefix="x" * (longest_file_name - 8)):
                 pass
         except OSError as error:
+            if cannot_be_written(error, location):
+                # A locator that does not test its location took this location, so this write is the first one
+                # attempted in it.
+                return
             raised = OSError(error.errno, error.strerror, location)
             if error.errno == errno.ENAMETOOLONG and _name_limit(location) < longest_file_name:
                 # The name alone is too long for the file system, regardless of the path. The error carries the name's
@@ -2037,10 +2056,11 @@ def uncached_where_no_cache_can_be_written(options):
     numbox's SQLite callbacks for virtual tables and table-valued functions. If numba cannot cache numbox, the
     function returns these options with ``"cache"`` set to ``False`` explicitly.
 
-    The check is stricter than numba for a ``.zip`` whose cache directory still holds every entry but can no longer be
-    written: numbox compiles without a cache there, where numba alone would load the entries. The test that the
-    location can be written in is the rule that numba applies to every other location, and the one that its ``.zip``
-    locator lacks, as https://github.com/numba/numba/issues/10888 reports.
+    A location that exists and cannot be written does not disable caching: the options are returned unchanged. numba
+    loads the entries that the location holds, and numbox skips each save that fails there. That is the case of a
+    cache built in a directory that is read-only at run time, which :mod:`numbox.core.read_only_cache` describes. It
+    is also the case of a ``.zip`` whose cache directory can no longer be written, because numba's ``.zip`` locator
+    takes its location without a test, as https://github.com/numba/numba/issues/10888 reports.
     """
     if not options.get("cache", True):
         return options

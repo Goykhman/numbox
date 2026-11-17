@@ -20,6 +20,7 @@ from pathlib import Path
 
 from numbox.core.configurations import (LONGEST_CACHE_FILE_NAME, _OVERLOAD_DIGITS, cache_remedy, check_cache_location,
                                         is_a_cache_error)
+from numbox.core.read_only_cache import cannot_be_written
 
 
 def _anchor_root(subdir: str = "numbox-structref") -> Path:
@@ -210,6 +211,27 @@ def _anchored_or_uncached(path: Path, code_txt: str, jit_options: dict) -> dict:
     error = _anchor_or_error(path, code_txt)
     if error is None:
         return jit_options
+    # ``refused`` is the existing directory that numbox could not write in when it wrote the anchor. It is the anchors'
+    # own directory, or the cache directory above it if numbox could not create the anchors' directory there. A cache
+    # that was built earlier and is now read-only is such a directory. It holds the anchors that were written during
+    # the build, and the build did not generate the code of this anchor. ``refused`` is None if the anchor exists, if
+    # the anchor is missing for another reason, or if the lookup of the anchor fails. A lookup fails, for example, in
+    # a directory that cannot be searched or for a path that is too long. numbox then cannot determine whether the
+    # directory holds the anchor.
+    #
+    # numbox sets ``refused`` only in the setup of a read-only cache: NUMBA_CACHE_DIR is set, and
+    # NUMBA_CACHE_LOCATOR_CLASSES lists a locator. numba's own locators do not load the cache of a file on disk from
+    # a directory that cannot be written, so numba would not load a cache that is built there again. numbox does not
+    # query the listed locators for the anchor, because numba's locators skip a file that does not exist.
+    from numba import config
+    refused = None
+    try:
+        path.stat()
+    except FileNotFoundError:
+        if config.CACHE_DIR and config.CACHE_LOCATOR_CLASSES:
+            refused = next((d for d in (path.parent, path.parent.parent) if cannot_be_written(error, d)), None)
+    except OSError:
+        pass
     if isinstance(error, OSError) and getattr(error, "longest_file_name", 0):
         # The file system that holds the location allows no name as long as the longest name that numba writes for the
         # anchor's functions, which is the length that the check tried. A shorter path does not avoid the error, so the
@@ -233,6 +255,11 @@ def _anchored_or_uncached(path: Path, code_txt: str, jit_options: dict) -> dict:
         remedy = (
             f"numba hashes the anchor's directory path as UTF-8 to name its cache directory, and {path.parent} is "
             f"not: NUMBA_CACHE_DIR at a UTF-8 path, or {_SILENCE}"
+        )
+    elif refused is not None:
+        remedy = (
+            f"{refused} is not writable and holds no file for this code. Build the cache again with a run that "
+            f"generates this code, set NUMBA_CACHE_DIR to a writable directory, or {_SILENCE}"
         )
     else:
         remedy = f"Set NUMBA_CACHE_DIR to a writable directory, or {_SILENCE}"
