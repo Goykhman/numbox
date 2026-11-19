@@ -706,11 +706,15 @@ def test_the_graph_maker_of_a_zip_import_whose_cache_directory_stopped_being_wri
         for path in read_only:
             path.chmod(0o755)
     assert loaded == {"x": 1.5, "maker loaded": [True], "warnings": []}, loaded
+    # numba's user cache directory is under XDG_CACHE_HOME on Linux and under Library/Caches in the home on macOS, so
+    # the test searches the whole home for the location of the directory that holds the ``builder`` module.
+    locations = [path for path in home.rglob("work_*") if path.is_dir()]
+    assert len(locations) == 1, sorted(str(path.relative_to(home)) for path in home.rglob("*") if path.is_dir())
     for seen in compiled:
         assert seen["x"] == 7 and seen["maker loaded"] == [False], seen
         (warning,) = seen["warnings"]
         assert warning.startswith("numbox: numba compiled _make_"), warning
-        assert f"cannot save its cache entry in the cache directory {home / 'cache' / 'numba'}" in warning, warning
+        assert f"cannot save its cache entry in the cache directory {locations[0]} (" in warning, warning
 
 
 @needs_a_directory_it_cannot_write
