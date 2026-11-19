@@ -231,6 +231,12 @@ then disables the cache of that function for the rest of the process, so numba c
 or saving an entry. numbox issues no warning for it. :func:`~numbox.core.cache_key.explain_cache_key` raises a
 ``ValueError`` for that function afterward.
 
+numbox recognizes both failed writes by their error: ``EROFS``, ``EACCES`` or ``EPERM`` in a directory that exists and
+that the process can search (:func:`~numbox.core.read_only_cache.cannot_be_written`). numbox does not test whether
+the process can write in the directory. It therefore treats a write that fails with one of these errors in a writable
+directory in the same way, for example the replacement of another user's index file in a directory that has the
+sticky bit.
+
 The locator skips a source directory that the cache holds no subdirectory for, and numba tries the next locator in the
 list. numba creates the subdirectory when it decorates the first cached function of a source directory. The
 subdirectory is therefore missing for a package that the build never imported, and also when the package's path at
@@ -256,10 +262,10 @@ a cache. The remedy of the warning in that section then begins:
 
 The remedy names the directory of the generated files. If the cache was built without any generated code of that
 kind, that directory does not exist, and the remedy names the cache directory instead. numbox gives this remedy only
-while ``NUMBA_CACHE_DIR`` is set and ``NUMBA_CACHE_LOCATOR_CLASSES`` lists a locator. Under numba's own locators,
-numba does not load the cache of a generated file from a directory that cannot be written in. A cache that is rebuilt
-in that directory is therefore not loaded either. The remedy is then to set ``NUMBA_CACHE_DIR`` to a writable
-directory, as under `If generated code cannot be cached`_.
+while ``NUMBA_CACHE_DIR`` is set and ``NUMBA_CACHE_LOCATOR_CLASSES`` lists a class that is not one of numba's own
+locators. Under numba's own locators, numba does not load the cache of a generated file from a directory that cannot
+be written in. A cache that is rebuilt in that directory is therefore not loaded either. The remedy is then to set
+``NUMBA_CACHE_DIR`` to a writable directory, as under `If generated code cannot be cached`_.
 
 A locator class that you define works as well, if it takes a directory that it cannot write in. The check passes a
 location that exists and cannot be written in, whichever locator took it (`How numbox checks`_). numbox skips the

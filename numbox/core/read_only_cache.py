@@ -11,8 +11,9 @@ written. To use it, list it in numba's ``NUMBA_CACHE_LOCATOR_CLASSES`` as
 ``numbox.core.read_only_cache.ReadOnlyCacheLocator``, followed by the locators that numba should try for a file that
 this locator does not take. The configurations page states the complete value.
 
-numbox recognizes such a directory with :func:`cannot_be_written`. Its check of a cache location passes a location in
-which a write fails with such an error (:func:`~numbox.core.configurations.check_cache_location`). The wrapper that
+numbox recognizes such a directory by the error of a write that fails in it (:func:`cannot_be_written`). Its check of
+a cache location passes a location in which a write fails with such an error
+(:func:`~numbox.core.configurations.check_cache_location`). The wrapper that
 :mod:`numbox.core.cache_key` installs around numba's save skips a save that fails with such an error, for every
 function that numba caches in the process. numba's ``Dispatcher.recompile`` empties the function's index before it
 compiles the function again. A second wrapper disables the function's cache if that write fails with such an error,
@@ -31,10 +32,15 @@ _CANNOT_WRITE = (errno.EROFS, errno.EACCES, errno.EPERM)
 
 
 def cannot_be_written(error, location):
-    """Return whether ``error`` is the error of a write in ``location``, a directory that exists but cannot be written.
+    """Return whether ``error`` is the error of a write that the operating system denied in the directory ``location``.
 
-    ``error`` is such an error if it is an ``OSError`` whose ``errno`` is ``EROFS``, ``EACCES`` or ``EPERM``. A
-    location that does not exist, or that is not a directory, holds no cache to load, so the result is False for it.
+    ``error`` is such an error if it is an ``OSError`` whose ``errno`` is ``EROFS``, ``EACCES`` or ``EPERM``. The
+    function reads the error number and does not test whether the process can write in ``location``, so the caller
+    must pass the error of a write that failed there. A single write to a directory that the process can otherwise
+    write in can fail with one of these errors, for example the replacement of another user's file in a directory
+    that has the sticky bit. The result is True for that error as well.
+
+    A location that does not exist, or that is not a directory, holds no cache to load, so the result is False for it.
     The result is also False for a directory that the process cannot search, because numba cannot open a cache file
     in it. Any other ``OSError``, such as a full disk or a name that is too long, also gives False.
     """

@@ -18,8 +18,8 @@ import time
 import warnings
 from pathlib import Path
 
-from numbox.core.configurations import (LONGEST_CACHE_FILE_NAME, _OVERLOAD_DIGITS, cache_remedy, check_cache_location,
-                                        is_a_cache_error)
+from numbox.core.configurations import (LONGEST_CACHE_FILE_NAME, _OVERLOAD_DIGITS, _locators, cache_remedy,
+                                        check_cache_location, is_a_cache_error)
 from numbox.core.read_only_cache import cannot_be_written
 
 
@@ -220,15 +220,17 @@ def _anchored_or_uncached(path: Path, code_txt: str, jit_options: dict) -> dict:
     # directory holds the anchor.
     #
     # numbox sets ``refused`` only in the setup of a read-only cache: NUMBA_CACHE_DIR is set, and
-    # NUMBA_CACHE_LOCATOR_CLASSES lists a locator. numba's own locators do not load the cache of a file on disk from
-    # a directory that cannot be written, so numba would not load a cache that is built there again. numbox does not
-    # query the listed locators for the anchor, because numba's locators skip a file that does not exist.
+    # NUMBA_CACHE_LOCATOR_CLASSES lists a class that is not one of numba's own locators. numba's own locators do not
+    # load the cache of a file on disk from a directory that cannot be written, so numba would not load a cache that
+    # is built there again. numbox does not query the listed locators for the anchor, because numba's locators skip a
+    # file that does not exist.
     from numba import config
     refused = None
     try:
         path.stat()
     except FileNotFoundError:
-        if config.CACHE_DIR and config.CACHE_LOCATOR_CLASSES:
+        listed = _locators(config.CACHE_LOCATOR_CLASSES) if config.CACHE_LOCATOR_CLASSES else []
+        if config.CACHE_DIR and any(cls.__module__ != "numba.core.caching" for cls in listed):
             refused = next((d for d in (path.parent, path.parent.parent) if cannot_be_written(error, d)), None)
     except OSError:
         pass

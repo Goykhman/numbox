@@ -57,6 +57,10 @@ class TakesUntestedLocator(caching.UserProvidedCacheLocator):
         return cls(py_func, py_file)
 
 
+class UserProvidedCacheLocator(TakesUntestedLocator):
+    """A user-defined locator with the same name as numba's class."""
+
+
 @contextlib.contextmanager
 def _read_only(*roots):
     """Remove write access from every directory under ``roots`` for the block, and restore it afterward."""
@@ -588,16 +592,21 @@ def test_a_recompile_whose_index_cannot_be_emptied_for_another_reason_still_rais
 
 @needs_a_directory_it_cannot_write
 @pytest.mark.parametrize("built_with_such_code", [True, False])
+@pytest.mark.parametrize("locators", [
+    "numbox.core.read_only_cache.ReadOnlyCacheLocator",
+    f"InTreeCacheLocator,{__name__}.TakesUntestedLocator",
+    f"{__name__}.UserProvidedCacheLocator",
+], ids=["numbox's locator", "a user-defined locator", "a user-defined locator with the same name as numba's class"])
 def test_generated_code_whose_file_is_missing_from_a_read_only_directory_is_told_to_build_again(
-        tmp_path, monkeypatch, built_with_such_code):
+        tmp_path, monkeypatch, built_with_such_code, locators):
     """The warning names the directory that refused the write: the directory of the generated files, or the cache
-    directory if the cache was built without any generated code of this kind."""
+    directory if the cache was built without any generated code of this kind. numbox gives this remedy if
+    ``NUMBA_CACHE_LOCATOR_CLASSES`` lists a class that is not one of numba's own."""
     cache = tmp_path / "cache"
     anchors = cache / "numbox-structref"
     (anchors if built_with_such_code else cache).mkdir(parents=True)
     monkeypatch.setattr(numba.config, "CACHE_DIR", str(cache))
-    monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", "numbox.core.read_only_cache.ReadOnlyCacheLocator",
-                        raising=False)
+    monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", locators, raising=False)
     path = anchors / "Struct_0123456789abcdef.py"
     with _read_only(cache):
         with pytest.warns(RuntimeWarning) as caught:
@@ -637,13 +646,17 @@ def test_generated_code_whose_write_fails_with_each_error_of_a_refused_write_is_
 @needs_a_directory_it_cannot_write
 @pytest.mark.parametrize("cache_dir_is_set, locators", [
     (True, ""),
+    (True, "UserProvidedCacheLocator,InTreeCacheLocator"),
+    (True, "numba.core.caching.UserProvidedCacheLocator,numba.core.caching.InTreeCacheLocator"),
+    (True, "UserProvidedCacheLocator,InTreeCacheLocatorFsAgnostic"),
     (False, "numbox.core.read_only_cache.ReadOnlyCacheLocator"),
-], ids=["numba's own locators", "NUMBA_CACHE_DIR unset"])
+], ids=["numba's own locators", "numba's own locators, listed", "numba's own locators, listed by their paths",
+        "a locator of numba's that numba tries only when it is listed", "NUMBA_CACHE_DIR unset"])
 def test_generated_code_outside_the_setup_of_a_read_only_cache_keeps_its_remedy(
         tmp_path, monkeypatch, cache_dir_is_set, locators):
     """numba's own locators do not load the cache of a generated file from a directory that cannot be written, so numba
-    would not load a cache that is built there again. numbox's locator takes no file while ``NUMBA_CACHE_DIR`` is
-    unset."""
+    would not load a cache that is built there again. That holds whether numba tries them in its own order or
+    ``NUMBA_CACHE_LOCATOR_CLASSES`` lists them. numbox's locator takes no file while ``NUMBA_CACHE_DIR`` is unset."""
     cache = tmp_path / "cache"
     anchors = cache / "numbox-structref"
     anchors.mkdir(parents=True)
@@ -657,6 +670,29 @@ def test_generated_code_outside_the_setup_of_a_read_only_cache_keeps_its_remedy(
     assert len(caught) == 1
     message = str(caught[0].message)
     assert message.startswith("numba cannot cache Struct_0123456789abcdef.py here ([Errno 13] Permission denied: ")
+    assert "holds no file for this code" not in message
+    assert "it compiles without a cache. Set NUMBA_CACHE_DIR to a writable directory, or compile" in message
+
+
+@needs_a_directory_it_cannot_write
+def test_generated_code_keeps_its_remedy_under_a_user_defined_locator_that_the_variable_does_not_list(
+        tmp_path, monkeypatch):
+    """A program can add its own locator class to the list that numba uses while ``NUMBA_CACHE_LOCATOR_CLASSES`` is
+    unset. numbox gives the remedy of building the cache again only if the variable lists such a class."""
+    cache = tmp_path / "cache"
+    anchors = cache / "numbox-structref"
+    anchors.mkdir(parents=True)
+    monkeypatch.setattr(numba.config, "CACHE_DIR", str(cache))
+    monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", "", raising=False)
+    monkeypatch.setattr(caching.CacheImpl, "_locator_classes",
+                        [TakesUntestedLocator, *caching.CacheImpl._locator_classes])
+    path = anchors / "Struct_0123456789abcdef.py"
+    with _read_only(cache):
+        with pytest.warns(RuntimeWarning) as caught:
+            options = _anchored_or_uncached(path, "x = 1\n", {"cache": True})
+    assert options == {"cache": False} and not path.exists()
+    assert len(caught) == 1
+    message = str(caught[0].message)
     assert "holds no file for this code" not in message
     assert "it compiles without a cache. Set NUMBA_CACHE_DIR to a writable directory, or compile" in message
 
