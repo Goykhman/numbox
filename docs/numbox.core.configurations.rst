@@ -227,6 +227,13 @@ To cache that function as well, build the cache again with a run that calls it w
 On Windows, numba itself ignores a save that fails with ``EACCES``, so numbox issues no warning for that save. The
 function still compiles again in every process.
 
+On Windows, a read-only cache directory also needs a CPython that has the fix for
+`CPython issue 66305 <https://github.com/python/cpython/issues/66305>`_. The fix is in CPython 3.13.13, in 3.14.4 and
+in 3.15. numba tests a cache directory when it decorates a cached function: it creates a file there with the
+``tempfile`` module. Without the fix, ``tempfile`` retries approximately two billion times when the creation fails
+with ``PermissionError``, so the process appears to hang. numba's own locator for ``NUMBA_CACHE_DIR`` hangs in the
+same way.
+
 numba's `Dispatcher.recompile
 <https://numba.readthedocs.io/en/stable/reference/jit-compilation.html#Dispatcher.recompile>`_ empties the function's
 index file before it compiles the function again. That write fails in a directory that cannot be written in. numbox
