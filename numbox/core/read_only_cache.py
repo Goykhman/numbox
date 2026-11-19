@@ -4,7 +4,7 @@ A cache that was built in ``NUMBA_CACHE_DIR`` can be deployed read-only, for exa
 process compiles when it starts. numba alone does not load from such a cache. Its locator for ``NUMBA_CACHE_DIR``
 creates a temporary file in the directory when numba decorates a function, and numba skips the directory if the file
 cannot be created. numba also raises the ``OSError`` of a failed save from the call that compiled the function, except
-for a permission error on Windows, which it ignores.
+for ``EACCES`` on Windows, which it ignores.
 
 :class:`ReadOnlyCacheLocator` is a subclass of that locator that also takes a directory that exists and cannot be
 written. To use it, list it in numba's ``NUMBA_CACHE_LOCATOR_CLASSES`` as

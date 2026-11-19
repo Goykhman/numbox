@@ -430,7 +430,7 @@ def _wrap_save_overload(original):
         except OSError as error:
             # A cache directory that is read-only at run time holds the entries that it was built with, and numba
             # loads them. numba compiles a function or a signature that the directory holds no entry for, and then
-            # saves it. numba raises the error of that save, except for a permission error on Windows, which it
+            # saves it. numba raises the error of that save, except for EACCES on Windows, which it
             # ignores. The call that compiled the function would fail with that error. numbox skips the save
             # instead, so the call returns its result.
             if not cannot_be_written(error, self.cache_path):

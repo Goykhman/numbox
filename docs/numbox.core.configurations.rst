@@ -224,6 +224,9 @@ process:
 
 To cache that function as well, build the cache again with a run that calls it with the same argument types.
 
+On Windows, numba itself ignores a save that fails with ``EACCES``, so numbox issues no warning for that save. The
+function still compiles again in every process.
+
 numba's `Dispatcher.recompile
 <https://numba.readthedocs.io/en/stable/reference/jit-compilation.html#Dispatcher.recompile>`_ empties the function's
 index file before it compiles the function again. That write fails in a directory that cannot be written in. numbox
@@ -270,8 +273,8 @@ be written in. A cache that is rebuilt in that directory is therefore not loaded
 A locator class that you define works as well, if it takes a directory that it cannot write in. The check passes a
 location that exists and cannot be written in, whichever locator took it (`How numbox checks`_). numbox skips the
 failed saves once ``numbox.core`` is imported. Under ``ReadOnlyCacheLocator``, numba imports ``numbox.core`` before the
-first save, because numba imports the locator's module. Under a locator class that you define, a function that
-compiles before your program imports numbox still fails with numba's error.
+first save, because numba imports the locator's module. Under a locator class that you define, numbox does not skip a
+failed save of a function that compiles before ``numbox.core`` is imported.
 
 If numbox is imported from an archive
 -------------------------------------
