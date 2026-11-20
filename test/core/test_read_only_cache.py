@@ -425,6 +425,77 @@ def test_two_functions_whose_saves_are_skipped_give_one_warning_in_a_process(tmp
     assert str(caught[0].message).startswith("numbox: numba compiled first but cannot save its cache entry")
 
 
+# The program refuses every save with EROFS, so numbox skips each save of its two functions. It prints the functions
+# named in numbox's warnings in the parent, in a child forked after the parent's warning, and in the parent again.
+FORKING = '''import errno
+import json
+import os
+import re
+import warnings
+
+from numba import njit
+from numba.core import caching
+
+import numbox.core  # noqa: F401
+
+
+def refused(self, sig, data):
+    raise OSError(errno.EROFS, os.strerror(errno.EROFS), os.path.join(self.cache_path, "x.nbi.tmp.0123"))
+
+
+caching.Cache._save_overload = refused
+
+
+@njit(cache=True)
+def first(x):
+    return x + 1
+
+
+@njit(cache=True)
+def second(x):
+    return x + 1
+
+
+def named(function, argument):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        function(argument)
+    messages = " ".join(str(warning.message) for warning in caught)
+    return re.findall(r"numba compiled (\\w+) but cannot save its cache entry", messages)
+
+
+seen = {"parent": named(first, 1)}
+read_end, write_end = os.pipe()
+pid = os.fork()
+if pid == 0:
+    try:
+        os.write(write_end, json.dumps(named(second, 1)).encode())
+    finally:
+        os._exit(0)
+os.close(write_end)
+seen["forked child"] = json.loads(os.read(read_end, 1000))
+os.waitpid(pid, 0)
+seen["parent after the fork"] = named(second, 1)
+print(json.dumps(seen))
+'''
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="needs os.fork")
+def test_a_process_forked_after_the_warning_warns_of_its_own_first_skipped_save(tmp_path):
+    """A forked child starts with a copy of its parent's memory, including numbox's warning state from before the fork.
+    The parent does not issue another warning after the fork."""
+    (tmp_path / "forking.py").write_text(FORKING)
+    (tmp_path / "cache").mkdir()
+    env = dict(os.environ, PYTHONPATH=str(REPO), NUMBA_CACHE_DIR=str(tmp_path / "cache"))
+    for name in ("NUMBOX_JIT_OPTIONS", "NUMBA_CACHE_LOCATOR_CLASSES", "NUMBOX_PROXY_CACHE_STRICT"):
+        env.pop(name, None)
+    done = subprocess.run([sys.executable, str(tmp_path / "forking.py")], capture_output=True, text=True, env=env,
+                          cwd=str(tmp_path))
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout.splitlines()[-1]) == {
+        "parent": ["first"], "forked child": ["second"], "parent after the fork": []}
+
+
 def test_a_function_whose_save_was_skipped_still_loads_the_entries_that_the_directory_holds(tmp_path, monkeypatch):
     """The build caches two signatures. The run calls a third signature before the two cached signatures, and numbox
     skips saving the third signature."""

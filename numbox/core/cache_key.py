@@ -14,6 +14,7 @@ empty in such a directory. :mod:`numbox.core.read_only_cache` describes that cas
 """
 import contextlib
 import functools
+import os
 import re
 import threading
 import warnings
@@ -362,6 +363,17 @@ def numbox_cfunc(*args, **kwargs):
 _uncached_reported = set()
 # Whether this process has warned of a save that numbox skipped in a cache directory that cannot be written.
 _unsaved_reported = False
+
+
+def _forget_unsaved_report():
+    global _unsaved_reported
+    _unsaved_reported = False
+
+
+# A forked child starts with a copy of its parent's flag. The child is a separate process, so numbox clears the flag
+# there, and the child warns of its own first skipped save. Windows does not support fork.
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_forget_unsaved_report)
 
 
 def _qualname(cache) -> str:
