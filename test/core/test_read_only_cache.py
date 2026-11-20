@@ -264,6 +264,28 @@ def test_an_index_file_that_cannot_be_read_raises_numbas_error_at_the_first_call
     assert raised.value.filename == str(index)
 
 
+def test_an_index_file_that_numba_is_denied_raises_at_the_first_call_except_on_windows(tmp_path, monkeypatch):
+    """On Windows, numba ignores a load and a save that fail with ``EACCES``, so the function compiles."""
+    monkeypatch.setattr(numba.config, "CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", "", raising=False)
+    add_one = _function_in_a_file_of_its_own(tmp_path)
+
+    def denied(self):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), self._index_path)
+
+    monkeypatch.setattr(caching.IndexDataCacheFile, "_load_index", denied)
+    if os.name == "nt":
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            assert add_one(1) == 2
+        assert caught == []
+        assert (sum(add_one.stats.cache_hits.values()), sum(add_one.stats.cache_misses.values())) == (0, 1)
+        return
+    with pytest.raises(PermissionError) as raised:
+        add_one(1)
+    assert raised.value.errno == errno.EACCES
+
+
 @needs_a_directory_it_cannot_write
 def test_a_data_file_that_cannot_be_read_is_compiled_again_and_its_save_is_skipped(tmp_path, monkeypatch):
     """numba treats a data file that it cannot open as an entry that the directory does not hold."""

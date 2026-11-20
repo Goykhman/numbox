@@ -260,8 +260,9 @@ The locator also skips a subdirectory that the process cannot search, and numba 
 open a cache file in such a subdirectory. A build that runs as another user under a umask of ``077`` creates such
 subdirectories. The locator does not test whether the process can read the cache files in a subdirectory that it
 takes. If the process cannot read a function's index file, numba raises ``PermissionError`` when it opens that file.
-If the process cannot read a data file, numba compiles the function as it does when the directory holds no entry for
-it. Grant the user that runs the program read and search permission on the cache.
+On Windows, numba raises no error: it ignores the failed load and compiles the function in every process. If the
+process cannot read a data file, numba compiles the function as it does when the directory holds no entry for it.
+Grant the user that runs the program read and search permission on the cache.
 
 numbox writes the files of generated code under the cache directory (`If generated code cannot be cached`_). It
 cannot write a file that was not written while the cache was built, and the code of that file then compiles without
