@@ -246,6 +246,50 @@ def test_the_locator_takes_a_directory_that_can_be_searched_but_not_listed(tmp_p
 
 
 @needs_a_directory_it_cannot_write
+def test_an_index_file_that_cannot_be_read_raises_numbas_error_at_the_first_call(tmp_path, monkeypatch):
+    """The locator does not test whether the process can read the files of a directory that it takes."""
+    monkeypatch.setattr(numba.config, "CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", "numbox.core.read_only_cache.ReadOnlyCacheLocator",
+                        raising=False)
+    assert _module_whose_function_adds_a_global(tmp_path, "scaled_build").add_g(1) == 2
+    (index,) = (tmp_path / "cache").rglob("*.nbi")
+    index.chmod(0o000)
+    try:
+        with _read_only(tmp_path / "cache"):
+            run = _module_whose_function_adds_a_global(tmp_path, "scaled_run")
+            with pytest.raises(PermissionError) as raised:
+                run.add_g(1)
+    finally:
+        index.chmod(0o644)
+    assert raised.value.filename == str(index)
+
+
+@needs_a_directory_it_cannot_write
+def test_a_data_file_that_cannot_be_read_is_compiled_again_and_its_save_is_skipped(tmp_path, monkeypatch):
+    """numba treats a data file that it cannot open as an entry that the directory does not hold."""
+    monkeypatch.setattr(numba.config, "CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(numba.config, "CACHE_LOCATOR_CLASSES", "numbox.core.read_only_cache.ReadOnlyCacheLocator",
+                        raising=False)
+    monkeypatch.setattr(cache_key, "_unsaved_reported", False)
+    assert _module_whose_function_adds_a_global(tmp_path, "scaled_build").add_g(1) == 2
+    (data,) = (tmp_path / "cache").rglob("*.nbc")
+    before = _files(tmp_path / "cache")
+    data.chmod(0o000)
+    try:
+        with _read_only(tmp_path / "cache"):
+            run = _module_whose_function_adds_a_global(tmp_path, "scaled_run")
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                assert run.add_g(1) == 2
+    finally:
+        data.chmod(0o644)
+    assert (sum(run.add_g.stats.cache_hits.values()), sum(run.add_g.stats.cache_misses.values())) == (0, 1)
+    assert len(caught) == 1, [str(warning.message) for warning in caught]
+    assert str(caught[0].message).startswith("numbox: numba compiled add_g but cannot save its cache entry")
+    assert _files(tmp_path / "cache") == before
+
+
+@needs_a_directory_it_cannot_write
 def test_the_locator_skips_a_directory_that_it_cannot_create(tmp_path, monkeypatch):
     """A source directory that the cache was not built with has no subdirectory, so there is nothing to load."""
     # The function is decorated before the variable is set, so that numba's own locator does not create the
