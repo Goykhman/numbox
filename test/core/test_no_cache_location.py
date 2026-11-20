@@ -17,6 +17,7 @@ import ast
 import compileall
 import errno
 import importlib.util
+import json
 import marshal
 import os
 import py_compile
@@ -530,10 +531,11 @@ def test_a_zip_import_whose_user_cache_directory_hangs_off_a_dangling_link_is_to
 
 
 @needs_a_directory_it_cannot_write
-def test_a_zip_import_whose_cache_directory_stopped_being_writable_compiles_uncached(tmp_path):
-    """A ``.zip`` import whose user cache directory holds every entry but can no longer be written warns once. The
-    check tests that the location can be written in, as numba tests every other kind of location, so that no function
-    fails later at its first save there."""
+def test_a_zip_import_whose_cache_directory_stopped_being_writable_loads_its_entries(tmp_path):
+    """A ``.zip`` import whose user cache directory holds every entry but can no longer be written loads the entries,
+    issues no warning and writes nothing. numba's ``.zip`` locator takes its location without testing whether the
+    location can be written. The check passes a location that exists and cannot be written, because numbox skips a
+    save that fails there, so no function fails later at its first save."""
     archive = _archive(tmp_path / "numbox.zip")
     home = tmp_path / "home"
     home.mkdir()
@@ -542,27 +544,188 @@ def test_a_zip_import_whose_cache_directory_stopped_being_writable_compiles_unca
     env.pop("NUMBOX_JIT_OPTIONS", None)
     warm = _run(env, tmp_path)
     assert warm.returncode == 0, warm.stderr
+    entries = {path: path.stat().st_mtime_ns for path in home.rglob("*") if path.is_file()}
     assert _index_files(home)
     read_only = [home, *(path for path in home.rglob("*") if path.is_dir())]
     for path in read_only:
         path.chmod(0o555)
     try:
-        run = _run(env, tmp_path)
+        run = _run(env, tmp_path, warnings="error")
         assert run.returncode == 0 and str(archive) in run.stdout, run.stderr
-        assert run.stderr.count("compiles without a cache") == 1, run.stderr
+        assert run.stderr == ""
+        assert {path: path.stat().st_mtime_ns for path in home.rglob("*") if path.is_file()} == entries
     finally:
         for path in read_only:
             path.chmod(0o755)
 
 
+# POINT_TYPES is a module on disk that holds the type class of a struct. MAKE_A_STRUCT is a child that imports
+# numbox, calls the libm binding cos and makes the struct with make_structref. The child prints one JSON object:
+# the struct's fields, how often cos was loaded from the cache and compiled, and every warning.
+POINT_TYPES = '''from numba.core.types import StructRef
+from numba.experimental.structref import register
+
+
+@register
+class PointTypeClass(StructRef):
+    pass
+'''
+
+MAKE_A_STRUCT = '''import json
+import warnings
+
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter("always")
+    from numbox.core.bindings.libm import cos
+    from numbox.utils.highlevel import make_structref
+    from pointtypes import PointTypeClass
+    point = make_structref("Point", ("x", "y"), PointTypeClass)(1.5, 2)
+    seen = {"point": [point.x, point.y], "cos": cos(0.0),
+            "cos counts": [sum(cos.stats.cache_hits.values()), sum(cos.stats.cache_misses.values())]}
+seen["warnings"] = [str(warning.message) for warning in caught]
+print(json.dumps(seen))
+'''
+
+
+@needs_a_directory_it_cannot_write
+@pytest.mark.parametrize("cache_dir_is_set", [False, True], ids=["NUMBA_CACHE_DIR unset", "NUMBA_CACHE_DIR writable"])
+def test_generated_code_of_a_zip_import_whose_cache_directory_stopped_being_writable(tmp_path, cache_dir_is_set):
+    """numbox's own functions load from the archive's location, and the generated code of a struct is cached only
+    under a writable ``NUMBA_CACHE_DIR``.
+
+    While ``NUMBA_CACHE_DIR`` is unset, numbox writes the file of that code under the user's cache directory.
+    numba's own locators skip a file whose cache directory cannot be written, so the struct compiles without a cache
+    and numbox warns. The remedy of that warning is to set ``NUMBA_CACHE_DIR`` to a writable directory. The variable
+    has no effect on the location of the archive's own functions."""
+    archive = _archive(tmp_path / "numbox.zip")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "pointtypes.py").write_text(POINT_TYPES)
+    (tmp_path / "make_a_struct.py").write_text(MAKE_A_STRUCT)
+    home = tmp_path / "home"
+    home.mkdir()
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(archive), str(tmp_path / "src")]), HOME=str(home),
+               XDG_CACHE_HOME=str(home / "cache"))
+    for name in ("NUMBA_CACHE_DIR", "NUMBOX_JIT_OPTIONS", "NUMBA_CACHE_LOCATOR_CLASSES"):
+        env.pop(name, None)
+
+    def run():
+        done = subprocess.run([sys.executable, str(tmp_path / "make_a_struct.py")],
+                              capture_output=True, text=True, env=env, cwd=str(tmp_path))
+        assert done.returncode == 0, done.stderr
+        return json.loads(done.stdout.splitlines()[-1])
+
+    built = run()
+    assert built["warnings"] == [] and built["cos counts"] == [0, 1], built
+    read_only = [home, *(path for path in home.rglob("*") if path.is_dir())]
+    for path in read_only:
+        path.chmod(0o555)
+    try:
+        if cache_dir_is_set:
+            env["NUMBA_CACHE_DIR"] = str(tmp_path / "cache")
+        runs = [run(), run()]
+    finally:
+        for path in read_only:
+            path.chmod(0o755)
+    for seen in runs:
+        assert seen["point"] == [1.5, 2] and seen["cos counts"] == [1, 0], seen
+        if cache_dir_is_set:
+            assert seen["warnings"] == [], seen
+        else:
+            (warning,) = seen["warnings"]
+            assert warning.startswith("numba cannot cache Point_"), warning
+            assert "it compiles without a cache. Set NUMBA_CACHE_DIR to a writable directory, or " in warning
+    if cache_dir_is_set:
+        assert any(name.startswith("Point_") for name in _index_files(tmp_path / "cache"))
+
+
+# MAKE_A_GRAPH is a child that imports numbox and makes a graph of one node with make_graph. The node's value is a
+# float if the child's argument is "built", and an int otherwise, so the two graphs have different graph makers. The
+# child prints one JSON object: the node's value, whether numba loaded the graph maker from the cache, and every
+# warning.
+MAKE_A_GRAPH = '''import json
+import sys
+import warnings
+
+from numba.core import caching
+
+loads = []
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter("always")
+    from numbox.core.work.builder import End, make_graph
+
+    load_overload = caching.Cache.load_overload
+
+    def recording_load(self, sig, target_context):
+        loaded = load_overload(self, sig, target_context)
+        if self._py_func.__name__.startswith("_make_"):
+            loads.append(loaded is not None)
+        return loaded
+
+    caching.Cache.load_overload = recording_load
+    registry = {}
+    node = End(name="x", init_value=1.5 if sys.argv[1] == "built" else 7, registry=registry)
+    seen = {"x": make_graph(node, registry=registry).x.data, "maker loaded": loads}
+seen["warnings"] = [str(warning.message) for warning in caught]
+print(json.dumps(seen))
+'''
+
+
+@needs_a_directory_it_cannot_write
+@pytest.mark.parametrize("cache_dir_is_set", [False, True], ids=["NUMBA_CACHE_DIR unset", "NUMBA_CACHE_DIR writable"])
+def test_the_graph_maker_of_a_zip_import_whose_cache_directory_stopped_being_writable(tmp_path, cache_dir_is_set):
+    """numba caches the graph maker of ``make_graph`` in the location of the archive's ``builder`` module, whether or
+    not ``NUMBA_CACHE_DIR`` is set.
+
+    numba loads the graph maker of the graph that the build made, and numbox issues no warning. The graph maker of a
+    graph that the build did not make compiles in every process, and numbox warns that it skipped the save."""
+    archive = _archive(tmp_path / "numbox.zip")
+    (tmp_path / "make_a_graph.py").write_text(MAKE_A_GRAPH)
+    home = tmp_path / "home"
+    home.mkdir()
+    env = dict(os.environ, PYTHONPATH=str(archive), HOME=str(home), XDG_CACHE_HOME=str(home / "cache"))
+    for name in ("NUMBA_CACHE_DIR", "NUMBOX_JIT_OPTIONS", "NUMBA_CACHE_LOCATOR_CLASSES"):
+        env.pop(name, None)
+
+    def run(graph):
+        done = subprocess.run([sys.executable, str(tmp_path / "make_a_graph.py"), graph],
+                              capture_output=True, text=True, env=env, cwd=str(tmp_path))
+        assert done.returncode == 0, done.stderr
+        return json.loads(done.stdout.splitlines()[-1])
+
+    built = run("built")
+    assert built == {"x": 1.5, "maker loaded": [False], "warnings": []}, built
+    read_only = [home, *(path for path in home.rglob("*") if path.is_dir())]
+    for path in read_only:
+        path.chmod(0o555)
+    try:
+        if cache_dir_is_set:
+            env["NUMBA_CACHE_DIR"] = str(tmp_path / "cache")
+        loaded = run("built")
+        compiled = [run("other"), run("other")]
+    finally:
+        for path in read_only:
+            path.chmod(0o755)
+    assert loaded == {"x": 1.5, "maker loaded": [True], "warnings": []}, loaded
+    # numba's user cache directory is under XDG_CACHE_HOME on Linux and under Library/Caches in the home on macOS, so
+    # the test searches the whole home for the location of the directory that holds the ``builder`` module.
+    locations = [path for path in home.rglob("work_*") if path.is_dir()]
+    assert len(locations) == 1, sorted(str(path.relative_to(home)) for path in home.rglob("*") if path.is_dir())
+    for seen in compiled:
+        assert seen["x"] == 7 and seen["maker loaded"] == [False], seen
+        (warning,) = seen["warnings"]
+        assert warning.startswith("numbox: numba compiled _make_"), warning
+        assert f"cannot save its cache entry in the cache directory {locations[0]} (" in warning, warning
+
+
 @needs_a_directory_it_cannot_write
 @pytest.mark.parametrize("parent, bytecode", [("", ()), ("container.zip", ()), ("", ("numbox/core/bindings",))],
                          ids=["sources", "under a directory named .zip", "bindings as .pyc naming the archive"])
-def test_a_zip_import_whose_location_for_one_directory_stopped_being_writable_takes_the_fallback(
+def test_a_zip_import_whose_location_for_one_directory_can_no_longer_be_used_takes_the_fallback(
         tmp_path, parent, bytecode):
-    """When the location of one directory of a ``.zip`` stops being writable, the import warns once and names that
+    """When numba can no longer use the location of one directory of a ``.zip``, the import warns once and names that
     location. numba caches each directory of a ``.zip`` in a location of its own under the user's cache directory, so
-    the check asks numba about each directory of the archive."""
+    the check asks numba about each directory of the archive. The test replaces the location with a file. A location
+    that still exists and can no longer be written passes the check, and numba loads from it."""
     # The check takes the archive to be the first part of the path that ends in .zip and is a zip archive. It therefore
     # lists the archive's directories under container.zip too. A directory of .pyc members, compiled to name their own
     # paths in the archive as compileall -d compiles them, counts as a directory of the archive. numba 0.68 and later
@@ -595,16 +758,14 @@ def test_a_zip_import_whose_location_for_one_directory_stopped_being_writable_ta
     # the test searches the whole home for the location of the bindings directory.
     locations = [path for path in home.rglob("bindings_*") if path.is_dir()]
     assert len(locations) == 1, sorted(str(path.relative_to(home)) for path in home.rglob("*") if path.is_dir())
-    locations[0].chmod(0o555)
-    try:
-        run = _run(env, tmp_path)
-        assert run.returncode == 0 and str(archive) in run.stdout, run.stderr
-        assert run.stderr.count("compiles without a cache") == 1, run.stderr
-        # The remedy names the location that lost write access, not the user's cache directory above it.
-        assert (f"no file can be written in that directory, {locations[0]} (Permission denied), so make room there, "
-                "or make it writable") in run.stderr, run.stderr
-    finally:
-        locations[0].chmod(0o755)
+    shutil.rmtree(locations[0])
+    locations[0].write_text("")
+    run = _run(env, tmp_path)
+    assert run.returncode == 0 and str(archive) in run.stdout, run.stderr
+    assert run.stderr.count("compiles without a cache") == 1, run.stderr
+    # The remedy names the location that numba cannot use, not the user's cache directory above it.
+    assert (f"no file can be written in that directory, {locations[0]}, which cannot be made, {locations[0]} being "
+            "a file in its path (File exists), so put that file elsewhere") in run.stderr, run.stderr
 
 
 def test_a_pyc_member_alone_beside_sourced_ones_in_a_zip_is_asked_for_itself(tmp_path):

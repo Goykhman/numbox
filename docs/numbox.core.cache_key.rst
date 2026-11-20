@@ -245,7 +245,9 @@ directory.
 ``explain_cache_key`` raises a ``ValueError`` for a function that is not keyed, such as a ``numba.njit`` function or a
 ``numbox_njit`` function without ``cache=True``. It also raises one for a function that numbox keeps out of the on-disk
 cache, with the reason that the ``UncachedWarning`` gives, as described in
-`If numbox warns that a function is not cached`_.
+`If numbox warns that a function is not cached`_. It also raises a ``ValueError`` for a function whose cache is
+disabled. numbox disables a function's cache when ``Dispatcher.recompile`` cannot empty the function's index in a
+read-only cache directory (:ref:`If the cache directory is read-only at run time <read_only_cache_directory>`).
 
 Deleting a function's cache files
 +++++++++++++++++++++++++++++++++
