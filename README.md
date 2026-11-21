@@ -4,6 +4,8 @@ A toolbox of low-level utilities for working with [numba](https://numba.pydata.o
 
 Documentation is available at [numbox](https://goykhman.github.io/numbox).
 
+The changes in each release are listed in the [changelog](https://github.com/Goykhman/numbox/blob/main/CHANGELOG.md).
+
 ## Tools
 
 - **Any**: A lightweight structure that wraps any value into the same type leveraging a variant of the type erasure technique.
