@@ -11,13 +11,14 @@ without a fingerprint would make the fingerprint fail, so the work builder would
 The last tests cover ``_opaque_values_match`` and the ``@proxy`` aliases that a collision retires. The tests that need
 a C math library skip if ``open_libm`` finds none.
 """
+import sys
 import textwrap
 
 import numpy as np
 import pytest
 
 from numbox.utils.fingerprint import (
-    _Unfingerprintable, _canon_value, _fingerprint_function, _loaded_global_names,
+    _MAX_REPR_INT_BITS, _Unfingerprintable, _canon_value, _fingerprint_function, _loaded_global_names,
     _opaque_values_match, _referenced_global_names,
 )
 from test.auxiliary_utils import open_libm
@@ -46,6 +47,31 @@ def test_canon_value_structured_dtype_preserves_layout():
 def test_canon_value_plain_dtype_unchanged():
     canon = _canon_value(np.arange(3, dtype=np.float64), set())
     assert canon.startswith("ndarray(<f8;")
+
+
+def test_canon_value_separates_the_field_orders_of_a_reordered_structured_array():
+    # NumPy defines no descr for the dtype of base[["b", "a"]], whose fields are not in the order of their offsets.
+    # The dtype's str lists the offsets, so the text tells that view from the views with other fields or another order.
+    base = np.zeros(2, dtype=[("a", "<f8"), ("b", "<f8"), ("c", "<f8")])
+
+    canons = {_canon_value(base[names], set()) for names in (["b", "a"], ["a", "b"], ["c", "a"])}
+    assert len(canons) == 3
+    assert _canon_value(base[["b", "a"]][0], set()) != _canon_value(base[["c", "a"]][0], set())
+
+
+def test_canon_value_writes_an_int_the_same_way_under_every_digit_limit():
+    # repr raises for an int of more decimal digits than the interpreter's limit, and a process can change the limit.
+    # An int above the bound is written with hex, which has no limit. An int at the bound has no more digits than the
+    # lowest limit that a process can set, so repr accepts it in every process.
+    huge = 7 ** 6000
+
+    assert _canon_value(huge, set()) == hex(huge)
+    assert len({_canon_value(value, set()) for value in (huge, huge + 1, -huge)}) == 3
+    assert _canon_value([huge], set()) == f"list[{hex(huge)}]"
+
+    bound = 2 ** _MAX_REPR_INT_BITS - 1
+    assert _canon_value(bound, set()) == repr(bound)
+    assert len(repr(bound)) <= sys.int_info.str_digits_check_threshold
 
 
 def test_proxy_binding_callback_fingerprints_cleanly_and_distinctly():

@@ -257,6 +257,8 @@ the value to a ``DeriveWAP``. :func:`~numbox.core.work.work.make_work` calls ``r
 receives from Python. A tuple that mixes ``DeriveWAP`` values with other function values is subject to further limits,
 which the :ref:`work page <derive_mixed_function_values>` lists.
 
+.. _cres_module_level_constant:
+
 Holding the value as a module-level constant
 ''''''''''''''''''''''''''''''''''''''''''''
 
@@ -277,19 +279,49 @@ third file, ``constant.py``, shows this form:
 
     print(twice(4.0))   # 4.0
 
-This form gives a direct call, which LLVM can inline, and an exception raised in the body propagates as it does through
-an argument. numba caches ``twice`` too. numbox declares the body's numba entry point by its symbol name and links the
-body's compiled code into ``twice``, so ``twice`` holds no address that changes between processes. numba itself refuses
-to cache a caller that holds one of numba's own function values as a constant, and it warns that the caller uses dynamic
-globals.
+An exception raised in the body propagates as it does through an argument, and numba caches ``twice`` too. numbox
+registers the body's numba entry point under an alias, a symbol name that is the same in every process. ``twice`` holds
+a declaration of that name and a call to it. It therefore holds no address that changes between processes and no copy of
+the body, and LLVM cannot inline the call. numba itself refuses to cache a caller that holds one of numba's own function
+values as a constant, and it warns that the caller uses dynamic globals.
 
-The cost is that the cache entry of ``twice`` holds its own copy of the body. The copy can go stale, as the cached
-caller of a struct's method does (`after you edit a struct's method <After you edit a struct's method_>`_). After you
-edit ``checked_sqrt`` in ``ops.py``, ``twice`` may keep running the old body. Delete the cache files of ``twice`` after
-every edit of the body, here ``constant.twice-6.py312.nbi`` and ``constant.twice-6.py312.1.nbc``. Unless the inlining
-matters, pass the value as an argument instead: ``apply`` calls whichever value it is passed, so it always runs the
-current body. The proxy page covers the same form for ``.as_func`` (:ref:`holding the function as a module-level
-constant <proxy_module_level_constant>`).
+A function that ``numba.pycc`` compiles ahead of time holds a copy of the body instead, because the loader of an
+ahead-of-time module cannot resolve a name that numbox registers at run time. ``numba.pycc`` compiles only the exported
+function that way. A jitted function or a ``cres`` function that the exported function calls is compiled in the same
+way as for the running process, and if it holds a ``cres`` value as a module-level constant, the module fails to import
+with an undefined symbol. Read the value in the exported function and pass it to a jitted function as an argument, in
+the way that ``apply`` takes it in the example above.
+
+numbox computes the alias as it does for a proxied function: from the function's code and the values it captures, from
+its module and name, and from the signature and the options passed to ``cres``. After you edit ``checked_sqrt`` in
+``ops.py``, the alias changes. numbox then discards the cache entry of ``twice`` with a
+:class:`~numbox.core.proxy.proxy.StaleProxyCacheWarning`, and numba compiles ``twice`` again. The proxy page shows the
+warning under :ref:`Caching <proxy_caching>` and describes strict mode there.
+
+``twice`` always calls the function that ``checked_sqrt`` names. If a second ``cres`` function in the process computes
+the same alias, numbox registers it under a name of its own. That happens after a module reload, when a function that
+calls ``cres`` runs twice with equal arguments, when one function is passed to ``cres`` twice with the same signature
+and options, and for two functions that differ only in a value that the alias leaves out, such as a captured ufunc or
+``math`` function. In a process where two functions share an alias, numbox does not load a cached caller that holds
+either as a constant, and numba compiles that caller again with the same warning. The proxy page explains the rule under
+:ref:`If two functions share an alias <proxy_shared_alias>`. If such a function is passed as an argument instead, in the
+way that ``apply`` takes it in the example above, the caller's cache entry loads in every process.
+
+A cache entry that numbox 0.7.9 or earlier wrote for a caller such as ``twice`` holds a copy of the body and names no
+alias, so the check does not cover it. Delete such an entry once after the upgrade, as the proxy page explains under
+:ref:`holding the function as a module-level constant <proxy_module_level_constant>`.
+
+Delete the cache files of ``twice`` before a downgrade to numbox 0.7.9 or earlier as well. A cache entry that a later
+release wrote refers to the alias, and the older release does not register it. If the process imports
+``numbox.core.proxy.proxy``, as every use of a numbox binding does, the older release discards the entry with a
+warning and compiles ``twice`` again. In any other process, numba loads the entry, and the process ends in a
+segmentation fault without a message.
+
+Only a value that ``cres`` or ``@proxy`` made has an alias. A ``DeriveWAP`` that you construct from a compile result,
+or that :func:`~numbox.utils.derive_wap.rewrap_derive` returns, has none. For such a value held as a constant, numbox
+links the body's compiled code into the caller, and the caller's cache entry holds its own copy of the body. After an
+edit to the body in another file, the cached caller may keep running the old body without a warning. Compile the
+function with ``cres`` instead, or delete the caller's cache files after every edit of the body.
 
 .. automodule:: numbox.utils.derive_wap
    :members:

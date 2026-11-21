@@ -23,6 +23,7 @@ from typing import Callable, Iterable, Optional
 
 from numbox.core.cache_key import _keyed
 from numbox.core.configurations import jit_options as jit_options_
+from numbox.core.proxy.proxy import _claim_jit_alias, _stable_cfunc_alias
 from numbox.utils.derive_wap import DeriveWAP
 from numbox.utils.fingerprint import (
     _Unfingerprintable, _canon_value, _fingerprint_function,
@@ -77,6 +78,15 @@ def cres(sig, **kwargs):
     :class:`~numbox.utils.derive_wap.DeriveWAP`, not a dispatcher, so a cached jitted function that takes it as an
     argument loads from the cache in the next process. An exception raised in its body propagates to a jitted caller,
     as :mod:`numbox.utils.derive_wap` explains.
+
+    numbox registers the compiled function's numba entry point under a name that is the same in every process. The
+    name is made from the alias that :func:`~numbox.core.proxy.proxy.proxy` computes for a function. A cached jitted
+    function that reads the result as a constant, such as a module-level global, refers to that name. After an edit to
+    the decorated function, numbox discards the cache entry of such a caller with a
+    :class:`~numbox.core.proxy.proxy.StaleProxyCacheWarning`, and numba compiles the caller again. If a second function
+    in the process computes the same alias, numbox registers it under a name of its own, so each caller runs the
+    function that it holds. numbox then discards the cache entry of every caller that holds either function as a
+    constant, in each process where both exist.
     """
     if not isinstance(sig, Signature):
         raise ValueError(f"Expected a single signature, found {sig} of type {type(sig)}")
@@ -94,6 +104,11 @@ def cres(sig, **kwargs):
         wrapper._numbox_py_func = func
         # The wrapper also stores the dispatcher, whose cache numbox.core.cache_key.explain_cache_key reads.
         wrapper._numbox_dispatcher = func_jit
+        # The numba entry point is registered under a name made from the alias that @proxy would compute for the
+        # function. The constant lowering in numbox.utils.derive_wap declares that name. A cached caller that reads the
+        # wrapper as a constant therefore imports a name that the cache check of numbox.core.proxy.proxy can test, and
+        # importing that module installs the check.
+        wrapper._numbox_jit_alias = _claim_jit_alias(_stable_cfunc_alias(func, sig, kwargs), wrapper.jit_address)
         return wrapper
     return _
 

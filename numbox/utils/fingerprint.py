@@ -55,9 +55,17 @@ def _dtype_key(dtype: np.dtype) -> str:
     For a plain dtype the text is ``dtype.str``. ``dtype.str`` gives ``|V<itemsize>`` for every structured dtype and
     drops the names, types, order and offsets of the fields, so two arrays of one size and different layouts would have
     the same text. The text of a structured dtype therefore holds its ``str``, its ``descr`` and its itemsize.
+
+    NumPy defines no ``descr`` for a dtype whose fields overlap or are not in the order of their offsets, such as the
+    dtype of ``array[["b", "a"]]``. The ``str`` of such a dtype lists the names, the formats and the offsets of the
+    fields, so the text holds a fixed word in place of the ``descr``.
     """
     if dtype.names is not None:
-        return f"struct({dtype!s};descr={dtype.descr};itemsize={dtype.itemsize})"
+        try:
+            descr = dtype.descr
+        except ValueError:
+            descr = "undefined"
+        return f"struct({dtype!s};descr={descr};itemsize={dtype.itemsize})"
     return dtype.str
 
 
@@ -83,7 +91,15 @@ def _dtype_key(dtype: np.dtype) -> str:
 _ABSENT_ALIASES: set[str] = set()
 
 
+# repr raises ValueError for an int of more decimal digits than sys.get_int_max_str_digits() allows. A process can set
+# that limit as low as 640 digits, and an int of at most 2048 bits has at most 617. _canon_value writes a larger int
+# with hex, which has no limit, so that the text of an int does not depend on the limit of the process.
+_MAX_REPR_INT_BITS = 2048
+
+
 def _canon_value(value: Any, seen: set[int]) -> str:
+    if isinstance(value, int) and value.bit_length() > _MAX_REPR_INT_BITS:
+        return hex(value)
     if value is None or isinstance(value, (bool, int, float, complex, str, bytes)):
         return repr(value)
     if isinstance(value, np.generic):
