@@ -131,5 +131,27 @@ def test_digest_folds_dufunc_jit_flags():
     assert plain == digest("StateType", (vectorize(cb),))
 
 
+def test_digest_varies_with_a_named_function_that_a_module_attribute_holds():
+    """The digest of a callback that calls ``helpers.op`` changes with the builtin function that the attribute holds.
+
+    That holds for a Python function and for a dispatcher. With one digest for both, a SQLite registration in the next
+    process would load the code that was compiled for the first function.
+    """
+    import math
+    import types
+
+    helpers = types.ModuleType("helpers")
+
+    def callback(x):
+        return helpers.op(x)
+
+    for fn in (callback, njit(callback)):
+        digests = []
+        for op in (math.sin, math.cos):
+            helpers.op = op
+            digests.append(digest("subject", [fn]))
+        assert digests[0] != digests[1]
+
+
 if __name__ == '__main__':
     collect_and_run_tests(__name__)

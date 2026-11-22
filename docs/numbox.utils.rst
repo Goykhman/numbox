@@ -506,6 +506,8 @@ in a module that the script imports.
    :show-inheritance:
    :undoc-members:
 
+.. _utils_fingerprint:
+
 numbox.utils.fingerprint
 ------------------------
 
@@ -522,8 +524,16 @@ new code, which is compiled again. The fingerprint of a function is built from:
 - the value of each global that it reads by name;
 - the value of each module attribute that it reads, such as ``cfg.SCALE``, when the value is a number, a string,
   an array or another kind of data, or a dispatcher;
+- the module and name of a builtin function or a NumPy ufunc that it reads as a module attribute, such as
+  ``numpy.sin`` read as ``helpers.op``. This holds for a builtin function that its module provides under the function's
+  own name, and for a ufunc that the ``numpy`` module itself provides, read through a module of another package. Only
+  the fingerprint of a struct method, a formula, a derive and a ``digest`` has this item. The alias of a ``@proxy`` or
+  ``cres`` function leaves it out;
 - for each function or dispatcher among these values, that function's own fingerprint, and the options that a
   dispatcher compiles under.
+
+numbox reads these values when it computes the fingerprint. A program that rebinds one of them later in the same
+process, before numba compiles the code, caches code that the fingerprint does not describe.
 
 An edit to any of these changes the fingerprint. Such edits include those that leave numba's own key unchanged: a new
 literal or default value, a renamed attribute or global, and a new value of a global. Renaming a local variable or
@@ -576,8 +586,8 @@ again in every process and never runs a stale version, and numbox gives no warni
 find out whether it compiles without a cache. A struct that compiles without a cache has none named after its anchor. To
 keep such a struct cached, do not import a value that never changes, such as a numba type or a builtin function, by
 name. Reach it through its module instead, as in ``math.sqrt`` after ``import math`` or ``numba.float64`` after
-``import numba``. The fingerprint leaves out a module attribute whose value is not data, so the method then reads no
-value without a fingerprint, and it has a fingerprint of its own.
+``import numba``. The fingerprint leaves out a module attribute that holds a type, and one that holds a builtin
+function of that module, so the method then reads no value without a fingerprint, and it has a fingerprint of its own.
 
 The fingerprint leaves out a value that a module provides only through a module-level ``__getattr__``. A change to such
 a value therefore does not change the fingerprint. Delete the cache files of the code that depends on such a value after

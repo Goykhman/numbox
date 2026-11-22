@@ -230,6 +230,58 @@ def test_module_constant_change_not_stale_across_processes(tmp_path):
     assert got == "30.0", f"module constant change served a stale kernel: got {got}, expected 30.0"
 
 
+@pytest.mark.parametrize("holder", ["attribute", "global"])
+def test_a_named_function_swapped_between_processes_does_not_serve_a_stale_kernel(tmp_path, holder):
+    """A kernel compiles again when the function that its formula calls is another one in the next process.
+
+    The formula calls ``op``, which holds ``math.sin`` in the first process and ``math.cos`` in the second. ``op`` is an
+    attribute of a module in one case and a global of the script in the other. The code of the formula is the same in
+    both processes. As a module attribute, only the name of the function that ``op`` holds separates the digests of
+    the two kernels. As a global, ``op`` leaves the formula without a fingerprint, and the kernel compiles without a
+    cache. The second process shares the first process's NUMBA_CACHE_DIR and must print ``cos(0.0)``; a kernel loaded
+    from the first process's cache would print ``sin(0.0)``.
+    """
+    probe = tmp_path / "named_function_probe.py"
+    probe.write_text(textwrap.dedent('''
+        import math
+        import os
+        import sys
+        import types
+        import numpy as np
+        from numbox.core.variable.variable import Graph
+        from numbox.core.variable.compile_kernel import compile_kernel
+
+        op = getattr(math, os.environ["OP"])
+        cfg = types.ModuleType("ck_op_probe")
+        cfg.op = op
+        sys.modules["ck_op_probe"] = cfg
+        import ck_op_probe  # noqa: E402,F401  -- now a module global of this script
+
+        if os.environ["HOLDER"] == "global":
+            def apply(y):
+                return op(y)
+        else:
+            def apply(y):
+                return ck_op_probe.op(y)
+
+        g = Graph(
+            variables_lists={"variables": [
+                {"name": "out", "inputs": {"y": "basket"}, "formula": apply}]},
+            external_source_names=["basket"],
+        )
+        ck = compile_kernel(g, "variables.out")
+        print(float(np.asarray(ck.kernel(0.0)[0]).ravel()[0]))
+    '''), encoding="utf-8")
+
+    env = _shared_cache_env(tmp_path)
+    env["HOLDER"] = holder
+    env["OP"] = "sin"
+    assert _run_probe(probe, env) == "0.0"
+    env["OP"] = "cos"
+    got = _run_probe(probe, env)
+    assert got == "1.0", f"the kernel compiled for math.sin was served for math.cos: got {got}, expected 1.0"
+
+
 # A formula with a cache of its own leaves the kernel uncached.
 # ---------------------------------------------------------------------------
 

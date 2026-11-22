@@ -545,5 +545,31 @@ def test_method_identity_folds_ns_values_read_as_globals_only():
     assert _method_identity(reads_global, {"knob": 6})[0] != ident_five
 
 
+def test_a_struct_method_identity_follows_a_named_function_that_a_module_attribute_holds():
+    """The identity of a method that calls ``helpers.op`` changes with the builtin function that the attribute holds.
+
+    The struct stays cacheable, and its code is cached under another name once ``helpers.op`` holds another function.
+    With one identity for both, the next process would load the struct that was compiled for the first function.
+    """
+    import math
+    import types
+
+    helpers = types.ModuleType("helpers")
+    ns = {"helpers": helpers}
+    exec("def method(self):\n    return helpers.op(self.x)\n", ns)  # nosec B102 - fixed test snippet
+    # The second method reaches the attribute through a helper that the struct's ns provides.
+    exec("def helper(x):\n    return helpers.op(x)\n", ns)  # nosec B102 - fixed test snippet
+    through_ns = {}
+    exec("def method(self):\n    return helper(self.x)\n", through_ns)  # nosec B102 - fixed test snippet
+    for method, user_ns in ((ns["method"], None), (through_ns["method"], {"helper": njit(ns["helper"])})):
+        identities = []
+        for op in (math.sin, math.cos):
+            helpers.op = op
+            identity, cacheable = _method_identity(method, user_ns)
+            assert cacheable
+            identities.append(identity)
+        assert identities[0] != identities[1]
+
+
 if __name__ == '__main__':
     collect_and_run_tests(__name__)

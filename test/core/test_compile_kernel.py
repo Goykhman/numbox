@@ -718,6 +718,36 @@ def test_fingerprint_recursive_helpers_terminate():
     assert ok and "recursive(" in fp
 
 
+def test_a_formula_that_calls_a_function_or_a_type_by_a_bare_imported_name_is_not_cached():
+    """A builtin function, a NumPy ufunc or a type allows caching when called through its module, not by a bare name.
+
+    A formula that reads one as a global has no fingerprint, so its kernel compiles without a cache. A kernel cached
+    under a fingerprint is exposed to every value that the fingerprint leaves out, so a formula that reads such a
+    global must not gain a fingerprint unnoticed. The variable page lists these cases in a table.
+    """
+    from numbox.core.variable.compile_kernel import _formula_fingerprint
+    bare = textwrap.dedent("""
+        from {module} import {name}
+        def f(x):
+            return {name}(x)
+    """)
+    through_module = textwrap.dedent("""
+        import {module}
+        def f(x):
+            return {module}.{name}(x)
+    """)
+    cacheable = {}
+    for module, name in (("math", "sqrt"), ("numpy", "exp"), ("numba", "float64"), ("numpy", "float64")):
+        for kind, src in (("bare", bare), ("module", through_module)):
+            ns = {}
+            exec(compile(src.format(module=module, name=name), f"<{kind}-{name}>", "exec"), ns)
+            cacheable[f"{kind} {module}.{name}"] = _formula_fingerprint(ns["f"])[1]
+    assert cacheable == {
+        "bare math.sqrt": False, "bare numpy.exp": False, "bare numba.float64": False, "bare numpy.float64": False,
+        "module math.sqrt": True, "module numpy.exp": True, "module numba.float64": True, "module numpy.float64": True,
+    }
+
+
 def test_fingerprint_fallback_paths():
     """A formula over a closure value without a fingerprint, and a cres formula, each leave the kernel uncached.
 

@@ -335,6 +335,9 @@ The digest holds:
   closure variables;
 - the values of the globals and module attributes that a formula reads, such as ``SCALE`` or ``settings.SCALE``, and
   the code and values of each function and dispatcher that it calls, with the exceptions below;
+- the module and name of a built-in function or of one of NumPy's own ufuncs that an attribute of a module of
+  another package holds, as in ``helpers.op(y)`` where ``helpers.op`` holds ``numpy.sin``.
+  :ref:`numbox.utils.fingerprint <utils_fingerprint>` states which functions have such a name;
 - the options of a formula that is a numba dispatcher or a ``@vectorize`` function;
 - the jit options that the kernel compiles under, from ``jit_options`` and numbox's defaults, except ``cache``;
 - the ``NUMBA_*`` settings that change the code numba emits, listed in :data:`~numbox.core.cache_key.KEYED_SETTINGS`;
@@ -481,9 +484,9 @@ for the kernel:
   arrays other than object arrays, tuples, lists, sets and dicts of these, modules, Python functions, numba
   dispatchers and ``@vectorize`` functions.
 
-One rule covers a built-in function, a NumPy ufunc and a type that a module provides, none of which numbox can hash:
-calling one through its module allows caching, and calling it by a bare name imported from the module does not. A
-Python function or a numba dispatcher imported by name is hashed, so it allows caching.
+One rule covers a built-in function, a NumPy ufunc and a type that a module provides, none of which has a value that
+numbox can hash: calling one through its module allows caching, and calling it by a bare name imported from the module
+does not. A Python function or a numba dispatcher imported by name is hashed, so it allows caching.
 
 ==============================  ================================================================
 Allows caching                  Prevents caching

@@ -11,15 +11,20 @@ without a fingerprint would make the fingerprint fail, so the work builder would
 The last tests cover ``_opaque_values_match`` and the ``@proxy`` aliases that a collision retires. The tests that need
 a C math library skip if ``open_libm`` finds none.
 """
+import importlib.util
+import math
 import sys
 import textwrap
+import types
 
 import numpy as np
 import pytest
+from numba import float64, njit, vectorize
 
 from numbox.utils.fingerprint import (
-    _MAX_REPR_INT_BITS, _Unfingerprintable, _canon_value, _fingerprint_function, _loaded_global_names,
-    _opaque_values_match, _referenced_global_names,
+    _MAX_REPR_INT_BITS, _Unfingerprintable, _canon_value, _fingerprint_function, _fingerprint_function_best_effort,
+    _fingerprint_module_attrs, _loaded_global_names, _named_function_text, _opaque_values_match,
+    _referenced_global_names,
 )
 from test.auxiliary_utils import open_libm
 
@@ -72,6 +77,279 @@ def test_canon_value_writes_an_int_the_same_way_under_every_digit_limit():
     bound = 2 ** _MAX_REPR_INT_BITS - 1
     assert _canon_value(bound, set()) == repr(bound)
     assert len(repr(bound)) <= sys.int_info.str_digits_check_threshold
+
+
+def test_named_function_text_names_a_ufunc_or_a_builtin_function_that_its_module_holds():
+    # numpy holds sin under the ufunc's own name, and math holds sqrt, so the module and the name identify each of them
+    # in every process. np.abs is a second name for the ufunc absolute, and the text holds the ufunc's own name.
+    assert _named_function_text(np.sin) == "ufunc(numpy.sin)"
+    assert _named_function_text(np.abs) == "ufunc(numpy.absolute)"
+    assert _named_function_text(math.sqrt) == "builtin(math.sqrt)"
+    assert _named_function_text(len) == "builtin(builtins.len)"
+    # The strict walk does not use the name: a value that _canon_value has no text for makes the code that reads it
+    # compile without a cache, and that stays so for these functions.
+    for value in (np.sin, math.sqrt, len):
+        with pytest.raises(_Unfingerprintable):
+            _canon_value(value, set())
+
+
+def test_named_function_text_is_none_for_a_function_that_no_module_holds_by_name(monkeypatch):
+    # The text names a function by its module and its name, so it must not be given to another function of that name.
+    # A ufunc that the user built and named sin is not the one that numpy holds. The parallel target of vectorize
+    # returns a NumPy ufunc. A method of an object records no module. A function that was replaced in its module is
+    # no longer found there, and the function that replaced it is named as its own module holds it.
+    @vectorize([float64(float64)], target="parallel")
+    def sin(x):
+        return x + 1.0
+
+    assert isinstance(sin, np.ufunc) and sin.__name__ == "sin"
+    replaced = math.sqrt
+    monkeypatch.setattr(math, "sqrt", math.sin)
+    # A builtin function accepts any object as its __module__. One whose __module__ is not a string has no name.
+    monkeypatch.setattr(math.fsum, "__module__", ["math"])
+
+    for value in (sin, [].append, replaced, math.fsum, float64, 2.0, test_canon_value_structured_dtype_preserves_layout):
+        assert _named_function_text(value) is None
+    assert _named_function_text(math.sqrt) == "builtin(math.sin)"
+
+
+def test_named_function_text_reads_only_a_loaded_module(tmp_path, monkeypatch):
+    # A builtin function accepts any string as its __module__, and sys.modules can hold anything under that string.
+    # Reading the __dict__ of a module that importlib.util.LazyLoader has not loaded yet runs the module, so the lookup
+    # must leave such an entry alone, and an entry that is no module as well.
+    source = tmp_path / "lazy_home.py"
+    source.write_text("raise RuntimeError('the lookup ran a lazy module')\n", encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("lazy_home", source)
+    spec.loader = importlib.util.LazyLoader(spec.loader)
+    lazy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lazy)
+    monkeypatch.setitem(sys.modules, "lazy_home", lazy)
+    monkeypatch.setitem(sys.modules, "no_module", types.SimpleNamespace(fsum=math.fsum))
+
+    for home in ("lazy_home", "no_module"):
+        monkeypatch.setattr(math.fsum, "__module__", home)
+        assert _named_function_text(math.fsum) is None
+    assert type(lazy) is not types.ModuleType, "the lookup loaded the lazy module"
+
+
+def test_named_function_text_does_not_ask_an_impostor_for_its_name():
+    # An object can report any class as its __class__, and isinstance believes it. Such an object is not a ufunc or a
+    # builtin function, and reading its __name__ can run arbitrary code.
+    class Impostor:
+        def __init__(self, reported):
+            self._reported = reported
+
+        @property
+        def __class__(self):
+            return self._reported
+
+        @property
+        def __name__(self):
+            raise RuntimeError("the lookup read the name of an impostor")
+
+    helpers = types.ModuleType("helpers")
+    for reported in (np.ufunc, type(len)):
+        impostor = Impostor(reported)
+        assert isinstance(impostor, reported)
+        assert _named_function_text(impostor) is None
+        helpers.op = impostor
+        assert _fingerprint_module_attrs({"op"}, {"helpers": helpers}, set(), True) == ""
+
+
+def test_the_fold_runs_no_code_of_a_str_subclass_or_of_an_odd_module(monkeypatch):
+    # A module's __name__ and a builtin function's __module__ can be instances of a subclass of str, whose methods
+    # are user code. A subclass of the module type can provide a __dict__ that is not a dict. The fold reads such a
+    # __dict__ only by membership and by item, as the walk over data attributes does.
+    class Loud(str):
+        def partition(self, sep):
+            raise RuntimeError("the fold called a method of a str subclass")
+
+        def __hash__(self):
+            raise RuntimeError("the fold hashed a str subclass")
+
+        def __eq__(self, other):
+            raise RuntimeError("the fold compared a str subclass")
+
+    helpers = types.ModuleType("helpers")
+    helpers.__dict__["__name__"] = Loud("numpy.lookalike")
+    helpers.op = np.sin
+    assert _fingerprint_module_attrs({"op"}, {"helpers": helpers}, set(), True) == (
+        ";module_attrs=[helpers.op=ufunc(numpy.sin)]"
+    )
+
+    class NoGet:
+        def __init__(self, items):
+            self._items = items
+
+        def __contains__(self, key):
+            return key in self._items
+
+        def __getitem__(self, key):
+            return self._items[key]
+
+    class OddModule(types.ModuleType):
+        @property
+        def __dict__(self):
+            return NoGet({"__name__": "odd", "op": np.cos})
+
+    assert _fingerprint_module_attrs({"op"}, {"odd": OddModule("odd")}, set(), True) == (
+        ";module_attrs=[odd.op=ufunc(numpy.cos)]"
+    )
+
+    monkeypatch.setattr(math.fsum, "__module__", Loud("math"))
+    assert _named_function_text(math.fsum) is None
+
+    # A value that is data must keep the entry that it has as data. The fold must not take it for a ufunc because
+    # its class has a metaclass whose __eq__ agrees with any operand, or because it reports another __class__.
+    class AgreesWithAll(type):
+        def __eq__(cls, other):
+            return True
+
+        def __hash__(cls):
+            return 0
+
+    class Scale(float, metaclass=AgreesWithAll):
+        pass
+
+    class Disguised(float):
+        @property
+        def __class__(self):
+            return np.ufunc
+
+    plain = types.ModuleType("plain")
+    for value in (Scale(2.0), Disguised(2.0)):
+        plain.SCALE = value
+        folded = _fingerprint_module_attrs({"SCALE"}, {"plain": plain}, set(), True)
+        assert folded == _fingerprint_module_attrs({"SCALE"}, {"plain": plain}, set()) == ";module_attrs=[plain.SCALE=2.0]"
+
+
+def test_a_function_that_reads_a_named_function_by_a_bare_name_has_no_fingerprint():
+    # After "from math import sqrt", a function reads sqrt as a global. Such a function has no fingerprint, so code
+    # that is cached by the fingerprint compiles without a cache for it. The best-effort text, which names a @proxy
+    # function, holds a placeholder for sqrt and hands the function to the caller. @proxy compares the values handed
+    # over, and that comparison is what tells two bodies with equal texts apart.
+    src = """
+        def f(x):
+            return op(x)
+    """
+    for op in (math.sqrt, np.sin):
+        f = _make(src, op=op)
+        with pytest.raises(_Unfingerprintable):
+            _fingerprint_function(f, set())
+        opaque = []
+        assert f"op=<opaque:{type(op).__name__}>" in _fingerprint_function_best_effort(f, opaque)
+        assert opaque == [op]
+
+
+def test_a_module_attribute_that_holds_a_ufunc_or_a_builtin_function_is_folded_by_its_name():
+    # helpers.op can hold numpy.sin in one process and numpy.cos in the next. The code of f names only op, so the
+    # fingerprint folds the name of the function that the attribute holds.
+    helpers = types.ModuleType("helpers")
+    f = _make("""
+        def f(x):
+            return helpers.op(x)
+    """, helpers=helpers)
+
+    texts, plain = [], []
+    for op in (np.sin, np.cos, math.sqrt):
+        helpers.op = op
+        texts.append(_fingerprint_function(f, set(), fold_named=True))
+        plain.append(_fingerprint_function(f, set()))
+    assert len(set(texts)) == 3
+    assert "helpers.op=ufunc(numpy.sin)" in texts[0]
+    assert "helpers.op=builtin(math.sqrt)" in texts[2]
+    # Without fold_named the text is the one that @proxy and cres hash into an alias. It leaves the attribute out, so
+    # that an alias does not change with it.
+    assert len(set(plain)) == 1 and "module_attrs" not in plain[0]
+    # Another module that holds a function under the function's own name can hold another function in the next
+    # process too, so that attribute is folded as well.
+    helpers.sin = np.sin
+    assert _fingerprint_module_attrs({"sin"}, {"helpers": helpers}, set(), True) == (
+        ";module_attrs=[helpers.sin=ufunc(numpy.sin)]"
+    )
+    assert _fingerprint_module_attrs({"sin"}, {"helpers": helpers}, set()) == ""
+
+
+@pytest.mark.parametrize("kind", [
+    "global", "closure", "default", "keyword default", "tuple", "set", "dict key", "dict value", "dispatcher",
+    "vectorize", "cres", "module attribute",
+])
+def test_fold_named_reaches_a_function_that_the_fingerprinted_function_calls(kind):
+    # The attribute helpers.op is read by a helper. The fingerprinted function reaches the helper in one of the ways
+    # that the walk follows, and the walk must fold the attribute on each of them.
+    from numbox.utils.highlevel import cres
+
+    helpers = types.ModuleType("helpers")
+    helpers.op = np.sin
+    helper = _make("""
+        def f(x):
+            return helpers.op(x)
+    """, helpers=helpers)
+    call_global = """
+        def f(x):
+            return helper(x)
+    """
+    if kind == "global":
+        caller = _make(call_global, helper=helper)
+    elif kind == "closure":
+        def caller(x):
+            return helper(x)
+    elif kind == "default":
+        caller = _make("""
+            def f(x, g=helper):
+                return g(x)
+        """, helper=helper)
+    elif kind == "keyword default":
+        caller = _make("""
+            def f(x, *, g=helper):
+                return g(x)
+        """, helper=helper)
+    elif kind == "module attribute":
+        outer = types.ModuleType("outer")
+        outer.inner = njit(helper)
+        caller = _make("""
+            def f(x):
+                return outer.inner(x)
+        """, outer=outer)
+    else:
+        held = {
+            "tuple": lambda: (helper,), "set": lambda: frozenset({helper}), "dict key": lambda: {helper: 1.0},
+            "dict value": lambda: {"k": helper}, "dispatcher": lambda: njit(helper),
+            "vectorize": lambda: vectorize(helper), "cres": lambda: cres(float64(float64))(helper),
+        }[kind]()
+        caller = _make(call_global, helper=held)
+
+    texts, plain = [], []
+    for op in (np.sin, np.cos):
+        helpers.op = op
+        texts.append(_fingerprint_function(caller, set(), fold_named=True))
+        plain.append(_fingerprint_function(caller, set()))
+    assert texts[0] != texts[1]
+    assert plain[0] == plain[1]
+
+
+def test_a_named_function_reached_through_its_own_package_is_not_folded():
+    # numpy.add, numpy.abs and math.sqrt are the same functions in every process, so they add nothing to the
+    # fingerprint of a function that calls them through their modules. A submodule of numpy that holds add as well,
+    # under that name or another, is loaded in some processes and not in others. numpy.strings.add and
+    # numpy.ma.core.narray are such attributes. They are not folded either, so the fingerprint does not depend on which
+    # submodules are loaded.
+    f = _make("""
+        def f(x):
+            return math.sqrt(np.abs(np.add(x, 1.0)))
+    """, np=np, math=math)
+    assert "module_attrs" not in _fingerprint_function(f, set(), fold_named=True)
+
+    submodule = types.ModuleType("numpy.a_submodule")
+    submodule.add = np.add
+    submodule.narray = np.array
+    assert _fingerprint_module_attrs({"add", "narray"}, {"sub": submodule}, set(), True) == ""
+    # A module of another package whose name starts with "numpy" is not a module of numpy.
+    lookalike = types.ModuleType("numpy_extras.ops")
+    lookalike.add = np.add
+    assert _fingerprint_module_attrs({"add"}, {"sub": lookalike}, set(), True) == (
+        ";module_attrs=[sub.add=ufunc(numpy.add)]"
+    )
 
 
 def test_proxy_binding_callback_fingerprints_cleanly_and_distinctly():

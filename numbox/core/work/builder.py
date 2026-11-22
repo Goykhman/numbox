@@ -130,7 +130,7 @@ def _derive_fingerprint(derive) -> tuple[str, bool, bool]:
     cannot fingerprint.
     """
     try:
-        fingerprint = _fingerprint_function(derive, set())
+        fingerprint = _fingerprint_function(derive, set(), fold_named=True)
     except (_Unfingerprintable, RecursionError):
         return _fingerprint_function_best_effort(derive), False, False
     # The check reads the instruction stream (_loaded_global_names), not co_names, because co_names also holds

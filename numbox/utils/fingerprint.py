@@ -11,12 +11,18 @@ no text that means the same thing in another process. The caller decides how to 
 compile the code without a cache, and ``@proxy`` and ``digest`` name the code with
 ``_fingerprint_function_best_effort``, which never raises. ``make_structref``, ``compile_kernel``, the work builder,
 ``@proxy`` and ``digest`` use the module, which also resolves the jit options that their names fold.
+
+With ``fold_named``, the walk also folds a NumPy ufunc or a builtin function that a module attribute holds, by the name
+that ``_named_function_text`` gives it, such as ``numpy.sin``. The callers that hash the text only into the name of
+cached code pass it. ``@proxy`` and ``cres`` hash the text into an alias and do not pass it.
+``_fingerprint_module_attrs`` gives the reason.
 """
 import ctypes
 import dis
 import hashlib
+import sys
 
-from types import CodeType, FunctionType, ModuleType
+from types import BuiltinFunctionType, CodeType, FunctionType, ModuleType
 from typing import Any, Optional, Sequence
 
 import numpy as np
@@ -97,7 +103,7 @@ _ABSENT_ALIASES: set[str] = set()
 _MAX_REPR_INT_BITS = 2048
 
 
-def _canon_value(value: Any, seen: set[int]) -> str:
+def _canon_value(value: Any, seen: set[int], fold_named: bool = False) -> str:
     if isinstance(value, int) and value.bit_length() > _MAX_REPR_INT_BITS:
         return hex(value)
     if value is None or isinstance(value, (bool, int, float, complex, str, bytes)):
@@ -114,11 +120,11 @@ def _canon_value(value: Any, seen: set[int]) -> str:
             raise _Unfingerprintable(f"unhashable ndarray {value.dtype.str}") from e
         return f"ndarray({_dtype_key(data.dtype)};{value.shape};{raw})"
     if isinstance(value, (tuple, list)):
-        return f"{type(value).__name__}[" + ",".join(_canon_value(v, seen) for v in value) + "]"
+        return f"{type(value).__name__}[" + ",".join(_canon_value(v, seen, fold_named) for v in value) + "]"
     if isinstance(value, (set, frozenset)):
-        return f"{type(value).__name__}[" + ",".join(sorted(_canon_value(v, seen) for v in value)) + "]"
+        return f"{type(value).__name__}[" + ",".join(sorted(_canon_value(v, seen, fold_named) for v in value)) + "]"
     if isinstance(value, dict):
-        items = sorted((_canon_value(k, seen), _canon_value(v, seen)) for k, v in value.items())
+        items = sorted((_canon_value(k, seen, fold_named), _canon_value(v, seen, fold_named)) for k, v in value.items())
         return "dict[" + ",".join(f"{k}:{v}" for k, v in items) + "]"
     if isinstance(value, ModuleType):
         return f"module({value.__name__})"
@@ -130,18 +136,18 @@ def _canon_value(value: Any, seen: set[int]) -> str:
             # which has no fingerprint. A retired alias identifies nothing, so the function falls through to that walk.
             return f"proxy({proxy_alias})"
         topts = _canon_value(dict(getattr(value, "targetoptions", {}) or {}), seen)
-        return f"dispatcher({_fingerprint_function(value.py_func, seen)};{topts})"
+        return f"dispatcher({_fingerprint_function(value.py_func, seen, fold_named)};{topts})"
     if isinstance(value, DUFunc):
         # A @vectorize function: numba links its compiled loop and compiles in the globals and closure values of the
         # scalar body, so the text folds that body with the options it compiles under.
         wrapped = getattr(value, "__wrapped__", None)
         topts = _canon_value(dict(getattr(value, "targetoptions", {}) or {}), seen)
-        body = _fingerprint_function(wrapped, seen) if isinstance(wrapped, FunctionType) else _safe_repr(wrapped)
+        body = _fingerprint_function(wrapped, seen, fold_named) if isinstance(wrapped, FunctionType) else _safe_repr(wrapped)
         return f"dufunc({body};{topts})"
     if isinstance(value, FunctionType):
         # A plain Python function. If numba compiles calls of it through an @overload, the text folds the Python
         # function, not the overload's implementation, so an edit to the implementation leaves the text unchanged.
-        return f"function({_fingerprint_function(value, seen)})"
+        return f"function({_fingerprint_function(value, seen, fold_named)})"
     if isinstance(value, ExternalFunction):
         # numba's own key for this type, the symbol and the signature. Both are strings and types, so the text is the
         # same in the next process, and it separates two bindings that a factory made for different C symbols.
@@ -156,12 +162,47 @@ def _canon_value(value: Any, seen: set[int]) -> str:
             return f"proxyfunc({proxy_alias})"
         py_func = getattr(value, "_numbox_py_func", None)
         if py_func is not None:
-            return f"cresfunc({_fingerprint_function(py_func, seen)};{value.cres.signature})"
+            return f"cresfunc({_fingerprint_function(py_func, seen, fold_named)};{value.cres.signature})"
     if isinstance(value, ctypes._CFuncPtr):
         return f"cfuncptr({_ctypes_func_key(value)})"
     # Any other value has no fingerprint, among them a builtin function, a ufunc, a numba type, a class and a
     # CompileResultWAP that numbox did not tag.
     raise _Unfingerprintable(type(value).__name__)
+
+
+def _named_function_text(value: Any) -> Optional[str]:
+    """Return the text that names a NumPy ufunc or a builtin function by its module and name, or None.
+
+    numba compiles a call of such a function by the function's identity, and the module and the name identify the
+    function in every process. A ufunc has a name if NumPy holds it under the ufunc's own name, such as ``numpy.sin``.
+    A builtin function has one if its module holds it under the function's own name, such as ``math.sqrt`` or ``len``.
+    The lookup reads the module's ``__dict__`` and compares by identity. A ufunc that the user built, a method of an
+    object, which records no module, and a function that was replaced in its module therefore have no name, and
+    neither has a value of any other type. The tests are on the exact type, so the lookup reads no ``__name__`` from
+    an object that only reports one of these types as its ``__class__``, and a ``__module__`` of a subclass of ``str``
+    is not hashed. The lookup likewise accepts only an entry of ``sys.modules`` whose type is exactly the module type.
+    A module that ``importlib.util.LazyLoader`` has not loaded yet has another type, and reading its ``__dict__``
+    would run the module.
+    """
+    if type(value) is np.ufunc:
+        if vars(np).get(value.__name__) is value:
+            return f"ufunc(numpy.{value.__name__})"
+    elif type(value) is BuiltinFunctionType and type(value.__module__) is str:
+        module = sys.modules.get(value.__module__)
+        if type(module) is ModuleType and vars(module).get(value.__name__) is value:
+            return f"builtin({value.__module__}.{value.__name__})"
+    return None
+
+
+def _is_held_by_its_own_package(holder: Any, value: Any) -> bool:
+    """Return whether the module named ``holder`` belongs to the top-level package that defines ``value``.
+
+    A package holds its own functions in the same way in every process that imports it, as ``numpy.add``,
+    ``numpy.strings.add`` and ``math.sqrt`` show, so such an attribute adds nothing to a fingerprint. ``value`` is a
+    function that ``_named_function_text`` names.
+    """
+    home = "numpy" if type(value) is np.ufunc else value.__module__
+    return type(holder) is str and holder.partition(".")[0] == home.partition(".")[0]
 
 
 def _ctypes_func_key(value: Any) -> str:
@@ -269,7 +310,8 @@ _FROZEN_DATA_TYPES = (bool, int, float, complex, str, bytes,
                       np.generic, np.ndarray, tuple, list, set, frozenset, dict)
 
 
-def _fingerprint_module_attrs(referenced: set[str], namespace: dict, seen: set[int]) -> str:
+def _fingerprint_module_attrs(referenced: set[str], namespace: dict, seen: set[int],
+                              fold_named: bool = False) -> str:
     """Return the text for the module attributes that a function reads, such as ``cfg.SCALE``, or an empty string.
 
     ``_fingerprint_function`` folds the globals that a function reads, but not a value that it reads through a module,
@@ -285,6 +327,21 @@ def _fingerprint_module_attrs(referenced: set[str], namespace: dict, seen: set[i
     class, and any value without a fingerprint. A formula that reads such a value stays cacheable, and the walk does
     not descend into a package such as numpy. A value that a module provides only through a module-level
     ``__getattr__`` is not folded; numba still compiles it in, so the cache must be cleared after it changes.
+
+    With ``fold_named``, the function also folds a NumPy ufunc or a builtin function that ``_named_function_text``
+    names, as ``helpers.op=ufunc(numpy.sin)``. ``helpers.op`` can hold ``numpy.sin`` in one process and ``numpy.cos`` in
+    the next, and without the name both give one text. An attribute of a module in the function's own top-level
+    package, such as ``numpy.add`` or ``numpy.strings.add``, is not folded. It is the same in every process, and
+    folding it would make the text depend on which submodules are loaded.
+
+    ``compile_kernel``, ``make_structref``, the work builder and ``digest`` pass ``fold_named``, because they hash the
+    text only into the name of cached code. The work builder also names the wrapper that it generates for a derive
+    after that text, so the alias of such a wrapper follows it. ``@proxy`` and ``cres`` hash the text of a user's
+    function into an alias and do not pass ``fold_named``. Two bodies that differ only in such an attribute then
+    compute one alias, and the rules for a shared alias apply to them. numbox reports a collision if the bodies also
+    differ in a value that it can compare, and it does not load a cached caller that holds either function as a
+    constant. If each body had an alias of its own, those rules would not apply. numba would then load code for one
+    body that it compiled for the other, because its key for that code holds neither the attribute nor the alias.
     """
     attrs: list[str] = []
     mods_seen: set[int] = set()
@@ -305,11 +362,19 @@ def _fingerprint_module_attrs(referenced: set[str], namespace: dict, seen: set[i
             if isinstance(value, ModuleType):
                 _walk(f"{prefix}.{attr}", value)
                 continue
+            # The tests are identity tests. A membership test would compare the types with ==, which calls the
+            # __eq__ of a metaclass.
+            if fold_named and (type(value) is np.ufunc or type(value) is BuiltinFunctionType):
+                named = _named_function_text(value)
+                holder = mod_dict["__name__"] if "__name__" in mod_dict else None
+                if named is not None and not _is_held_by_its_own_package(holder, value):
+                    attrs.append(f"{prefix}.{attr}={named}")
+                continue
             if not (value is None or isinstance(value, _FROZEN_DATA_TYPES)
                     or isinstance(value, (Dispatcher, DUFunc))):
                 continue
             try:
-                canon = _canon_value(value, seen)
+                canon = _canon_value(value, seen, fold_named)
             except (_Unfingerprintable, RecursionError):
                 continue
             attrs.append(f"{prefix}.{attr}={canon}")
@@ -321,7 +386,7 @@ def _fingerprint_module_attrs(referenced: set[str], namespace: dict, seen: set[i
     return f";module_attrs=[{';'.join(sorted(attrs))}]" if attrs else ""
 
 
-def _fingerprint_function(func: FunctionType, seen: set[int]) -> str:
+def _fingerprint_function(func: FunctionType, seen: set[int], fold_named: bool = False) -> str:
     # A function that the walk has already entered, through recursion or a cycle, is folded by its qualified name.
     if id(func) in seen:
         return f"recursive({func.__qualname__})"
@@ -334,7 +399,7 @@ def _fingerprint_function(func: FunctionType, seen: set[int]) -> str:
             contents = cell.cell_contents
         except ValueError as e:
             raise _Unfingerprintable("empty closure cell") from e
-        cells.append(f"{name}={_canon_value(contents, seen)}")
+        cells.append(f"{name}={_canon_value(contents, seen, fold_named)}")
         closure_vals[name] = contents
     # The values of globals are folded for the names that the opcodes read as globals. Module attributes are looked up
     # for every name in co_names, which includes attribute names such as SCALE in cfg.SCALE.
@@ -343,14 +408,14 @@ def _fingerprint_function(func: FunctionType, seen: set[int]) -> str:
     hashed_globals = []
     for name in sorted(global_names):
         if name in func.__globals__:
-            hashed_globals.append(f"{name}={_canon_value(func.__globals__[name], seen)}")
+            hashed_globals.append(f"{name}={_canon_value(func.__globals__[name], seen, fold_named)}")
     modattr_ns = {n: func.__globals__[n] for n in referenced if n in func.__globals__}
     modattr_ns.update(closure_vals)
-    module_attrs = _fingerprint_module_attrs(referenced, modattr_ns, seen)
+    module_attrs = _fingerprint_module_attrs(referenced, modattr_ns, seen, fold_named)
     return (
         f"func({func.__module__}:{func.__qualname__};{_fingerprint_codeobj(code, seen)};"
-        f"defaults={_canon_value(func.__defaults__ or (), seen)};"
-        f"kwdefaults={_canon_value(func.__kwdefaults__ or {}, seen)};"
+        f"defaults={_canon_value(func.__defaults__ or (), seen, fold_named)};"
+        f"kwdefaults={_canon_value(func.__kwdefaults__ or {}, seen, fold_named)};"
         f"closure=[{';'.join(cells)}];globals=[{';'.join(hashed_globals)}]{module_attrs})"
     )
 

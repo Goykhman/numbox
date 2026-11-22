@@ -50,7 +50,7 @@ def _method_identity(method, user_ns) -> tuple[str, bool]:
     never loaded stale.
     """
     try:
-        fingerprint = _fingerprint_function(method, set())
+        fingerprint = _fingerprint_function(method, set(), fold_named=True)
         cacheable = True
     except (_Unfingerprintable, RecursionError):
         fingerprint = _fingerprint_function_best_effort(method)
@@ -63,7 +63,7 @@ def _method_identity(method, user_ns) -> tuple[str, bool]:
     if user_ns:
         for name in sorted(n for n in _loaded_global_names(method.__code__) if n in user_ns):
             try:
-                parts.append(f"ns:{name}={_canon_value(user_ns[name], set())}")
+                parts.append(f"ns:{name}={_canon_value(user_ns[name], set(), fold_named=True)}")
             except (_Unfingerprintable, RecursionError):
                 parts.append(f"ns:{name}=<opaque:{type(user_ns[name]).__name__}>")
                 cacheable = False

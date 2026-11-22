@@ -60,7 +60,7 @@ def digest(subject, fns):
             # one hash for two dispatchers of one body compiled with different options, such as nogil, fastmath,
             # error_model or boundscheck.
             try:
-                h.update(_canon_value(fn, set()).encode("utf-8"))
+                h.update(_canon_value(fn, set(), fold_named=True).encode("utf-8"))
                 continue
             except (_Unfingerprintable, RecursionError):
                 # The body has no fingerprint. The options are folded separately, so that a change of an option still
@@ -70,7 +70,7 @@ def digest(subject, fns):
         py = getattr(fn, "py_func", fn)
         if isinstance(py, FunctionType):
             try:
-                h.update(_fingerprint_function(py, set()).encode("utf-8"))
+                h.update(_fingerprint_function(py, set(), fold_named=True).encode("utf-8"))
             except (_Unfingerprintable, RecursionError):
                 # A value without a fingerprint makes _fingerprint_function raise. The best-effort fingerprint still
                 # folds the constants, closure values, defaults and globals that have one, and it sorts the elements
