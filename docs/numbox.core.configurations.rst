@@ -249,8 +249,8 @@ sticky bit.
 
 The locator skips a source directory that the cache holds no subdirectory for, and numba tries the next locator in the
 list. numba creates the subdirectory when it decorates the first cached function of a source directory. The
-subdirectory is therefore missing for a package that the build never imported, and also when the package's path at
-run time differs from its path during the build. If no other location in the list can be written in either, numba
+subdirectory is therefore missing for a package that the build never imported, and also when the package's absolute
+path at run time differs from the one during the build. If no other location in the list can be written in either, numba
 raises the ``RuntimeError`` that `Where numba writes the cache`_ quotes when it decorates a cached function of yours.
 For its own functions, numbox issues the warning described under `If numbox is installed read-only`_, and the remedy
 of that warning names ``NUMBA_CACHE_DIR``. Build the cache with a run that imports every package that the later runs

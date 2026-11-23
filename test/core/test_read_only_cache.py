@@ -1071,6 +1071,10 @@ class _Built:
         self.files = _files(self.cache)
 
     def run(self, *arguments, locators=None, script="child.py"):
+        # On Linux, numba puts the user's cache directory under XDG_CACHE_HOME, and under HOME only when that variable
+        # is unset. The child's environment therefore sets both variables. A run on a machine that sets XDG_CACHE_HOME
+        # then writes no cache file into the user's own cache directory, and a test that makes the home read-only
+        # leaves numba without a writable location.
         env = dict(os.environ, PYTHONPATH=str(self.site), HOME=str(self.home),
                    XDG_CACHE_HOME=str(self.home / "cache"), NUMBA_CACHE_DIR=str(self.cache))
         for name in ("NUMBOX_JIT_OPTIONS", "NUMBA_CACHE_LOCATOR_CLASSES", "NUMBOX_PROXY_CACHE_STRICT"):
