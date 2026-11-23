@@ -66,13 +66,15 @@ def _formula_fingerprint(formula) -> tuple[str, bool]:
     Python function. It holds the function's code, constants and names, its module and qualified name, its default
     arguments and its closure variables. It also holds the values of the globals that the function reads, recursively
     through the functions and dispatchers that it calls; a function already visited is not walked again. It holds a
-    module attribute that the function reads only if the attribute is data, a dispatcher, a @vectorize function, or a
-    builtin function or NumPy ufunc that `_named_function_text` names. A named builtin function or ufunc is hashed by
-    its module and name, and only when the module that holds the attribute is outside the package that defines that
-    function. A dispatcher or a @vectorize formula adds its target options. Builtins are not among a function's
-    globals, so they are not hashed. A value that a module provides only through a module-level ``__getattr__``
-    (PEP 562) is not hashed either, because resolving it would run the ``__getattr__`` of unrelated modules at every
-    compilation. After a change of such a value, numba loads the cached kernel until the user deletes its cache files.
+    module attribute that the function reads only if the attribute is data, a dispatcher, a @vectorize function, a
+    builtin function or NumPy ufunc that `_named_function_text` names, or a module. A named builtin function or ufunc
+    is hashed by its module and name, and only when the module that holds the attribute is outside the package that
+    defines that function. A module is hashed by its name, and only when the module that holds the attribute is
+    outside the top-level package of the module that it holds. A dispatcher or a @vectorize formula adds its target
+    options. Builtins are not among a function's globals, so they are not hashed. A value that a module provides only
+    through a module-level ``__getattr__`` (PEP 562) is not hashed either, because resolving it would run the
+    ``__getattr__`` of unrelated modules at every compilation. After a change of such a value, numba loads the cached
+    kernel until the user deletes its cache files.
 
     If the formula has no Python function, or reads a value without a canonical form, the text names the object by
     its id, and the second value is False. The kernel then compiles in every process, and numba never loads it from a

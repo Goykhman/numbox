@@ -696,6 +696,44 @@ def test_a_caller_of_a_constant_is_not_served_another_function_with_the_same_ali
         assert "twin_callers.call_sin-" in fields["WARNINGS"], f"the discard went unannounced: {fields['WARNINGS']}"
 
 
+def test_strict_mode_raises_for_a_shared_alias_in_every_run_and_names_the_cause(tmp_path):
+    """In strict mode, loading a cached caller whose constant shares its alias raises an error that names the cause.
+
+    The process creates two functions that compute one alias, so numbox does not load the cached caller of either
+    function. The alias is registered and the process can call it. An error that named only an alias that the process
+    cannot call would lead the user to look for a missing function, so the error must name the sharing as a possible
+    cause.
+
+    Deleting the caller's cache files does not stop the error, as the docstring of ``StaleProxyCacheError`` states. The
+    next strict run compiles the caller and writes a new entry. The following run finds that entry stale for the same
+    reason and raises the error again.
+    """
+    probe = _write_shared_alias_scenario(tmp_path)
+    env = _probe_env(tmp_path, "nbcache")
+    env["TWINS"] = "alone"
+    _warm(probe, env)
+
+    env["TWINS"] = "sin_first"
+    env["NUMBOX_PROXY_CACHE_STRICT"] = "1"
+    r = _run_probe(probe, env)
+    assert r.returncode != 0 and "StaleProxyCacheError" in r.stderr, (
+        f"strict mode loaded or repaired a caller whose alias two functions share\n{_report(r)}"
+    )
+    message = r.stderr[r.stderr.index("StaleProxyCacheError"):]
+    assert "two of its functions share" in message, f"the error does not name the sharing as a cause\n{_report(r)}"
+
+    entries = list((tmp_path / "nbcache").rglob("twin_callers.call_sin-*"))
+    assert entries, "the scenario wrote no cache entry for the caller, so there is nothing to delete"
+    for entry in entries:
+        entry.unlink()
+    fresh = _fields(_run_probe(probe, env))
+    assert (fresh["RESULT_call_sin"], fresh["STATS_call_sin"]) == ("0.0", "compiled"), fresh
+    again = _run_probe(probe, env)
+    assert again.returncode != 0 and "StaleProxyCacheError" in again.stderr, (
+        f"the strict run after the one that wrote a new entry did not raise\n{_report(again)}"
+    )
+
+
 def _write_rebound_constant_scenario(tmp_path):
     """Write a module whose constant holds one of two ``cres`` functions, a cached caller of the constant, and the probe.
 

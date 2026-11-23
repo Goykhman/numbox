@@ -617,6 +617,10 @@ class StaleProxyCacheError(RuntimeError):
     stale entry stays on disk for inspection. By default, numbox discards the entry with the warning, and numba
     overwrites it with the code it compiles again. To recover, delete the caller's numba cache files, or unset
     ``NUMBOX_PROXY_CACHE_STRICT``.
+
+    Deleting the files does not stop the error if two functions in the process share the alias. numbox then finds each
+    new entry of the caller stale as well, so every strict run after the run that writes the entry raises the error.
+    In that case, unset ``NUMBOX_PROXY_CACHE_STRICT``, or pass the function to the caller as an argument.
     """
 
 
@@ -814,9 +818,9 @@ def _guarded_rebuild(orig_rebuild, libdata_of_payload):
             filename_base = getattr(self, 'filename_base', '?')
             if _strict_cache_mode():
                 raise StaleProxyCacheError(
-                    f"numbox: {filename_base} references numbox alias(es) this process cannot call "
-                    f"({', '.join(stale)}); {_PROXY_CACHE_STRICT_ENV} is set, so the stale entry was left on disk for "
-                    "inspection instead of being discarded and recompiled"
+                    f"numbox: {filename_base} references numbox alias(es) that this process cannot call or that two "
+                    f"of its functions share ({', '.join(stale)}); {_PROXY_CACHE_STRICT_ENV} is set, so the stale "
+                    "entry was left on disk for inspection instead of being discarded and recompiled"
                 )
             warnings.warn(
                 "numbox: discarding a stale numba cache entry and recompiling: "

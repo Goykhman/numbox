@@ -195,13 +195,17 @@ def _named_function_text(value: Any) -> Optional[str]:
 
 
 def _is_held_by_its_own_package(holder: Any, value: Any) -> bool:
-    """Return whether the module named ``holder`` belongs to the top-level package that defines ``value``.
+    """Return whether the module named ``holder`` belongs to the top-level package of ``value``.
 
-    A package holds its own functions in the same way in every process that imports it, as ``numpy.add``,
-    ``numpy.strings.add`` and ``math.sqrt`` show, so such an attribute adds nothing to a fingerprint. ``value`` is a
-    function that ``_named_function_text`` names.
+    ``value`` is a function that ``_named_function_text`` names, or the name of a module. A package holds its own
+    functions in the same way in every process that imports it, as ``numpy.add``, ``numpy.strings.add`` and
+    ``math.sqrt`` show, so such an attribute adds nothing to a fingerprint. ``_fingerprint_module_attrs`` applies the
+    same test to a submodule that its own package holds, such as ``numpy.linalg``, and its docstring gives the reason.
     """
-    home = "numpy" if type(value) is np.ufunc else value.__module__
+    if type(value) is str:
+        home = value
+    else:
+        home = "numpy" if type(value) is np.ufunc else value.__module__
     return type(holder) is str and holder.partition(".")[0] == home.partition(".")[0]
 
 
@@ -330,9 +334,12 @@ def _fingerprint_module_attrs(referenced: set[str], namespace: dict, seen: set[i
 
     With ``fold_named``, the function also folds a NumPy ufunc or a builtin function that ``_named_function_text``
     names, as ``helpers.op=ufunc(numpy.sin)``. ``helpers.op`` can hold ``numpy.sin`` in one process and ``numpy.cos`` in
-    the next, and without the name both give one text. An attribute of a module in the function's own top-level
-    package, such as ``numpy.add`` or ``numpy.strings.add``, is not folded. It is the same in every process, and
-    folding it would make the text depend on which submodules are loaded.
+    the next, and without the name both give one text. In the same way, the function folds the name of a module that
+    an attribute holds, which gives ``helpers.lib=module(math)``. An attribute of a module in the function's own
+    top-level package, such as ``numpy.add`` or ``numpy.strings.add``, is not folded. It is the same in every process,
+    and folding it would make the text depend on which submodules are loaded. A submodule that its own package holds,
+    such as ``numpy.linalg`` or ``numpy.strings``, is not folded either. A package holds a submodule only in a process
+    that has loaded it, so folding it would make the text depend on the loaded submodules as well.
 
     ``compile_kernel``, ``make_structref``, the work builder and ``digest`` pass ``fold_named``, because they hash the
     text only into the name of cached code. The work builder also names the wrapper that it generates for a derive
@@ -352,6 +359,7 @@ def _fingerprint_module_attrs(referenced: set[str], namespace: dict, seen: set[i
             return
         mods_seen.add(id(mod))
         mod_dict = getattr(mod, "__dict__", {})
+        holder = mod_dict["__name__"] if "__name__" in mod_dict else None
         for attr in sorted(referenced):
             # The walk tests membership in the module's __dict__ and never calls getattr. getattr would run a
             # module-level __getattr__ (PEP 562), such as numpy's, for every name of co_names that the module lacks,
@@ -360,13 +368,21 @@ def _fingerprint_module_attrs(referenced: set[str], namespace: dict, seen: set[i
                 continue
             value = mod_dict[attr]
             if isinstance(value, ModuleType):
+                # helpers.lib can hold math in one process and cmath in the next, and the walk of either module folds
+                # nothing for lib.sqrt. The walk therefore folds the name of the module, as the fingerprint does for a
+                # global that holds a module. It reads the name from the module's __dict__, as it reads every other
+                # attribute.
+                if fold_named:
+                    held_dict = getattr(value, "__dict__", {})
+                    held = held_dict["__name__"] if "__name__" in held_dict else None
+                    if type(held) is str and not _is_held_by_its_own_package(holder, held):
+                        attrs.append(f"{prefix}.{attr}=module({held})")
                 _walk(f"{prefix}.{attr}", value)
                 continue
             # The tests are identity tests. A membership test would compare the types with ==, which calls the
             # __eq__ of a metaclass.
             if fold_named and (type(value) is np.ufunc or type(value) is BuiltinFunctionType):
                 named = _named_function_text(value)
-                holder = mod_dict["__name__"] if "__name__" in mod_dict else None
                 if named is not None and not _is_held_by_its_own_package(holder, value):
                     attrs.append(f"{prefix}.{attr}={named}")
                 continue

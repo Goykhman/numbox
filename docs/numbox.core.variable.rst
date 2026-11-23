@@ -336,7 +336,8 @@ The digest holds:
 - the values of the globals and module attributes that a formula reads, such as ``SCALE`` or ``settings.SCALE``, and
   the code and values of each function and dispatcher that it calls, with the exceptions below;
 - the module and name of a built-in function or of one of NumPy's own ufuncs that an attribute of a module of
-  another package holds, as in ``helpers.op(y)`` where ``helpers.op`` holds ``numpy.sin``.
+  another package holds, as in ``helpers.op(y)`` where ``helpers.op`` holds ``numpy.sin``. The name of a module that
+  such an attribute holds is included as well, as in ``helpers.lib.sqrt(y)`` where ``helpers.lib`` holds ``math``.
   :ref:`numbox.utils.fingerprint <utils_fingerprint>` states which functions have such a name;
 - the options of a formula that is a numba dispatcher or a ``@vectorize`` function;
 - the jit options that the kernel compiles under, from ``jit_options`` and numbox's defaults, except ``cache``;

@@ -11,6 +11,7 @@ without a fingerprint would make the fingerprint fail, so the work builder would
 The last tests cover ``_opaque_values_match`` and the ``@proxy`` aliases that a collision retires. The tests that need
 a C math library skip if ``open_libm`` finds none.
 """
+import cmath
 import importlib.util
 import math
 import sys
@@ -196,6 +197,15 @@ def test_the_fold_runs_no_code_of_a_str_subclass_or_of_an_odd_module(monkeypatch
         ";module_attrs=[odd.op=ufunc(numpy.cos)]"
     )
 
+    # The name of a module that an attribute holds is read in the same way, and a name of a str subclass is not folded.
+    helpers.lib = types.ModuleType("held")
+    helpers.lib.__dict__["__name__"] = Loud("held")
+    assert _fingerprint_module_attrs({"lib"}, {"helpers": helpers}, set(), True) == ""
+    helpers.lib = OddModule("a_name_that_only_getattr_returns")
+    assert _fingerprint_module_attrs({"lib"}, {"helpers": helpers}, set(), True) == (
+        ";module_attrs=[helpers.lib=module(odd)]"
+    )
+
     monkeypatch.setattr(math.fsum, "__module__", Loud("math"))
     assert _named_function_text(math.fsum) is None
 
@@ -268,6 +278,40 @@ def test_a_module_attribute_that_holds_a_ufunc_or_a_builtin_function_is_folded_b
         ";module_attrs=[helpers.sin=ufunc(numpy.sin)]"
     )
     assert _fingerprint_module_attrs({"sin"}, {"helpers": helpers}, set()) == ""
+
+
+def test_a_module_that_a_module_attribute_holds_is_folded_by_its_name():
+    # helpers.lib can hold math in one process and cmath in the next. Each provides sqrt as its own function, which
+    # is not folded, so the fingerprint folds the name of the module that the attribute holds.
+    helpers = types.ModuleType("helpers")
+    f = _make("""
+        def f(x):
+            return helpers.lib.sqrt(x)
+    """, helpers=helpers)
+
+    texts, plain = [], []
+    for lib in (math, cmath):
+        helpers.lib = lib
+        texts.append(_fingerprint_function(f, set(), fold_named=True))
+        plain.append(_fingerprint_function(f, set()))
+    assert texts[0].endswith(";module_attrs=[helpers.lib=module(math)])")
+    assert texts[1].endswith(";module_attrs=[helpers.lib=module(cmath)])")
+    # @proxy and cres hash the text without fold_named into an alias. That text leaves the module out.
+    assert plain[0] == plain[1] and "module_attrs" not in plain[0]
+    # A submodule that its own package holds is not folded, as numpy.linalg is not. A package holds a submodule only
+    # in a process that has loaded it, so folding it would make the text depend on which submodules are loaded. The
+    # walk still reaches its attributes.
+    package = types.ModuleType("package")
+    package.sub = types.ModuleType("package.sub")
+    package.sub.SCALE = 3.0
+    assert _fingerprint_module_attrs({"sub", "SCALE"}, {"package": package}, set(), True) == (
+        ";module_attrs=[package.sub.SCALE=3.0]"
+    )
+    # A module of another package whose name starts with the holder's name is not a submodule of the holder.
+    package.sub = types.ModuleType("package_extras.sub")
+    assert _fingerprint_module_attrs({"sub"}, {"package": package}, set(), True) == (
+        ";module_attrs=[package.sub=module(package_extras.sub)]"
+    )
 
 
 @pytest.mark.parametrize("kind", [

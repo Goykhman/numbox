@@ -282,6 +282,51 @@ def test_a_named_function_swapped_between_processes_does_not_serve_a_stale_kerne
     assert got == "1.0", f"the kernel compiled for math.sin was served for math.cos: got {got}, expected 1.0"
 
 
+def test_a_module_swapped_between_processes_does_not_serve_a_stale_kernel(tmp_path):
+    """A kernel compiles again when a module attribute holds another module in the next process.
+
+    The formula calls ``lib.sqrt`` through the module attribute ``lib``, which holds ``math`` in the first process and
+    ``cmath`` in the second. Each of the two modules provides ``sqrt`` as its own function, so only the name of the
+    module that ``lib`` holds separates the digests of the two kernels. The second process shares the first process's
+    NUMBA_CACHE_DIR and must print 2.0, the absolute value of ``cmath.sqrt(-4.0)``. A kernel loaded from the first
+    process's cache would print ``nan``, which ``math.sqrt(-4.0)`` returns in jitted code.
+    """
+    probe = tmp_path / "swapped_module_probe.py"
+    probe.write_text(textwrap.dedent('''
+        import importlib
+        import os
+        import sys
+        import types
+        import numpy as np
+        from numbox.core.variable.variable import Graph
+        from numbox.core.variable.compile_kernel import compile_kernel
+
+        cfg = types.ModuleType("ck_lib_probe")
+        cfg.lib = importlib.import_module(os.environ["LIB"])
+        sys.modules["ck_lib_probe"] = cfg
+        import ck_lib_probe  # noqa: E402,F401  -- now a module global of this script
+
+
+        def apply(y):
+            return abs(ck_lib_probe.lib.sqrt(y))
+
+        g = Graph(
+            variables_lists={"variables": [
+                {"name": "out", "inputs": {"y": "basket"}, "formula": apply}]},
+            external_source_names=["basket"],
+        )
+        ck = compile_kernel(g, "variables.out")
+        print(float(np.asarray(ck.kernel(-4.0)[0]).ravel()[0]))
+    '''), encoding="utf-8")
+
+    env = _shared_cache_env(tmp_path)
+    env["LIB"] = "math"
+    assert _run_probe(probe, env) == "nan"
+    env["LIB"] = "cmath"
+    got = _run_probe(probe, env)
+    assert got == "2.0", f"the kernel compiled for math.sqrt was served for cmath.sqrt: got {got}, expected 2.0"
+
+
 # A formula with a cache of its own leaves the kernel uncached.
 # ---------------------------------------------------------------------------
 

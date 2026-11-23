@@ -30,6 +30,7 @@ from llvmlite import ir
 from numba import njit, objmode, prange, typeof
 from numba.core import types
 from numba.core.cpu import CPUContext
+from numba.core.registry import cpu_target
 from numba.core.types import FunctionType, float64
 from numba.core.types.function_type import CompileResultWAP
 
@@ -680,6 +681,32 @@ def test_a_caller_of_a_constant_declares_the_entry_point_with_the_target_attribu
     marked = _extension_attributes(defined)
     assert [b"signext"] in marked, "the hook marked nothing, so the comparison below proves nothing"
     assert _extension_attributes(declared) == marked
+
+
+def test_a_caller_of_a_constant_declares_the_entry_point_with_the_argument_attributes_of_numba_s_declaration():
+    """The declaration in a caller of a constant carries the argument attributes of numba's own declaration.
+
+    numba's ``declare_function`` marks the pointer for the result and the pointer for the exception data as
+    ``noalias`` and as not captured, and LLVM uses both attributes when it optimizes the caller. numbox builds the
+    declaration under the alias without ``declare_function``. The test therefore compares the attributes of that
+    declaration with those of a declaration that numba creates for the same entry point.
+    """
+    value = cres(types.int64(types.int32))(_shape_double)
+
+    @njit
+    def call(n):
+        return value(n)
+
+    assert call(numpy.int32(21)) == 42
+
+    caller_module = ll.parse_assembly(next(iter(call.inspect_llvm().values())))
+    declared = caller_module.get_function(value._numbox_jit_alias)
+    numba_module = ir.Module()
+    cpu_target.target_context.declare_function(numba_module, value.cres.fndesc)
+    expected = ll.parse_assembly(str(numba_module)).get_function(value.cres.fndesc.mangled_name)
+    attributes = [sorted(argument.attributes) for argument in expected.arguments]
+    assert any(attributes), "numba marked no argument, so the comparison below proves nothing"
+    assert [sorted(argument.attributes) for argument in declared.arguments] == attributes
 
 
 def test_a_function_compiled_twice_by_cres_gets_a_name_of_its_own_and_no_name_is_repointed():
