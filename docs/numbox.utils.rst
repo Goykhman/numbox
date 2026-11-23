@@ -526,9 +526,10 @@ new code, which is compiled again. The fingerprint of a function is built from:
   an array or another kind of data, or a dispatcher;
 - the module and name of a builtin function or a NumPy ufunc that it reads as a module attribute, such as
   ``numpy.sin`` read as ``helpers.op``. This holds for a builtin function that its module provides under the function's
-  own name, and for a ufunc that the ``numpy`` module itself provides, read through a module of another package. Only
-  the fingerprint of a struct method, a formula, a derive and a ``digest`` has this item. The alias of a ``@proxy`` or
-  ``cres`` function leaves it out;
+  own name, and for a ufunc that the ``numpy`` module itself provides, read through a module of another package. A
+  NumPy function that is not a ufunc, such as ``numpy.sum``, and a ``@register_jitable`` function are left out when a
+  module attribute holds them. Only the fingerprint of a struct method, a formula, a derive and a ``digest`` has this
+  item. The alias of a ``@proxy`` or ``cres`` function leaves it out;
 - for each function or dispatcher among these values, that function's own fingerprint, and the options that a
   dispatcher compiles under.
 

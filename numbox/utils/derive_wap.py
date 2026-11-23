@@ -233,6 +233,12 @@ def lower_constant_derive_function_type(context, builder, typ, pyval):
         # llvmlite.binding.add_symbol, so the caller's object imports the alias and holds nothing else of the body.
         fnty = context.call_conv.get_function_type(fndesc.restype, fndesc.argtypes)
         fn = cgutils.get_or_insert_function(builder.module, fnty, alias)
+        # numba 0.64 and later pass each declaration of an entry point to this hook. On s390x, the hook marks every
+        # integer argument and result of fewer than 64 bits as sign-extended or zero-extended, which that platform's
+        # calling convention requires of the caller. numba 0.63 has no such hook.
+        apply_target_attributes = getattr(context, "apply_target_attributes", None)
+        if apply_target_attributes is not None:
+            apply_target_attributes(fn, fndesc.argtypes, fndesc.restype)
         context.call_conv.decorate_function(fn, fndesc.args, fndesc.argtypes, noalias=fndesc.noalias)
     else:
         # The compile result's library is linked in, as numba does when it casts a dispatcher to a FunctionType. The

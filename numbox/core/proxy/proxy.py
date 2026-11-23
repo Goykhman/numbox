@@ -293,7 +293,12 @@ def _claim_jit_alias(alias, jit_address):
 
 
 def _is_shared_jit_name(name):
-    """Return whether another process may give ``name``, a name from :func:`_claim_jit_alias`, to another function.
+    """Return whether this process shows that another process may give ``name`` to another function.
+
+    ``name`` is a name from :func:`_claim_jit_alias`. The function reads only the claims that this process has made. If
+    two functions compute one alias and each process creates only one of them, the result is ``False`` in both
+    processes, and numba loads a cached caller that refers to the name in both. The proxy page documents this
+    limitation.
 
     A name with a number belongs to a later claim of its alias. The number is a count, which is not a property of the
     function, so another process may give the name to another function. The name without a number belongs to the first

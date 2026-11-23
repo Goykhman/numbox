@@ -627,9 +627,9 @@ def test_two_colliding_bodies_read_as_constants_each_run_their_own_body():
 
     The two bodies close over ctypes pointers built from raw addresses, which have no fingerprint, so both compute one
     alias. The second body's ``.as_func`` must carry a companion of its own. With the companion of the shared alias, its
-    caller would run the first body and return ``floor(2.5)`` where ``ceil(2.5)`` is wanted. The cache check must also
-    reject both companions, because a cached caller refers to a companion, and another process may build the two bodies
-    in the other order.
+    caller would run the first body and return ``floor(2.5)`` instead of the expected ``ceil(2.5)``. The cache check
+    must also reject both companions, because a cached caller refers to a companion, and another process may build the
+    two bodies in the other order.
     """
     import ctypes
 

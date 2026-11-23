@@ -696,6 +696,101 @@ def test_a_caller_of_a_constant_is_not_served_another_function_with_the_same_ali
         assert "twin_callers.call_sin-" in fields["WARNINGS"], f"the discard went unannounced: {fields['WARNINGS']}"
 
 
+def _write_rebound_constant_scenario(tmp_path):
+    """Write a module whose constant holds one of two ``cres`` functions, a cached caller of the constant, and the probe.
+
+    ``CONSTANT`` selects the functions that the process creates and the one that ``VALUE`` holds. ``one`` and ``two``
+    create both functions and bind ``VALUE`` to the first and to the second, respectively. ``two_only`` creates only
+    the second function and binds ``VALUE`` to it. The caller's own file is the same in every run, so numba's cache
+    index does not change.
+    """
+    (tmp_path / "rebound_ops.py").write_text(textwrap.dedent('''
+        """Two functions and a constant that holds one of them. An environment variable selects which."""
+        import os
+
+        from numba.core.types import float64
+
+        from numbox.utils.highlevel import cres
+
+
+        def plus_one(x):
+            return x + 1.0
+
+
+        def plus_two(x):
+            return x + 2.0
+
+
+        chosen = os.environ["CONSTANT"]
+        ONE = None if chosen == "two_only" else cres(float64(float64))(plus_one)
+        TWO = cres(float64(float64))(plus_two)
+        VALUE = ONE if chosen == "one" else TWO
+    '''), encoding="utf-8")
+    (tmp_path / "rebound_callers.py").write_text(textwrap.dedent('''
+        """A cached caller that reads the constant of another module."""
+        from numba import njit
+        from numba.core.types import float64
+
+        from rebound_ops import VALUE
+
+
+        @njit(float64(float64), cache=True)
+        def call_value(x):
+            return VALUE(x)
+    '''), encoding="utf-8")
+
+    probe = tmp_path / "rebound_probe.py"
+    probe.write_text(textwrap.dedent('''
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            import rebound_callers
+            print("RESULT_call_value", rebound_callers.call_value(0.0), flush=True)
+
+        fn = rebound_callers.call_value
+        hits = sum(fn.stats.cache_hits.values())
+        misses = sum(fn.stats.cache_misses.values())
+        state = "served" if hits and not misses else "compiled" if misses and not hits else f"{hits}/{misses}"
+        print("STATS_call_value", state, flush=True)
+        print("WARNINGS", " | ".join(f"{w.category.__name__}: {w.message}".replace("\\n", " ") for w in caught))
+        print("DONE ok", flush=True)
+    '''), encoding="utf-8")
+    return probe
+
+
+def test_a_cached_caller_follows_a_rebound_constant_only_when_the_old_function_is_gone(tmp_path):
+    """A cached caller of a constant that another module rebinds is repaired only if the old function is not created.
+
+    numba treats a global as a constant and does not record its value in the cache index, so numba alone loads the
+    caller's entry in every run in which the caller's file is unchanged. The entry refers to the name of the function
+    that the constant held when the entry was written. numbox discards the entry in a process that registers no
+    function under that name. The name is registered in a process that still creates the old function. numba then loads
+    the entry, and the caller calls the old function although the constant holds the new one. The proxy page documents
+    this limitation.
+    """
+    probe = _write_rebound_constant_scenario(tmp_path)
+    env = _probe_env(tmp_path, "nbcache")
+
+    env["CONSTANT"] = "one"
+    cold = _warm(probe, env)
+    assert cold["RESULT_call_value"] == "1.0"
+    warm = _warm(probe, env)
+    assert warm["STATS_call_value"] == "served", f"the caller of a constant did not cache: {warm['WARNINGS']}"
+
+    env["CONSTANT"] = "two"
+    kept = _fields(_run_probe(probe, env))
+    assert (kept["STATS_call_value"], kept["RESULT_call_value"]) == ("served", "1.0"), (
+        f"the documented limitation no longer holds; update the proxy page\n{kept}"
+    )
+
+    env["CONSTANT"] = "two_only"
+    repaired = _fields(_run_probe(probe, env))
+    assert repaired["RESULT_call_value"] == "2.0", f"the caller ran a function that the process never made\n{repaired}"
+    assert repaired["STATS_call_value"] == "compiled"
+    assert "rebound_callers.call_value-" in repaired["WARNINGS"], f"the discard went unannounced: {repaired['WARNINGS']}"
+
+
 def _rewrite(path, old, new):
     """Replace ``old`` with ``new`` in ``path``, and move the file's modification time 10 seconds forward.
 

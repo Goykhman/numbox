@@ -26,8 +26,10 @@ from collections import namedtuple
 import numpy
 import pytest
 from llvmlite import binding as ll
+from llvmlite import ir
 from numba import njit, objmode, prange, typeof
 from numba.core import types
+from numba.core.cpu import CPUContext
 from numba.core.types import FunctionType, float64
 from numba.core.types.function_type import CompileResultWAP
 
@@ -634,6 +636,52 @@ def test_a_caller_of_a_constant_declares_the_entry_point_with_the_type_of_its_de
     assert str(declared.global_value_type) == str(defined.global_value_type)
 
 
+def _shape_double(n):
+    return 2 * n
+
+
+def _extension_attributes(function):
+    """Return, for each argument of an LLVM function, which of the attributes ``signext`` and ``zeroext`` it carries."""
+    return [sorted({b"signext", b"zeroext"} & set(argument.attributes)) for argument in function.arguments]
+
+
+@pytest.mark.skipif(
+    not hasattr(CPUContext, "apply_target_attributes"), reason="numba 0.63 has no hook for target attributes"
+)
+def test_a_caller_of_a_constant_declares_the_entry_point_with_the_target_attributes_of_its_definition(monkeypatch):
+    """The declaration in a caller of a constant carries the target-specific attributes of the function's definition.
+
+    Since numba 0.64, ``declare_function`` passes each entry point to the target context's
+    ``apply_target_attributes``. On s390x, that hook marks every integer argument and result of fewer than 64 bits with
+    ``signext`` or ``zeroext``, because the platform's calling convention requires the caller to extend such a value.
+    A caller whose declaration lacks the attribute may pass a 32-bit argument with undefined upper bits. The hook does
+    nothing on the platforms that run the tests. The test therefore installs a hook that marks every narrow integer
+    argument with ``signext``, and it compares these attributes of the declaration with those of the definition.
+    """
+    def mark_narrow_integers(self, llvm_func, argtypes=None, restype=None):
+        for argument in llvm_func.args:
+            if isinstance(argument.type, ir.IntType) and argument.type.width < 64:
+                argument.add_attribute("signext")
+
+    monkeypatch.setattr(CPUContext, "apply_target_attributes", mark_narrow_integers)
+    value = cres(types.int64(types.int32))(_shape_double)
+
+    @njit
+    def call(n):
+        return value(n)
+
+    assert call(numpy.int32(21)) == 42
+
+    caller_module = ll.parse_assembly(next(iter(call.inspect_llvm().values())))
+    body_module = ll.parse_assembly(next(iter(value._numbox_dispatcher.inspect_llvm().values())))
+    declared = caller_module.get_function(value._numbox_jit_alias)
+    defined = body_module.get_function(value.cres.fndesc.llvm_func_name)
+    assert declared.is_declaration and not defined.is_declaration
+    marked = _extension_attributes(defined)
+    assert [b"signext"] in marked, "the hook marked nothing, so the comparison below proves nothing"
+    assert _extension_attributes(declared) == marked
+
+
 def test_a_function_compiled_twice_by_cres_gets_a_name_of_its_own_and_no_name_is_repointed():
     """A second ``cres`` function that computes an alias gets a name of its own, without a collision warning.
 
@@ -721,7 +769,7 @@ def test_two_cres_values_over_unfingerprintable_pointers_each_run_their_own_body
 
     The two functions close over ctypes pointers built from raw addresses, which have no fingerprint, so both compute
     one alias. The second value must carry a name of its own. With the shared name, its caller would run the first
-    function and return ``floor(2.5)`` where ``ceil(2.5)`` is wanted. ``cres`` does not warn at decoration.
+    function and return ``floor(2.5)`` instead of the expected ``ceil(2.5)``. ``cres`` does not warn at decoration.
     """
     libm = open_libm()
     if libm is None:

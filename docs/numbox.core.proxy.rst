@@ -395,9 +395,9 @@ raises :class:`~numbox.core.proxy.proxy.StaleProxyCacheError` instead.
 If two functions share an alias
 -------------------------------
 
-``twice`` always calls the function that ``SCALE`` holds. The compiled code of ``twice`` refers to that function only
-by name, so numbox never registers a ``_jit`` name a second time. The first function in a process that computes an
-alias receives the name. Each later function that computes the same alias receives a name of its own, which is used
+``twice`` must call the function that ``SCALE`` holds, and the compiled code of ``twice`` refers to that function only
+by name. numbox therefore never registers a ``_jit`` name a second time. The first function in a process that computes
+an alias receives the name. Each later function that computes the same alias receives a name of its own, which is used
 only in that process. Two functions compute one alias in four cases:
 
 - a module is reloaded, which compiles its proxied functions again;
@@ -413,6 +413,17 @@ the function that a cached caller was compiled against. numbox discards the entr
 shown above, and numba compiles the caller again. Both occur in every such process, and strict mode raises
 :class:`~numbox.core.proxy.proxy.StaleProxyCacheError` there. A caller that takes ``.as_func`` as an argument is not
 affected, and its cache entry loads in every process.
+
+numbox detects a shared alias only in a process that creates both functions. It also cannot detect that ``SCALE``
+holds a different function from the one it held in the run that cached ``twice``. That happens when ``SCALE`` is
+imported from a module that selects the function from a setting, and a later run selects another function. numba
+treats a global as a constant, and a function loaded from the cache `keeps the value from the run that compiled it
+<https://numba.readthedocs.io/en/stable/developer/caching.html#caching-limitations>`_. numba therefore loads the entry
+of ``twice`` for as long as the file that defines ``twice`` is unchanged. If the later run registers no function under
+the name that the entry refers to, numbox discards the entry, and numba compiles ``twice`` again. If the run still
+creates the old function, or creates another function that computes the same alias, numba loads the entry, and
+``twice`` calls that function and not the one that ``SCALE`` holds. After such a change, delete the cache files of
+``twice`` or pass the function as an argument.
 
 After an upgrade from, or a downgrade to, numbox 0.7.9 or earlier
 -----------------------------------------------------------------
