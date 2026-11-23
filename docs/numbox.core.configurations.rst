@@ -96,6 +96,8 @@ of the directory's path, such as ``core_df4387379757d214fdc85570af6767de3b7850dc
 numba picks the location when the function is decorated. It skips a location that it cannot create or write in, and it
 issues no warning. If ``NUMBA_CACHE_DIR`` cannot be written in, numba therefore uses the next location. If no
 location is left, the decoration raises ``RuntimeError: cannot cache function 'f': no locator available for file ...``.
+numba therefore never loads from a cache that was built in a directory that is read-only now.
+`If the cache directory is read-only at run time`_ describes the locator that loads from such a directory.
 The variable `NUMBA_CACHE_LOCATOR_CLASSES
 <https://numba.readthedocs.io/en/stable/reference/envvars.html#envvar-NUMBA_CACHE_LOCATOR_CLASSES>`_ can reorder the
 locators or leave some out.
@@ -173,6 +175,118 @@ begins:
     numba looks only where NUMBA_CACHE_LOCATOR_CLASSES, InTreeCacheLocator,UserWideCacheLocator, says: make one of
     those locations writable
 
+.. _read_only_cache_directory:
+
+If the cache directory is read-only at run time
+-----------------------------------------------
+
+A cache can be built once and deployed read-only, for example in a container image, so that no process compiles when
+it starts. Build the cache with ``NUMBA_CACHE_DIR`` set to a writable directory. Then run with the same directory, and
+list numbox's locator in ``NUMBA_CACHE_LOCATOR_CLASSES`` in place of numba's ``UserProvidedCacheLocator``:
+
+.. code-block:: sh
+
+    export NUMBA_CACHE_DIR=/opt/numba-cache
+    export NUMBA_CACHE_LOCATOR_CLASSES=numbox.core.read_only_cache.ReadOnlyCacheLocator,\
+    InTreeCacheLocator,UserWideCacheLocator,IPythonCacheLocator,ZipCacheLocator
+
+numba's own locator for ``NUMBA_CACHE_DIR`` skips a directory that it cannot write in, so numba alone compiles again
+in the next location. :class:`~numbox.core.read_only_cache.ReadOnlyCacheLocator` names the same subdirectory as
+numba's locator, and it also takes that subdirectory when it exists and cannot be written in. Where the subdirectory
+can be written in, the two locators behave alike, so the cache can be built under the same value of the variable.
+numba imports the class when it first decorates a cached function, so numbox must be importable in every process that
+sets the variable. The numba issue
+`Support read-only cache directories <https://github.com/numba/numba/issues/10984>`_ asks for the same in numba.
+
+numba then loads every function that the directory holds an entry for, both numbox's functions and your own, and
+neither numba nor numbox issues a warning. An entry is loaded only if the run matches the build:
+
+- the source files are at the same paths, because numba names each subdirectory with a hash of the source directory's
+  path;
+- the source files are unchanged. From numba 0.68, an entry records a hash of the source file. Before numba 0.68, it
+  records the file's size and modification time, so a copy of the sources must keep those times;
+- Python, numba and numbox have the same versions, and the settings in numbox's part of the key are the same
+  (:doc:`numbox.core.cache_key`);
+- the CPU has the same model and features, as numba's notes on
+  `cache sharing <https://numba.readthedocs.io/en/stable/developer/caching.html#cache-sharing>`_ explain.
+
+A function that the directory holds no entry for compiles in every process, as does a call with argument types
+that the build did not compile. numba alone would raise the error of its failed save from the call that compiled the
+function. numbox skips that save, for every function that numba caches in the process, and issues one warning per
+process:
+
+.. code-block:: text
+
+    RuntimeWarning: numbox: numba compiled total but cannot save its cache entry in the cache directory
+    /opt/numba-cache/kernels_3d04936142c1d950d4261f423a857de26e0328a3 (Read-only file system), so the function
+    compiles again in every process. numbox skips each save that fails in this way. It warns only once per process,
+    for the first skipped save.
+
+To cache that function as well, build the cache again with a run that calls it with the same argument types.
+
+On Windows, numba itself ignores a save that fails with ``EACCES``, so numbox issues no warning for that save. The
+function still compiles again in every process.
+
+On Windows, a read-only cache directory also needs a CPython that has the fix for
+`CPython issue 66305 <https://github.com/python/cpython/issues/66305>`_. The fix is in CPython 3.13.13, in 3.14.4 and
+in 3.15. numba tests a cache directory when it decorates a cached function: it creates a file there with the
+``tempfile`` module. Without the fix, ``tempfile`` retries approximately two billion times when the creation fails
+with ``PermissionError``, so the process appears to hang. numba's own locator for ``NUMBA_CACHE_DIR`` hangs in the
+same way.
+
+numba's `Dispatcher.recompile
+<https://numba.readthedocs.io/en/stable/reference/jit-compilation.html#Dispatcher.recompile>`_ empties the function's
+index file before it compiles the function again. That write fails in a directory that cannot be written in. numbox
+then disables the cache of that function for the rest of the process, so numba compiles the function without loading
+or saving an entry. numbox issues no warning for it. :func:`~numbox.core.cache_key.explain_cache_key` raises a
+``ValueError`` for that function afterward.
+
+numbox recognizes both failed writes by their error: ``EROFS``, ``EACCES`` or ``EPERM`` in a directory that exists and
+that the process can search (:func:`~numbox.core.read_only_cache.cannot_be_written`). numbox does not test whether
+the process can write in the directory. It therefore treats a write that fails with one of these errors in a writable
+directory in the same way, for example the replacement of another user's index file in a directory that has the
+sticky bit.
+
+The locator skips a source directory that the cache holds no subdirectory for, and numba tries the next locator in the
+list. numba creates the subdirectory when it decorates the first cached function of a source directory. The
+subdirectory is therefore missing for a package that the build never imported, and also when the package's absolute
+path at run time differs from the one during the build. If no other location in the list can be written in either, numba
+raises the ``RuntimeError`` that `Where numba writes the cache`_ quotes when it decorates a cached function of yours.
+For its own functions, numbox issues the warning described under `If numbox is installed read-only`_, and the remedy
+of that warning names ``NUMBA_CACHE_DIR``. Build the cache with a run that imports every package that the later runs
+import.
+
+The locator also skips a subdirectory that the process cannot search, and numba tries the next locator. numba cannot
+open a cache file in such a subdirectory. A build that runs as another user under a umask of ``077`` creates such
+subdirectories. The locator does not test whether the process can read the cache files in a subdirectory that it
+takes. If the process cannot read a function's index file, numba raises ``PermissionError`` when it opens that file.
+On Windows, numba raises no error: it ignores the failed load and compiles the function in every process. If the
+process cannot read a data file, numba compiles the function as it does when the directory holds no entry for it.
+Grant the user that runs the program read and search permission on the cache.
+
+numbox writes the files of generated code under the cache directory (`If generated code cannot be cached`_). It
+cannot write a file that was not written while the cache was built, and the code of that file then compiles without
+a cache. The remedy of the warning in that section then begins:
+
+.. code-block:: text
+
+    /opt/numba-cache/numbox-structref is not writable and holds no file for this code. Build the cache again with a
+    run that generates this code, set NUMBA_CACHE_DIR to a writable directory, or compile without a cache to silence
+    this warning
+
+The remedy names the directory of the generated files. If the cache was built without any generated code of that
+kind, that directory does not exist, and the remedy names the cache directory instead. numbox gives this remedy only
+while ``NUMBA_CACHE_DIR`` is set and ``NUMBA_CACHE_LOCATOR_CLASSES`` lists a class that is not one of numba's own
+locators. Under numba's own locators, numba does not load the cache of a generated file from a directory that cannot
+be written in. A cache that is rebuilt in that directory is therefore not loaded either. The remedy is then to set
+``NUMBA_CACHE_DIR`` to a writable directory, as under `If generated code cannot be cached`_.
+
+A locator class that you define works as well, if it takes a directory that it cannot write in. The check passes a
+location that exists and cannot be written in, whichever locator took it (`How numbox checks`_). numbox skips the
+failed saves once ``numbox.core`` is imported. Under ``ReadOnlyCacheLocator``, numba imports ``numbox.core`` before the
+first save, because numba imports the locator's module. Under a locator class that you define, numbox does not skip a
+failed save of a function that compiles before ``numbox.core`` is imported.
+
 If numbox is imported from an archive
 -------------------------------------
 
@@ -206,14 +320,25 @@ error is ``Permission denied``. It begins:
     /home/user/.cache/numba/core_1544a931bcaa3f414cb218856f1bf59ef75bcc9f, which cannot be made under /home/user
     (Permission denied), so make room there, or make it writable
 
-numba uses a ``.zip``'s location without testing that it can be written in. Without the check, numba's first save
+numba uses a ``.zip``'s location without testing that it can be written in, as
+`numba issue 10888 <https://github.com/numba/numba/issues/10888>`_ reports. Without the check, numba's first save
 would raise an ``OSError``. numbox compiles some of its functions as its modules are imported, so the import would
 fail; a function that numba compiles lazily fails at its first call instead. The check runs numba's test on that
 location, as numba runs it for every other kind of location.
 
-The check is stricter than numba in one case. numbox warns for a ``.zip`` whose location still holds every cache entry
-but can no longer be written in, although numba by itself would load those entries. numba's ``.zip``
-locator lacks the test, as `numba issue 10888 <https://github.com/numba/numba/issues/10888>`_ reports.
+A location that exists and can no longer be written in is not an error. numba loads the entries that the location
+still holds, and numbox skips the saves that fail there, as under `If the cache directory is read-only at run time`_.
+
+Generated code that numbox writes to a file is not cached in that case. While ``NUMBA_CACHE_DIR`` is unset, numbox
+writes the files of generated code under the user's cache directory, and numba's own locators skip a file whose cache
+directory cannot be written in. The code of such a file then compiles without a cache, as
+`If generated code cannot be cached`_ describes. The remedy of the warning in that section, setting
+``NUMBA_CACHE_DIR`` to a writable directory, applies to that code, although the variable has no effect on the
+location of the archive's own functions.
+
+The graph maker that ``make_graph`` generates has no file of its own. numba caches it in the location of the
+archive's ``builder`` module, whether or not ``NUMBA_CACHE_DIR`` is set. numba loads the graph maker of a graph that
+the build made. The graph maker of any other graph compiles in every process, and numbox skips its save.
 
 If numbox is bundled with PyInstaller
 -------------------------------------
@@ -456,6 +581,12 @@ The check then repeats the other steps that numba takes at decoration and at the
 - It asks numba for the location once more, as numba does at each save.
 - It creates and removes a file with a name of 128 bytes.
 
+A location that exists and cannot be written in passes the check, whichever of these steps writes in it first. numba
+loads the entries that such a location holds, and numbox skips the saves that fail there
+(`If the cache directory is read-only at run time`_). The check recognizes the case by the error of the write, which
+is that of a read-only file system or of a denied permission, in a directory that exists. A location that cannot be
+created fails the check, and so does one on a full disk.
+
 The last step matters for a location near the path limit. numba's own test creates a temporary file. On Linux, that file
 is usually unnamed. It has no entry in the directory, so it has no name that could be too long. Elsewhere its name is
 short. The names of the files that numba saves later include the source file's name, the function's qualified name and
@@ -641,3 +772,10 @@ numbox.core.configurations
    :members:
    :show-inheritance:
    :undoc-members:
+
+numbox.core.read_only_cache
+---------------------------
+
+.. automodule:: numbox.core.read_only_cache
+   :members:
+   :show-inheritance:
