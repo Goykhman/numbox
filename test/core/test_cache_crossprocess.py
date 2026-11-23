@@ -3,7 +3,8 @@
 The tests cover the graph maker and the derives of ``make_graph``, the methods of ``make_structref``, ``hash_type`` and
 the fallback fingerprint of ``digest``. Most tests run a probe in two or three child processes that share one
 ``NUMBA_CACHE_DIR``. The input that changes between the runs is one that numba's cache key does not cover: a module
-global, an ``ns`` value, a jit option, or a global that a node's dispatcher reads. The tests assert that a later process
+global, an ``ns`` value, a function behind a module attribute, a jit option, or a global that a node's dispatcher
+reads. The tests assert that a later process
 computes the new result instead of loading a stale entry, and that a graph compiled without a cache leaves no cache
 files behind. The digest test instead compares the digests computed under two hash seeds. numbox's own part of the
 cache key is tested in ``test_cache_key.py``.
@@ -102,6 +103,119 @@ def test_make_structref_method_ns_value_is_not_stale_across_processes(tmp_path):
     env["G_VAL"] = "5.0"
     got = _run_probe(probe, env)  # The second process shares the cache and passes a different ns value.
     assert got == "10.0", f"method served a stale ns value: got {got}, expected 10.0"
+
+
+def test_make_structref_method_ns_module_attribute_is_not_stale_across_processes(tmp_path):
+    """A ``make_structref`` method that calls a function through an ``ns`` module compiles again after an edit to it.
+
+    The method's source is the same in both processes. It reaches ``helpers`` only through ``ns``, and
+    ``helpers.step`` holds a ``@register_jitable`` function whose body differs between the processes. The hash in the
+    name of the method's jitted helper covers the attributes that the method reads through an ``ns`` module, so numba
+    compiles the method again. Without them, numba would load the code compiled for the first body: 4.0 instead of
+    6.0. The type class is in a module that the probe imports, so that a struct with an unchanged name would load from
+    the cache in the second process.
+    """
+    (tmp_path / "ns_module_type_classes.py").write_text(textwrap.dedent('''
+        from numba.experimental.structref import register
+        from numba.core.types import StructRef
+
+        @register
+        class NsModuleStructTypeClass(StructRef):
+            pass
+    '''), encoding="utf-8")
+    probe = tmp_path / "struct_ns_module_probe.py"
+    probe.write_text(textwrap.dedent('''
+        import os
+        import types
+        from numba.extending import register_jitable
+        from numbox.utils.highlevel import make_structref
+        from ns_module_type_classes import NsModuleStructTypeClass
+
+        if os.environ["STEP"] == "triple":
+            @register_jitable
+            def step(x):
+                return 3.0 * x
+        else:
+            @register_jitable
+            def step(x):
+                return 2.0 * x
+
+        ns_helpers = types.ModuleType("ns_helpers")
+        ns_helpers.step = step
+
+        def scale(self):
+            return helpers.step(self.x)
+
+        make_s = make_structref(
+            "NsModuleStruct", ("x",), NsModuleStructTypeClass,
+            struct_methods={"scale": scale}, ns={"helpers": ns_helpers},
+        )
+        s = make_s(2.0)
+        print(s.scale())
+    '''), encoding="utf-8")
+
+    env = dict(os.environ)
+    env["NUMBA_CACHE_DIR"] = str(tmp_path / "nbcache")
+    env["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+    env["STEP"] = "double"
+    assert _run_probe(probe, env) == "4.0"  # The first process fills the empty cache.
+
+    env["STEP"] = "triple"
+    got = _run_probe(probe, env)  # The second process shares the cache, and helpers.step has another body.
+    assert got == "6.0", f"method served the code compiled for the first body of helpers.step: got {got}, expected 6.0"
+
+
+def test_make_graph_derive_calling_a_module_attribute_is_not_stale_across_processes(tmp_path):
+    """A ``make_graph`` derive that calls a function through a closure module compiles again after an edit to it.
+
+    The derive's code is the same in both processes, and ``mod.step`` holds a ``@register_jitable`` function whose body
+    differs between them. The fingerprint that names the derive's cached code covers the function, so the second
+    process compiles the derive again. Without it, the derive would return the first process's result, 2.0 instead of
+    3.0.
+    """
+    probe = tmp_path / "graph_module_attr_probe.py"
+    probe.write_text(textwrap.dedent('''
+        import os
+        import types
+        from numba.extending import register_jitable
+        from numbox.core.work.builder import End, Derived, make_graph
+
+        if os.environ["STEP"] == "triple":
+            @register_jitable
+            def step(x):
+                return 3.0 * x
+        else:
+            @register_jitable
+            def step(x):
+                return 2.0 * x
+
+        helpers = types.ModuleType("graph_helpers")
+        helpers.step = step
+
+        def make_derive(mod):
+            def derive_y(x):
+                return mod.step(x)
+            return derive_y
+
+        reg = {}
+        x = End(name="x", init_value=1.0, registry=reg)
+        y = Derived(name="y", init_value=0.0, derive=make_derive(helpers), sources=(x,), registry=reg)
+        access = make_graph(y, registry=reg)
+        access.y.calculate()
+        print(access.y.data)
+    '''), encoding="utf-8")
+
+    env = dict(os.environ)
+    env["NUMBA_CACHE_DIR"] = str(tmp_path / "nbcache")
+    env["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+    env["STEP"] = "double"
+    assert _run_probe(probe, env) == "2.0"  # The first process fills the empty cache.
+
+    env["STEP"] = "triple"
+    got = _run_probe(probe, env)  # The second process shares the cache, and mod.step has another body.
+    assert got == "3.0", f"derive served the code compiled for the first body of mod.step: got {got}, expected 3.0"
 
 
 def test_digest_fallback_is_pythonhashseed_stable(tmp_path):

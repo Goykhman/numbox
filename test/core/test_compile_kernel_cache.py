@@ -5,11 +5,12 @@ must therefore hold every value that changes the compiled code: the target optio
 attributes that a formula reads, the declared types, and the ``NUMBA_*`` settings that change the emitted code. A
 formula that is or calls a dispatcher compiled with ``cache=True`` must leave the kernel uncached, because the kernel's
 name cannot make numba refresh that dispatcher's own cache. Most tests compare fingerprints, kernel names or the cache
-of a compiled dispatcher in one process. Three tests run a probe script in two processes that share one
+of a compiled dispatcher in one process. Some tests run a probe script in two or three processes that share one
 ``NUMBA_CACHE_DIR``; a stale kernel would make the second process print the first process's result, or would leave a
 cached kernel file. The last test checks that the record of passed return-type checks is keyed on the jit options.
 test_compile_kernel.py tests the other inputs of the digest and the cache in general.
 """
+import json
 import os
 import subprocess
 import sys
@@ -325,6 +326,169 @@ def test_a_module_swapped_between_processes_does_not_serve_a_stale_kernel(tmp_pa
     env["LIB"] = "cmath"
     got = _run_probe(probe, env)
     assert got == "2.0", f"the kernel compiled for math.sqrt was served for cmath.sqrt: got {got}, expected 2.0"
+
+
+_SWAP_KINDS = [
+    "a @register_jitable function, edited", "an @njit function without a fingerprint", "a cres function",
+    "a NumPy function", "a class of NumPy", "a numba type", "a dtype object",
+    "a module taken as a default argument", "the locals of a dispatcher",
+    "the declared signature of a dispatcher", "the declared signature of a dispatcher formula",
+    "the declared loop of a @vectorize function", "the declared loop of a @vectorize formula",
+    "an @njit function in a tuple that calls a function without a fingerprint",
+]
+
+
+@pytest.fixture(scope="module")
+def swap_results(tmp_path_factory):
+    """Run the probe below three times and return the three lists of results, one result per kind in ``_SWAP_KINDS``.
+
+    The probe compiles one kernel per kind. Each formula has the same code in every run. The value that it reaches
+    differs between the first run and the two others. That value is the function, class, type or module behind a
+    module attribute, or the types that a dispatcher was declared with. The first and the second run share one
+    ``NUMBA_CACHE_DIR``. The third run repeats the second on an empty cache, so its results are the ones that freshly
+    compiled kernels return.
+    """
+    tmp_path = tmp_path_factory.mktemp("swap")
+    probe = tmp_path / "swap_probe.py"
+    probe.write_text(textwrap.dedent('''
+        import json
+        import os
+        import sys
+        import types
+        from math import sqrt
+
+        import numpy as np
+        from numba import float32, float64, njit, vectorize
+        from numba.extending import register_jitable
+        from numbox.core.variable.compile_kernel import compile_kernel
+        from numbox.core.variable.variable import Graph
+        from numbox.utils.highlevel import cres
+
+        LATER = os.environ["RUN"] != "first"
+        helpers = types.ModuleType("ck_swap_probe")
+        sys.modules["ck_swap_probe"] = helpers
+        import ck_swap_probe  # noqa: E402,F401  -- now a module global of this script
+
+        if LATER:
+            @register_jitable
+            def step(x):
+                return 3.0 * x
+
+            @njit
+            def root(x):
+                return 3.0 * sqrt(x)
+        else:
+            @register_jitable
+            def step(x):
+                return 2.0 * x
+
+            @njit
+            def root(x):
+                return 2.0 * sqrt(x)
+
+
+        def plain_double(x):
+            return 2.0 * x
+
+
+        def plain_triple(x):
+            return 3.0 * x
+
+
+        # Both cres functions exist in every run, so a process never discards a caller for a missing alias.
+        compiled = {False: cres(float64(float64))(plain_double), True: cres(float64(float64))(plain_triple)}
+        @njit
+        def through(x):
+            return (5.0 if LATER else 4.0) * ck_swap_probe.root(x)
+
+
+        helpers.step = step
+        helpers.root = root
+        helpers.table = (through,)
+        helpers.compiled = compiled[LATER]
+        helpers.reduce = np.prod if LATER else np.sum
+        helpers.kind = np.float32 if LATER else np.float64
+        helpers.cast = float32 if LATER else float64
+        helpers.dtype = np.dtype("float32") if LATER else np.dtype("float64")
+        helpers.SCALE = 3.0 if LATER else 2.0
+
+
+        @njit(locals={"t": float32 if LATER else float64})
+        def with_locals(x):
+            t = x / 3.0
+            return t * 1.0
+
+
+        @njit("float64(float32)" if LATER else "float64(float64)")
+        def declared(x):
+            return x / 3.0
+
+
+        @vectorize(["float32(float64)"] if LATER else ["float64(float64)"])
+        def loop(x):
+            return x / 3.0
+
+
+        def default_module(y, m=helpers):
+            return m.SCALE * y
+
+
+        def dtype_object(y):
+            stored = np.empty(1, ck_swap_probe.dtype)
+            stored[0] = y / 3.0
+            return stored[0] * 1.0
+
+
+        formulas = [
+            lambda y: ck_swap_probe.step(y),
+            lambda y: ck_swap_probe.root(y),
+            lambda y: ck_swap_probe.compiled(y),
+            lambda y: ck_swap_probe.reduce(np.full(3, y)),
+            lambda y: ck_swap_probe.kind(y) / 3.0,
+            lambda y: ck_swap_probe.cast(y) / 3.0,
+            dtype_object,
+            default_module,
+            lambda y: with_locals(y),
+            lambda y: declared(y),
+            declared,
+            lambda y: loop(y) * 1.0,
+            loop,
+            lambda y: ck_swap_probe.table[0](y),
+        ]
+        results = []
+        for formula in formulas:
+            graph = Graph(
+                variables_lists={"variables": [{"name": "out", "inputs": {"y": "basket"}, "formula": formula}]},
+                external_source_names=["basket"],
+            )
+            kernel = compile_kernel(graph, "variables.out").kernel
+            results.append(float(np.asarray(kernel(1.6)[0]).ravel()[0]))
+        print(json.dumps(results))
+    '''), encoding="utf-8")
+
+    env = _shared_cache_env(tmp_path)
+    runs = []
+    for run, cache in (("first", "nbcache"), ("second", "nbcache"), ("fresh", "nbcache-fresh")):
+        env["RUN"] = run
+        env["NUMBA_CACHE_DIR"] = str(tmp_path / cache)
+        runs.append(json.loads(_run_probe(probe, env)))
+    assert all(len(results) == len(_SWAP_KINDS) for results in runs)
+    return runs
+
+
+@pytest.mark.parametrize("kind", _SWAP_KINDS)
+def test_a_value_swapped_between_processes_does_not_serve_a_stale_kernel(swap_results, kind):
+    """A kernel compiles again when a value that its formula reaches is another one in the next process.
+
+    The formula's code is the same in both processes. What differs is a function, a class, a type or a module that
+    the formula reaches through a module attribute or a default argument, or the types that a dispatcher was declared
+    with. The second process shares the first process's NUMBA_CACHE_DIR and must return what a kernel compiled on an
+    empty cache returns. A kernel loaded from the first process's cache would return the first process's result.
+    """
+    index = _SWAP_KINDS.index(kind)
+    first, second, fresh = (results[index] for results in swap_results)
+    assert first != fresh, "the two runs must compute different results for the test to show anything"
+    assert second == fresh, f"the kernel compiled in the first process was served: got {second}, expected {fresh}"
 
 
 # A formula with a cache of its own leaves the kernel uncached.

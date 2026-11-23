@@ -8,23 +8,33 @@ Other tests check that a fingerprint folds the globals and the module attributes
 module global that only shares an attribute's name. ``co_names`` holds both kinds of name, so ``_loaded_global_names``
 reads the opcodes. Folding such a global would change the fingerprint when only the global changes, and a global
 without a fingerprint would make the fingerprint fail, so the work builder would compile the derive without a cache.
+Four rules apply with ``fold_named``. A module attribute that holds a function or a class is folded by its content
+or by its name. A module attribute that holds a numba type or a dtype object is folded by the identity of the type. A
+helper without a fingerprint leaves its caller without one. The text of a dispatcher holds the types that it was
+declared with. The tests state each rule, and that the text without ``fold_named`` does not change.
 The last tests cover ``_opaque_values_match`` and the ``@proxy`` aliases that a collision retires. The tests that need
 a C math library skip if ``open_libm`` finds none.
 """
 import cmath
+import enum
+import heapq
 import importlib.util
 import math
 import sys
 import textwrap
 import types
 
+import numba
 import numpy as np
 import pytest
-from numba import float64, njit, vectorize
+from numba import deferred_type, float32, float64, guvectorize, njit, stencil, vectorize
+from numba.core.types import ExternalFunction
+from numba.extending import intrinsic
 
+from numbox.utils import lowlevel
 from numbox.utils.fingerprint import (
     _MAX_REPR_INT_BITS, _Unfingerprintable, _canon_value, _fingerprint_function, _fingerprint_function_best_effort,
-    _fingerprint_module_attrs, _loaded_global_names, _named_function_text, _opaque_values_match,
+    _fingerprint_module_attrs, _loaded_global_names, _named_value_text, _opaque_values_match,
     _referenced_global_names,
 )
 from test.auxiliary_utils import open_libm
@@ -80,13 +90,13 @@ def test_canon_value_writes_an_int_the_same_way_under_every_digit_limit():
     assert len(repr(bound)) <= sys.int_info.str_digits_check_threshold
 
 
-def test_named_function_text_names_a_ufunc_or_a_builtin_function_that_its_module_holds():
+def test_named_value_text_names_a_ufunc_or_a_builtin_function_that_its_module_holds():
     # numpy holds sin under the ufunc's own name, and math holds sqrt, so the module and the name identify each of them
     # in every process. np.abs is a second name for the ufunc absolute, and the text holds the ufunc's own name.
-    assert _named_function_text(np.sin) == "ufunc(numpy.sin)"
-    assert _named_function_text(np.abs) == "ufunc(numpy.absolute)"
-    assert _named_function_text(math.sqrt) == "builtin(math.sqrt)"
-    assert _named_function_text(len) == "builtin(builtins.len)"
+    assert _named_value_text(np.sin) == "ufunc(numpy.sin)"
+    assert _named_value_text(np.abs) == "ufunc(numpy.absolute)"
+    assert _named_value_text(math.sqrt) == "builtin(math.sqrt)"
+    assert _named_value_text(len) == "builtin(builtins.len)"
     # The strict walk does not use the name: a value that _canon_value has no text for makes the code that reads it
     # compile without a cache, and that stays so for these functions.
     for value in (np.sin, math.sqrt, len):
@@ -94,7 +104,7 @@ def test_named_function_text_names_a_ufunc_or_a_builtin_function_that_its_module
             _canon_value(value, set())
 
 
-def test_named_function_text_is_none_for_a_function_that_no_module_holds_by_name(monkeypatch):
+def test_named_value_text_is_none_for_a_function_that_no_module_holds_by_name(monkeypatch):
     # The text names a function by its module and its name, so it must not be given to another function of that name.
     # A ufunc that the user built and named sin is not the one that numpy holds. The parallel target of vectorize
     # returns a NumPy ufunc. A method of an object records no module. A function that was replaced in its module is
@@ -110,11 +120,11 @@ def test_named_function_text_is_none_for_a_function_that_no_module_holds_by_name
     monkeypatch.setattr(math.fsum, "__module__", ["math"])
 
     for value in (sin, [].append, replaced, math.fsum, float64, 2.0, test_canon_value_structured_dtype_preserves_layout):
-        assert _named_function_text(value) is None
-    assert _named_function_text(math.sqrt) == "builtin(math.sin)"
+        assert _named_value_text(value) is None
+    assert _named_value_text(math.sqrt) == "builtin(math.sin)"
 
 
-def test_named_function_text_reads_only_a_loaded_module(tmp_path, monkeypatch):
+def test_named_value_text_reads_only_a_loaded_module(tmp_path, monkeypatch):
     # A builtin function accepts any string as its __module__, and sys.modules can hold anything under that string.
     # Reading the __dict__ of a module that importlib.util.LazyLoader has not loaded yet runs the module, so the lookup
     # must leave such an entry alone, and an entry that is no module as well.
@@ -129,11 +139,11 @@ def test_named_function_text_reads_only_a_loaded_module(tmp_path, monkeypatch):
 
     for home in ("lazy_home", "no_module"):
         monkeypatch.setattr(math.fsum, "__module__", home)
-        assert _named_function_text(math.fsum) is None
+        assert _named_value_text(math.fsum) is None
     assert type(lazy) is not types.ModuleType, "the lookup loaded the lazy module"
 
 
-def test_named_function_text_does_not_ask_an_impostor_for_its_name():
+def test_named_value_text_does_not_ask_an_impostor_for_its_name():
     # An object can report any class as its __class__, and isinstance believes it. Such an object is not a ufunc or a
     # builtin function, and reading its __name__ can run arbitrary code.
     class Impostor:
@@ -152,7 +162,7 @@ def test_named_function_text_does_not_ask_an_impostor_for_its_name():
     for reported in (np.ufunc, type(len)):
         impostor = Impostor(reported)
         assert isinstance(impostor, reported)
-        assert _named_function_text(impostor) is None
+        assert _named_value_text(impostor) is None
         helpers.op = impostor
         assert _fingerprint_module_attrs({"op"}, {"helpers": helpers}, set(), True) == ""
 
@@ -207,7 +217,7 @@ def test_the_fold_runs_no_code_of_a_str_subclass_or_of_an_odd_module(monkeypatch
     )
 
     monkeypatch.setattr(math.fsum, "__module__", Loud("math"))
-    assert _named_function_text(math.fsum) is None
+    assert _named_value_text(math.fsum) is None
 
     # A value that is data must keep the entry that it has as data. The fold must not take it for a ufunc because
     # its class has a metaclass whose __eq__ agrees with any operand, or because it reports another __class__.
@@ -378,11 +388,18 @@ def test_a_named_function_reached_through_its_own_package_is_not_folded():
     # under that name or another, is loaded in some processes and not in others. numpy.strings.add and
     # numpy.ma.core.narray are such attributes. They are not folded either, so the fingerprint does not depend on which
     # submodules are loaded.
-    f = _make("""
+    # The two modules are read by two functions. NumPy before 1.25 holds the module math as numpy.math, so a function
+    # that names both modules would fold that attribute.
+    through_numpy = _make("""
         def f(x):
-            return math.sqrt(np.abs(np.add(x, 1.0)))
-    """, np=np, math=math)
-    assert "module_attrs" not in _fingerprint_function(f, set(), fold_named=True)
+            return np.abs(np.add(x, 1.0))
+    """, np=np)
+    through_math = _make("""
+        def f(x):
+            return math.sqrt(x)
+    """, math=math)
+    for f in (through_numpy, through_math):
+        assert "module_attrs" not in _fingerprint_function(f, set(), fold_named=True)
 
     submodule = types.ModuleType("numpy.a_submodule")
     submodule.add = np.add
@@ -394,6 +411,388 @@ def test_a_named_function_reached_through_its_own_package_is_not_folded():
     assert _fingerprint_module_attrs({"add"}, {"sub": lookalike}, set(), True) == (
         ";module_attrs=[sub.add=ufunc(numpy.add)]"
     )
+
+
+def test_named_value_text_names_a_function_or_a_class_that_numba_compiles_from_its_own_implementation():
+    # numba compiles a call of numpy.sum, heapq.nlargest, numpy.float32 or float from an implementation of its own,
+    # so the module and the name identify each of them in every process. numpy.sum is not a ufunc, heapq.nlargest is
+    # a plain Python function, and the last two are classes. A jitted function of numbox is named after its Python
+    # function.
+    assert _named_value_text(np.sum) == "named(numpy.sum)"
+    assert _named_value_text(heapq.nlargest) == "named(heapq.nlargest)"
+    assert _named_value_text(np.float32) == "class(numpy.float32)"
+    assert _named_value_text(float) == "class(builtins.float)"
+    assert _named_value_text(lowlevel.array_data_p) == "named(numbox.utils.lowlevel.array_data_p)"
+
+
+def test_named_value_text_is_none_for_a_function_or_a_class_of_any_other_package(monkeypatch):
+    # numba compiles a function of the user from the function's own body, and the name does not identify the body.
+    # A class of the user, an enum, whose metaclass is not type, and a numba type have no name either. A function that
+    # was replaced in its module is no longer found there.
+    class Mine:
+        pass
+
+    class Color(enum.Enum):
+        RED = 1
+
+    replaced = heapq.nlargest
+    monkeypatch.setattr(heapq, "nlargest", heapq.nsmallest)
+
+    user_function = test_canon_value_plain_dtype_unchanged
+    for value in (user_function, njit(user_function), Mine, Color, enum.Enum, float64, replaced):
+        assert _named_value_text(value) is None
+    # heapq now holds nsmallest under two names. Its name is the one that it has itself.
+    assert _named_value_text(heapq.nlargest) == "named(heapq.nsmallest)"
+
+
+def test_a_module_attribute_that_holds_a_function_or_a_class_of_numpy_is_folded_by_its_name():
+    # helpers.op can hold numpy.sum in one process and numpy.prod in the next, and helpers.T can hold numpy.float32 or
+    # numpy.float64. The code of f names only the attribute, so the fingerprint folds the name of the value.
+    helpers = types.ModuleType("helpers")
+    f = _make("""
+        def f(x):
+            return helpers.op(x)
+    """, helpers=helpers)
+
+    texts, plain = [], []
+    for op in (np.sum, np.prod, np.float32, np.float64, float, heapq.nlargest):
+        helpers.op = op
+        texts.append(_fingerprint_function(f, set(), fold_named=True))
+        plain.append(_fingerprint_function(f, set()))
+    assert len(set(texts)) == 6
+    assert "helpers.op=named(numpy.sum)" in texts[0]
+    assert "helpers.op=class(numpy.float32)" in texts[2]
+    assert "helpers.op=class(builtins.float)" in texts[4]
+    assert "helpers.op=named(heapq.nlargest)" in texts[5]
+    # The text that @proxy and cres hash into an alias leaves the attribute out.
+    assert len(set(plain)) == 1 and "module_attrs" not in plain[0]
+
+    # numpy holds its own functions and classes in the same way in every process, so they add nothing to the
+    # fingerprint of a function that reaches them through numpy.
+    g = _make("""
+        def f(x):
+            return np.sum(np.ones(3) * np.float32(x)) + heapq.nlargest(1, [x])[0]
+    """, np=np, heapq=heapq)
+    assert "module_attrs" not in _fingerprint_function(g, set(), fold_named=True)
+
+
+def test_a_module_attribute_that_holds_a_function_of_the_user_is_folded_by_its_content():
+    # numba compiles a @register_jitable function, a cres function, an ExternalFunction and a ctypes function pointer
+    # from the value's own content. helpers.step can hold another one in the next process, or the same function after
+    # an edit, so the fingerprint folds the text that the value has when it is read as a global.
+    from numbox.utils.highlevel import cres
+
+    helpers = types.ModuleType("helpers")
+    f = _make("""
+        def f(x):
+            return helpers.step(x)
+    """, helpers=helpers)
+    # The two bodies have one name and differ in a constant, as a function does before and after an edit.
+    double = _make("def f(x):\n    return 2.0 * x\n")
+    triple = _make("def f(x):\n    return 3.0 * x\n")
+    steps = [
+        double, triple, cres(float64(float64))(double), cres(float64(float64))(triple),
+        ExternalFunction("sin", float64(float64)), ExternalFunction("cos", float64(float64)),
+    ]
+    libm = open_libm()
+    if libm is not None:
+        steps += [libm.sin, libm.cos]
+
+    texts, plain = [], []
+    for step in steps:
+        helpers.step = step
+        texts.append(_fingerprint_function(f, set(), fold_named=True))
+        plain.append(_fingerprint_function(f, set()))
+    assert len(set(texts)) == len(steps)
+    for step, text in zip(steps, texts):
+        assert text.endswith(f";module_attrs=[helpers.step={_canon_value(step, set(), True)}])")
+    # The text that @proxy and cres hash into an alias leaves the attribute out.
+    assert len(set(plain)) == 1 and "module_attrs" not in plain[0]
+
+
+def test_a_helper_without_a_fingerprint_behind_a_module_attribute_leaves_its_caller_without_one():
+    # A function, a dispatcher or a @vectorize function that reads math.sqrt as a global has no fingerprint. A caller
+    # that reads it as a global has none either, and the code that numbox names by the fingerprint compiles without a
+    # cache. The same holds when the caller reads the helper through a module, so that numba never loads code that
+    # was compiled for another body of the helper.
+    opaque = _make("def f(x):\n    return sqrt(x)\n", sqrt=math.sqrt)
+    helpers = types.ModuleType("helpers")
+    f = _make("""
+        def f(x):
+            return helpers.step(x)
+    """, helpers=helpers)
+    # A @guvectorize function and a @stencil function never have a fingerprint, whatever they read.
+    gufunc = guvectorize("(n)->(n)")(_make("def f(a, out):\n    out[:] = 2.0 * a\n"))
+    window = stencil(_make("def f(a):\n    return 2.0 * a[0]\n"))
+    for step in (opaque, njit(opaque), vectorize(opaque), gufunc, window):
+        with pytest.raises(_Unfingerprintable):
+            _canon_value(step, set(), True)
+        helpers.step = step
+        with pytest.raises(_Unfingerprintable):
+            _fingerprint_function(f, set(), fold_named=True)
+        # The text that @proxy and cres hash into an alias leaves the attribute out.
+        assert "module_attrs" not in _fingerprint_function(f, set())
+
+    # The walk matches names and does not check which attributes the code reads. g calls the method sum of an array,
+    # and helpers holds a function under the same name, so that function is folded too, and g has no fingerprint
+    # while that function has none.
+    g = _make("""
+        def f(x):
+            return helpers.SCALE * x.sum()
+    """, helpers=helpers)
+    helpers.SCALE = 2.0
+    helpers.sum = opaque
+    with pytest.raises(_Unfingerprintable):
+        _fingerprint_function(g, set(), fold_named=True)
+    helpers.sum = _make("def f(x):\n    return 2.0 * x\n")
+    assert "helpers.SCALE=2.0" in _fingerprint_function(g, set(), fold_named=True)
+
+
+def test_data_that_holds_a_caller_of_a_helper_without_a_fingerprint_leaves_its_reader_without_one():
+    # helpers.OPS is a tuple that holds a dispatcher, and the dispatcher calls low.raw, which has no fingerprint,
+    # through a module. The dispatcher has a text without fold_named and none with it, and so has the tuple. A reader
+    # of helpers.OPS then has no fingerprint, as a reader of an attribute that holds the dispatcher itself has none.
+    # If the walk left the tuple out, an edit to the dispatcher would not change the reader's fingerprint.
+    low = types.ModuleType("low")
+    low.raw = njit(_make("def f(x):\n    return sqrt(x)\n", sqrt=math.sqrt))
+    op = njit(_make("def f(x):\n    return 2.0 * low.raw(x)\n", low=low))
+    helpers = types.ModuleType("helpers")
+    f = _make("""
+        def f(x):
+            return helpers.OPS[0](x)
+    """, helpers=helpers)
+    for ops in ((op,), [op], {"first": op}):
+        helpers.OPS = ops
+        with pytest.raises(_Unfingerprintable):
+            _fingerprint_function(f, set(), fold_named=True)
+        assert "helpers.OPS=" in _fingerprint_function(f, set())
+
+    # Data that has no text without fold_named either is left out, and its reader keeps its fingerprint.
+    helpers.OPS = (float64, op)
+    assert "module_attrs" not in _fingerprint_function(f, set(), fold_named=True)
+    assert "module_attrs" not in _fingerprint_function(f, set())
+
+
+def test_a_jitted_function_of_numbox_without_a_fingerprint_keeps_its_caller_cacheable():
+    # array_data_p calls an @intrinsic, so it has no fingerprint. numbox supplies it, and numbox's version is part of
+    # the key of every entry that numbox caches, so a caller that reaches it through its module keeps its fingerprint.
+    # When a module of another package holds it in an attribute, it is folded by its name.
+    with pytest.raises(_Unfingerprintable):
+        _canon_value(lowlevel.array_data_p, set(), True)
+    f = _make("""
+        def f(a):
+            return lowlevel.array_data_p(a)
+    """, lowlevel=lowlevel)
+    assert "module_attrs" not in _fingerprint_function(f, set(), fold_named=True)
+
+    helpers = types.ModuleType("helpers")
+    g = _make("""
+        def f(a):
+            return helpers.address(a)
+    """, helpers=helpers)
+    texts = []
+    for address in (lowlevel.array_data_p, lowlevel.get_unicode_data_p):
+        helpers.address = address
+        texts.append(_fingerprint_function(g, set(), fold_named=True))
+    assert texts[0].endswith(";module_attrs=[helpers.address=named(numbox.utils.lowlevel.array_data_p)])")
+    assert texts[0] != texts[1]
+
+
+def test_a_module_attribute_that_holds_an_intrinsic_or_a_class_of_the_user_is_left_out():
+    # The fingerprint has no text for an @intrinsic, for a class of the user or for an enum. Such an attribute is
+    # left out, the caller keeps its fingerprint, and a change of the value does not change it.
+    @intrinsic
+    def first(typingctx, x):
+        return x(x), lambda context, builder, sig, args: args[0]
+
+    class Mine:
+        pass
+
+    class Color(enum.Enum):
+        RED = 1
+
+    # A function of NumPy, numba, numbox or the standard library that no module holds under its own name has no name.
+    # numba does not compile it from its body, so it is left out as well. The body of such a function often reads a
+    # value without a fingerprint, and folding the body would then leave the caller without a cache.
+    unnamed = types.FunctionType(heapq.nlargest.__code__, heapq.nlargest.__globals__)
+    assert unnamed.__module__ == "heapq" and _named_value_text(unnamed) is None
+    with pytest.raises(_Unfingerprintable):
+        _canon_value(unnamed, set(), True)
+
+    helpers = types.ModuleType("helpers")
+    f = _make("""
+        def f(x):
+            return helpers.op(x)
+    """, helpers=helpers)
+    for op in (first, Mine, Color, unnamed):
+        helpers.op = op
+        assert "module_attrs" not in _fingerprint_function(f, set(), fold_named=True)
+
+
+def test_a_module_attribute_that_holds_a_numba_type_or_a_dtype_object_is_folded_by_the_identity_of_the_type():
+    # helpers.T can hold numba's float32 in one process and float64 in the next, or two dtype objects. numba compiles
+    # in the type that the value stands for, and the code of f names only the attribute.
+    structured = (np.dtype([("a", "<i4"), ("b", "<f4")]), np.dtype([("a", "<f4"), ("b", "<i4")]))
+    helpers = types.ModuleType("helpers")
+    f = _make("""
+        def f(x):
+            return helpers.T(x)
+    """, helpers=helpers)
+
+    texts, plain = [], []
+    for held in (float32, float64, np.dtype("float32"), np.dtype("float64"), *structured):
+        helpers.T = held
+        texts.append(_fingerprint_function(f, set(), fold_named=True))
+        plain.append(_fingerprint_function(f, set()))
+    assert len(set(texts)) == 6
+    assert "helpers.T=numbatype(" in texts[0] and "helpers.T=npdtype(<f4)" in texts[2]
+    # The text that @proxy and cres hash into an alias leaves the attribute out.
+    assert len(set(plain)) == 1 and "module_attrs" not in plain[0]
+
+    # numba holds its own types under the same names in every process, so they add nothing to the fingerprint of a
+    # function that reaches them through numba. A module of the user that has the same attribute is folded.
+    through_numba = _make("""
+        def f(x):
+            return nb.float32(x) + nb.types.float64(x)
+    """, nb=numba)
+    assert "module_attrs" not in _fingerprint_function(through_numba, set(), fold_named=True)
+    helpers.float32, helpers.types = float32, numba.types
+    through_helpers = _make("""
+        def f(x):
+            return nb.float32(x) + nb.types.float64(x)
+    """, nb=helpers)
+    assert "nb.float32=numbatype(" in _fingerprint_function(through_helpers, set(), fold_named=True)
+    # A module whose __dict__ holds no __name__ belongs to no package, so a type that it holds is folded as well.
+    helpers.inner = types.ModuleType("inner")
+    helpers.inner.float32 = float32
+    del helpers.inner.__dict__["__name__"]
+    through_inner = _make("""
+        def f(x):
+            return nb.inner.float32(x)
+    """, nb=helpers)
+    assert "nb.inner.float32=numbatype(" in _fingerprint_function(through_inner, set(), fold_named=True)
+
+
+def test_a_numba_type_whose_text_names_an_address_leaves_the_function_without_a_fingerprint():
+    # numba's text for a deferred type, as for the type of a jitclass instance, holds an address of this process. A
+    # digest of that text would name code that no other process finds, so the function has no fingerprint, and its
+    # caller compiles without a cache.
+    unstable = deferred_type()
+    assert "DeferredType#" in str(unstable)
+    helpers = types.ModuleType("helpers")
+    helpers.T = unstable
+    f = _make("""
+        def f(x):
+            return helpers.T(x)
+    """, helpers=helpers)
+    with pytest.raises(_Unfingerprintable):
+        _fingerprint_function(f, set(), fold_named=True)
+    assert "module_attrs" not in _fingerprint_function(f, set())
+
+    @njit(locals={"t": unstable})
+    def with_locals(x):
+        t = x
+        return t
+
+    # The type of a dispatcher is another such type: numba's text for it holds the address of the Python function.
+    declared = njit(float64(numba.typeof(with_locals)))(lambda g: 1.0)
+    assert " at 0x" in str(declared.nopython_signatures[0])
+    for dispatcher in (with_locals, declared):
+        with pytest.raises(_Unfingerprintable):
+            _canon_value(dispatcher, set(), True)
+        assert _canon_value(dispatcher, set()).startswith("dispatcher(")
+
+
+@pytest.mark.parametrize("src", [
+    "def f(y, m=helpers):\n    return y * m.SCALE + m.step(y)\n",
+    "def f(y, *, m=helpers):\n    return y * m.SCALE + m.step(y)\n",
+    "def f(y, /, z=1.0, m=helpers):\n    return y * m.SCALE + m.step(z)\n",
+])
+def test_the_attributes_of_a_module_taken_as_a_default_argument_are_folded(src):
+    # The function reads SCALE and step through the parameter m, whose default value is the module. The module is
+    # neither a global nor a closure variable of the function.
+    helpers = types.ModuleType("helpers")
+    helpers.step = _make("def f(x):\n    return 2.0 * x\n")
+    f = _make(src, helpers=helpers)
+
+    texts, plain = [], []
+    for scale, constant in ((2.0, "2.0"), (3.0, "2.0"), (3.0, "3.0")):
+        helpers.SCALE = scale
+        helpers.step = _make(f"def f(x):\n    return {constant} * x\n")
+        texts.append(_fingerprint_function(f, set(), fold_named=True))
+        plain.append(_fingerprint_function(f, set()))
+    assert len(set(texts)) == 3
+    assert "m.SCALE=2.0" in texts[0] and "m.step=function(" in texts[0]
+    # The text that @proxy and cres hash into an alias does not walk the module.
+    assert len(set(plain)) == 1 and "module_attrs" not in plain[0]
+
+
+def test_a_parameter_hides_a_global_of_the_same_name_in_the_walk():
+    # The parameter cfg hides the global cfg inside the function, so the module that the default holds is the one
+    # that the function reads, and the walk folds the attributes of that module. The function also reads an
+    # attribute named cfg, which puts the name among those that the walk looks up in the function's globals.
+    shown, hidden = types.ModuleType("shown"), types.ModuleType("hidden")
+    shown.SCALE, hidden.SCALE = 5.0, 2.0
+    ns = {"cfg": hidden, "shown": shown}
+    exec("def f(y, cfg=shown):\n    return y.cfg * cfg.SCALE\n\n\ndef g(y):\n    return y * cfg.SCALE\n", ns)  # nosec B102
+    text = _fingerprint_function(ns["f"], set(), fold_named=True)
+    assert text.endswith(";module_attrs=[cfg.SCALE=5.0])")
+    hidden.SCALE = 3.0
+    assert _fingerprint_function(ns["f"], set(), fold_named=True) == text
+    # g has no such parameter and reads the global.
+    assert _fingerprint_function(ns["g"], set(), fold_named=True).endswith(";module_attrs=[cfg.SCALE=3.0])")
+
+
+def test_the_text_of_a_dispatcher_holds_its_locals_and_its_declared_signatures():
+    # The locals option and a declared signature change the code of a dispatcher, and of a caller that numba links it
+    # into, without changing the Python function. The text under fold_named therefore holds them.
+    def body(x):
+        t = x / 3.0
+        return t * 1.0
+
+    with_locals = [njit(locals={"t": ty})(body) for ty in (float32, float64)]
+    texts = [_canon_value(disp, set(), True) for disp in with_locals]
+    assert texts[0] != texts[1] and ";locals=[t:" in texts[0]
+
+    declared = [njit(sig)(body) for sig in ("float64(float32)", "float64(float64)")]
+    texts = [_canon_value(disp, set(), True) for disp in declared]
+    assert texts[0] != texts[1] and ";signatures=[" in texts[0] and ";locals=" not in texts[0]
+
+    loops = [vectorize([sig])(body) for sig in ("float32(float64)", "float64(float64)")]
+    texts = [_canon_value(ufunc, set(), True) for ufunc in loops]
+    assert texts[0].endswith(";loops=[d->f])") and texts[1].endswith(";loops=[d->d])")
+
+    # A tuple of dispatchers that a module attribute holds is data, and the text of each dispatcher in it holds the
+    # declared types as well.
+    helpers = types.ModuleType("helpers")
+    f = _make("""
+        def f(x):
+            return helpers.steps[0](x)
+    """, helpers=helpers)
+    texts = []
+    for disp in with_locals:
+        helpers.steps = (disp,)
+        texts.append(_fingerprint_function(f, set(), fold_named=True))
+    assert texts[0] != texts[1] and ";locals=[t:" in texts[0]
+
+    # The text that @proxy and cres hash into an alias holds none of them, so no alias changes.
+    for group in (with_locals, declared, loops):
+        assert len({_canon_value(value, set()) for value in group}) == 1
+
+
+def test_the_text_of_a_dispatcher_that_compiles_on_demand_does_not_depend_on_the_calls_made():
+    # A dispatcher or a @vectorize function without declared signatures compiles a signature at each call with new
+    # argument types. Those signatures differ from process to process, so the text holds none of them, and it is the
+    # text that the dispatcher has without fold_named.
+    def body(x):
+        return x / 3.0
+
+    for lazy in (njit(body), vectorize(body)):
+        before = _canon_value(lazy, set(), True)
+        assert before == _canon_value(lazy, set())
+        lazy(1.0)
+        lazy(np.float32(1.0))
+        assert _canon_value(lazy, set(), True) == before
 
 
 def test_proxy_binding_callback_fingerprints_cleanly_and_distinctly():

@@ -34,10 +34,9 @@ from numbox.core.variable.variable import (
 )
 from numbox.core.cache_key import _settings_canon
 from numbox.utils.fingerprint import (
-    _Unfingerprintable, _canon_value, _effective_flags, _fingerprint_function,
-    _flags_canon, _referenced_global_names, _safe_repr,
+    _Unfingerprintable, _canon_value, _declared_types_text, _effective_flags, _fingerprint_function,
+    _flags_canon, _referenced_global_names, _safe_repr, _type_identity,
 )
-from numbox.utils.highlevel import _type_identity
 from numbox.utils.preprocessing import (
     _anchor_root, _anchored_or_uncached, _orphan_anchor_sweep,
 )
@@ -65,21 +64,33 @@ def _formula_fingerprint(formula) -> tuple[str, bool]:
     The text is the fingerprint that `_fingerprint_function` in numbox.utils.fingerprint computes for the formula's
     Python function. It holds the function's code, constants and names, its module and qualified name, its default
     arguments and its closure variables. It also holds the values of the globals that the function reads, recursively
-    through the functions and dispatchers that it calls; a function already visited is not walked again. It holds a
-    module attribute that the function reads only if the attribute is data, a dispatcher, a @vectorize function, a
-    builtin function or NumPy ufunc that `_named_function_text` names, or a module. A named builtin function or ufunc
-    is hashed by its module and name, and only when the module that holds the attribute is outside the package that
-    defines that function. A module is hashed by its name, and only when the module that holds the attribute is
-    outside the top-level package of the module that it holds. A dispatcher or a @vectorize formula adds its target
-    options. Builtins are not among a function's globals, so they are not hashed. A value that a module provides only
-    through a module-level ``__getattr__`` (PEP 562) is not hashed either, because resolving it would run the
-    ``__getattr__`` of unrelated modules at every compilation. After a change of such a value, numba loads the cached
-    kernel until the user deletes its cache files.
+    through the functions and dispatchers that it calls; a function already visited is not walked again.
+
+    The text also holds the module attributes that the function reads, as `_fingerprint_module_attrs` folds them
+    with ``fold_named``. Some values are hashed by their content. These are data, a dispatcher, a @vectorize
+    function, a plain Python function such as a @register_jitable helper, a cres value, an ExternalFunction and a
+    ctypes function pointer. Other values are hashed by module and name. These are a NumPy function, a builtin
+    function, and a function or a class of NumPy, numba, numbox or the standard library. A name is hashed only when
+    the module that holds the attribute is outside the top-level package that defines the value. A module is hashed
+    by its name under the same condition. The attributes of a module that the function takes as a default argument
+    are hashed in the same way.
+
+    A dispatcher or a @vectorize formula adds its target options, its ``locals`` and the signatures that it was
+    declared with, and so does one that the formula calls. Builtins are not among a function's globals, so they are
+    not hashed. An @intrinsic that a module attribute holds is not hashed, and neither is a class of any other
+    package. A value that a module provides only through a module-level ``__getattr__`` (PEP 562) is not hashed
+    either, because resolving it would run the ``__getattr__`` of unrelated modules at every compilation. After a
+    change of such a value, numba loads the cached kernel until the user deletes its cache files.
 
     If the formula has no Python function, or reads a value without a canonical form, the text names the object by
     its id, and the second value is False. The kernel then compiles in every process, and numba never loads it from a
-    cache. numbox hashes a @cfunc formula, but the second value is False as well: the kernel calls it at an address
-    that differs from process to process, and numba cannot cache that.
+    cache. A function, a dispatcher, a cres value or a ctypes function pointer without a canonical form has that
+    effect whether the formula reads it as a global or through a module attribute. A @guvectorize function and a
+    @stencil function never have a canonical form, so they have that effect as well. A function or a dispatcher of
+    NumPy, numba, numbox or the standard library is the exception. numbox hashes it by module and name when the
+    formula reads it through a module attribute, and the kernel stays cached. numbox hashes a @cfunc formula, but the
+    second value is False as well: the kernel calls it at an address that differs from process to process, and numba
+    cannot cache that.
     """
     # A dispatcher stores its Python function in py_func, and a @vectorize or @cfunc function in __wrapped__. A cres
     # function has neither, so it reaches the id branch below and leaves the kernel uncached, although _canon_value
@@ -96,6 +107,7 @@ def _formula_fingerprint(formula) -> tuple[str, bool]:
     try:
         if isinstance(formula, (Dispatcher, DUFunc)):
             extra += ";targetoptions=" + _canon_value(dict(getattr(formula, "targetoptions", {}) or {}), set())
+            extra += _declared_types_text(formula)
         return _fingerprint_function(target, set(), fold_named=True) + extra, not isinstance(formula, CFunc)
     except (_Unfingerprintable, RecursionError):
         return f"{_safe_repr(formula)} @{id(formula)}", False
@@ -141,8 +153,10 @@ def _references_self_cached(value, seen: set[int]) -> bool:
     attribute, or a container of these. The kernel then links the dispatcher's code, which can be stale, and the
     digest cannot make numba refresh the dispatcher's cache. The walk follows the channels that `_canon_value`
     follows when it computes the digest. If the walk skipped one of those channels, numba could cache a kernel that
-    links a dispatcher's stale code. The walk differs in two places: it reads only the values of a dict, not its keys,
-    and it stops at a cres function. `seen` holds the ids of the objects already visited.
+    links a dispatcher's stale code. The walk differs in three places. It reads only the values of a dict, not its
+    keys. It stops at a cres function. It walks a module that the function reads as a global, and not a module that
+    the function holds in a closure variable or takes as a default argument. `seen` holds the ids of the objects
+    already visited.
     """
     if id(value) in seen:
         return False

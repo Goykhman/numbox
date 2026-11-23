@@ -205,7 +205,7 @@ def _compile_callbacks(stem, srcs, state_type, fns):
     state_id = "%s.%s;%r" % (type(state_type).__module__, type(state_type).__qualname__, state_type)
     # The digest covers that subject, numba's and numbox's versions, numbox's jit options and the fingerprint of each
     # callback. A fingerprint covers the callback's code, constants, defaults, closure, the globals it reads and the
-    # module attributes it reads that hold data, a dispatcher or a named ufunc or builtin function. An edit to any of
+    # module attributes it reads that hold data, a function, a class or a type. An edit to any of
     # these, a numeric literal included, therefore compiles new code. If a callback reads a value without a fingerprint,
     # such as the @intrinsic _cast_int_to_void_p of the usual argv_pp idiom, digest falls back to a weaker fingerprint.
     # It names the type of such a value instead of the value and omits module attributes, so an edit to such a value or

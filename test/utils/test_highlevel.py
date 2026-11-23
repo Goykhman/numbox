@@ -20,10 +20,9 @@ from numpy import isclose
 
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
+from numbox.utils.fingerprint import _canon_value, _signature_identity, _type_identity
 from numbox.utils.highlevel import (
     _method_identity,
-    _signature_identity,
-    _type_identity,
     cres,
     cres_if_available,
     determine_field_index,
@@ -569,6 +568,80 @@ def test_a_struct_method_identity_follows_a_named_function_that_a_module_attribu
             assert cacheable
             identities.append(identity)
         assert identities[0] != identities[1]
+
+
+def test_a_struct_method_identity_follows_the_attributes_of_a_module_that_only_ns_provides():
+    """The identity of a method that reads ``helpers.SCALE`` and ``helpers.step`` changes with either attribute.
+
+    The module ``helpers`` reaches the method only through the struct's ``ns``, so the method's own fingerprint does
+    not hold its attributes. The next process would load the struct that was compiled for the first value if two
+    values of an attribute gave one identity. A ``step`` without a fingerprint leaves the struct without a cache.
+    """
+    import math
+    import types
+
+    helpers = types.ModuleType("helpers")
+    scope = {}
+    exec("def method(self):\n    return helpers.step(self.x) * helpers.SCALE\n", scope)  # nosec B102 - fixed snippet
+    method = scope["method"]
+
+    def body(constant):
+        made = {}
+        exec(f"def step(x):\n    return {constant} * x\n", made)  # nosec B102 - fixed test snippet
+        return made["step"]
+
+    identities = []
+    for scale, step in ((2.0, body("2.0")), (3.0, body("2.0")), (3.0, body("3.0")), (3.0, math.sin), (3.0, math.cos)):
+        helpers.SCALE, helpers.step = scale, step
+        identity, cacheable = _method_identity(method, {"helpers": helpers})
+        assert cacheable
+        identities.append(identity)
+    assert len(set(identities)) == 5
+    step_text = _canon_value(body("2.0"), set(), True)
+    assert identities[0].endswith(
+        f";ns:helpers=module(helpers);ns;module_attrs=[helpers.SCALE=2.0;helpers.step={step_text}]"
+    )
+
+    made = {"sqrt": math.sqrt}
+    exec("def step(x):\n    return sqrt(x)\n", made)  # nosec B102 - fixed test snippet
+    helpers.step = made["step"]
+    identity, cacheable = _method_identity(method, {"helpers": helpers})
+    assert cacheable is False
+    assert identity.endswith(";ns:helpers=module(helpers);ns;module_attrs=<opaque>")
+
+
+def test_a_struct_method_identity_gains_no_part_when_ns_provides_no_module_attribute():
+    """A method whose ``ns`` holds no module that it reads an attribute of keeps the identity that it had.
+
+    The identity names the struct's cached code, so a part added for every method with ``ns`` would compile every such
+    struct once more. A module that the method's own globals hold under the same name is walked once, by the method's
+    fingerprint.
+    """
+    import types
+
+    def reads_global(self):
+        return knob                            # noqa: F821 - in a struct, ns provides knob
+
+    identity, cacheable = _method_identity(reads_global, {"knob": 5})
+    assert cacheable and identity.endswith(";ns:knob=5")
+
+    helpers = types.ModuleType("helpers")
+    helpers.SCALE = 2.0
+    unread = {}
+    exec("def method(self):\n    return self.x if helpers is None else self.x + 1.0\n", unread)  # nosec B102
+    identity, cacheable = _method_identity(unread["method"], {"helpers": helpers})
+    assert cacheable and identity.endswith(";ns:helpers=module(helpers)")
+
+    # A method that reads the attribute SCALE of the struct does not read the ns module that has the same attribute.
+    exec("def method(self):\n    return self.SCALE\n", unread)  # nosec B102 - fixed test snippet
+    identity, cacheable = _method_identity(unread["method"], {"helpers": helpers})
+    assert cacheable and "helpers" not in identity
+
+    own = {"helpers": helpers}
+    exec("def method(self):\n    return self.x * helpers.SCALE\n", own)  # nosec B102 - fixed test snippet
+    identity, cacheable = _method_identity(own["method"], {"helpers": helpers})
+    assert cacheable and identity.count("helpers.SCALE=2.0") == 1
+    assert identity.endswith(";ns:helpers=module(helpers)")
 
 
 if __name__ == '__main__':

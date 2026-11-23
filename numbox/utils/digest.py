@@ -23,6 +23,23 @@ from numbox.utils.fingerprint import (
 )
 
 
+def _fingerprint_or_none(describe, value):
+    """Return the text that ``describe`` gives ``value``, or None if ``value`` has no fingerprint.
+
+    ``describe`` is ``_canon_value`` or ``_fingerprint_function``. With ``fold_named``, each of them raises if the
+    function reads, as a module attribute, a function or a type without a fingerprint. The callers that name a struct,
+    a kernel or a derive then compile without a cache. A digest only names code and cannot disable caching, so this
+    function calls ``describe`` again without ``fold_named``. That call leaves such an attribute out. Its text still
+    holds the data that the function reads as module attributes, which the best-effort fingerprint omits.
+    """
+    for fold_named in (True, False):
+        try:
+            return describe(value, set(), fold_named)
+        except (_Unfingerprintable, RecursionError):
+            continue
+    return None
+
+
 def digest(subject, fns):
     """Return a hash of 16 hexadecimal digits that changes when ``subject`` or one of the functions ``fns`` changes.
 
@@ -36,6 +53,13 @@ def digest(subject, fns):
       dispatcher, and with a cloudpickle of the object for a ``@vectorize`` function;
     - a Python function: its fingerprint, or the weaker fingerprint if the function reads a value that has none;
     - any other callable, such as a ``functools.partial``, a builtin or a callable object: a cloudpickle of it.
+
+    numbox compiles a struct, a kernel or a derive without a cache when its function calls a helper without a
+    fingerprint through a module, as in ``helpers.step(x)``. A digest only names code. For such a function, the hash
+    therefore folds the fingerprint that the alias of a ``@proxy`` function has. That fingerprint holds the data that
+    the function reads as module attributes, and each dispatcher among them that has a fingerprint. It leaves out
+    every other function, class and type that the function reads as a module attribute. An edit to the helper
+    therefore leaves the hash unchanged.
 
     For a Python function or a dispatcher, the hash is the same in every process. The weaker fingerprint puts the name
     of a value's type in place of each value without a fingerprint, and it leaves out module attributes, so an edit to
@@ -59,26 +83,27 @@ def digest(subject, fns):
             # under; for a @proxy function it folds the alias, which covers both. The Python function alone would give
             # one hash for two dispatchers of one body compiled with different options, such as nogil, fastmath,
             # error_model or boundscheck.
-            try:
-                h.update(_canon_value(fn, set(), fold_named=True).encode("utf-8"))
+            text = _fingerprint_or_none(_canon_value, fn)
+            if text is not None:
+                h.update(text.encode("utf-8"))
                 continue
-            except (_Unfingerprintable, RecursionError):
-                # The body has no fingerprint. The options are folded separately, so that a change of an option still
-                # changes the digest. The weaker fingerprint below is then computed for a dispatcher's Python
-                # function, and a @vectorize function, which has no py_func, is pickled.
-                h.update(repr(sorted((getattr(fn, "targetoptions", None) or {}).items())).encode("utf-8"))
+            # The body has no fingerprint. The options are folded separately, so that a change of an option still
+            # changes the digest. The weaker fingerprint below is then computed for a dispatcher's Python function,
+            # and a @vectorize function, which has no py_func, is pickled.
+            h.update(repr(sorted((getattr(fn, "targetoptions", None) or {}).items())).encode("utf-8"))
         py = getattr(fn, "py_func", fn)
         if isinstance(py, FunctionType):
-            try:
-                h.update(_fingerprint_function(py, set(), fold_named=True).encode("utf-8"))
-            except (_Unfingerprintable, RecursionError):
-                # A value without a fingerprint makes _fingerprint_function raise. The best-effort fingerprint still
-                # folds the constants, closure values, defaults and globals that have one, and it sorts the elements
-                # of sets, so the result does not depend on PYTHONHASHSEED. It puts the name of the type in place of
-                # each value without a fingerprint, and it omits the module attributes that the function reads.
-                # An edit to such a value, or to such an attribute, therefore leaves the digest unchanged, and a
-                # SQLite registration named after the digest loads the code compiled before the edit.
-                h.update(_fingerprint_function_best_effort(py).encode("utf-8"))
+            text = _fingerprint_or_none(_fingerprint_function, py)
+            if text is None:
+                # The function reads a value without a fingerprint as a global, a closure value or a default. The
+                # best-effort fingerprint still folds the constants, closure values, defaults and globals that have
+                # one. It sorts the elements of sets, so the result does not depend on PYTHONHASHSEED. It puts the
+                # name of the type in place of each value without a fingerprint, and it omits the module attributes
+                # that the function reads. An edit to such a value, or to such an attribute, therefore leaves the
+                # digest unchanged. A SQLite registration named after the digest then loads the code compiled before
+                # the edit.
+                text = _fingerprint_function_best_effort(py)
+            h.update(text.encode("utf-8"))
             continue
         # A callable without code, such as a functools.partial, a builtin or a callable object, is hashed as a
         # cloudpickle of the object, which holds its bound state. cloudpickle assigns a random uuid4 identifier to a
