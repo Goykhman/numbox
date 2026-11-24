@@ -60,18 +60,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A `cache=True` function that reads a `cres` function or the `.as_func` of a `@proxy` function from a module-level
   variable compiles again after an edit to that function. numbox discards the stale cache entry with a
   `StaleProxyCacheWarning`. Before, the caller continued to run the code from before the edit, without a warning.
-- The code that numbox generates and caches for a struct method, a `compile_kernel` formula, a work-builder derive or a
-  SQLite registration compiles again when a function that the user's code calls through a module attribute changes, as
-  in `helpers.step(x)`. That holds after an edit to a Python function such as a `@register_jitable` helper. It also
-  holds when the attribute holds another value than in the run that cached the code, such as `numpy.cos` in place of
-  `numpy.sin`. The value can be a function, a module, a numba type, a NumPy dtype object, or a class of NumPy, numba,
-  numbox or the standard library. Before, numbox loaded the cached code in these cases. The utils page lists what the
-  fingerprint still leaves out.
+- The code that numbox generates and caches for a struct method, a `compile_kernel` formula or a work-builder derive
+  compiles again when a function that the user's code calls through a module attribute changes, as in `helpers.step(x)`.
+  That holds after an edit to a Python function such as a `@register_jitable` helper. It also holds when the attribute
+  holds another value than in the run that cached the code, such as `numpy.cos` in place of `numpy.sin`. The value can
+  be a function, a module, a numba type, a NumPy dtype object, or a class of NumPy, numba, numbox or the standard
+  library. Before, numbox loaded the cached code in these cases. The utils page lists what the fingerprint still leaves
+  out.
 - The same generated code also compiles again after each of three more changes. The first is a change to an attribute of
   a module that the user's function takes as a default argument. The second is a change to an attribute of a module that
   a struct method reaches only through `ns`. The third is a change to the `locals`, the declared signatures or the
   declared `@vectorize` loops of a jitted function that the user's function calls. Before, numbox loaded the cached code
   in these cases.
+- The code of a SQLite registration compiles again after a change from the two entries above if the changed value is
+  reached by a callback for which `digest` computes a full fingerprint. `digest` computes a weaker fingerprint for a
+  callback that reads a value without a fingerprint. A callback that reads its arguments in the usual way, with
+  `_cast_int_to_void_p` as a global, is such a callback. The weaker fingerprint covers none of these changes, as before.
+  A registration therefore still loads its cached code after a change that only such callbacks reach. The utils page
+  describes this in the section "If a SQLite function keeps returning old results".
 
 ## [0.7.9] - 2026-11-05
 
