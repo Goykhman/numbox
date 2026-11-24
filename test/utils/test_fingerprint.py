@@ -15,11 +15,14 @@ declared with. The tests state each rule, and that the text without ``fold_named
 The last tests cover ``_opaque_values_match`` and the ``@proxy`` aliases that a collision retires. The tests that need
 a C math library skip if ``open_libm`` finds none.
 """
+import abc
 import cmath
+import collections
 import enum
 import heapq
 import importlib.util
 import math
+import random
 import sys
 import textwrap
 import types
@@ -420,6 +423,9 @@ def test_named_value_text_names_a_function_or_a_class_that_numba_compiles_from_i
     # function.
     assert _named_value_text(np.sum) == "named(numpy.sum)"
     assert _named_value_text(heapq.nlargest) == "named(heapq.nlargest)"
+    # collections is a package of the standard library, and abc is frozen into the interpreter from Python 3.11 on.
+    assert _named_value_text(collections.namedtuple) == "named(collections.namedtuple)"
+    assert _named_value_text(abc.abstractmethod) == "named(abc.abstractmethod)"
     assert _named_value_text(np.float32) == "class(numpy.float32)"
     assert _named_value_text(float) == "class(builtins.float)"
     assert _named_value_text(lowlevel.array_data_p) == "named(numbox.utils.lowlevel.array_data_p)"
@@ -476,6 +482,81 @@ def test_a_module_attribute_that_holds_a_function_or_a_class_of_numpy_is_folded_
     assert "module_attrs" not in _fingerprint_function(g, set(), fold_named=True)
 
 
+def test_named_value_text_names_a_function_that_is_a_method_of_a_generator_of_its_module():
+    # numpy.random.normal and random.gauss are methods bound to a generator object that the module creates.
+    # random.random is a builtin method of that object and records no module. The module of the object's class holds
+    # each of them under the function's own name. A method of a generator that the user created is not the object
+    # that the module holds, so it has no name.
+    assert _named_value_text(np.random.normal) in (
+        "named(numpy.random.mtrand.normal)", "builtin(numpy.random.mtrand.normal)")
+    assert _named_value_text(random.gauss) == "named(random.gauss)"
+    assert _named_value_text(random.random) == "builtin(random.random)"
+    assert _named_value_text(np.random.RandomState(1).normal) is None
+    assert _named_value_text(random.Random(1).gauss) is None
+
+    # The lookup reads the module of the object's class only if the metaclass is type.
+    class Meta(type):
+        @property
+        def __module__(cls):
+            raise AssertionError("the lookup ran code of a metaclass")
+
+    class Odd(metaclass=Meta):
+        def method(self):
+            return None
+
+    assert _named_value_text(Odd().method) is None
+
+
+def test_a_module_attribute_that_holds_a_function_of_numpy_random_or_of_random_is_folded_by_its_name():
+    # helpers.draw can hold numpy.random.normal in one process and numpy.random.uniform in the next. The code of f
+    # names only the attribute, so the fingerprint folds the name of the function.
+    helpers = types.ModuleType("helpers")
+    f = _make("""
+        def f(x):
+            return helpers.draw(x, x)
+    """, helpers=helpers)
+
+    texts = []
+    for draw in (np.random.normal, np.random.uniform, random.gauss, random.uniform):
+        helpers.draw = draw
+        texts.append(_fingerprint_function(f, set(), fold_named=True))
+    assert len(set(texts)) == 4
+    assert "helpers.draw=named(random.gauss)" in texts[2]
+
+    # numpy.random and random hold their own functions in the same way in every process.
+    g = _make("""
+        def f(x):
+            return np.random.normal(x, x) + random.gauss(x, x) + random.random()
+    """, np=np, random=random)
+    assert "module_attrs" not in _fingerprint_function(g, set(), fold_named=True)
+
+
+def test_a_module_of_the_user_with_the_name_of_a_standard_library_module_is_folded_by_its_content(
+        tmp_path, monkeypatch):
+    # A user's module named colorsys replaces the standard library's module in sys.modules. Its file is not in the
+    # standard-library directory. numba compiles its functions from their own content, so the fingerprint folds that
+    # content, and it folds a numba type that the module holds.
+    texts = []
+    for factor in ("2.0", "3.0"):
+        source = tmp_path / factor / "colorsys.py"
+        source.parent.mkdir()
+        source.write_text(
+            f"from numba import float32\n\nT = float32\n\n\ndef step(x):\n    return {factor} * x\n", encoding="utf-8")
+        spec = importlib.util.spec_from_file_location("colorsys", source)
+        mine = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mine)
+        monkeypatch.setitem(sys.modules, "colorsys", mine)
+        assert mine.step.__module__ == "colorsys" and _named_value_text(mine.step) is None
+        f = _make("""
+            def f(x):
+                return colorsys.step(colorsys.T(x))
+        """, colorsys=mine)
+        text = _fingerprint_function(f, set(), fold_named=True)
+        assert "colorsys.step=function(" in text and "colorsys.T=" in text
+        texts.append(text)
+    assert texts[0] != texts[1]
+
+
 def test_a_module_attribute_that_holds_a_function_of_the_user_is_folded_by_its_content():
     # numba compiles a @register_jitable function, a cres function, an ExternalFunction and a ctypes function pointer
     # from the value's own content. helpers.step can hold another one in the next process, or the same function after
@@ -521,7 +602,7 @@ def test_a_helper_without_a_fingerprint_behind_a_module_attribute_leaves_its_cal
         def f(x):
             return helpers.step(x)
     """, helpers=helpers)
-    # A @guvectorize function and a @stencil function never have a fingerprint, whatever they read.
+    # A @guvectorize function and a @stencil function never have a fingerprint, regardless of what they read.
     gufunc = guvectorize("(n)->(n)")(_make("def f(a, out):\n    out[:] = 2.0 * a\n"))
     window = stencil(_make("def f(a):\n    return 2.0 * a[0]\n"))
     for step in (opaque, njit(opaque), vectorize(opaque), gufunc, window):

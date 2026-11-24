@@ -24,9 +24,13 @@ gives the reason.
 import ctypes
 import dis
 import hashlib
+import os
 import sys
+import sysconfig
 
-from types import BuiltinFunctionType, CodeType, FunctionType, ModuleType
+from functools import lru_cache
+from importlib.machinery import ModuleSpec
+from types import BuiltinFunctionType, CodeType, FunctionType, MethodType, ModuleType
 from typing import Any, Optional, Sequence
 
 import numpy as np
@@ -186,32 +190,102 @@ def _canon_value(value: Any, seen: set[int], fold_named: bool = False) -> str:
 # function. An earlier NumPy defines it as a plain Python function, and this name is then the function type.
 _ARRAY_FUNCTION_TYPE = type(np.sum)
 
-# The top-level packages whose functions and classes numba compiles from an implementation that numba or numbox
-# supplies. numba does not compile the value's own body. numba discards a cache index that another version of numba
-# wrote. numbox's version is part of the key of every entry that numbox caches. An entry that one implementation
-# compiled is therefore never loaded for another. sys.stdlib_module_names lists the standard library without its
-# test packages and without "__main__".
-_SUPPLIED_PACKAGES = frozenset({"numpy", "numba", "numbox"}) | sys.stdlib_module_names
+# These are the top-level packages whose functions and classes numba compiles from an implementation that numba or
+# numbox supplies. numba does not compile the value's own body. numba discards a cache index that another version of
+# numba wrote. numbox's version is part of the key of every entry that numbox caches. An entry that one implementation
+# compiled is therefore never loaded for another. The standard library is another such package, and
+# _in_supplied_package recognizes it by its location.
+_SUPPLIED_PACKAGES = frozenset({"numpy", "numba", "numbox"})
+
+
+def _standard_library_folders() -> frozenset[str]:
+    """Return the directories that hold the top-level modules of the interpreter's standard library."""
+    folders = set()
+    for key in ("stdlib", "platstdlib"):
+        root = sysconfig.get_path(key)
+        if root:
+            root = os.path.normcase(os.path.realpath(root))
+            folders.update((root, os.path.join(root, "lib-dynload")))
+    return frozenset(folders)
+
+
+_STANDARD_LIBRARY_FOLDERS = _standard_library_folders()
+
+
+@lru_cache(maxsize=None)
+def _is_standard_library_file(origin: str, top: str) -> bool:
+    """Return whether ``origin`` is the file of the standard library's top-level module or package named ``top``."""
+    folder, file_name = os.path.split(os.path.normcase(os.path.realpath(origin)))
+    if file_name.partition(".")[0] == "__init__" and os.path.basename(folder) == os.path.normcase(top):
+        folder = os.path.dirname(folder)
+    return folder in _STANDARD_LIBRARY_FOLDERS
+
+
+def _in_supplied_package(module_name: str) -> bool:
+    """Return whether the module named ``module_name`` belongs to NumPy, numba, numbox or the standard library.
+
+    Only the first part of the name is tested. It names the standard library if ``sys.stdlib_module_names`` lists it
+    and the loaded module of that name is built in, frozen, or a file in the interpreter's standard-library directory.
+    ``sys.stdlib_module_names`` lists the standard library without its test packages and without ``__main__``.
+
+    The name alone is not enough, because a user's module can have the name of a standard-library module, such as
+    ``code`` or ``statistics``. Python then loads the user's module under that name. Its file is in another directory,
+    so it does not belong to the standard library, and numbox folds its functions by their content. A standard-library
+    module that Python loads from another place does not belong either, as in an application that PyInstaller bundled.
+    Its Python functions are then folded by their content as well.
+    """
+    top = module_name.partition(".")[0]
+    if top in _SUPPLIED_PACKAGES:
+        return True
+    if top not in sys.stdlib_module_names:
+        return False
+    module = sys.modules.get(top)
+    spec = vars(module).get("__spec__") if type(module) is ModuleType else None
+    origin = spec.origin if type(spec) is ModuleSpec else None
+    if type(origin) is not str:
+        return False
+    return origin in ("built-in", "frozen") or _is_standard_library_file(origin, top)
+
+
+def _home_of(described: Any) -> Optional[str]:
+    """Return the name of the module that is expected to hold ``described`` under the value's own name, or None.
+
+    For a function or a class, that is its ``__module__``. A function of ``numpy.random`` or of ``random``, such as
+    ``numpy.random.normal`` or ``random.gauss``, is a method bound to a generator object that the module creates. For
+    such a method, that is the module of the class of that object, which is ``numpy.random.mtrand`` or ``random``. The
+    same rule applies to a bound builtin method, which records no module itself. The class must have the metaclass
+    ``type``, so the lookup runs no code of another metaclass. A ``__module__`` that is not exactly a ``str`` gives
+    None.
+
+    The function does not test that the module holds the value. ``_named_value_text`` tests that.
+    """
+    kind = type(described)
+    home = None if kind is MethodType else getattr(described, "__module__", None)
+    if home is None and (kind is MethodType or kind is BuiltinFunctionType):
+        owner_class = type(described.__self__)
+        if type(owner_class) is type:
+            home = owner_class.__module__
+    return home if type(home) is str else None
 
 
 def _is_supplied(value: Any) -> bool:
-    """Return whether ``value`` is a function or a class of a package in ``_SUPPLIED_PACKAGES``.
+    """Return whether ``value`` is a function or a class of NumPy, numba, numbox or the standard library.
 
-    ``value`` qualifies if it is a plain Python function, a NumPy function that is not a ufunc, or a class whose type is
-    ``type``, and if the first part of its ``__module__`` names one of those packages. ``numpy.sum``, ``numpy.ones``,
-    ``numpy.float32``, ``numba.carray``, ``heapq.nlargest`` and ``float`` qualify. numba compiles a call of such a value
-    from an implementation that numba or numbox supplies, so the value's own body does not affect the compiled code.
-    A function or a class of any other package does not qualify, and neither does a class with another metaclass, such
-    as an enum. A user's module that has the name of a standard-library module is treated as that module.
+    ``value`` qualifies if it meets two conditions. It is a plain Python function, a method bound to an object, a
+    NumPy function that is not a ufunc, or a class whose type is ``type``. ``_in_supplied_package`` accepts the module
+    that ``_home_of`` returns for it. ``numpy.sum``, ``numpy.ones``, ``numpy.float32``, ``numba.carray``,
+    ``heapq.nlargest``, ``random.gauss`` and ``float`` qualify. numba compiles a call of such a value from an
+    implementation that numba or numbox supplies, so the value's own body does not affect the compiled code. A
+    function or a class of any other package does not qualify, and neither does a class with another metaclass, such
+    as an enum.
 
-    The tests are on the exact type, as in ``_named_value_text``, and a ``__module__`` that is not exactly a ``str``
-    does not qualify.
+    The tests are on the exact type, as in ``_named_value_text``.
     """
     kind = type(value)
-    if kind is not FunctionType and kind is not _ARRAY_FUNCTION_TYPE and kind is not type:
+    if kind is not FunctionType and kind is not MethodType and kind is not _ARRAY_FUNCTION_TYPE and kind is not type:
         return False
-    home = getattr(value, "__module__", None)
-    return type(home) is str and home.partition(".")[0] in _SUPPLIED_PACKAGES
+    home = _home_of(value)
+    return home is not None and _in_supplied_package(home)
 
 
 def _named_value_text(value: Any) -> Optional[str]:
@@ -219,15 +293,15 @@ def _named_value_text(value: Any) -> Optional[str]:
 
     numba compiles a call of a NumPy ufunc, a builtin function, or a function or class that ``_is_supplied`` accepts by
     the value's identity, and the module and the name identify the value in every process. A ufunc has a name if NumPy
-    holds it under the ufunc's own name, such as ``numpy.sin``. Any other value has one if the module that its
-    ``__module__`` names holds it under the value's own name, such as ``math.sqrt``, ``len``, ``numpy.sum`` or
-    ``numpy.float32``. The lookup reads the module's ``__dict__`` and compares by identity. A ufunc that the user built,
-    a method of an object, which records no module, and a value that was replaced in its module therefore have no name,
-    and neither has a value of any other type. The tests are on the exact type, so the lookup reads no ``__name__``
-    from an object that only reports one of these types as its ``__class__``, and a ``__module__`` of a subclass of
-    ``str`` is not hashed. The lookup likewise accepts only an entry of ``sys.modules`` whose type is exactly the module
-    type. A module that ``importlib.util.LazyLoader`` has not loaded yet has another type, and reading its ``__dict__``
-    would run the module.
+    holds it under the ufunc's own name, such as ``numpy.sin``. Any other value has one if the module that
+    ``_home_of`` returns for it holds it under the value's own name, such as ``math.sqrt``, ``len``, ``numpy.sum``,
+    ``numpy.float32`` or ``numpy.random.normal``. The lookup reads the module's ``__dict__`` and compares by identity.
+    A ufunc that the user built, a method of an object that the user created, and a value that was replaced in its
+    module therefore have no name, and neither has a value of any other type. The tests are on the exact type, so the
+    lookup reads no ``__name__`` from an object that only reports one of these types as its ``__class__``, and a
+    ``__module__`` of a subclass of ``str`` is not hashed. The lookup likewise accepts only an entry of
+    ``sys.modules`` whose type is exactly the module type. A module that ``importlib.util.LazyLoader`` has not loaded
+    yet has another type, and reading its ``__dict__`` would run the module.
 
     A numba dispatcher is named after its Python function, by the same rule, if ``_is_supplied`` accepts that function
     and the module holds the dispatcher under the function's name, as ``numbox.utils.lowlevel`` holds
@@ -244,8 +318,8 @@ def _named_value_text(value: Any) -> Optional[str]:
         tag = "class" if type(described) is type else "named"
     else:
         return None
-    home, name = described.__module__, getattr(described, "__name__", None)
-    if type(home) is not str or type(name) is not str:
+    home, name = _home_of(described), getattr(described, "__name__", None)
+    if home is None or type(name) is not str:
         return None
     module = sys.modules.get(home)
     if type(module) is ModuleType and vars(module).get(name) is value:
@@ -268,8 +342,8 @@ def _is_held_by_its_own_package(holder: Any, value: Any) -> bool:
     elif type(value) is np.ufunc:
         home = "numpy"
     else:
-        home = (value.py_func if isinstance(value, Dispatcher) else value).__module__
-    return type(holder) is str and holder.partition(".")[0] == home.partition(".")[0]
+        home = _home_of(value.py_func if isinstance(value, Dispatcher) else value)
+    return type(holder) is str and home is not None and holder.partition(".")[0] == home.partition(".")[0]
 
 
 def _process_stable(described: Any) -> Any:
@@ -478,8 +552,8 @@ def _fingerprint_module_attrs(referenced: set[str], namespace: dict, seen: set[i
     The second kind is a value that numba compiles from an implementation of its own: a NumPy ufunc, a builtin
     function, and a function or a class that ``_is_supplied`` accepts, such as ``numpy.sum`` or ``numpy.float32``. It
     is folded by the name that ``_named_value_text`` gives it, as ``helpers.op=ufunc(numpy.sin)``. ``helpers.op`` can
-    hold ``numpy.sin`` in one process and ``numpy.cos`` in the next, and without the name both give one text. In the
-    same way, the function folds the name of a module that an attribute holds, which gives
+    hold ``numpy.sin`` in one process and ``numpy.cos`` in the next, and without the name both have the same text. In
+    the same way, the function folds the name of a module that an attribute holds, which gives
     ``helpers.lib=module(math)``. An attribute of a module in the value's own top-level package, such as ``numpy.add``
     or ``numpy.strings.add``, is not folded. It is the same in every process, and folding it would make the text
     depend on which submodules are loaded. A submodule that its own package holds, such as ``numpy.linalg`` or
@@ -499,10 +573,10 @@ def _fingerprint_module_attrs(referenced: set[str], namespace: dict, seen: set[i
     function has no fingerprint. Neither case loads stale code.
 
     Some values are left out with ``fold_named`` too. These are an ``@intrinsic``, a class that ``_is_supplied`` does
-    not accept, such as an enum or a jitclass, and a function without a name, such as a method of an object. Data
-    without a fingerprint, such as a tuple that holds a numba type, is left out as well, and so is a value of any
-    kind that this docstring does not name. A change of such a value leaves the fingerprint unchanged. A fingerprint
-    also never holds the implementation of an ``@overload``.
+    not accept, such as an enum or a jitclass, and a function without a name, such as a method of an object that the
+    user created. Data without a fingerprint, such as a tuple that holds a numba type, is left out as well, and so is
+    a value of any kind that this docstring does not name. A change of such a value leaves the fingerprint unchanged.
+    A fingerprint also never holds the implementation of an ``@overload``.
 
     Data can hold a function, as a tuple of dispatchers does. Such data can have a text without ``fold_named`` and
     none with it, because one of its functions calls a helper without a fingerprint through a module. The function
@@ -510,10 +584,10 @@ def _fingerprint_module_attrs(referenced: set[str], namespace: dict, seen: set[i
 
     ``compile_kernel``, ``make_structref``, the work builder and ``digest`` pass ``fold_named``, because they hash the
     text only into the name of cached code. The work builder also names the wrapper that it generates for a derive
-    after that text, so the alias of such a wrapper follows it. ``@proxy`` and ``cres`` hash the text of a user's
-    function into an alias and do not pass ``fold_named``. Two bodies that differ only in such an attribute then
-    compute one alias, and the rules for a shared alias apply to them. numbox reports a collision if the bodies also
-    differ in a value that it can compare, and it does not load a cached caller that holds either function as a
+    after that text, so the alias of such a wrapper changes with that text. ``@proxy`` and ``cres`` hash the text of a
+    user's function into an alias and do not pass ``fold_named``. Two bodies that differ only in such an attribute
+    then compute one alias, and the rules for a shared alias apply to them. numbox reports a collision if the bodies
+    also differ in a value that it can compare, and it does not load a cached caller that holds either function as a
     constant. If each body had an alias of its own, those rules would not apply. numba would then load code for one
     body that it compiled for the other, because its key for that code holds neither the attribute nor the alias.
     """
@@ -572,7 +646,7 @@ def _fingerprint_module_attrs(referenced: set[str], namespace: dict, seen: set[i
                 # numba compiles in the type that such a value stands for. A module of NumPy, numba, numbox or the
                 # standard library holds the same type under a name in every process, so the walk folds only a type
                 # that another module holds.
-                if type(holder) is not str or holder.partition(".")[0] not in _SUPPLIED_PACKAGES:
+                if type(holder) is not str or not _in_supplied_package(holder):
                     attrs.append(f"{prefix}.{attr}={_held_type_text(value)}")
                 continue
             if not (value is None or isinstance(value, _FROZEN_DATA_TYPES)

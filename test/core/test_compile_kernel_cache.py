@@ -335,6 +335,8 @@ _SWAP_KINDS = [
     "the declared signature of a dispatcher", "the declared signature of a dispatcher formula",
     "the declared loop of a @vectorize function", "the declared loop of a @vectorize formula",
     "an @njit function in a tuple that calls a function without a fingerprint",
+    "a function of numpy.random",
+    "a @register_jitable function in a module with the name of a standard-library module, edited",
 ]
 
 
@@ -349,6 +351,22 @@ def swap_results(tmp_path_factory):
     compiled kernels return.
     """
     tmp_path = tmp_path_factory.mktemp("swap")
+    # The probe's directory is first on the probe's sys.path, so this module replaces the standard library's colorsys
+    # there.
+    (tmp_path / "colorsys.py").write_text(textwrap.dedent('''
+        import os
+
+        from numba.extending import register_jitable
+
+        if os.environ["RUN"] != "first":
+            @register_jitable
+            def shade(x):
+                return 3.0 * x
+        else:
+            @register_jitable
+            def shade(x):
+                return 2.0 * x
+    '''), encoding="utf-8")
     probe = tmp_path / "swap_probe.py"
     probe.write_text(textwrap.dedent('''
         import json
@@ -357,6 +375,7 @@ def swap_results(tmp_path_factory):
         import types
         from math import sqrt
 
+        import colorsys
         import numpy as np
         from numba import float32, float64, njit, vectorize
         from numba.extending import register_jitable
@@ -411,6 +430,8 @@ def swap_results(tmp_path_factory):
         helpers.cast = float32 if LATER else float64
         helpers.dtype = np.dtype("float32") if LATER else np.dtype("float64")
         helpers.SCALE = 3.0 if LATER else 2.0
+        # uniform(y, y) is exactly y, and normal(y, y) is a random draw.
+        helpers.draw = np.random.uniform if LATER else np.random.normal
 
 
         @njit(locals={"t": float32 if LATER else float64})
@@ -454,6 +475,8 @@ def swap_results(tmp_path_factory):
             lambda y: loop(y) * 1.0,
             loop,
             lambda y: ck_swap_probe.table[0](y),
+            lambda y: ck_swap_probe.draw(y, y),
+            lambda y: colorsys.shade(y),
         ]
         results = []
         for formula in formulas:
