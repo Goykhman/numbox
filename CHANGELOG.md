@@ -78,6 +78,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `_cast_int_to_void_p` as a global, is such a callback. The weaker fingerprint covers none of these changes, as before.
   A registration therefore still loads its cached code after a change that only such callbacks reach. The utils page
   describes this in the section "If a SQLite function keeps returning old results".
+- Two cached `@proxy` functions that one factory function makes each run their own body when called from Python or
+  passed to a jitted function as an argument. Before, the second function loaded the cache entry of the first
+  function's generated wrapper, and such a call of the second function ran the first function's body, without a
+  warning. A jitted function that called the second function by name ran the right body. numbox now compiles the
+  wrapper of a `@proxy` function that is defined inside another function in every process, and caches only its body.
 
 ## [0.7.9] - 2026-11-05
 

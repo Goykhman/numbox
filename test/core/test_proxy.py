@@ -358,6 +358,109 @@ def test_proxy_factory_over_c_symbols_dispatch_distinctly():
     assert abs(call_sin(1.0) - math.sin(1.0)) < 1e-12, "jitted caller of sin reached the wrong body"
 
 
+def test_cached_factory_functions_each_run_their_own_body(tmp_path):
+    """Cached proxied functions that one factory makes each run their own body, in a cold and in a warm process.
+
+    The wrappers that ``@proxy`` generates for the products of one factory share a module, a qualified name, a first
+    line and their bytecode, so numba would keep them in one index file under one key, and the second product would load
+    the first one's wrapper. numbox therefore compiles such a wrapper in every process, under a qualified name that
+    contains the product's own. The module also defines a cached ``@proxy`` function of the same name at module level,
+    and the warm process makes a third product. A wrapper loaded from the cache keeps the symbol name it received in the
+    cold process, and a wrapper compiled under the same qualified name could receive that name too, by which numba
+    passes a function as a first-class value. Each function is called from Python, from a jitted function that takes it
+    as a dispatcher and from one that takes it as a first-class function. The bodies load from the cache in the warm
+    process, the module-level wrapper is cached, and no wrapper of a product is saved.
+    """
+    script = tmp_path / "factory_products.py"
+    script.write_text(textwrap.dedent('''
+        """Cached @proxy functions from one factory.
+
+        The docstring moves the decorator below line 8.
+        """
+        import os
+
+        from numba import njit, types
+        from numba.core.types import float64
+
+        from numbox.core.cache_key import explain_cache_key
+        from numbox.core.proxy.proxy import proxy
+
+
+        @proxy(float64(float64), jit_options={"cache": True})
+        def body(x):
+            return x + 100.0
+
+
+        def make(scale):
+            @proxy(float64(float64), jit_options={"cache": True})
+            def body(x):
+                return x * scale
+            return body
+
+
+        products =[make(float(k)) for k in os.environ["FACTORS"].split(",")]
+
+
+        @njit
+        def apply(f, x):
+            return f(x)
+
+
+        @njit(float64(types.FunctionType(float64(float64)), float64))
+        def apply_value(f, x):
+            return f(x)
+
+
+        print("PY", *[p(1.0) for p in [body, *products]])
+        print("DISPATCHER", *[apply(p, 1.0) for p in [body, *products]])
+        print("VALUE", *[apply_value(p, 1.0) for p in [body, *products]])
+        print("BODY_HITS", sum(sum(p.as_func._numbox_dispatcher.stats.cache_hits.values()) for p in products))
+        try:
+            explain_cache_key(products[0])
+            print("EXPLAIN_WRAPPER returned")
+        except ValueError:
+            print("EXPLAIN_WRAPPER ValueError")
+        print("EXPLAIN_BODY", *sorted(explain_cache_key(products[0].as_func)))
+    '''), encoding="utf-8")
+    cache = tmp_path / "nbcache"
+
+    def run(factors):
+        env = dict(os.environ, NUMBA_CACHE_DIR=str(cache), PYTHONPATH=os.pathsep.join(sys.path), FACTORS=factors)
+        done = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, env=env, timeout=300)
+        assert done.returncode == 0, done.stderr
+        return done.stdout.splitlines()
+
+    explained = ["EXPLAIN_WRAPPER ValueError", "EXPLAIN_BODY flags numbox settings"]
+    calls = ["PY", "DISPATCHER", "VALUE"]
+    assert run("2,3") == [f"{call} 101.0 2.0 3.0" for call in calls] + ["BODY_HITS 0", *explained]
+    assert run("2,3,4") == [f"{call} 101.0 2.0 3.0 4.0" for call in calls] + ["BODY_HITS 2", *explained]
+    assert list(cache.rglob("factory_products.make.locals.body-*.nbi")), "the bodies were not cached"
+    # The module-level function's wrapper is cached, and no wrapper of a factory product is.
+    lines = script.read_text(encoding="utf-8").splitlines()
+    module_level = 1 + lines.index('@proxy(float64(float64), jit_options={"cache": True})')
+    wrappers = sorted(p.name.partition(".py")[0] for p in cache.rglob("factory_products*__body-*.nbi"))
+    assert wrappers == [f"factory_products.__body-{module_level}"], f"wrapper index files: {wrappers}"
+
+
+def test_a_nested_function_with_a_reassigned_qualname_gets_an_uncached_wrapper():
+    """numbox reads the nesting of a function from its code, so a product whose ``__qualname__`` was reassigned counts.
+
+    The factory sets each product's ``__qualname__`` to a name without ``<locals>`` before it decorates the product.
+    The two wrappers still share a module, a name, a first line and their bytecode. If numbox read the nesting from the
+    qualified name, it would cache both wrappers under one key, and the second product would run the first body.
+    """
+    def make(scale):
+        def body(x):
+            return x * scale
+        body.__qualname__ = f"scaled_by_{int(scale)}"
+        return proxy(float64(float64), jit_options={"cache": True})(body)
+
+    double, triple = make(2.0), make(3.0)
+    assert (double(1.0), triple(1.0)) == (2.0, 3.0)
+    assert type(triple._cache).__name__ == "NullCache", "the wrapper of a nested function was cached"
+    assert triple.py_func.__qualname__ == "scaled_by_3.<proxy>.__body"
+
+
 def test_proxy_redefinition_keeps_callers_on_their_own_body():
     """A redefinition with a different body does not change what a caller of the first dispatcher runs.
 

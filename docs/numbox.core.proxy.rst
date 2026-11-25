@@ -63,6 +63,14 @@ disables it. It also disables caching when numba can write no cache for numbox's
 not cached either (:doc:`numbox.core.configurations`). Under ``NUMBA_OPT=0``, a debugging setting, numba does not cache
 a caller of a proxied function and warns that the caller uses dynamic globals; the caller then compiles on every run.
 
+A function that you decorate inside another function, such as a factory that makes one proxied function for each
+value it receives, has its body cached but its wrapper compiled in every process. numba's cache cannot distinguish the
+wrappers of two such functions, because they share a name, a line and their code, and differ only in the body that
+they call. The wrapper is small and compiles quickly, but the compile time grows with the number of such functions
+that a process makes.
+:func:`~numbox.core.cache_key.explain_cache_key` raises a ``ValueError`` for the dispatcher of such a function; pass
+its ``.as_func`` to see the key of its body.
+
 .. _proxy_where_the_function_may_start:
 
 Where the function may start
@@ -71,10 +79,11 @@ Where the function may start
 The function's first decorator line must be on line 8 of its file or later. That line is the ``@proxy`` line, or the
 topmost decorator when others are stacked above it, because Python records the line of a decorated function as the line
 of its first decorator. numbox compiles the generated wrapper as though it were defined at that line of your file, so
-that numba caches the wrapper with your module and detects your edits. The wrapper's own source has seven lines of
-helper code above its decorator. That decorator therefore cannot be above line 8. A function nearer the top is refused
-at import with a ``ValueError`` that says where to move it. In the example, the module docstring moves the ``@proxy``
-line to line 8 or later.
+that numba caches the wrapper with your module and detects your edits. The wrapper of a function defined inside another
+function is not cached, as described above, and is also compiled as though it were defined at that line. The wrapper's
+own source has seven lines of helper code above its decorator. That decorator therefore cannot be above line 8. A
+function nearer the top is refused at import with a ``ValueError`` that says where to move it. In the example, the
+module docstring moves the ``@proxy`` line to line 8 or later.
 
 Other decorators may be stacked above ``@proxy``. A decorator between ``@proxy`` and ``def`` runs first, so numba
 compiles whatever that decorator returns in place of your function. Put a decorator there only if it returns the
@@ -266,8 +275,8 @@ After you upgrade numbox
 ------------------------
 
 numbox's version is part of the cache key of every proxied function, as :doc:`numbox.core.cache_key` explains. The first
-run after an upgrade therefore compiles each proxied body and its wrapper once more and caches them again. The alias
-does not include the version, so cached callers load as before. A release that changes the code of one of numbox's
+run after an upgrade therefore compiles each proxied body and each cached wrapper once more and caches them again. The
+alias does not include the version, so cached callers load as before. A release that changes the code of one of numbox's
 bindings renames that binding's alias. A release that changes how aliases are computed renames every alias, including
 the aliases of your own proxied functions. numbox repairs each affected cached caller in the first run after such a
 release and issues one warning of the kind shown above per caller. The recompilation and the repairs are one-time costs.
