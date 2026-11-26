@@ -1,0 +1,230 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.sqlite.stmt &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/sqlite/stmt.html" />
+      <script src="../../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.sqlite.stmt</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.sqlite.stmt</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Bindings that prepare, step, reset and finalize a SQLite statement.</span>
+
+<span class="sd">The module binds ``sqlite3_prepare_v2``, ``sqlite3_step``, ``sqlite3_reset`` and ``sqlite3_finalize``, and</span>
+<span class="sd">``sqlite3_sql``, ``sqlite3_expanded_sql`` and ``sqlite3_stmt_busy``, which report a statement's text and state.</span>
+<span class="sd">``sqlite3_expanded_sql`` returns a ``char *`` that the caller must free with ``sqlite3_free``, which</span>
+<span class="sd">:mod:`~numbox.core.bindings.sqlite.exec` binds.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.call</span><span class="w"> </span><span class="kn">import</span> <span class="n">_call_lib_func</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.signatures</span><span class="w"> </span><span class="kn">import</span> <span class="n">signatures</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_lib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">"sqlite3_prepare_v2"</span><span class="p">,</span> <span class="s2">"sqlite3_finalize"</span><span class="p">,</span> <span class="s2">"sqlite3_reset"</span><span class="p">,</span> <span class="s2">"sqlite3_step"</span><span class="p">,</span>
+    <span class="s2">"sqlite3_sql"</span><span class="p">,</span> <span class="s2">"sqlite3_expanded_sql"</span><span class="p">,</span> <span class="s2">"sqlite3_stmt_busy"</span><span class="p">,</span>
+<span class="p">]</span>
+
+
+<span class="n">load_lib</span><span class="p">(</span><span class="s2">"sqlite3"</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="sqlite3_prepare_v2">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.stmt.sqlite3_prepare_v2">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_prepare_v2"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_prepare_v2</span><span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">sql_p</span><span class="p">,</span> <span class="n">n_byte</span><span class="p">,</span> <span class="n">stmt_pp</span><span class="p">,</span> <span class="n">tail_pp</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Compile the first SQL statement of the text at ``sql_p`` on ``db_p`` and write its handle to ``stmt_pp``.</span>
+
+<span class="sd">    C reference: `sqlite3_prepare_v2 &lt;https://sqlite.org/c3ref/prepare.html&gt;`_.</span>
+
+<span class="sd">    ``sql_p`` is the address of UTF-8 SQL text, and ``n_byte`` its length in bytes, or -1 to read up to the first NUL.</span>
+<span class="sd">    ``stmt_pp`` is the address of an ``intp`` that receives the statement's handle, or 0 after an error or for text</span>
+<span class="sd">    that holds no statement. Unless ``tail_pp`` is 0, it receives the address of the text after the first statement.</span>
+<span class="sd">    Returns ``SQLITE_OK`` or an error code. The caller finalizes the statement with :func:`sqlite3_finalize`.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_prepare_v2"</span><span class="p">,</span> <span class="p">(</span><span class="n">db_p</span><span class="p">,</span> <span class="n">sql_p</span><span class="p">,</span> <span class="n">n_byte</span><span class="p">,</span> <span class="n">stmt_pp</span><span class="p">,</span> <span class="n">tail_pp</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_finalize">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.stmt.sqlite3_finalize">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_finalize"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_finalize</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Delete the prepared statement ``stmt_p``, and return ``SQLITE_OK`` or the error code of its last failed step.</span>
+
+<span class="sd">    C reference: `sqlite3_finalize &lt;https://sqlite.org/c3ref/finalize.html&gt;`_.</span>
+
+<span class="sd">    A call with a handle of 0 does nothing. Any use of the statement after this call is undefined, and can crash the</span>
+<span class="sd">    process.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_finalize"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_reset">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.stmt.sqlite3_reset">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_reset"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_reset</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Reset the statement ``stmt_p`` to run again from the start, and return ``SQLITE_OK`` or an error code.</span>
+
+<span class="sd">    C reference: `sqlite3_reset &lt;https://sqlite.org/c3ref/reset.html&gt;`_.</span>
+
+<span class="sd">    The parameters keep their bound values. The code is the error of the most recent step, if it failed. The reset</span>
+<span class="sd">    itself can fail too, for example with ``SQLITE_BUSY`` when a statement stepped only once cannot commit, so check</span>
+<span class="sd">    the code even when every step succeeded.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_reset"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_step">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.stmt.sqlite3_step">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_step"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_step</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Run the statement ``stmt_p`` to its next result row, and return ``SQLITE_ROW``, ``SQLITE_DONE`` or an error code.</span>
+
+<span class="sd">    C reference: `sqlite3_step &lt;https://sqlite.org/c3ref/step.html&gt;`_.</span>
+
+<span class="sd">    After ``SQLITE_ROW``, the bindings of :mod:`~numbox.core.bindings.sqlite.column` read the row. After</span>
+<span class="sd">    ``SQLITE_DONE`` or an error, the statement must be reset before it is stepped again. ``SQLITE_BUSY`` means that</span>
+<span class="sd">    SQLite could not take a lock that it needs.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_step"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_sql">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.stmt.sqlite3_sql">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_sql"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_sql</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the UTF-8 SQL text from which the statement ``stmt_p`` was prepared.</span>
+
+<span class="sd">    C reference: `sqlite3_sql &lt;https://sqlite.org/c3ref/expanded_sql.html&gt;`_.</span>
+
+<span class="sd">    The statement owns the text, and SQLite frees it when the statement is finalized.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_sql"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,))</span></div>
+
+
+
+<span class="c1"># The binding returns SQLite's pointer unchanged, and the caller frees the text with sqlite3_free. No binding of this</span>
+<span class="c1"># subpackage frees memory on behalf of its caller, so the ownership of the memory stays explicit at each call site.</span>
+<div class="viewcode-block" id="sqlite3_expanded_sql">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.stmt.sqlite3_expanded_sql">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_expanded_sql"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_expanded_sql</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the address of the SQL text of the statement ``stmt_p``, with the bound parameter values written in.</span>
+
+<span class="sd">    C reference: `sqlite3_expanded_sql &lt;https://sqlite.org/c3ref/expanded_sql.html&gt;`_.</span>
+
+<span class="sd">    SQLite allocates the text, and the caller frees it with ``sqlite3_free``. Returns 0 when an allocation fails,</span>
+<span class="sd">    when the text would exceed SQLite's length limit, and in a SQLite built with ``SQLITE_OMIT_TRACE``.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_expanded_sql"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqlite3_stmt_busy">
+<a class="viewcode-back" href="../../../../../numbox.core.bindings.sqlite.html#numbox.core.bindings.sqlite.stmt.sqlite3_stmt_busy">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqlite3_stmt_busy"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqlite3_stmt_busy</span><span class="p">(</span><span class="n">stmt_p</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return a nonzero value if ``stmt_p`` has been stepped but has neither finished nor been reset, and 0 otherwise.</span>
+
+<span class="sd">    C reference: `sqlite3_stmt_busy &lt;https://sqlite.org/c3ref/stmt_busy.html&gt;`_.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqlite3_stmt_busy"</span><span class="p">,</span> <span class="p">(</span><span class="n">stmt_p</span><span class="p">,))</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

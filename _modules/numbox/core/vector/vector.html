@@ -1,0 +1,291 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.vector.vector &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/vector/vector.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.vector.vector</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.vector.vector</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""A growable vector of one numba scalar type for jitted code, stored in a NumPy array.</span>
+
+<span class="sd">:func:`make_vector` returns a jitted factory of vectors of one element type, and their numba type. In jitted code,</span>
+<span class="sd">``len(v)``, ``v[i]`` and ``v[i] = x`` work on a vector, :func:`vector_push` appends an element and</span>
+<span class="sd">:func:`vector_extend` appends the elements of another vector. If the elements to append do not fit, the buffer is</span>
+<span class="sd">replaced by one whose capacity is the old capacity doubled until they fit.</span>
+<span class="sd">"""</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">operator</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba</span><span class="w"> </span><span class="kn">import</span> <span class="n">njit</span><span class="p">,</span> <span class="n">types</span> <span class="k">as</span> <span class="n">nb_types</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">NumbaError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.experimental</span><span class="w"> </span><span class="kn">import</span> <span class="n">structref</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.experimental.structref</span><span class="w"> </span><span class="kn">import</span> <span class="n">StructRefProxy</span><span class="p">,</span> <span class="n">define_boxing</span><span class="p">,</span> <span class="n">new</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">overload</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+
+
+<div class="viewcode-block" id="VectorTypeClass">
+<a class="viewcode-back" href="../../../../numbox.core.vector.html#numbox.core.vector.vector.VectorTypeClass">[docs]</a>
+<span class="nd">@structref</span><span class="o">.</span><span class="n">register</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">VectorTypeClass</span><span class="p">(</span><span class="n">nb_types</span><span class="o">.</span><span class="n">StructRef</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""The numba type class of ``Vector``.</span>
+
+<span class="sd">    Each element type has an instance of its own, a structref type with the fields ``buf`` and ``size``.</span>
+<span class="sd">    """</span>
+<div class="viewcode-block" id="VectorTypeClass.preprocess_fields">
+<a class="viewcode-back" href="../../../../numbox.core.vector.html#numbox.core.vector.vector.VectorTypeClass.preprocess_fields">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">preprocess_fields</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fields</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Return ``fields`` with each literal field type replaced by its non-literal type."""</span>
+        <span class="k">return</span> <span class="nb">tuple</span><span class="p">((</span><span class="n">n</span><span class="p">,</span> <span class="n">nb_types</span><span class="o">.</span><span class="n">unliteral</span><span class="p">(</span><span class="n">t</span><span class="p">))</span> <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">fields</span><span class="p">)</span></div>
+</div>
+
+
+
+<span class="n">deleted_vector_ctor_error</span> <span class="o">=</span> <span class="s2">"Use the factory returned by make_vector(elem_type)"</span>
+
+
+<div class="viewcode-block" id="Vector">
+<a class="viewcode-back" href="../../../../numbox.core.vector.html#numbox.core.vector.vector.Vector">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">Vector</span><span class="p">(</span><span class="n">StructRefProxy</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""The Python object for a vector of one numba scalar type, whose buffer grows as elements are appended.</span>
+
+<span class="sd">    Create one with the ``create`` function that :func:`make_vector` returns. Calling the class raises</span>
+<span class="sd">    ``NotImplementedError`` in Python, and jitted code that calls it fails to compile.</span>
+<span class="sd">    """</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__new__</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="n">deleted_vector_ctor_error</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">size</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""The number of elements in the vector."""</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">size</span>
+
+    <span class="nd">@property</span>
+    <span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">buf</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""The NumPy array that holds the elements.</span>
+
+<span class="sd">        Its length is the capacity of the vector, and only its first ``size`` elements are set.</span>
+<span class="sd">        """</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">buf</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_vector_deleted_ctor</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">):</span>
+    <span class="k">raise</span> <span class="n">NumbaError</span><span class="p">(</span><span class="n">deleted_vector_ctor_error</span><span class="p">)</span>
+
+
+<span class="n">overload</span><span class="p">(</span><span class="n">Vector</span><span class="p">)(</span><span class="n">_vector_deleted_ctor</span><span class="p">)</span>
+<span class="n">define_boxing</span><span class="p">(</span><span class="n">VectorTypeClass</span><span class="p">,</span> <span class="n">Vector</span><span class="p">)</span>
+
+
+<span class="n">_vector_cache</span> <span class="o">=</span> <span class="p">{}</span>
+
+
+<div class="viewcode-block" id="make_vector">
+<a class="viewcode-back" href="../../../../numbox.core.vector.html#numbox.core.vector.vector.make_vector">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">make_vector</span><span class="p">(</span><span class="n">elem_type</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return ``(create, vector_type)``: a jitted factory of vectors of ``elem_type``, and their numba type.</span>
+
+<span class="sd">    ``create(capacity)`` returns an empty vector whose buffer holds ``capacity`` elements. It takes no buffer, so the</span>
+<span class="sd">    buffer's dtype always follows from ``elem_type``. A capacity below 1 fails an ``assert`` in ``create``. A buffer of</span>
+<span class="sd">    capacity 0 would never grow, because each growth doubles it: ``vector_extend`` would loop forever, and</span>
+<span class="sd">    ``vector_push`` would write past the end of the buffer. A vector grows and never shrinks, so a positive capacity</span>
+<span class="sd">    stays positive.</span>
+
+<span class="sd">    The buffer's dtype is ``numpy.dtype(str(elem_type))``, so ``elem_type`` must be a scalar type whose name NumPy</span>
+<span class="sd">    accepts, such as ``float64`` or ``int64``. For another type, such as ``unicode_type``, NumPy raises ``TypeError``.</span>
+<span class="sd">    The pair is stored in ``_vector_cache`` under ``elem_type.key``, and a later call with the same key returns it.</span>
+<span class="sd">    """</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="n">elem_type</span><span class="o">.</span><span class="n">key</span>
+    <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">_vector_cache</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_vector_cache</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+
+    <span class="n">type_inst</span> <span class="o">=</span> <span class="n">VectorTypeClass</span><span class="p">([</span>
+        <span class="p">(</span><span class="s2">"buf"</span><span class="p">,</span> <span class="n">nb_types</span><span class="o">.</span><span class="n">Array</span><span class="p">(</span><span class="n">elem_type</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s1">'C'</span><span class="p">)),</span>
+        <span class="p">(</span><span class="s2">"size"</span><span class="p">,</span> <span class="n">nb_types</span><span class="o">.</span><span class="n">int64</span><span class="p">),</span>
+    <span class="p">])</span>
+
+    <span class="n">np_dtype</span> <span class="o">=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">dtype</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">elem_type</span><span class="p">))</span>
+
+    <span class="nd">@njit</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">create</span><span class="p">(</span><span class="n">capacity</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""Return an empty vector whose buffer holds ``capacity`` elements; a capacity below 1 fails the ``assert``."""</span>
+        <span class="k">assert</span> <span class="n">capacity</span> <span class="o">&gt;=</span> <span class="mi">1</span>
+        <span class="n">v</span> <span class="o">=</span> <span class="n">new</span><span class="p">(</span><span class="n">type_inst</span><span class="p">)</span>
+        <span class="n">v</span><span class="o">.</span><span class="n">buf</span> <span class="o">=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">capacity</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np_dtype</span><span class="p">)</span>
+        <span class="n">v</span><span class="o">.</span><span class="n">size</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">return</span> <span class="n">v</span>
+
+    <span class="n">result</span> <span class="o">=</span> <span class="p">(</span><span class="n">create</span><span class="p">,</span> <span class="n">type_inst</span><span class="p">)</span>
+    <span class="n">_vector_cache</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">result</span>
+    <span class="k">return</span> <span class="n">result</span></div>
+
+
+
+<span class="nd">@overload</span><span class="p">(</span><span class="nb">len</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_vector_len</span><span class="p">(</span><span class="n">v</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">VectorTypeClass</span><span class="p">):</span>
+        <span class="k">def</span><span class="w"> </span><span class="nf">impl</span><span class="p">(</span><span class="n">v</span><span class="p">):</span>
+<span class="w">            </span><span class="sd">"""Return the number of elements in the vector ``v``, for ``len(v)`` in jitted code."""</span>
+            <span class="k">return</span> <span class="n">v</span><span class="o">.</span><span class="n">size</span>
+        <span class="k">return</span> <span class="n">impl</span>
+
+
+<span class="nd">@overload</span><span class="p">(</span><span class="n">operator</span><span class="o">.</span><span class="n">getitem</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_vector_getitem</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">i</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">VectorTypeClass</span><span class="p">):</span>
+        <span class="k">def</span><span class="w"> </span><span class="nf">impl</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">i</span><span class="p">):</span>
+<span class="w">            </span><span class="sd">"""Return ``v.buf[i]``, for ``v[i]`` in jitted code; ``i`` is not checked against ``len(v)``.</span>
+
+<span class="sd">            A negative ``i`` counts from the end of the buffer, not from the last element.</span>
+<span class="sd">            """</span>
+            <span class="k">return</span> <span class="n">v</span><span class="o">.</span><span class="n">buf</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">impl</span>
+
+
+<span class="nd">@overload</span><span class="p">(</span><span class="n">operator</span><span class="o">.</span><span class="n">setitem</span><span class="p">,</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_vector_setitem</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">VectorTypeClass</span><span class="p">):</span>
+        <span class="k">def</span><span class="w"> </span><span class="nf">impl</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+<span class="w">            </span><span class="sd">"""Set ``v.buf[i]`` to ``val``, for ``v[i] = val`` in jitted code.</span>
+
+<span class="sd">            ``i`` is not checked against ``len(v)``, and ``len(v)`` does not change.</span>
+<span class="sd">            """</span>
+            <span class="n">v</span><span class="o">.</span><span class="n">buf</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">val</span>
+        <span class="k">return</span> <span class="n">impl</span>
+
+
+<div class="viewcode-block" id="vector_push">
+<a class="viewcode-back" href="../../../../numbox.core.vector.html#numbox.core.vector.vector.vector_push">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">vector_push</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Append ``val`` to the vector ``v``, doubling the buffer's capacity first if the buffer is full.</span>
+
+<span class="sd">    numba converts ``val`` to the element type as it does for an array assignment, so a float appended to an integer</span>
+<span class="sd">    vector is truncated.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">v</span><span class="o">.</span><span class="n">size</span> <span class="o">==</span> <span class="n">v</span><span class="o">.</span><span class="n">buf</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+        <span class="n">new_buf</span> <span class="o">=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">buf</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="mi">2</span><span class="p">,</span> <span class="n">v</span><span class="o">.</span><span class="n">buf</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="n">new_buf</span><span class="p">[:</span><span class="n">v</span><span class="o">.</span><span class="n">size</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span><span class="o">.</span><span class="n">buf</span><span class="p">[:</span><span class="n">v</span><span class="o">.</span><span class="n">size</span><span class="p">]</span>
+        <span class="n">v</span><span class="o">.</span><span class="n">buf</span> <span class="o">=</span> <span class="n">new_buf</span>
+    <span class="n">v</span><span class="o">.</span><span class="n">buf</span><span class="p">[</span><span class="n">v</span><span class="o">.</span><span class="n">size</span><span class="p">]</span> <span class="o">=</span> <span class="n">val</span>
+    <span class="n">v</span><span class="o">.</span><span class="n">size</span> <span class="o">+=</span> <span class="mi">1</span></div>
+
+
+
+<div class="viewcode-block" id="vector_extend">
+<a class="viewcode-back" href="../../../../numbox.core.vector.html#numbox.core.vector.vector.vector_extend">[docs]</a>
+<span class="nd">@njit</span><span class="p">(</span><span class="o">**</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">vector_extend</span><span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">src</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Append the elements of the vector ``src`` to the vector ``dst``, doubling the capacity of ``dst`` until they fit.</span>
+
+<span class="sd">    numba converts the elements to the element type of ``dst`` as it does for an array assignment.</span>
+<span class="sd">    """</span>
+    <span class="n">needed</span> <span class="o">=</span> <span class="n">dst</span><span class="o">.</span><span class="n">size</span> <span class="o">+</span> <span class="n">src</span><span class="o">.</span><span class="n">size</span>
+    <span class="n">cap</span> <span class="o">=</span> <span class="n">dst</span><span class="o">.</span><span class="n">buf</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">needed</span> <span class="o">&gt;</span> <span class="n">cap</span><span class="p">:</span>
+        <span class="k">while</span> <span class="n">cap</span> <span class="o">&lt;</span> <span class="n">needed</span><span class="p">:</span>
+            <span class="n">cap</span> <span class="o">*=</span> <span class="mi">2</span>
+        <span class="n">new_buf</span> <span class="o">=</span> <span class="n">numpy</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">cap</span><span class="p">,</span> <span class="n">dst</span><span class="o">.</span><span class="n">buf</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="n">new_buf</span><span class="p">[:</span><span class="n">dst</span><span class="o">.</span><span class="n">size</span><span class="p">]</span> <span class="o">=</span> <span class="n">dst</span><span class="o">.</span><span class="n">buf</span><span class="p">[:</span><span class="n">dst</span><span class="o">.</span><span class="n">size</span><span class="p">]</span>
+        <span class="n">dst</span><span class="o">.</span><span class="n">buf</span> <span class="o">=</span> <span class="n">new_buf</span>
+    <span class="n">dst</span><span class="o">.</span><span class="n">buf</span><span class="p">[</span><span class="n">dst</span><span class="o">.</span><span class="n">size</span><span class="p">:</span><span class="n">dst</span><span class="o">.</span><span class="n">size</span> <span class="o">+</span> <span class="n">src</span><span class="o">.</span><span class="n">size</span><span class="p">]</span> <span class="o">=</span> <span class="n">src</span><span class="o">.</span><span class="n">buf</span><span class="p">[:</span><span class="n">src</span><span class="o">.</span><span class="n">size</span><span class="p">]</span>
+    <span class="n">dst</span><span class="o">.</span><span class="n">size</span> <span class="o">+=</span> <span class="n">src</span><span class="o">.</span><span class="n">size</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

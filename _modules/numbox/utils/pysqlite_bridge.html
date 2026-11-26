@@ -1,0 +1,260 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.utils.pysqlite_bridge &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/utils/pysqlite_bridge.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.utils.pysqlite_bridge</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.utils.pysqlite_bridge</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Functions that read the ``sqlite3 *`` handle of a Python ``sqlite3.Connection`` for numbox's SQLite bindings.</span>
+
+<span class="sd">numbox's SQLite bindings take a connection as the ``sqlite3 *`` handle of SQLite's C API, and a connection that</span>
+<span class="sd">Python's ``sqlite3`` module opens stores that handle in its C structure. :func:`extract_connection_ptr` reads it with</span>
+<span class="sd">ctypes, as the `pybridge &lt;https://github.com/Goykhman/numbduck/blob/main/numbduck/pybridge.py&gt;`_ module of numbduck</span>
+<span class="sd">reads the handle of a DuckDB connection. The handle is safe to use only if numbox's bindings and Python's ``sqlite3``</span>
+<span class="sd">module use the same SQLite, which :func:`libraries_coordinated` checks by comparing the versions they report.</span>
+
+<span class="sd">macOS caveat</span>
+<span class="sd">~~~~~~~~~~~~</span>
+
+<span class="sd">On macOS, the system's SQLite is in the `dyld shared cache &lt;https://keith.github.io/xcode-man-pages/dyld.1.html&gt;`_,</span>
+<span class="sd">whose structure Apple's `DyldSharedCache.h</span>
+<span class="sd">&lt;https://github.com/apple-oss-distributions/dyld/blob/main/common/DyldSharedCache.h&gt;`_ defines, and the cache is mapped</span>
+<span class="sd">into every process at launch. LLVM's JIT linker resolves the ``sqlite3_*`` symbols with ``dlsym(RTLD_DEFAULT)``, which</span>
+<span class="sd">returns the first match in load order: the system's copy. Python's ``_sqlite3`` module can use another SQLite. A</span>
+<span class="sd">python.org framework build links SQLite statically, and a Homebrew or conda-forge build links its own shared library.</span>
+<span class="sd">A handle from one copy passed to the other can produce wrong results or crash the process.</span>
+
+<span class="sd">The workaround is to make the process load Python's SQLite library first::</span>
+
+<span class="sd">    DYLD_INSERT_LIBRARIES=/path/to/your/libsqlite3.dylib python my_script.py</span>
+
+<span class="sd">The library is usually at one of these paths:</span>
+
+<span class="sd">- Homebrew on Apple Silicon: ``/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib``</span>
+<span class="sd">- Homebrew on Intel: ``/usr/local/opt/sqlite/lib/libsqlite3.dylib``</span>
+<span class="sd">- conda-forge: ``$CONDA_PREFIX/lib/libsqlite3.dylib``</span>
+
+<span class="sd">A python.org framework build has no shared library of its SQLite to insert. Inserting another library, such as</span>
+<span class="sd">Homebrew's, satisfies the check only if that library reports the same version as the SQLite linked into Python.</span>
+
+<span class="sd">On Linux, numbox's bindings load the library that ``ctypes.util.find_library("sqlite3")`` finds, which is usually the</span>
+<span class="sd">system's library. A Python whose ``sqlite3`` module links that library, as a Linux distribution's Python does, needs no</span>
+<span class="sd">workaround. A Python that includes its own SQLite, as the builds that uv installs do, can report another version, and</span>
+<span class="sd">:func:`extract_connection_ptr` then raises ``RuntimeError``.</span>
+<span class="sd">"""</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">ctypes</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sqlite3</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.sqlite.conn</span><span class="w"> </span><span class="kn">import</span> <span class="n">sqlite3_errmsg</span><span class="p">,</span> <span class="n">sqlite3_libversion</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_pyobject_head_fields</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Return the ctypes fields of CPython's ``PyObject_HEAD`` for the build of the running interpreter.</span>
+
+<span class="sd">    The fields of a release build are ``ob_refcnt`` and ``ob_type``, and those of a free-threaded build are its larger</span>
+<span class="sd">    header. The fields of a debug build, which has ``sys.gettotalrefcount``, start with the two pointers ``_ob_next``</span>
+<span class="sd">    and ``_ob_prev``. Those pointers exist only in a build configured ``--with-trace-refs``, and only on CPython 3.10</span>
+<span class="sd">    to 3.12, so on any other debug build the offset of ``db`` is wrong.</span>
+<span class="sd">    """</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">sysconfig</span>
+
+    <span class="n">fields</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="c1"># sys.gettotalrefcount exists in every debug build, but _ob_next and _ob_prev exist only under Py_TRACE_REFS,</span>
+    <span class="c1"># which a debug build does not imply, and CPython 3.13 removed them. On a plain debug build this layout puts db</span>
+    <span class="c1"># at offset 32 instead of 16. test_pyobject_head_fields_handles_debug_build makes the same assumption.</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">sys</span><span class="p">,</span> <span class="s2">"gettotalrefcount"</span><span class="p">):</span>
+        <span class="n">fields</span> <span class="o">+=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="s2">"_ob_next"</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_void_p</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">"_ob_prev"</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_void_p</span><span class="p">),</span>
+        <span class="p">]</span>
+
+    <span class="k">if</span> <span class="n">sysconfig</span><span class="o">.</span><span class="n">get_config_var</span><span class="p">(</span><span class="s2">"Py_GIL_DISABLED"</span><span class="p">):</span>
+        <span class="n">fields</span> <span class="o">+=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="s2">"ob_tid"</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_size_t</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">"_padding"</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_uint16</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">"ob_mutex"</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_uint8</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">"ob_gc_bits"</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_uint8</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">"ob_ref_local"</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_uint32</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">"ob_ref_shared"</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_ssize_t</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">"ob_type"</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_void_p</span><span class="p">),</span>
+        <span class="p">]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">fields</span> <span class="o">+=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="s2">"ob_refcnt"</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_ssize_t</span><span class="p">),</span>
+            <span class="p">(</span><span class="s2">"ob_type"</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_void_p</span><span class="p">),</span>
+        <span class="p">]</span>
+
+    <span class="k">return</span> <span class="n">fields</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_PysqliteConnection</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">Structure</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""The leading fields of CPython's ``pysqlite_Connection``: the object header and the ``db`` handle.</span>
+
+<span class="sd">    The layout follows `Modules/_sqlite/connection.h</span>
+<span class="sd">    &lt;https://github.com/python/cpython/blob/main/Modules/_sqlite/connection.h&gt;`_. ``ctypes.Structure`` computes the</span>
+<span class="sd">    offset of ``db`` from the declared field types, so no offset is written in the code, and the offset is correct on</span>
+<span class="sd">    32-bit, 64-bit and free-threaded builds. :func:`_pyobject_head_fields` names the debug builds on which it is</span>
+<span class="sd">    wrong. The approach comes from `numbsql &lt;https://github.com/cpcloud/numbsql/blob/main/numbsql/sqlite.py#L282&gt;`_.</span>
+<span class="sd">    """</span>
+
+    <span class="n">_fields_</span> <span class="o">=</span> <span class="n">_pyobject_head_fields</span><span class="p">()</span> <span class="o">+</span> <span class="p">[(</span><span class="s2">"db"</span><span class="p">,</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_void_p</span><span class="p">)]</span>
+
+
+<div class="viewcode-block" id="libraries_coordinated">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.pysqlite_bridge.libraries_coordinated">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">libraries_coordinated</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Return True if numbox's bindings and Python's ``sqlite3`` module report the same SQLite version.</span>
+
+<span class="sd">    The function compares the version that :func:`~numbox.core.bindings.sqlite.conn.sqlite3_libversion` returns</span>
+<span class="sd">    through numbox's bindings with ``sqlite3.sqlite_version``, the version of the library that Python's module uses.</span>
+<span class="sd">    Different versions mean different copies of SQLite, as on macOS without the workaround in the module</span>
+<span class="sd">    docstring.</span>
+<span class="sd">    :func:`extract_connection_ptr` then raises instead of passing a handle from one copy to the other. Two copies of</span>
+<span class="sd">    the same version count as coordinated.</span>
+<span class="sd">    """</span>
+    <span class="n">numbox_version</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_char_p</span><span class="p">(</span><span class="n">sqlite3_libversion</span><span class="p">())</span><span class="o">.</span><span class="n">value</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">numbox_version</span> <span class="o">==</span> <span class="n">sqlite3</span><span class="o">.</span><span class="n">sqlite_version</span></div>
+
+
+
+<div class="viewcode-block" id="extract_connection_ptr">
+<a class="viewcode-back" href="../../../numbox.utils.html#numbox.utils.pysqlite_bridge.extract_connection_ptr">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">extract_connection_ptr</span><span class="p">(</span><span class="n">conn</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the ``sqlite3 *`` handle of the Python ``sqlite3.Connection`` ``conn``, as an ``int``.</span>
+
+<span class="sd">    The handle is borrowed: ``conn`` owns it, and the ``int`` holds no reference to ``conn``. The caller must keep</span>
+<span class="sd">    ``conn`` open and referenced for as long as any code, whether jitted or not, uses the handle. After</span>
+<span class="sd">    ``conn.close()``, or once ``conn`` is garbage-collected, the handle points to freed memory, and a use of it is a</span>
+<span class="sd">    use-after-free. The rule is the one that ``SQLITE_STATIC`` sets for ``bind_text`` and ``bind_blob``: borrowed</span>
+<span class="sd">    memory must outlive every use.</span>
+
+<span class="sd">    ``TypeError`` is raised if ``conn`` is not a ``sqlite3.Connection``. Before it reads the handle, the function</span>
+<span class="sd">    checks with :func:`libraries_coordinated` that numbox's bindings and Python's ``sqlite3`` module use the same</span>
+<span class="sd">    SQLite, and it raises ``RuntimeError`` if they do not. It reads the ``db`` field of the connection's C structure</span>
+<span class="sd">    through :class:`_PysqliteConnection` and raises ``RuntimeError`` for a NULL handle, which a closed connection has.</span>
+<span class="sd">    It then checks the handle by calling :func:`~numbox.core.bindings.sqlite.conn.sqlite3_errmsg`, which must return</span>
+<span class="sd">    ``not an error``. Because of that check, the function also raises ``RuntimeError`` for a live connection whose most</span>
+<span class="sd">    recent statement failed, until a statement on the connection succeeds.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">sqlite3</span><span class="o">.</span><span class="n">Connection</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"expected sqlite3.Connection, got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">libraries_coordinated</span><span class="p">():</span>
+        <span class="n">numbox_version</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_char_p</span><span class="p">(</span><span class="n">sqlite3_libversion</span><span class="p">())</span><span class="o">.</span><span class="n">value</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"numbox's @njit bindings resolve libsqlite3 </span><span class="si">{</span><span class="n">numbox_version</span><span class="si">!r}</span><span class="s2">, but Python's "</span>
+            <span class="sa">f</span><span class="s2">"sqlite3 module uses </span><span class="si">{</span><span class="n">sqlite3</span><span class="o">.</span><span class="n">sqlite_version</span><span class="si">!r}</span><span class="s2">.  Passing this connection "</span>
+            <span class="sa">f</span><span class="s2">"pointer to numbox's bindings would be unsafe (possible segfault).  On macOS, "</span>
+            <span class="sa">f</span><span class="s2">"set DYLD_INSERT_LIBRARIES to your Python's libsqlite3.dylib — see the "</span>
+            <span class="sa">f</span><span class="s2">"numbox.utils.pysqlite_bridge module docstring."</span>
+        <span class="p">)</span>
+    <span class="n">db_ptr</span> <span class="o">=</span> <span class="n">_PysqliteConnection</span><span class="o">.</span><span class="n">from_address</span><span class="p">(</span><span class="nb">id</span><span class="p">(</span><span class="n">conn</span><span class="p">))</span><span class="o">.</span><span class="n">db</span>
+    <span class="k">if</span> <span class="n">db_ptr</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">"extracted null sqlite3* from sqlite3.Connection"</span><span class="p">)</span>
+    <span class="c1"># sqlite3_errmsg returns the message of the connection's most recent error, so this check also rejects an open</span>
+    <span class="c1"># connection whose last statement failed.</span>
+    <span class="n">errmsg</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_char_p</span><span class="p">(</span><span class="n">sqlite3_errmsg</span><span class="p">(</span><span class="n">db_ptr</span><span class="p">))</span><span class="o">.</span><span class="n">value</span>
+    <span class="k">if</span> <span class="n">errmsg</span> <span class="o">!=</span> <span class="sa">b</span><span class="s2">"not an error"</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"extracted connection pointer failed validation: </span><span class="si">{</span><span class="n">errmsg</span><span class="si">!r}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">db_ptr</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,183 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.read_only_cache &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/read_only_cache.html" />
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.read_only_cache</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.read_only_cache</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Loading numba's cache from a directory that can be read but not written.</span>
+
+<span class="sd">A cache that was built in ``NUMBA_CACHE_DIR`` can be deployed read-only, for example in a container image, so that no</span>
+<span class="sd">process compiles when it starts. numba alone does not load from such a cache. Its locator for ``NUMBA_CACHE_DIR``</span>
+<span class="sd">creates a temporary file in the directory when numba decorates a function, and numba skips the directory if the file</span>
+<span class="sd">cannot be created. numba also raises the ``OSError`` of a failed save from the call that compiled the function, except</span>
+<span class="sd">for ``EACCES`` on Windows, which it ignores.</span>
+
+<span class="sd">:class:`ReadOnlyCacheLocator` is a subclass of that locator that also takes a directory that exists and cannot be</span>
+<span class="sd">written. To use it, list it in numba's ``NUMBA_CACHE_LOCATOR_CLASSES`` as</span>
+<span class="sd">``numbox.core.read_only_cache.ReadOnlyCacheLocator``, followed by the locators that numba should try for a file that</span>
+<span class="sd">this locator does not take. The configurations page states the complete value.</span>
+
+<span class="sd">numbox recognizes such a directory by the error of a write that fails in it (:func:`cannot_be_written`). Its check of</span>
+<span class="sd">a cache location passes a location in which a write fails with such an error</span>
+<span class="sd">(:func:`~numbox.core.configurations.check_cache_location`). The wrapper that</span>
+<span class="sd">:mod:`numbox.core.cache_key` installs around numba's save skips a save that fails with such an error, for every</span>
+<span class="sd">function that numba caches in the process. numba's ``Dispatcher.recompile`` empties the function's index before it</span>
+<span class="sd">compiles the function again. A second wrapper disables the function's cache if that write fails with such an error,</span>
+<span class="sd">and numba then compiles the function without loading or saving an entry. numba resolves the locator by importing this</span>
+<span class="sd">module, which installs both wrappers.</span>
+<span class="sd">"""</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">errno</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.caching</span><span class="w"> </span><span class="kn">import</span> <span class="n">UserProvidedCacheLocator</span>
+
+
+<span class="c1"># A write fails with one of these errors in a directory that the process may read. EROFS is the error on a file system</span>
+<span class="c1"># that is mounted read-only. EACCES and EPERM are the errors where the directory's permissions or flags deny the write.</span>
+<span class="n">_CANNOT_WRITE</span> <span class="o">=</span> <span class="p">(</span><span class="n">errno</span><span class="o">.</span><span class="n">EROFS</span><span class="p">,</span> <span class="n">errno</span><span class="o">.</span><span class="n">EACCES</span><span class="p">,</span> <span class="n">errno</span><span class="o">.</span><span class="n">EPERM</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="cannot_be_written">
+<a class="viewcode-back" href="../../../numbox.core.configurations.html#numbox.core.read_only_cache.cannot_be_written">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">cannot_be_written</span><span class="p">(</span><span class="n">error</span><span class="p">,</span> <span class="n">location</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return whether ``error`` is the error of a write that the operating system denied in the directory ``location``.</span>
+
+<span class="sd">    ``error`` is such an error if it is an ``OSError`` whose ``errno`` is ``EROFS``, ``EACCES`` or ``EPERM``. The</span>
+<span class="sd">    function reads the error number and does not test whether the process can write in ``location``, so the caller</span>
+<span class="sd">    must pass the error of a write that failed there. A single write to a directory that the process can otherwise</span>
+<span class="sd">    write in can fail with one of these errors, for example the replacement of another user's file in a directory</span>
+<span class="sd">    that has the sticky bit. The result is True for that error as well.</span>
+
+<span class="sd">    A location that does not exist, or that is not a directory, holds no cache to load, so the result is False for it.</span>
+<span class="sd">    The result is also False for a directory that the process cannot search, because numba cannot open a cache file</span>
+<span class="sd">    in it. Any other ``OSError``, such as a full disk or a name that is too long, also gives False.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="p">(</span><span class="nb">isinstance</span><span class="p">(</span><span class="n">error</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">)</span> <span class="ow">and</span> <span class="n">error</span><span class="o">.</span><span class="n">errno</span> <span class="ow">in</span> <span class="n">_CANNOT_WRITE</span> <span class="ow">and</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">location</span><span class="p">)</span>
+            <span class="ow">and</span> <span class="n">os</span><span class="o">.</span><span class="n">access</span><span class="p">(</span><span class="n">location</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">X_OK</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="ReadOnlyCacheLocator">
+<a class="viewcode-back" href="../../../numbox.core.configurations.html#numbox.core.read_only_cache.ReadOnlyCacheLocator">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ReadOnlyCacheLocator</span><span class="p">(</span><span class="n">UserProvidedCacheLocator</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""numba's locator for ``NUMBA_CACHE_DIR``, which also takes a directory that exists and cannot be written.</span>
+
+<span class="sd">    numba's ``UserProvidedCacheLocator`` caches a source file in a subdirectory of ``NUMBA_CACHE_DIR`` that numba</span>
+<span class="sd">    names after the file's directory. It skips the file if it cannot create that subdirectory or cannot create a</span>
+<span class="sd">    temporary file in it. This locator names the same subdirectory. It differs in one case: it takes the file if the</span>
+<span class="sd">    subdirectory exists, the process can search it, and the creation of the temporary file fails with an error that</span>
+<span class="sd">    :func:`cannot_be_written` recognizes. numba then loads the entries that the subdirectory holds. A function that</span>
+<span class="sd">    the subdirectory holds no entry for compiles in every process. numbox skips the save that numba attempts for it</span>
+<span class="sd">    and issues one warning per process.</span>
+
+<span class="sd">    Where the subdirectory can be written, the locator behaves as numba's does, so the same value of</span>
+<span class="sd">    ``NUMBA_CACHE_LOCATOR_CLASSES`` serves to build the cache and to run from it. The locator skips a file whose</span>
+<span class="sd">    subdirectory does not exist and cannot be created, and numba then tries the next locator in the list. The</span>
+<span class="sd">    locator also skips a file whose subdirectory the process cannot search. numba creates the subdirectory when it</span>
+<span class="sd">    decorates the first cached function of a source directory, so a cache holds a subdirectory for each source</span>
+<span class="sd">    directory that was imported while the cache was built.</span>
+<span class="sd">    """</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">ensure_cache_path</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">ensure_cache_path</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">cannot_be_written</span><span class="p">(</span><span class="n">error</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_cache_path</span><span class="p">()):</span>
+                <span class="k">raise</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,234 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.strerror &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/strerror.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.strerror</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.strerror</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""A thread-safe message for an error number, for jitted code and Python.</span>
+
+<span class="sd">:func:`strerror_safe` writes the message for an error number into a buffer that the caller provides. It calls the</span>
+<span class="sd">thread-safe form of ``strerror`` that the platform's C library exports, chosen when numba compiles the call:</span>
+
+<span class="sd">- **glibc**: `__xpg_strerror_r &lt;https://codebrowser.dev/glibc/glibc/string/xpg-strerror.c.html&gt;`_, the POSIX (XSI)</span>
+<span class="sd">  form, which glibc exports from version 2.3.4, released in 2004;</span>
+<span class="sd">- **musl**: also ``__xpg_strerror_r``, which musl exports as a `weak alias</span>
+<span class="sd">  &lt;https://git.musl-libc.org/cgit/musl/tree/src/string/strerror_r.c&gt;`_ of its ``strerror_r``, itself the POSIX form;</span>
+<span class="sd">- **macOS**: `strerror_r &lt;macos-strerror-r_&gt;`_, the POSIX form;</span>
+<span class="sd">- **Windows**: `strerror_s</span>
+<span class="sd">  &lt;https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/strerror-s-strerror-s-wcserror-s-wcserror-s&gt;`_,</span>
+<span class="sd">  which takes its arguments in the order buffer, size, error number.</span>
+
+<span class="sd">numbox supports no other C library on Linux. glibc's plain ``strerror_r`` is the GNU form, which returns a ``char *``</span>
+<span class="sd">and does not match the POSIX-shaped call that this module emits. The module therefore calls ``__xpg_strerror_r`` on</span>
+<span class="sd">Linux whenever LLVM finds it, as it does with glibc and musl, and falls back to ``strerror_r`` only for a C library that</span>
+<span class="sd">lacks the symbol.</span>
+
+<span class="sd">.. _macos-strerror-r:</span>
+<span class="sd">   https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/strerror_r.3.html</span>
+<span class="sd">"""</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">llvmlite.binding</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ll</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">llvmlite</span><span class="w"> </span><span class="kn">import</span> <span class="n">ir</span> <span class="k">as</span> <span class="n">llir</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.cgutils</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_or_insert_function</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">TypingError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">int32</span><span class="p">,</span> <span class="n">int64</span><span class="p">,</span> <span class="n">intp</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.extending</span><span class="w"> </span><span class="kn">import</span> <span class="n">intrinsic</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">intp_ll_type</span><span class="p">,</span> <span class="n">platform_</span><span class="p">,</span> <span class="n">load_lib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"strerror_safe"</span><span class="p">]</span>
+
+
+<span class="n">load_lib</span><span class="p">(</span><span class="s2">"c"</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_select_posix_symbol</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Return the name of the POSIX-form ``strerror_r`` that the C library exports on Linux or macOS, or None.</span>
+
+<span class="sd">    The name is ``__xpg_strerror_r`` on Linux if LLVM finds that symbol, and ``strerror_r`` on Linux otherwise and on</span>
+<span class="sd">    macOS. On Windows and on any other platform, the function returns None.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">"Linux"</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">ll</span><span class="o">.</span><span class="n">address_of_symbol</span><span class="p">(</span><span class="s2">"__xpg_strerror_r"</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="s2">"__xpg_strerror_r"</span>
+        <span class="c1"># Execution does not reach this line with glibc or musl: glibc exports __xpg_strerror_r from 2.3.4, and musl</span>
+        <span class="c1"># exports it as a weak alias of its POSIX-form strerror_r. The fallback is for a C library without the symbol.</span>
+        <span class="c1"># On glibc, plain strerror_r is the GNU form, which returns a char * and does not match the declared i32 result.</span>
+        <span class="k">return</span> <span class="s2">"strerror_r"</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">"Darwin"</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">"strerror_r"</span>
+    <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="nd">@intrinsic</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_strerror_safe</span><span class="p">(</span><span class="n">typingctx</span><span class="p">,</span> <span class="n">errnum_ty</span><span class="p">,</span> <span class="n">buf_ty</span><span class="p">,</span> <span class="n">buflen_ty</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Call the platform's thread-safe ``strerror`` with ``(errnum, buf, buflen)``, and return its ``int32`` result.</span>
+
+<span class="sd">    ``errnum`` must be an ``int32``, and numba raises ``TypingError`` for any other type when it compiles the call, as</span>
+<span class="sd">    it does on a platform for which ``_select_posix_symbol`` returns None. On Windows the call is</span>
+<span class="sd">    ``strerror_s(buf, buflen, errnum)``.</span>
+<span class="sd">    """</span>
+    <span class="c1"># strerror_r, __xpg_strerror_r and strerror_s all take errnum as a 32-bit int. The check refuses any other type</span>
+    <span class="c1"># when numba types the call. A caller that passes an int64, as strerror_safe would do without its int32</span>
+    <span class="c1"># conversion, therefore receives this TypingError instead of a type mismatch in the generated IR.</span>
+    <span class="k">if</span> <span class="n">errnum_ty</span> <span class="o">!=</span> <span class="n">int32</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"_strerror_safe: errnum must be int32, got </span><span class="si">{</span><span class="n">errnum_ty</span><span class="si">!r}</span><span class="s2">"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">"Windows"</span><span class="p">:</span>
+        <span class="n">sym</span> <span class="o">=</span> <span class="s2">"strerror_s"</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">sym</span> <span class="o">=</span> <span class="n">_select_posix_symbol</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">sym</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">"_strerror_safe: unsupported platform </span><span class="si">{</span><span class="n">platform_</span><span class="si">!r}</span><span class="s2">"</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">codegen</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">builder</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">arguments</span><span class="p">):</span>
+        <span class="n">errnum</span><span class="p">,</span> <span class="n">buf_p</span><span class="p">,</span> <span class="n">buflen</span> <span class="o">=</span> <span class="n">arguments</span>
+        <span class="n">i32</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span>
+        <span class="n">i8p</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">()</span>
+        <span class="n">size_t_ll</span> <span class="o">=</span> <span class="n">intp_ll_type</span><span class="p">(</span><span class="n">context</span><span class="p">)</span>
+        <span class="n">buf</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">inttoptr</span><span class="p">(</span><span class="n">buf_p</span><span class="p">,</span> <span class="n">i8p</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">"Windows"</span><span class="p">:</span>
+            <span class="n">func_ty</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">FunctionType</span><span class="p">(</span><span class="n">i32</span><span class="p">,</span> <span class="p">[</span><span class="n">i8p</span><span class="p">,</span> <span class="n">size_t_ll</span><span class="p">,</span> <span class="n">i32</span><span class="p">])</span>
+            <span class="n">func_p</span> <span class="o">=</span> <span class="n">get_or_insert_function</span><span class="p">(</span><span class="n">builder</span><span class="o">.</span><span class="n">module</span><span class="p">,</span> <span class="n">func_ty</span><span class="p">,</span> <span class="n">sym</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">func_p</span><span class="p">,</span> <span class="p">[</span><span class="n">buf</span><span class="p">,</span> <span class="n">buflen</span><span class="p">,</span> <span class="n">errnum</span><span class="p">])</span>
+        <span class="n">func_ty</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">FunctionType</span><span class="p">(</span><span class="n">i32</span><span class="p">,</span> <span class="p">[</span><span class="n">i32</span><span class="p">,</span> <span class="n">i8p</span><span class="p">,</span> <span class="n">size_t_ll</span><span class="p">])</span>
+        <span class="n">func_p</span> <span class="o">=</span> <span class="n">get_or_insert_function</span><span class="p">(</span><span class="n">builder</span><span class="o">.</span><span class="n">module</span><span class="p">,</span> <span class="n">func_ty</span><span class="p">,</span> <span class="n">sym</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">builder</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">func_p</span><span class="p">,</span> <span class="p">[</span><span class="n">errnum</span><span class="p">,</span> <span class="n">buf</span><span class="p">,</span> <span class="n">buflen</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">int32</span><span class="p">(</span><span class="n">errnum_ty</span><span class="p">,</span> <span class="n">buf_ty</span><span class="p">,</span> <span class="n">buflen_ty</span><span class="p">),</span> <span class="n">codegen</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_render_ir_for_probe</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""Return the text of an LLVM module that declares the POSIX symbol that ``_strerror_safe`` would call.</span>
+
+<span class="sd">    ``test_strerror_safe.py`` makes ``ll.address_of_symbol("__xpg_strerror_r")`` return None and checks that the</span>
+<span class="sd">    declared symbol is then ``strerror_r``. The test reads the text instead of making the call, because on glibc the</span>
+<span class="sd">    plain ``strerror_r`` is the GNU form, which the POSIX-shaped declaration does not match. The ``size_t`` parameter's</span>
+<span class="sd">    type comes from ``intp_ll_type()``, the helper that the codegen calls with its context, and both calls return the</span>
+<span class="sd">    same type.</span>
+<span class="sd">    """</span>
+    <span class="n">module</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">Module</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">"probe"</span><span class="p">)</span>
+    <span class="n">i32</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span>
+    <span class="n">i8p</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="o">.</span><span class="n">as_pointer</span><span class="p">()</span>
+    <span class="n">sym</span> <span class="o">=</span> <span class="n">_select_posix_symbol</span><span class="p">()</span>
+    <span class="n">func_ty</span> <span class="o">=</span> <span class="n">llir</span><span class="o">.</span><span class="n">FunctionType</span><span class="p">(</span><span class="n">i32</span><span class="p">,</span> <span class="p">[</span><span class="n">i32</span><span class="p">,</span> <span class="n">i8p</span><span class="p">,</span> <span class="n">intp_ll_type</span><span class="p">()])</span>
+    <span class="n">get_or_insert_function</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="n">func_ty</span><span class="p">,</span> <span class="n">sym</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">module</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="strerror_safe">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.strerror.strerror_safe">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">int32</span><span class="p">(</span><span class="n">int64</span><span class="p">,</span> <span class="n">intp</span><span class="p">,</span> <span class="n">intp</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">strerror_safe</span><span class="p">(</span><span class="n">errnum</span><span class="p">,</span> <span class="n">buf</span><span class="p">,</span> <span class="n">buflen</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Write the message for the error number ``errnum`` into the buffer at ``buf``, and return 0 or an error number.</span>
+
+<span class="sd">    C reference: `strerror_r(3) &lt;https://man7.org/linux/man-pages/man3/strerror_r.3.html&gt;`_.</span>
+
+<span class="sd">    ``buf`` is the ``intp`` address of ``buflen`` bytes that the caller keeps alive during the call, and the message</span>
+<span class="sd">    ends with a NUL. The binding narrows ``errnum`` to ``int32``, the width of C's ``int``. With glibc, the function</span>
+<span class="sd">    returns ``EINVAL`` (22) for an unknown number and writes ``Unknown error`` followed by the number. It returns</span>
+<span class="sd">    ``ERANGE`` (34) for a buffer too short for the message and writes as much of the message as fits. The function uses</span>
+<span class="sd">    no buffer of its own, so threads can call it at the same time. On Linux it calls ``__xpg_strerror_r``, which glibc</span>
+<span class="sd">    and musl export, on macOS ``strerror_r``, and on Windows ``strerror_s``, with the arguments in that function's</span>
+<span class="sd">    order.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_strerror_safe</span><span class="p">(</span><span class="n">int32</span><span class="p">(</span><span class="n">errnum</span><span class="p">),</span> <span class="n">buf</span><span class="p">,</span> <span class="n">buflen</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

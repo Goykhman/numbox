@@ -1,0 +1,816 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.libm &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/libm.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.libm</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.libm</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Bindings for the functions of the C math library, on ``float64``.</span>
+
+<span class="sd">Each binding calls the ``double`` form of the C function of its name, so it takes and returns ``float64``, and numba</span>
+<span class="sd">converts an integer or ``float32`` argument without a warning. The bindings behave as C's functions, not Python's. C</span>
+<span class="sd">returns NaN or an infinity where Python's ``math`` module raises ``ValueError`` or ``OverflowError``, as for</span>
+<span class="sd">``sqrt(-1.0)``, ``log(0.0)`` or ``exp(1000.0)``, and ``round`` and ``pow`` differ from Python's built-ins. Import the</span>
+<span class="sd">module, as in ``from numbox.core.bindings import libm``, and call ``libm.round``, so that the name ``round`` still</span>
+<span class="sd">refers to Python's built-in function. numba registers 26 of these names, among them ``cos``, ``pow`` and ``sqrt``, for</span>
+<span class="sd">its own math support, and LLVM finds a registered name before it searches any library. On Windows, those 26 bindings</span>
+<span class="sd">therefore call the functions of CPython's C runtime instead of those of the ``msvcrt.dll`` that this module loads for</span>
+<span class="sd">``"m"``.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.call</span><span class="w"> </span><span class="kn">import</span> <span class="n">_call_lib_func</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.signatures</span><span class="w"> </span><span class="kn">import</span> <span class="n">signatures</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.bindings.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_lib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.configurations</span><span class="w"> </span><span class="kn">import</span> <span class="n">jit_options</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numbox.core.proxy.proxy</span><span class="w"> </span><span class="kn">import</span> <span class="n">proxy</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">"cos"</span><span class="p">,</span> <span class="s2">"sin"</span><span class="p">,</span> <span class="s2">"tan"</span><span class="p">,</span>
+    <span class="s2">"acos"</span><span class="p">,</span> <span class="s2">"asin"</span><span class="p">,</span> <span class="s2">"atan"</span><span class="p">,</span>
+    <span class="s2">"cosh"</span><span class="p">,</span> <span class="s2">"sinh"</span><span class="p">,</span> <span class="s2">"tanh"</span><span class="p">,</span> <span class="s2">"acosh"</span><span class="p">,</span> <span class="s2">"asinh"</span><span class="p">,</span> <span class="s2">"atanh"</span><span class="p">,</span>
+    <span class="s2">"exp"</span><span class="p">,</span> <span class="s2">"exp2"</span><span class="p">,</span> <span class="s2">"expm1"</span><span class="p">,</span> <span class="s2">"log"</span><span class="p">,</span> <span class="s2">"log2"</span><span class="p">,</span> <span class="s2">"log10"</span><span class="p">,</span> <span class="s2">"log1p"</span><span class="p">,</span> <span class="s2">"logb"</span><span class="p">,</span>
+    <span class="s2">"sqrt"</span><span class="p">,</span> <span class="s2">"cbrt"</span><span class="p">,</span>
+    <span class="s2">"ceil"</span><span class="p">,</span> <span class="s2">"floor"</span><span class="p">,</span> <span class="s2">"trunc"</span><span class="p">,</span> <span class="s2">"round"</span><span class="p">,</span> <span class="s2">"rint"</span><span class="p">,</span> <span class="s2">"nearbyint"</span><span class="p">,</span>
+    <span class="s2">"erf"</span><span class="p">,</span> <span class="s2">"erfc"</span><span class="p">,</span> <span class="s2">"lgamma"</span><span class="p">,</span> <span class="s2">"tgamma"</span><span class="p">,</span>
+    <span class="s2">"fabs"</span><span class="p">,</span>
+    <span class="s2">"atan2"</span><span class="p">,</span>
+    <span class="s2">"pow"</span><span class="p">,</span> <span class="s2">"fmod"</span><span class="p">,</span> <span class="s2">"remainder"</span><span class="p">,</span>
+    <span class="s2">"hypot"</span><span class="p">,</span>
+    <span class="s2">"fmax"</span><span class="p">,</span> <span class="s2">"fmin"</span><span class="p">,</span> <span class="s2">"fdim"</span><span class="p">,</span>
+    <span class="s2">"copysign"</span><span class="p">,</span>
+<span class="p">]</span>
+
+<span class="c1"># numba registers the names in numba.core.intrinsics.INTR_MATH, 26 of the 42 bound below, with ll.add_symbol</span>
+<span class="c1"># (numba/core/externals.py), and LLVM resolves a registered name before it searches the loaded libraries. On Linux the</span>
+<span class="c1"># registered addresses point into the same libm that this call loads. On Windows, they point into CPython's C runtime,</span>
+<span class="c1"># so LLVM resolves none of those 26 names to the msvcrt.dll that this call loads.</span>
+<span class="n">load_lib</span><span class="p">(</span><span class="s2">"m"</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="cos">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.cos">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"cos"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">cos</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the cosine of ``x``, an angle in radians.</span>
+
+<span class="sd">    C reference: `cos(3) &lt;https://man7.org/linux/man-pages/man3/cos.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the</span>
+<span class="sd">    one in ``msvcrt.dll``, because numba registers the name ``cos`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"cos"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sin">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.sin">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sin"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sin</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the sine of ``x``, an angle in radians.</span>
+
+<span class="sd">    C reference: `sin(3) &lt;https://man7.org/linux/man-pages/man3/sin.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the</span>
+<span class="sd">    one in ``msvcrt.dll``, because numba registers the name ``sin`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sin"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="tan">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.tan">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"tan"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">tan</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the tangent of ``x``, an angle in radians.</span>
+
+<span class="sd">    C reference: `tan(3) &lt;https://man7.org/linux/man-pages/man3/tan.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the</span>
+<span class="sd">    one in ``msvcrt.dll``, because numba registers the name ``tan`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"tan"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="acos">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.acos">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"acos"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">acos</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the arc cosine of ``x`` in radians, from 0 to pi.</span>
+
+<span class="sd">    C reference: `acos(3) &lt;https://man7.org/linux/man-pages/man3/acos.3.html&gt;`_.</span>
+
+<span class="sd">    An ``x`` outside [-1, 1] gives NaN. The binding calls C's ``double`` form, so it takes and returns ``float64``, and</span>
+<span class="sd">    numba converts an integer or ``float32`` argument without a warning. On Windows, the binding calls the function in</span>
+<span class="sd">    CPython's C runtime, not the one in ``msvcrt.dll``, because numba registers the name ``acos`` for its own math</span>
+<span class="sd">    support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"acos"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="asin">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.asin">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"asin"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">asin</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the arc sine of ``x`` in radians, from -pi/2 to pi/2.</span>
+
+<span class="sd">    C reference: `asin(3) &lt;https://man7.org/linux/man-pages/man3/asin.3.html&gt;`_.</span>
+
+<span class="sd">    An ``x`` outside [-1, 1] gives NaN. The binding calls C's ``double`` form, so it takes and returns ``float64``, and</span>
+<span class="sd">    numba converts an integer or ``float32`` argument without a warning. On Windows, the binding calls the function in</span>
+<span class="sd">    CPython's C runtime, not the one in ``msvcrt.dll``, because numba registers the name ``asin`` for its own math</span>
+<span class="sd">    support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"asin"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="atan">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.atan">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"atan"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">atan</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the arc tangent of ``x`` in radians, from -pi/2 to pi/2.</span>
+
+<span class="sd">    C reference: `atan(3) &lt;https://man7.org/linux/man-pages/man3/atan.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the</span>
+<span class="sd">    one in ``msvcrt.dll``, because numba registers the name ``atan`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"atan"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="cosh">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.cosh">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"cosh"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">cosh</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the hyperbolic cosine of ``x``.</span>
+
+<span class="sd">    C reference: `cosh(3) &lt;https://man7.org/linux/man-pages/man3/cosh.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the</span>
+<span class="sd">    one in ``msvcrt.dll``, because numba registers the name ``cosh`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"cosh"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sinh">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.sinh">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sinh"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sinh</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the hyperbolic sine of ``x``.</span>
+
+<span class="sd">    C reference: `sinh(3) &lt;https://man7.org/linux/man-pages/man3/sinh.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the</span>
+<span class="sd">    one in ``msvcrt.dll``, because numba registers the name ``sinh`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sinh"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="tanh">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.tanh">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"tanh"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">tanh</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the hyperbolic tangent of ``x``.</span>
+
+<span class="sd">    C reference: `tanh(3) &lt;https://man7.org/linux/man-pages/man3/tanh.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the</span>
+<span class="sd">    one in ``msvcrt.dll``, because numba registers the name ``tanh`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"tanh"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="acosh">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.acosh">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"acosh"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">acosh</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the inverse hyperbolic cosine of ``x``, a value of 0 or more.</span>
+
+<span class="sd">    C reference: `acosh(3) &lt;https://man7.org/linux/man-pages/man3/acosh.3.html&gt;`_.</span>
+
+<span class="sd">    An ``x`` below 1 gives NaN. The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba</span>
+<span class="sd">    converts an integer or ``float32`` argument without a warning. On Windows, the binding calls the function in</span>
+<span class="sd">    CPython's C runtime, not the one in ``msvcrt.dll``, because numba registers the name ``acosh`` for its own math</span>
+<span class="sd">    support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"acosh"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="asinh">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.asinh">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"asinh"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">asinh</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the inverse hyperbolic sine of ``x``.</span>
+
+<span class="sd">    C reference: `asinh(3) &lt;https://man7.org/linux/man-pages/man3/asinh.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the</span>
+<span class="sd">    one in ``msvcrt.dll``, because numba registers the name ``asinh`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"asinh"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="atanh">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.atanh">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"atanh"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">atanh</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the inverse hyperbolic tangent of ``x``.</span>
+
+<span class="sd">    C reference: `atanh(3) &lt;https://man7.org/linux/man-pages/man3/atanh.3.html&gt;`_.</span>
+
+<span class="sd">    An ``x`` of 1 or -1 gives an infinity of the same sign, and an ``x`` outside [-1, 1] gives NaN. The binding calls</span>
+<span class="sd">    C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or ``float32`` argument</span>
+<span class="sd">    without a warning. On Windows, the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``,</span>
+<span class="sd">    because numba registers the name ``atanh`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"atanh"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="exp">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.exp">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"exp"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">exp</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return e raised to the power ``x``.</span>
+
+<span class="sd">    C reference: `exp(3) &lt;https://man7.org/linux/man-pages/man3/exp.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the</span>
+<span class="sd">    one in ``msvcrt.dll``, because numba registers the name ``exp`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"exp"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="exp2">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.exp2">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"exp2"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">exp2</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return 2 raised to the power ``x``.</span>
+
+<span class="sd">    C reference: `exp2(3) &lt;https://man7.org/linux/man-pages/man3/exp2.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"exp2"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="expm1">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.expm1">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"expm1"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">expm1</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return e raised to the power ``x``, minus 1, computed accurately when ``x`` is near 0.</span>
+
+<span class="sd">    C reference: `expm1(3) &lt;https://man7.org/linux/man-pages/man3/expm1.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the</span>
+<span class="sd">    one in ``msvcrt.dll``, because numba registers the name ``expm1`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"expm1"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="log">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.log">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"log"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">log</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the natural logarithm of ``x``.</span>
+
+<span class="sd">    C reference: `log(3) &lt;https://man7.org/linux/man-pages/man3/log.3.html&gt;`_.</span>
+
+<span class="sd">    An ``x`` of 0 gives negative infinity, and a negative ``x`` gives NaN. The binding calls C's ``double`` form, so it</span>
+<span class="sd">    takes and returns ``float64``, and numba converts an integer or ``float32`` argument without a warning. On Windows,</span>
+<span class="sd">    the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``, because numba registers the</span>
+<span class="sd">    name ``log`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"log"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="log2">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.log2">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"log2"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">log2</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the base-2 logarithm of ``x``.</span>
+
+<span class="sd">    C reference: `log2(3) &lt;https://man7.org/linux/man-pages/man3/log2.3.html&gt;`_.</span>
+
+<span class="sd">    An ``x`` of 0 gives negative infinity, and a negative ``x`` gives NaN. The binding calls C's ``double`` form, so it</span>
+<span class="sd">    takes and returns ``float64``, and numba converts an integer or ``float32`` argument without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"log2"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="log10">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.log10">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"log10"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">log10</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the base-10 logarithm of ``x``.</span>
+
+<span class="sd">    C reference: `log10(3) &lt;https://man7.org/linux/man-pages/man3/log10.3.html&gt;`_.</span>
+
+<span class="sd">    An ``x`` of 0 gives negative infinity, and a negative ``x`` gives NaN. The binding calls C's ``double`` form, so it</span>
+<span class="sd">    takes and returns ``float64``, and numba converts an integer or ``float32`` argument without a warning. On Windows,</span>
+<span class="sd">    the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``, because numba registers the</span>
+<span class="sd">    name ``log10`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"log10"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="log1p">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.log1p">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"log1p"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">log1p</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the natural logarithm of ``1 + x``, computed accurately when ``x`` is near 0.</span>
+
+<span class="sd">    C reference: `log1p(3) &lt;https://man7.org/linux/man-pages/man3/log1p.3.html&gt;`_.</span>
+
+<span class="sd">    An ``x`` of -1 gives negative infinity, and an ``x`` below -1 gives NaN. The binding calls C's ``double`` form, so</span>
+<span class="sd">    it takes and returns ``float64``, and numba converts an integer or ``float32`` argument without a warning. On</span>
+<span class="sd">    Windows, the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``, because numba</span>
+<span class="sd">    registers the name ``log1p`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"log1p"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="logb">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.logb">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"logb"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">logb</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the base-2 exponent of ``x`` as a float: ``floor(log2(abs(x)))`` for a finite ``x`` other than 0.</span>
+
+<span class="sd">    C reference: `logb(3) &lt;https://man7.org/linux/man-pages/man3/logb.3.html&gt;`_.</span>
+
+<span class="sd">    An ``x`` of 0 gives negative infinity. The binding calls C's ``double`` form, so it takes and returns ``float64``,</span>
+<span class="sd">    and numba converts an integer or ``float32`` argument without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"logb"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="sqrt">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.sqrt">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sqrt"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">sqrt</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the square root of ``x``.</span>
+
+<span class="sd">    C reference: `sqrt(3) &lt;https://man7.org/linux/man-pages/man3/sqrt.3.html&gt;`_.</span>
+
+<span class="sd">    A negative ``x`` gives NaN. The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba</span>
+<span class="sd">    converts an integer or ``float32`` argument without a warning. On Windows, the binding calls the function in</span>
+<span class="sd">    CPython's C runtime, not the one in ``msvcrt.dll``, because numba registers the name ``sqrt`` for its own math</span>
+<span class="sd">    support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"sqrt"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="cbrt">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.cbrt">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"cbrt"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">cbrt</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the cube root of ``x``, which is negative for a negative ``x``.</span>
+
+<span class="sd">    C reference: `cbrt(3) &lt;https://man7.org/linux/man-pages/man3/cbrt.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"cbrt"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="ceil">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.ceil">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"ceil"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ceil</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the smallest integral value that is not less than ``x``, as a float.</span>
+
+<span class="sd">    C reference: `ceil(3) &lt;https://man7.org/linux/man-pages/man3/ceil.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the</span>
+<span class="sd">    one in ``msvcrt.dll``, because numba registers the name ``ceil`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"ceil"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="floor">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.floor">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"floor"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">floor</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the largest integral value that is not greater than ``x``, as a float.</span>
+
+<span class="sd">    C reference: `floor(3) &lt;https://man7.org/linux/man-pages/man3/floor.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the</span>
+<span class="sd">    one in ``msvcrt.dll``, because numba registers the name ``floor`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"floor"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="trunc">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.trunc">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"trunc"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">trunc</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return ``x`` rounded toward zero to an integral value, as a float.</span>
+
+<span class="sd">    C reference: `trunc(3) &lt;https://man7.org/linux/man-pages/man3/trunc.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the</span>
+<span class="sd">    one in ``msvcrt.dll``, because numba registers the name ``trunc`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"trunc"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="round">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.round">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"round"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">round</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return ``x`` rounded to the nearest integral value, with halfway cases away from zero, as a float.</span>
+
+<span class="sd">    C reference: `round(3) &lt;https://man7.org/linux/man-pages/man3/round.3.html&gt;`_.</span>
+
+<span class="sd">    This is C's ``round``, not Python's: ``round(2.5)`` is 3.0 here and 2 in Python. The binding calls C's ``double``</span>
+<span class="sd">    form, so it takes and returns ``float64``, and numba converts an integer or ``float32`` argument without a warning.</span>
+<span class="sd">    On Windows, the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``, because numba</span>
+<span class="sd">    registers the name ``round`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"round"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="rint">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.rint">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"rint"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">rint</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return ``x`` rounded to an integral value in the current rounding mode, as a float.</span>
+
+<span class="sd">    C reference: `rint(3) &lt;https://man7.org/linux/man-pages/man3/rint.3.html&gt;`_.</span>
+
+<span class="sd">    In the default mode, which rounds to nearest, a halfway case goes to the even value: ``rint(2.5)`` is 2.0. The</span>
+<span class="sd">    binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or ``float32``</span>
+<span class="sd">    argument without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"rint"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="nearbyint">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.nearbyint">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"nearbyint"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">nearbyint</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return ``x`` rounded to an integral value in the current rounding mode, as a float.</span>
+
+<span class="sd">    C reference: `nearbyint(3) &lt;https://man7.org/linux/man-pages/man3/nearbyint.3.html&gt;`_.</span>
+
+<span class="sd">    It differs from ``rint`` only in that it does not set C's inexact floating-point exception flag. In the default</span>
+<span class="sd">    mode, a halfway case goes to the even value. The binding calls C's ``double`` form, so it takes and returns</span>
+<span class="sd">    ``float64``, and numba converts an integer or ``float32`` argument without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"nearbyint"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="erf">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.erf">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"erf"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">erf</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the error function of ``x``.</span>
+
+<span class="sd">    C reference: `erf(3) &lt;https://man7.org/linux/man-pages/man3/erf.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"erf"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="erfc">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.erfc">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"erfc"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">erfc</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the complementary error function of ``x``, ``1 - erf(x)``, computed accurately for large ``x``.</span>
+
+<span class="sd">    C reference: `erfc(3) &lt;https://man7.org/linux/man-pages/man3/erfc.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"erfc"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="lgamma">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.lgamma">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"lgamma"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">lgamma</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the natural logarithm of the absolute value of the gamma function at ``x``.</span>
+
+<span class="sd">    C reference: `lgamma(3) &lt;https://man7.org/linux/man-pages/man3/lgamma.3.html&gt;`_.</span>
+
+<span class="sd">    The sign of the gamma function is not returned: C stores it in the global variable ``signgam``, which numbox does</span>
+<span class="sd">    not read. Because of that global variable, C does not require ``lgamma`` to be thread-safe. The binding calls C's</span>
+<span class="sd">    ``double`` form, so it takes and returns ``float64``, and numba converts an integer or ``float32`` argument without</span>
+<span class="sd">    a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"lgamma"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="tgamma">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.tgamma">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"tgamma"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">tgamma</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the gamma function at ``x``.</span>
+
+<span class="sd">    C reference: `tgamma(3) &lt;https://man7.org/linux/man-pages/man3/tgamma.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"tgamma"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="fabs">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.fabs">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"fabs"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fabs</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the absolute value of ``x``.</span>
+
+<span class="sd">    C reference: `fabs(3) &lt;https://man7.org/linux/man-pages/man3/fabs.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning. On Windows, the binding calls the function in CPython's C runtime, not the</span>
+<span class="sd">    one in ``msvcrt.dll``, because numba registers the name ``fabs`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"fabs"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,))</span></div>
+
+
+
+<div class="viewcode-block" id="atan2">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.atan2">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"atan2"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">atan2</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the arc tangent of ``y / x`` in radians, in the quadrant that the signs of ``x`` and ``y`` determine.</span>
+
+<span class="sd">    C reference: `atan2(3) &lt;https://man7.org/linux/man-pages/man3/atan2.3.html&gt;`_.</span>
+
+<span class="sd">    The result is in the range from -pi to pi, and the first argument is ``y``, as in C. The binding calls C's</span>
+<span class="sd">    ``double`` form, so it takes and returns ``float64``, and numba converts an integer or ``float32`` argument without</span>
+<span class="sd">    a warning. On Windows, the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``, because</span>
+<span class="sd">    numba registers the name ``atan2`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"atan2"</span><span class="p">,</span> <span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">x</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="pow">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.pow">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"pow"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return ``x`` raised to the power ``y``.</span>
+
+<span class="sd">    C reference: `pow(3) &lt;https://man7.org/linux/man-pages/man3/pow.3.html&gt;`_.</span>
+
+<span class="sd">    This is C's ``pow``, not Python's: a negative ``x`` with a non-integral ``y`` gives NaN, and 0 with a negative ``y``</span>
+<span class="sd">    gives infinity, where Python's ``**`` gives a complex number or raises ``ZeroDivisionError``. The binding calls C's</span>
+<span class="sd">    ``double`` form, so it takes and returns ``float64``, and numba converts an integer or ``float32`` argument without</span>
+<span class="sd">    a warning. On Windows, the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``, because</span>
+<span class="sd">    numba registers the name ``pow`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"pow"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fmod">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.fmod">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"fmod"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fmod</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return ``x - n * y``, where ``n`` is ``x / y`` rounded toward zero, so the result has the sign of ``x``.</span>
+
+<span class="sd">    C reference: `fmod(3) &lt;https://man7.org/linux/man-pages/man3/fmod.3.html&gt;`_.</span>
+
+<span class="sd">    Python's ``%`` gives the result the sign of ``y`` instead. A ``y`` of 0 gives NaN. The binding calls C's ``double``</span>
+<span class="sd">    form, so it takes and returns ``float64``, and numba converts an integer or ``float32`` argument without a warning.</span>
+<span class="sd">    On Windows, the binding calls the function in CPython's C runtime, not the one in ``msvcrt.dll``, because numba</span>
+<span class="sd">    registers the name ``fmod`` for its own math support.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"fmod"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="remainder">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.remainder">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"remainder"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">remainder</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return ``x - n * y``, where ``n`` is ``x / y`` rounded to the nearest integer, halfway cases to even.</span>
+
+<span class="sd">    C reference: `remainder(3) &lt;https://man7.org/linux/man-pages/man3/remainder.3.html&gt;`_.</span>
+
+<span class="sd">    This is the IEEE 754 remainder: ``remainder(7.0, 2.0)`` is -1.0. A ``y`` of 0 gives NaN. The binding calls C's</span>
+<span class="sd">    ``double`` form, so it takes and returns ``float64``, and numba converts an integer or ``float32`` argument without</span>
+<span class="sd">    a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"remainder"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="hypot">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.hypot">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"hypot"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">hypot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the square root of ``x * x + y * y``, without overflow or underflow in the intermediate steps.</span>
+
+<span class="sd">    C reference: `hypot(3) &lt;https://man7.org/linux/man-pages/man3/hypot.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"hypot"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fmax">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.fmax">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"fmax"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fmax</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the larger of ``x`` and ``y``; if one of them is NaN, return the other.</span>
+
+<span class="sd">    C reference: `fmax(3) &lt;https://man7.org/linux/man-pages/man3/fmax.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"fmax"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fmin">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.fmin">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"fmin"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fmin</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the smaller of ``x`` and ``y``; if one of them is NaN, return the other.</span>
+
+<span class="sd">    C reference: `fmin(3) &lt;https://man7.org/linux/man-pages/man3/fmin.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"fmin"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="fdim">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.fdim">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"fdim"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">fdim</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return ``x - y`` if ``x`` is greater than ``y``, and 0 otherwise.</span>
+
+<span class="sd">    C reference: `fdim(3) &lt;https://man7.org/linux/man-pages/man3/fdim.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"fdim"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="copysign">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.libm.copysign">[docs]</a>
+<span class="nd">@proxy</span><span class="p">(</span><span class="n">signatures</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"copysign"</span><span class="p">),</span> <span class="n">jit_options</span><span class="o">=</span><span class="n">jit_options</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">copysign</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return a value with the magnitude of ``x`` and the sign of ``y``.</span>
+
+<span class="sd">    C reference: `copysign(3) &lt;https://man7.org/linux/man-pages/man3/copysign.3.html&gt;`_.</span>
+
+<span class="sd">    The binding calls C's ``double`` form, so it takes and returns ``float64``, and numba converts an integer or</span>
+<span class="sd">    ``float32`` argument without a warning.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="n">_call_lib_func</span><span class="p">(</span><span class="s2">"copysign"</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

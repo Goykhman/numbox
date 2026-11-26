@@ -1,0 +1,285 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>numbox.core.bindings.utils &mdash; numbox  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=9edc463e" />
+
+  
+    <link rel="canonical" href="https://goykhman.github.io/numbox/_modules/numbox/core/bindings/utils.html" />
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            numbox
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">numbox</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">numbox</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">numbox.core.bindings.utils</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for numbox.core.bindings.utils</h1><div class="highlight"><pre>
+<span></span><span class="sd">"""Library loading and small helpers for the binding modules.</span>
+
+<span class="sd">:func:`load_lib` and :func:`load_lib_path` load a C library so that LLVM finds its symbols when it links jitted code</span>
+<span class="sd">into the process. :func:`extract_literal_str` reads the value of a numba string literal, such as a format string or a C</span>
+<span class="sd">function's name, and :func:`intp_ll_type` returns the LLVM type that numbox uses for ``size_t`` and pointers.</span>
+<span class="sd">``platform_`` holds the name of the operating system, as ``platform.system()`` returns it.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ctypes</span><span class="w"> </span><span class="kn">import</span> <span class="n">CDLL</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ctypes.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">find_library</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">platform</span><span class="w"> </span><span class="kn">import</span> <span class="n">system</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">llvmlite</span><span class="w"> </span><span class="kn">import</span> <span class="n">ir</span> <span class="k">as</span> <span class="n">llir</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">TypingError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">numba.core.types</span><span class="w"> </span><span class="kn">import</span> <span class="n">Literal</span><span class="p">,</span> <span class="n">intp</span>
+
+
+<span class="n">platform_</span> <span class="o">=</span> <span class="n">system</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="extract_literal_str">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.utils.extract_literal_str">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">extract_literal_str</span><span class="p">(</span><span class="n">binding_name</span><span class="p">,</span> <span class="n">ty</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">field</span><span class="o">=</span><span class="s2">"argument"</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the ``str`` value of a numba string literal type.</span>
+
+<span class="sd">    Intrinsics and overloads use it for an argument that numba must know when it compiles the call, such as a format</span>
+<span class="sd">    string, a C function's name or a standard stream's name. It raises ``TypingError`` if ``ty`` is not a literal or if</span>
+<span class="sd">    its value is not a ``str``, and the message names ``binding_name`` and the argument, ``field``.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">ty</span><span class="p">,</span> <span class="n">Literal</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">binding_name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">field</span><span class="si">}</span><span class="s2"> must be a literal str, got </span><span class="si">{</span><span class="n">ty</span><span class="si">!r}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="n">val</span> <span class="o">=</span> <span class="n">ty</span><span class="o">.</span><span class="n">literal_value</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">val</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="n">TypingError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">binding_name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">field</span><span class="si">}</span><span class="s2"> must be a Python str, got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">val</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">"</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">val</span></div>
+
+
+
+<div class="viewcode-block" id="intp_ll_type">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.utils.intp_ll_type">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">intp_ll_type</span><span class="p">(</span><span class="n">context</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the LLVM integer type of numba's ``intp``, which numbox uses for ``size_t`` and pointers.</span>
+
+<span class="sd">    With a codegen ``context``, the type is ``context.get_value_type(intp)``, which is how an intrinsic derives a width</span>
+<span class="sd">    that depends on the platform, such as that of ``size_t``, ``ssize_t`` or ``ptrdiff_t``. Without one, as in a test or</span>
+<span class="sd">    an IR probe, it is ``llir.IntType(intp.bitwidth)``. numba lowers ``intp`` to an integer of that same width, so both</span>
+<span class="sd">    calls give the same type.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">context</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">context</span><span class="o">.</span><span class="n">get_value_type</span><span class="p">(</span><span class="n">intp</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">llir</span><span class="o">.</span><span class="n">IntType</span><span class="p">(</span><span class="n">intp</span><span class="o">.</span><span class="n">bitwidth</span><span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_windows_bundled_dll_path</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the path of the DLL ``name`` that the Python installation bundles on Windows, or None.</span>
+
+<span class="sd">    The function checks three paths in order and returns the first that exists: ``&lt;sys.prefix&gt;/DLLs/&lt;name&gt;.dll``,</span>
+<span class="sd">    CPython's DLL directory for an installation outside a virtual environment; ``&lt;sys.base_prefix&gt;/DLLs/&lt;name&gt;.dll``,</span>
+<span class="sd">    the base installation of a virtual environment; and ``&lt;sys.base_prefix&gt;/Library/bin/&lt;name&gt;.dll``, conda's layout.</span>
+<span class="sd">    """</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+    <span class="n">dirs</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">prefix</span><span class="p">,</span> <span class="s2">"DLLs"</span><span class="p">),</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">base_prefix</span><span class="p">,</span> <span class="s2">"DLLs"</span><span class="p">),</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">base_prefix</span><span class="p">,</span> <span class="s2">"Library"</span><span class="p">,</span> <span class="s2">"bin"</span><span class="p">),</span>
+    <span class="p">]</span>
+    <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">dirs</span><span class="p">:</span>
+        <span class="n">candidate</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.dll"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">candidate</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">candidate</span>
+    <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_resolve_lib_path</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return a path or a name that ``ctypes.CDLL`` can load for the library ``name``, or None if none is found.</span>
+
+<span class="sd">    On Linux and macOS the result is ``ctypes.util.find_library(name)``. On Windows, the result for ``"c"`` and ``"m"``</span>
+<span class="sd">    is ``find_msvcrt()``. For ``"sqlite3"``, the result is only the DLL that Python bundles, from</span>
+<span class="sd">    ``_windows_bundled_dll_path``. For any other name, the function prefers that DLL to one that ``find_library`` finds</span>
+<span class="sd">    on the ``PATH``.</span>
+
+<span class="sd">    The function prefers the bundled DLL because a directory on the ``PATH`` can hold a copy of a common DLL that</span>
+<span class="sd">    another tool installs for its own use, and such a copy can crash an outside caller. On GitHub's windows-latest</span>
+<span class="sd">    runners, AWS CLI v2 puts ``C:\\Program Files\\Amazon\\AWSCLIV2\\sqlite3.dll`` on the ``PATH``. That DLL exports the</span>
+<span class="sd">    full SQLite API, but it writes through a null pointer inside ``sqlite3_open`` when a process other than ``aws.exe``</span>
+<span class="sd">    calls it. CPython's bundled ``sqlite3.dll`` is the SQLite that Python's own ``sqlite3`` module uses on Windows.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"Darwin"</span><span class="p">,</span> <span class="s2">"Linux"</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">find_library</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">"Windows"</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">ctypes.util</span><span class="w"> </span><span class="kn">import</span> <span class="n">find_msvcrt</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"c"</span><span class="p">,</span> <span class="s2">"m"</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">find_msvcrt</span><span class="p">()</span>
+        <span class="n">bundled</span> <span class="o">=</span> <span class="n">_windows_bundled_dll_path</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="o">==</span> <span class="s2">"sqlite3"</span><span class="p">:</span>
+            <span class="c1"># _sqlite3.pyd links to &lt;prefix&gt;/DLLs/sqlite3.dll, so every Python on Windows whose sqlite3 module works</span>
+            <span class="c1"># has that DLL. find_library is never consulted for sqlite3, because a copy on the PATH can belong to</span>
+            <span class="c1"># another tool and crash an outside caller, as AWS CLI v2's copy does.</span>
+            <span class="k">return</span> <span class="n">bundled</span>
+        <span class="k">if</span> <span class="n">bundled</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">bundled</span>
+        <span class="k">return</span> <span class="n">find_library</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="n">_loaded_libs</span> <span class="o">=</span> <span class="p">{}</span>
+
+
+<div class="viewcode-block" id="load_lib">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.utils.load_lib">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">load_lib</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Return the ``ctypes.CDLL`` handle of the library whose short name is ``name``, loading it at the first call.</span>
+
+<span class="sd">    The first call loads the library so that LLVM finds its symbols, and later calls with the same name return the same</span>
+<span class="sd">    handle from the module's cache, ``_loaded_libs``. Each binding module calls it for its own library, and the modules</span>
+<span class="sd">    share the handle without importing one another. A caller can test for a symbol with ``hasattr(handle, name)``, as</span>
+<span class="sd">    :func:`~numbox.core.proxy.proxy.proxy_if_available` does. ctypes never unloads a library, so the library stays</span>
+<span class="sd">    loaded for the life of the process.</span>
+
+<span class="sd">    On Linux and macOS, ``ctypes.util.find_library`` finds the file by the short name, such as ``"m"`` for the C math</span>
+<span class="sd">    library, in the system's library search and not in the Python installation. The file is then opened in global symbol</span>
+<span class="sd">    mode, ``RTLD_GLOBAL``. On Windows, the function loads the C runtime ``msvcrt.dll`` for ``"c"`` and ``"m"``, and only</span>
+<span class="sd">    the ``sqlite3.dll`` bundled with Python for ``"sqlite3"``. For any other name, it prefers a DLL bundled with Python</span>
+<span class="sd">    to one on the ``PATH``.</span>
+
+<span class="sd">    If no file is found, the function raises ``RuntimeError: Could not find shared library for &lt;name&gt;``; pass the file's</span>
+<span class="sd">    path to :func:`load_lib_path` instead. On Linux, ``find_library`` also searches the directories in</span>
+<span class="sd">    ``LD_LIBRARY_PATH``, but it finds a library there only if the library was built with a SONAME, and the system's</span>
+<span class="sd">    loader reads the variable only when the process starts. On macOS, ``find_library`` searches the directories in</span>
+<span class="sd">    ``DYLD_LIBRARY_PATH`` as ``os.environ`` holds the variable at the call.</span>
+<span class="sd">    """</span>
+    <span class="n">handle</span> <span class="o">=</span> <span class="n">_loaded_libs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">handle</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">handle</span> <span class="o">=</span> <span class="n">_load_lib_with_handle</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+        <span class="n">_loaded_libs</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">handle</span>
+    <span class="k">return</span> <span class="n">handle</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_load_lib_with_handle</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Find the library ``name`` with ``_resolve_lib_path``, open it for LLVM to find its symbols, and return a handle.</span>
+
+<span class="sd">    The function raises ``RuntimeError`` if it finds no file, and it does not cache the handle; :func:`load_lib` does.</span>
+<span class="sd">    """</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">_resolve_lib_path</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="c1"># find_msvcrt() returns None on a Python built with Visual Studio 2015 or later, as every supported CPython</span>
+        <span class="c1"># is, so on Windows "c" and "m" load msvcrt.dll through ctypes.cdll.</span>
+        <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">"Windows"</span> <span class="ow">and</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"c"</span><span class="p">,</span> <span class="s2">"m"</span><span class="p">):</span>
+            <span class="kn">import</span><span class="w"> </span><span class="nn">ctypes</span>
+            <span class="k">return</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">cdll</span><span class="o">.</span><span class="n">msvcrt</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Could not find shared library for </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"Darwin"</span><span class="p">,</span> <span class="s2">"Linux"</span><span class="p">):</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">os</span><span class="w"> </span><span class="kn">import</span> <span class="n">RTLD_GLOBAL</span>
+        <span class="k">return</span> <span class="n">CDLL</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="n">RTLD_GLOBAL</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">"Windows"</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">CDLL</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">winmode</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Platform </span><span class="si">{</span><span class="n">platform_</span><span class="si">}</span><span class="s2"> is not supported, yet."</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="load_lib_path">
+<a class="viewcode-back" href="../../../../numbox.core.bindings.html#numbox.core.bindings.utils.load_lib_path">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">load_lib_path</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""Load the library at ``path`` so that LLVM finds its symbols, and return a new ``ctypes.CDLL`` handle.</span>
+
+<span class="sd">    ``path`` is any string that ``ctypes.CDLL`` accepts: an absolute path, a soname such as ``libm.so.6``, which</span>
+<span class="sd">    ``ctypes.util.find_library`` returns, or a file name that the system's loader resolves. The function opens the</span>
+<span class="sd">    library with ``RTLD_GLOBAL`` on Linux and macOS and with ``winmode=0`` on Windows, and it raises ``RuntimeError``</span>
+<span class="sd">    on any other platform. Each call returns a new handle; use :func:`load_lib` for a library that several modules</span>
+<span class="sd">    load by its short name.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"Darwin"</span><span class="p">,</span> <span class="s2">"Linux"</span><span class="p">):</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">os</span><span class="w"> </span><span class="kn">import</span> <span class="n">RTLD_GLOBAL</span>
+        <span class="k">return</span> <span class="n">CDLL</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="n">RTLD_GLOBAL</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">platform_</span> <span class="o">==</span> <span class="s2">"Windows"</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">CDLL</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">winmode</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Platform </span><span class="si">{</span><span class="n">platform_</span><span class="si">}</span><span class="s2"> is not supported, yet."</span><span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, NumbOx GitHub Repository Contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
