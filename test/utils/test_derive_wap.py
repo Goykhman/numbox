@@ -6,28 +6,41 @@ type and message, and that the failing node keeps its ``data`` with ``derived`` 
 function, and the nodes are built from Python and from jitted code. Other tests check ``rewrap_derive``, the relation
 between ``DeriveFunctionType`` and numba's plain ``FunctionType``, the references that the unboxing releases, and a
 case in which the exception is lost. One test runs two subprocesses to check a cached caller that reads a ``cres``
-value as a module-level constant. ``test/core/test_proxy.py`` tests the ``.as_func`` of a ``@proxy`` function in more
-detail.
+value as a module-level constant. Further tests check the alias under which ``cres`` publishes a function for such a
+caller. They cover what the caller declares, two functions that compute one alias, a value without an alias, and a
+caller that numba compiles ahead of time. ``test/core/test_proxy.py`` tests the ``.as_func`` of a ``@proxy`` function
+in more detail. ``test/core/test_proxy_cache_stale.py`` tests the repair of a cached caller of a constant after an
+edit.
 """
+import ctypes
 import gc
 import os
+import re
 import subprocess
 import sys
 import textwrap
+import warnings
 import weakref
+from collections import namedtuple
 
 import numpy
 import pytest
-from numba import njit, prange
+from llvmlite import binding as ll
+from llvmlite import ir
+from numba import njit, objmode, prange, typeof
+from numba.core import types
+from numba.core.cpu import CPUContext
+from numba.core.registry import cpu_target
 from numba.core.types import FunctionType, float64
 from numba.core.types.function_type import CompileResultWAP
 
 import numbox.utils.derive_wap as derive_wap_module
-from numbox.core.proxy.proxy import proxy
+from numbox.core.proxy.proxy import AliasCollisionWarning, _is_shared_jit_name, proxy
 from numbox.utils.derive_wap import DeriveFunctionType, DeriveWAP, rewrap_derive
 from numbox.core.work.work import make_work
 from numbox.core.work.work_utils import make_work_helper
 from numbox.utils.highlevel import cres
+from test.auxiliary_utils import open_libm
 
 
 def _raise_when_positive(a):
@@ -540,6 +553,406 @@ def test_a_cached_caller_of_a_derive_caches_and_still_propagates(tmp_path):
 
     written = sorted(p.name for p in (tmp_path / "nbcache").rglob("*.nbi"))
     assert written, "no cache index was written, so the cache-hit count proves nothing"
+
+
+def test_cres_publishes_the_numba_entry_point_under_an_alias():
+    """A ``cres`` value carries an alias for its numba entry point, and a caller of the constant declares that alias.
+
+    The alias is registered with llvmlite and resolves to the address that the value recorded. The caller's LLVM IR
+    must declare the alias. If the function's library were linked into the caller instead, the IR would hold numba's
+    own name for the entry point, and the caller's cached code would import no name that the cache check could test.
+    The value has no ``_numbox_proxy_alias``, so the fingerprint of a function that captures the value still comes from
+    the value's Python function.
+    """
+    @cres(float64(float64))
+    def tripled(x):
+        return 3.0 * x
+
+    alias = tripled._numbox_jit_alias
+    assert re.fullmatch(r"numbox_pxy_tripled_[0-9a-f]{16}_jit", alias), alias
+    assert ll.address_of_symbol(alias) == tripled.jit_address, "the alias does not resolve to the numba entry point"
+    assert not hasattr(tripled, "_numbox_proxy_alias")
+
+    @njit(float64(float64))
+    def call_constant(x):
+        return tripled(x)
+
+    assert call_constant(2.0) == 6.0
+    llvm_ir = next(iter(call_constant.inspect_llvm().values()))
+    assert re.search(rf"declare [^\n]*@{alias}\(", llvm_ir), "the caller of the constant does not declare the alias"
+
+
+def _shape_scalar(x):
+    return x + 1.0
+
+
+def _shape_pair(x, n):
+    return (x, x + n)
+
+
+def _shape_total(a):
+    return a.sum()
+
+
+def _shape_text(s):
+    return s + "!"
+
+
+def _shape_bump(a):
+    a[0] += 1.0
+
+
+@pytest.mark.parametrize("func, sig, args, expected", [
+    (_shape_scalar, float64(float64), (2.0,), 3.0),
+    (_shape_pair, types.UniTuple(float64, 2)(float64, types.int64), (2.0, 3), (2.0, 5.0)),
+    (_shape_total, float64(types.Array(float64, 1, "C")), (numpy.arange(4.0),), 6.0),
+    (_shape_text, types.unicode_type(types.unicode_type), ("hey",), "hey!"),
+    (_shape_bump, types.void(types.Array(float64, 1, "C")), (numpy.zeros(2),), None),
+], ids=["scalar", "tuple", "array", "text", "void"])
+def test_a_caller_of_a_constant_declares_the_entry_point_with_the_type_of_its_definition(func, sig, args, expected):
+    """The declaration in a caller of a constant has the LLVM function type of the function's definition.
+
+    numbox builds the declaration from the compile result's types and links nothing in, so no linker compares the
+    declaration with the definition. A numba release that changed how an entry point receives an argument or returns a
+    value could make the two differ, and the call would then read its arguments from the wrong places. The test
+    compares the two types for several kinds of argument and return value, and it checks the result of each call.
+    """
+    value = cres(sig)(func)
+    if len(args) == 1:
+        @njit
+        def call(a):
+            return value(a)
+    else:
+        @njit
+        def call(a, b):
+            return value(a, b)
+
+    assert call(*args) == expected
+
+    caller_module = ll.parse_assembly(next(iter(call.inspect_llvm().values())))
+    body_module = ll.parse_assembly(next(iter(value._numbox_dispatcher.inspect_llvm().values())))
+    declared = caller_module.get_function(value._numbox_jit_alias)
+    defined = body_module.get_function(value.cres.fndesc.llvm_func_name)
+    assert declared.is_declaration and not defined.is_declaration
+    assert str(declared.global_value_type) == str(defined.global_value_type)
+
+
+def _shape_double(n):
+    return 2 * n
+
+
+def _extension_attributes(function):
+    """Return, for each argument of an LLVM function, which of the attributes ``signext`` and ``zeroext`` it carries."""
+    return [sorted({b"signext", b"zeroext"} & set(argument.attributes)) for argument in function.arguments]
+
+
+@pytest.mark.skipif(
+    not hasattr(CPUContext, "apply_target_attributes"), reason="numba 0.63 has no hook for target attributes"
+)
+def test_a_caller_of_a_constant_declares_the_entry_point_with_the_target_attributes_of_its_definition(monkeypatch):
+    """The declaration in a caller of a constant carries the target-specific attributes of the function's definition.
+
+    Since numba 0.64, ``declare_function`` passes each entry point to the target context's
+    ``apply_target_attributes``. On s390x, that hook marks every integer argument and result of fewer than 64 bits with
+    ``signext`` or ``zeroext``, because the platform's calling convention requires the caller to extend such a value.
+    A caller whose declaration lacks the attribute may pass a 32-bit argument with undefined upper bits. The hook does
+    nothing on the platforms that run the tests. The test therefore installs a hook that marks every narrow integer
+    argument with ``signext``, and it compares these attributes of the declaration with those of the definition.
+    """
+    def mark_narrow_integers(self, llvm_func, argtypes=None, restype=None):
+        for argument in llvm_func.args:
+            if isinstance(argument.type, ir.IntType) and argument.type.width < 64:
+                argument.add_attribute("signext")
+
+    monkeypatch.setattr(CPUContext, "apply_target_attributes", mark_narrow_integers)
+    value = cres(types.int64(types.int32))(_shape_double)
+
+    @njit
+    def call(n):
+        return value(n)
+
+    assert call(numpy.int32(21)) == 42
+
+    caller_module = ll.parse_assembly(next(iter(call.inspect_llvm().values())))
+    body_module = ll.parse_assembly(next(iter(value._numbox_dispatcher.inspect_llvm().values())))
+    declared = caller_module.get_function(value._numbox_jit_alias)
+    defined = body_module.get_function(value.cres.fndesc.llvm_func_name)
+    assert declared.is_declaration and not defined.is_declaration
+    marked = _extension_attributes(defined)
+    assert [b"signext"] in marked, "the hook marked nothing, so the comparison below proves nothing"
+    assert _extension_attributes(declared) == marked
+
+
+def test_a_caller_of_a_constant_declares_the_entry_point_with_the_argument_attributes_of_numba_s_declaration():
+    """The declaration in a caller of a constant carries the argument attributes of numba's own declaration.
+
+    numba's ``declare_function`` marks the pointer for the result and the pointer for the exception data as
+    ``noalias`` and as not captured, and LLVM uses both attributes when it optimizes the caller. numbox builds the
+    declaration under the alias without ``declare_function``. The test therefore compares the attributes of that
+    declaration with those of a declaration that numba creates for the same entry point.
+    """
+    value = cres(types.int64(types.int32))(_shape_double)
+
+    @njit
+    def call(n):
+        return value(n)
+
+    assert call(numpy.int32(21)) == 42
+
+    caller_module = ll.parse_assembly(next(iter(call.inspect_llvm().values())))
+    declared = caller_module.get_function(value._numbox_jit_alias)
+    numba_module = ir.Module()
+    cpu_target.target_context.declare_function(numba_module, value.cres.fndesc)
+    expected = ll.parse_assembly(str(numba_module)).get_function(value.cres.fndesc.mangled_name)
+    attributes = [sorted(argument.attributes) for argument in expected.arguments]
+    assert any(attributes), "numba marked no argument, so the comparison below proves nothing"
+    assert [sorted(argument.attributes) for argument in declared.arguments] == attributes
+
+
+def test_a_function_compiled_twice_by_cres_gets_a_name_of_its_own_and_no_name_is_repointed():
+    """A second ``cres`` function that computes an alias gets a name of its own, without a collision warning.
+
+    A module reload compiles each ``cres`` function again, and so does a factory called twice with equal arguments.
+    The first name must keep resolving to the first compilation. A caller that reads a value as a constant holds no
+    copy of the function, so a name pointed at a second compilation would make a later caller of the first value run
+    the second. Both names are retired, because another process may compile the two in the other order. ``cres`` warns
+    about none of this at decoration: most ``cres`` functions are never read as constants, and only a cached caller
+    that reads one is affected.
+    """
+    def make():
+        @cres(float64(float64))
+        def body(x):
+            return x + 7.0
+        return body
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", AliasCollisionWarning)
+        first = make()
+        second = make()
+
+    shared, own = first._numbox_jit_alias, second._numbox_jit_alias
+    assert re.fullmatch(re.escape(shared) + r"_\d+", own), (shared, own)
+    assert ll.address_of_symbol(shared) == first.jit_address, "the first name was pointed at the second compilation"
+    assert ll.address_of_symbol(own) == second.jit_address
+    assert _is_shared_jit_name(shared) and _is_shared_jit_name(own), (
+        "a name that two functions share still passes the cache check, so a warm caller can be served the wrong one"
+    )
+
+
+def test_one_function_compiled_by_cres_under_two_sets_of_options_claims_two_aliases():
+    """One function that ``cres`` compiles under two sets of options has two aliases, and neither is retired.
+
+    The options change the compiled code, so the two compilations are two functions to a caller. With one alias for
+    both, the second would receive a name used only in this process, and a cached caller that holds either as a
+    constant would compile again in every process.
+    """
+    def body(x):
+        return x / 3.0
+
+    python_model = cres(float64(float64))(body)
+    numpy_model = cres(float64(float64), error_model="numpy")(body)
+    aliases = {python_model._numbox_jit_alias, numpy_model._numbox_jit_alias}
+    assert all(re.fullmatch(r"numbox_pxy_body_[0-9a-f]{16}_jit", alias) for alias in aliases), aliases
+    assert len(aliases) == 2, "two sets of options computed one alias"
+    assert not any(_is_shared_jit_name(alias) for alias in aliases)
+
+
+def test_two_functions_that_the_alias_cannot_tell_apart_each_run_their_own_code_as_constants():
+    """Two different functions with equal alias inputs each run their own code when read as constants.
+
+    The two tuple classes are both named ``Row`` and hold two floats, so the two signatures print alike, and the two
+    accessors have the same code and read no global. Everything that the alias covers is equal, and numbox cannot tell
+    the second accessor from the first one compiled again. The fields are in a different order, so the accessors read
+    different positions. The caller of the first accessor is compiled after the second accessor exists. If the second
+    registration had taken over the first one's name, that caller would return field ``b``. The second accessor has no
+    caller here, because numba gives two function types that print alike one type, the first.
+    """
+    row_ab = namedtuple("Row", ["a", "b"])
+    row_ba = namedtuple("Row", ["b", "a"])
+
+    def make(row_type):
+        @cres(float64(row_type))
+        def get_a(row):
+            return row.a
+        return get_a
+
+    type_ab, type_ba = typeof(row_ab(1.0, 2.0)), typeof(row_ba(1.0, 2.0))
+    assert str(float64(type_ab)) == str(float64(type_ba)), "the scenario needs two signatures that print alike"
+    get_a_ab = make(type_ab)
+    get_a_ba = make(type_ba)
+    assert get_a_ba._numbox_jit_alias.startswith(get_a_ab._numbox_jit_alias + "_"), (
+        "the two accessors did not compute one alias, so the test would pass without exercising the rule"
+    )
+
+    @njit
+    def read_ab(row):
+        return get_a_ab(row)
+
+    assert read_ab(row_ab(a=1.0, b=2.0)) == 1.0, "the caller of the first accessor ran the second one"
+
+
+def test_two_cres_values_over_unfingerprintable_pointers_each_run_their_own_body_as_constants():
+    """Two ``cres`` functions that differ only in a value with no fingerprint each run their own code as constants.
+
+    The two functions close over ctypes pointers built from raw addresses, which have no fingerprint, so both compute
+    one alias. The second value must carry a name of its own. With the shared name, its caller would run the first
+    function and return ``floor(2.5)`` instead of the expected ``ceil(2.5)``. ``cres`` does not warn at decoration.
+    """
+    libm = open_libm()
+    if libm is None:
+        pytest.skip("No math library discoverable to take two distinct symbol addresses from")
+    proto = ctypes.CFUNCTYPE(ctypes.c_double, ctypes.c_double)
+
+    def make(symbol):
+        fp = proto(ctypes.cast(getattr(libm, symbol), ctypes.c_void_p).value)
+
+        @cres(float64(float64))
+        def body(x):
+            return fp(x)
+        return body
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", AliasCollisionWarning)
+        floor_value = make("floor")
+        ceil_value = make("ceil")
+
+    @njit(float64(float64))
+    def const_floor(x):
+        return floor_value(x)
+
+    @njit(float64(float64))
+    def const_ceil(x):
+        return ceil_value(x)
+
+    assert const_floor(2.5) == 2.0
+    assert const_ceil(2.5) == 3.0, "the second function was lowered against the first one's entry point"
+    assert floor_value._numbox_jit_alias != ceil_value._numbox_jit_alias
+    assert _is_shared_jit_name(floor_value._numbox_jit_alias) and _is_shared_jit_name(ceil_value._numbox_jit_alias), (
+        "an alias still identifies a function, so a warm caller of the constant can be served the wrong one"
+    )
+
+
+# Two values that jitted code cannot hold and that an object-mode block can read.
+_REORDERED_TABLE = numpy.array([(1.0, 10.0), (2.0, 20.0)], dtype=[("a", "f8"), ("b", "f8")])[["b", "a"]]
+_HUGE_INT = 7 ** 6000
+
+
+def test_cres_compiles_a_function_whose_object_mode_block_reads_values_that_numba_cannot_type():
+    """``cres`` computes a function's alias from every global that it reads, including one read only in object mode.
+
+    numba does not type such a global, so its value can be one that jitted code could not hold. The first value here
+    is a structured array whose fields are not in the order of their offsets, so NumPy defines no ``descr`` for it.
+    The second is an int for which ``repr`` raises ``ValueError`` under the interpreter's default digit limit.
+    ``cres`` must compute an alias for a function that reads them, and the function must run.
+    """
+    @cres(float64(float64))
+    def lookup(x):
+        with objmode(y="float64"):
+            row = _REORDERED_TABLE[int(x)]
+            y = float(row["a"] + row["b"] + _HUGE_INT % 5)
+        return y
+
+    assert lookup._numbox_jit_alias.endswith("_jit")
+    assert lookup(1.0) == 2.0 + 20.0 + 1.0
+
+
+def _ahead_of_time_ir(func):
+    """Return the LLVM IR of ``func`` compiled for ``float64(float64)`` as ``numba.pycc`` compiles an exported function.
+
+    The compilation stops at the IR of the finalized library, so it needs no C compiler. The calling test is skipped if
+    this numba has no ahead-of-time code generator.
+    """
+    from numba.core.compiler import Flags, compile_extra
+    from numba.core.compiler_lock import global_compiler_lock
+    from numba.core.registry import cpu_target
+
+    if not hasattr(cpu_target.target_context, "with_aot_codegen"):
+        pytest.skip("this numba has no ahead-of-time code generator")
+
+    flags = Flags()
+    flags.no_compile = True
+    flags.no_cpython_wrapper = True
+    flags.no_cfunc_wrapper = True
+    with global_compiler_lock:
+        target_context = cpu_target.target_context.with_aot_codegen("aot_probe")
+        library = target_context.codegen().create_library("aot_probe")
+        compile_extra(
+            cpu_target.typing_context, target_context, func, (float64,), float64, flags, locals={}, library=library,
+        )
+        library.finalize()
+        return library.get_llvm_str()
+
+
+def test_a_module_compiled_ahead_of_time_declares_no_alias():
+    """A caller compiled for numba's ahead-of-time target has the constant's code linked in and names no alias.
+
+    numbox registers an alias with llvmlite in the running process. The loader of a module that ``numba.pycc`` compiled
+    knows nothing of that table, so a module that declared an alias would fail to import with an undefined symbol.
+    """
+    @cres(float64(float64))
+    def scale(x):
+        return x * 2.0
+
+    def twice(x):
+        return scale(x) + scale(x)
+
+    llvm_ir = _ahead_of_time_ir(twice)
+
+    assert "twice" in llvm_ir, "the library holds no caller, so the test would pass without exercising the lowering"
+    assert "numbox_pxy_" not in llvm_ir, "the ahead-of-time module refers to a name that only this process registers"
+
+
+def test_an_ahead_of_time_module_that_calls_a_jitted_holder_of_the_constant_declares_the_alias():
+    """A jitted function that holds the constant brings the alias into an ahead-of-time module that calls it.
+
+    ``numba.pycc`` compiles only the exported function for its ahead-of-time target. A jitted function that the
+    exported function calls is compiled in the same way as for the running process, so it declares the alias, and the
+    module that links it in cannot be imported. The pages on ``cres`` and ``@proxy`` state this limit and the way
+    around it: the exported function reads the value itself and passes it on as an argument, and the module then names
+    no alias.
+    """
+    @cres(float64(float64))
+    def scale(x):
+        return x * 2.0
+
+    @njit
+    def holder(x):
+        return scale(x) + 1.0
+
+    @njit
+    def taker(func, x):
+        return func(x) + 1.0
+
+    def through_the_holder(x):
+        return holder(x)
+
+    def through_an_argument(x):
+        return taker(scale, x)
+
+    assert "numbox_pxy_" in _ahead_of_time_ir(through_the_holder)
+    assert "numbox_pxy_" not in _ahead_of_time_ir(through_an_argument)
+
+
+def test_a_rewrapped_wrapper_has_no_alias_and_is_linked_into_a_caller_of_the_constant():
+    """A value that ``rewrap_derive`` returns has no alias, and a caller that reads it as a constant links its body in.
+
+    numbox computes an alias only for a function that ``cres`` or ``@proxy`` compiled. For any other ``DeriveWAP``, the
+    constant lowering declares numba's own name for the entry point and links the body's library into the caller. The
+    call must still return the body's result and propagate its exception, and the caller's IR must name no numbox
+    alias.
+    """
+    jitted = njit(float64(float64))(_raise_when_positive)
+    upgraded = rewrap_derive(CompileResultWAP(jitted.get_compile_result(jitted.nopython_signatures[0])))
+    assert not hasattr(upgraded, "_numbox_jit_alias")
+
+    @njit(float64(float64))
+    def call_constant(x):
+        return upgraded(x)
+
+    assert call_constant(-2.0) == -1.0
+    with pytest.raises(ValueError, match="derive boom"):
+        call_constant(3.0)
+    assert "numbox_pxy_" not in next(iter(call_constant.inspect_llvm().values()))
 
 
 def test_a_foreign_wrapper_reached_from_jitted_scope_still_discards():

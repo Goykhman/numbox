@@ -120,9 +120,10 @@ disable caching. numbox also disables caching, with a warning, where numba can w
 Cached callers of a binding keep working after a numbox upgrade from one release to another. The bindings compile again,
 because their cache key holds numbox's version, as :ref:`after you upgrade numbox <cache_key_after_upgrade>` explains.
 numbox repairs each cached caller of a binding whose code the new release changed, at the caller's next run and with one
-warning, as the proxy page says under :ref:`After you upgrade numbox <proxy_after_upgrade>`. The one case that repair
-does not cover is a caller that holds a binding's ``.as_func`` in a module-level variable. Delete that caller's cache
-files, as :ref:`holding the function as a module-level constant <proxy_module_level_constant>` explains.
+warning, as the proxy page says under :ref:`After you upgrade numbox <proxy_after_upgrade>`. The repair also covers a
+caller that holds a binding's ``.as_func`` in a module-level variable, unless numbox 0.7.9 or earlier wrote the
+caller's cache entry. Delete such an entry once, as
+:ref:`holding the function as a module-level constant <proxy_module_level_constant>` explains.
 
 A few SQLite bindings name symbols that some builds of SQLite lack, such as ``sqlite3_changes64``, which SQLite added in
 version 3.37. Where the symbol is missing, the binding is a stub, and a jitted caller fails to compile, as :ref:`the

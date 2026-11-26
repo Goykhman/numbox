@@ -3,15 +3,14 @@
 :func:`make_structref` generates the code of a StructRef type with its constructor, field getters and methods, writes
 the code to a cache anchor and compiles it, so that numba can cache the struct. :func:`cres` compiles a function for
 one signature into a :class:`~numbox.utils.derive_wap.DeriveWAP`, and :func:`cres_if_available` does the same if a C
-library has the function's symbol. The module also computes the process-stable identities of numba types and
-signatures that numbox puts into the names of generated code.
+library has the function's symbol. :func:`hash_type` returns the process-stable identity of a numba type, which
+numbox puts into the names of generated code.
 """
 import hashlib
 import re
 from inspect import getmodule, getsource
 from io import StringIO
 from numba import njit
-from numba.core.itanium_mangler import mangle_type_or_value
 from numba.core.types import Type
 from numba.core.types.functions import Dispatcher
 from numba.core.typing.templates import Signature
@@ -23,10 +22,11 @@ from typing import Callable, Iterable, Optional
 
 from numbox.core.cache_key import _keyed
 from numbox.core.configurations import jit_options as jit_options_
+from numbox.core.proxy.proxy import _claim_jit_alias, _stable_cfunc_alias
 from numbox.utils.derive_wap import DeriveWAP
 from numbox.utils.fingerprint import (
-    _Unfingerprintable, _canon_value, _fingerprint_function,
-    _fingerprint_function_best_effort, _loaded_global_names,
+    _Unfingerprintable, _canon_value, _fingerprint_function, _fingerprint_function_best_effort,
+    _fingerprint_module_attrs, _loaded_global_names, _referenced_global_names, _type_identity,
 )
 from numbox.utils.preprocessing import _anchored_or_uncached, _structref_anchor_path, bounded_stem
 from numbox.utils.standard import make_params_strings
@@ -44,12 +44,13 @@ def _method_identity(method, user_ns) -> tuple[str, bool]:
     values therefore reach the compiled method, but the method's own fingerprint does not include them. Two methods
     with the same source and different ``ns`` values have different texts, so their helpers have different names and
     their code is written to different anchors. numba then compiles the second method instead of loading the binary of
-    the first. ``cacheable`` is False if the method has no
-    fingerprint or reads an ``ns`` value that has none. The struct then compiles without an on-disk cache, so it is
-    never loaded stale.
+    the first. An ``ns`` entry that is a module adds the attributes that the method reads through it, such as
+    ``helpers.K`` or ``helpers.op``, as ``_fingerprint_module_attrs`` folds them for a module among a function's
+    globals. ``cacheable`` is False if the method has no fingerprint, or reads an ``ns`` value or an attribute of an
+    ``ns`` module that has none. The struct then compiles without an on-disk cache, so it is never loaded stale.
     """
     try:
-        fingerprint = _fingerprint_function(method, set())
+        fingerprint = _fingerprint_function(method, set(), fold_named=True)
         cacheable = True
     except (_Unfingerprintable, RecursionError):
         fingerprint = _fingerprint_function_best_effort(method)
@@ -60,12 +61,24 @@ def _method_identity(method, user_ns) -> tuple[str, bool]:
     # reads self.x would fold an ns entry named x that it never reads, and an entry without a fingerprint would turn
     # the struct's cache off.
     if user_ns:
-        for name in sorted(n for n in _loaded_global_names(method.__code__) if n in user_ns):
+        read = sorted(n for n in _loaded_global_names(method.__code__) if n in user_ns)
+        for name in read:
             try:
-                parts.append(f"ns:{name}={_canon_value(user_ns[name], set())}")
+                parts.append(f"ns:{name}={_canon_value(user_ns[name], set(), fold_named=True)}")
             except (_Unfingerprintable, RecursionError):
                 parts.append(f"ns:{name}=<opaque:{type(user_ns[name]).__name__}>")
                 cacheable = False
+        # The loop above folds a module by its name only. The method's fingerprint already holds the attributes of a
+        # module that the method's own globals hold under the same name, so only the other ns modules are walked. A
+        # method that reads no attribute of such a module adds no part, and its text is the one it had before.
+        through_ns = {name: user_ns[name] for name in read if method.__globals__.get(name) is not user_ns[name]}
+        try:
+            ns_attrs = _fingerprint_module_attrs(_referenced_global_names(method.__code__), through_ns, set(), True)
+        except (_Unfingerprintable, RecursionError):
+            ns_attrs = ";module_attrs=<opaque>"
+            cacheable = False
+        if ns_attrs:
+            parts.append(f"ns{ns_attrs}")
     return ";".join(parts), cacheable
 
 
@@ -77,6 +90,15 @@ def cres(sig, **kwargs):
     :class:`~numbox.utils.derive_wap.DeriveWAP`, not a dispatcher, so a cached jitted function that takes it as an
     argument loads from the cache in the next process. An exception raised in its body propagates to a jitted caller,
     as :mod:`numbox.utils.derive_wap` explains.
+
+    numbox registers the compiled function's numba entry point under a name that is the same in every process. The
+    name is made from the alias that :func:`~numbox.core.proxy.proxy.proxy` computes for a function. A cached jitted
+    function that reads the result as a constant, such as a module-level global, refers to that name. After an edit to
+    the decorated function, numbox discards the cache entry of such a caller with a
+    :class:`~numbox.core.proxy.proxy.StaleProxyCacheWarning`, and numba compiles the caller again. If a second function
+    in the process computes the same alias, numbox registers it under a name of its own, so each caller runs the
+    function that it holds. numbox then discards the cache entry of every caller that holds either function as a
+    constant, in each process where both exist.
     """
     if not isinstance(sig, Signature):
         raise ValueError(f"Expected a single signature, found {sig} of type {type(sig)}")
@@ -94,6 +116,11 @@ def cres(sig, **kwargs):
         wrapper._numbox_py_func = func
         # The wrapper also stores the dispatcher, whose cache numbox.core.cache_key.explain_cache_key reads.
         wrapper._numbox_dispatcher = func_jit
+        # The numba entry point is registered under a name made from the alias that @proxy would compute for the
+        # function. The constant lowering in numbox.utils.derive_wap declares that name. A cached caller that reads the
+        # wrapper as a constant therefore imports a name that the cache check of numbox.core.proxy.proxy can test, and
+        # importing that module installs the check.
+        wrapper._numbox_jit_alias = _claim_jit_alias(_stable_cfunc_alias(func, sig, kwargs), wrapper.jit_address)
         return wrapper
     return _
 
@@ -126,37 +153,6 @@ def determine_field_index(struct_ty, field_name):
     raise ValueError(f"{field_name} not in {struct_ty}")
 
 
-def _type_identity(ty: Type) -> tuple[str, bool]:
-    """Return ``(digest, cacheable)`` for the numba type ``ty``: a SHA-256 that is the same in every process, and
-    whether code typed with ``ty`` may be cached.
-
-    A dispatcher type, or a container type that holds one, is not cacheable. A Record type is hashed by its ``str``, a
-    dispatcher type by the fingerprint of its Python function, and any other type by numba's mangled name for it.
-    """
-    cacheable = True
-    ty_str = str(ty)
-    if isinstance(ty, Dispatcher):
-        # A dispatcher type holds the address of its Python function, which differs from one process to the next. A
-        # signature that holds one misses numba's on-disk index in every process, and numba appends a new data entry
-        # each time, so the cache files grow without bound.
-        cacheable = False
-        try:
-            body = "dispatcher(" + _fingerprint_function(ty.dispatcher.py_func, set()) + ")"
-        except (_Unfingerprintable, RecursionError):
-            body = "dispatcher-besteffort(" + _fingerprint_function_best_effort(ty.dispatcher.py_func) + ")"
-    elif "Record(" in ty_str:
-        # numba mangles a Record type with its _code, a counter of the order in which the process creates types, so
-        # the mangled name differs between a fresh process and one that has created other types first. The str of a
-        # Record describes its fields, so the str is hashed instead.
-        body = "structural(" + ty_str + ")"
-    else:
-        body = mangle_type_or_value(ty)
-    if cacheable and "CPUDispatcher(" in ty_str:
-        # A dispatcher inside a container type, such as a tuple, makes the type uncacheable as well.
-        cacheable = False
-    return hashlib.sha256(body.encode("utf-8")).hexdigest(), cacheable
-
-
 def hash_type(ty: Type) -> str:
     """Return a SHA-256 hex digest of the numba type ``ty`` that is the same in every process.
 
@@ -164,16 +160,6 @@ def hash_type(ty: Type) -> str:
     type by numba's mangled name for it.
     """
     return _type_identity(ty)[0]
-
-
-def _signature_identity(sig: Signature) -> tuple[str, bool]:
-    """Return ``(text, cacheable)`` for the numba signature ``sig``: the digests of its return and argument types, and
-    whether all of them are cacheable, as :func:`_type_identity` returns them."""
-    ret_hash, ret_ok = _type_identity(sig.return_type)
-    arg_ids = [_type_identity(a) for a in sig.args]
-    text = ret_hash + "(" + ",".join(h for h, _ok in arg_ids) + ")"
-    cacheable = ret_ok and all(ok for _h, ok in arg_ids)
-    return text, cacheable
 
 
 def make_structref_code_txt(

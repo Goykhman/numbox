@@ -5,11 +5,12 @@ must therefore hold every value that changes the compiled code: the target optio
 attributes that a formula reads, the declared types, and the ``NUMBA_*`` settings that change the emitted code. A
 formula that is or calls a dispatcher compiled with ``cache=True`` must leave the kernel uncached, because the kernel's
 name cannot make numba refresh that dispatcher's own cache. Most tests compare fingerprints, kernel names or the cache
-of a compiled dispatcher in one process. Three tests run a probe script in two processes that share one
+of a compiled dispatcher in one process. Some tests run a probe script in two or three processes that share one
 ``NUMBA_CACHE_DIR``; a stale kernel would make the second process print the first process's result, or would leave a
 cached kernel file. The last test checks that the record of passed return-type checks is keyed on the jit options.
 test_compile_kernel.py tests the other inputs of the digest and the cache in general.
 """
+import json
 import os
 import subprocess
 import sys
@@ -228,6 +229,289 @@ def test_module_constant_change_not_stale_across_processes(tmp_path):
     # The second process uses the same cache directory with SCALE = 3.0.
     got = _run_probe(probe, env)
     assert got == "30.0", f"module constant change served a stale kernel: got {got}, expected 30.0"
+
+
+@pytest.mark.parametrize("holder", ["attribute", "global"])
+def test_a_named_function_swapped_between_processes_does_not_serve_a_stale_kernel(tmp_path, holder):
+    """A kernel compiles again when the function that its formula calls is another one in the next process.
+
+    The formula calls ``op``, which holds ``math.sin`` in the first process and ``math.cos`` in the second. ``op`` is an
+    attribute of a module in one case and a global of the script in the other. The code of the formula is the same in
+    both processes. As a module attribute, only the name of the function that ``op`` holds separates the digests of
+    the two kernels. As a global, ``op`` leaves the formula without a fingerprint, and the kernel compiles without a
+    cache. The second process shares the first process's NUMBA_CACHE_DIR and must print ``cos(0.0)``; a kernel loaded
+    from the first process's cache would print ``sin(0.0)``.
+    """
+    probe = tmp_path / "named_function_probe.py"
+    probe.write_text(textwrap.dedent('''
+        import math
+        import os
+        import sys
+        import types
+        import numpy as np
+        from numbox.core.variable.variable import Graph
+        from numbox.core.variable.compile_kernel import compile_kernel
+
+        op = getattr(math, os.environ["OP"])
+        cfg = types.ModuleType("ck_op_probe")
+        cfg.op = op
+        sys.modules["ck_op_probe"] = cfg
+        import ck_op_probe  # noqa: E402,F401  -- now a module global of this script
+
+        if os.environ["HOLDER"] == "global":
+            def apply(y):
+                return op(y)
+        else:
+            def apply(y):
+                return ck_op_probe.op(y)
+
+        g = Graph(
+            variables_lists={"variables": [
+                {"name": "out", "inputs": {"y": "basket"}, "formula": apply}]},
+            external_source_names=["basket"],
+        )
+        ck = compile_kernel(g, "variables.out")
+        print(float(np.asarray(ck.kernel(0.0)[0]).ravel()[0]))
+    '''), encoding="utf-8")
+
+    env = _shared_cache_env(tmp_path)
+    env["HOLDER"] = holder
+    env["OP"] = "sin"
+    assert _run_probe(probe, env) == "0.0"
+    env["OP"] = "cos"
+    got = _run_probe(probe, env)
+    assert got == "1.0", f"the kernel compiled for math.sin was served for math.cos: got {got}, expected 1.0"
+
+
+def test_a_module_swapped_between_processes_does_not_serve_a_stale_kernel(tmp_path):
+    """A kernel compiles again when a module attribute holds another module in the next process.
+
+    The formula calls ``lib.sqrt`` through the module attribute ``lib``, which holds ``math`` in the first process and
+    ``cmath`` in the second. Each of the two modules provides ``sqrt`` as its own function, so only the name of the
+    module that ``lib`` holds separates the digests of the two kernels. The second process shares the first process's
+    NUMBA_CACHE_DIR and must print 2.0, the absolute value of ``cmath.sqrt(-4.0)``. A kernel loaded from the first
+    process's cache would print ``nan``, which ``math.sqrt(-4.0)`` returns in jitted code.
+    """
+    probe = tmp_path / "swapped_module_probe.py"
+    probe.write_text(textwrap.dedent('''
+        import importlib
+        import os
+        import sys
+        import types
+        import numpy as np
+        from numbox.core.variable.variable import Graph
+        from numbox.core.variable.compile_kernel import compile_kernel
+
+        cfg = types.ModuleType("ck_lib_probe")
+        cfg.lib = importlib.import_module(os.environ["LIB"])
+        sys.modules["ck_lib_probe"] = cfg
+        import ck_lib_probe  # noqa: E402,F401  -- now a module global of this script
+
+
+        def apply(y):
+            return abs(ck_lib_probe.lib.sqrt(y))
+
+        g = Graph(
+            variables_lists={"variables": [
+                {"name": "out", "inputs": {"y": "basket"}, "formula": apply}]},
+            external_source_names=["basket"],
+        )
+        ck = compile_kernel(g, "variables.out")
+        print(float(np.asarray(ck.kernel(-4.0)[0]).ravel()[0]))
+    '''), encoding="utf-8")
+
+    env = _shared_cache_env(tmp_path)
+    env["LIB"] = "math"
+    assert _run_probe(probe, env) == "nan"
+    env["LIB"] = "cmath"
+    got = _run_probe(probe, env)
+    assert got == "2.0", f"the kernel compiled for math.sqrt was served for cmath.sqrt: got {got}, expected 2.0"
+
+
+_SWAP_KINDS = [
+    "a @register_jitable function, edited", "an @njit function without a fingerprint", "a cres function",
+    "a NumPy function", "a class of NumPy", "a numba type", "a dtype object",
+    "a module taken as a default argument", "the locals of a dispatcher",
+    "the declared signature of a dispatcher", "the declared signature of a dispatcher formula",
+    "the declared loop of a @vectorize function", "the declared loop of a @vectorize formula",
+    "an @njit function in a tuple that calls a function without a fingerprint",
+    "a function of numpy.random",
+    "a @register_jitable function in a module with the name of a standard-library module, edited",
+]
+
+
+@pytest.fixture(scope="module")
+def swap_results(tmp_path_factory):
+    """Run the probe below three times and return the three lists of results, one result per kind in ``_SWAP_KINDS``.
+
+    The probe compiles one kernel per kind. Each formula has the same code in every run. The value that it reaches
+    differs between the first run and the two others. That value is the function, class, type or module behind a
+    module attribute, or the types that a dispatcher was declared with. The first and the second run share one
+    ``NUMBA_CACHE_DIR``. The third run repeats the second on an empty cache, so its results are the ones that freshly
+    compiled kernels return.
+    """
+    tmp_path = tmp_path_factory.mktemp("swap")
+    # The probe's directory is first on the probe's sys.path, so this module replaces the standard library's colorsys
+    # there.
+    (tmp_path / "colorsys.py").write_text(textwrap.dedent('''
+        import os
+
+        from numba.extending import register_jitable
+
+        if os.environ["RUN"] != "first":
+            @register_jitable
+            def shade(x):
+                return 3.0 * x
+        else:
+            @register_jitable
+            def shade(x):
+                return 2.0 * x
+    '''), encoding="utf-8")
+    probe = tmp_path / "swap_probe.py"
+    probe.write_text(textwrap.dedent('''
+        import json
+        import os
+        import sys
+        import types
+        from math import sqrt
+
+        import colorsys
+        import numpy as np
+        from numba import float32, float64, njit, vectorize
+        from numba.extending import register_jitable
+        from numbox.core.variable.compile_kernel import compile_kernel
+        from numbox.core.variable.variable import Graph
+        from numbox.utils.highlevel import cres
+
+        LATER = os.environ["RUN"] != "first"
+        helpers = types.ModuleType("ck_swap_probe")
+        sys.modules["ck_swap_probe"] = helpers
+        import ck_swap_probe  # noqa: E402,F401  -- now a module global of this script
+
+        if LATER:
+            @register_jitable
+            def step(x):
+                return 3.0 * x
+
+            @njit
+            def root(x):
+                return 3.0 * sqrt(x)
+        else:
+            @register_jitable
+            def step(x):
+                return 2.0 * x
+
+            @njit
+            def root(x):
+                return 2.0 * sqrt(x)
+
+
+        def plain_double(x):
+            return 2.0 * x
+
+
+        def plain_triple(x):
+            return 3.0 * x
+
+
+        # Both cres functions exist in every run, so a process never discards a caller for a missing alias.
+        compiled = {False: cres(float64(float64))(plain_double), True: cres(float64(float64))(plain_triple)}
+        @njit
+        def through(x):
+            return (5.0 if LATER else 4.0) * ck_swap_probe.root(x)
+
+
+        helpers.step = step
+        helpers.root = root
+        helpers.table = (through,)
+        helpers.compiled = compiled[LATER]
+        helpers.reduce = np.prod if LATER else np.sum
+        helpers.kind = np.float32 if LATER else np.float64
+        helpers.cast = float32 if LATER else float64
+        helpers.dtype = np.dtype("float32") if LATER else np.dtype("float64")
+        helpers.SCALE = 3.0 if LATER else 2.0
+        # uniform(y, y) is exactly y, and normal(y, y) is a random draw.
+        helpers.draw = np.random.uniform if LATER else np.random.normal
+
+
+        @njit(locals={"t": float32 if LATER else float64})
+        def with_locals(x):
+            t = x / 3.0
+            return t * 1.0
+
+
+        @njit("float64(float32)" if LATER else "float64(float64)")
+        def declared(x):
+            return x / 3.0
+
+
+        @vectorize(["float32(float64)"] if LATER else ["float64(float64)"])
+        def loop(x):
+            return x / 3.0
+
+
+        def default_module(y, m=helpers):
+            return m.SCALE * y
+
+
+        def dtype_object(y):
+            stored = np.empty(1, ck_swap_probe.dtype)
+            stored[0] = y / 3.0
+            return stored[0] * 1.0
+
+
+        formulas = [
+            lambda y: ck_swap_probe.step(y),
+            lambda y: ck_swap_probe.root(y),
+            lambda y: ck_swap_probe.compiled(y),
+            lambda y: ck_swap_probe.reduce(np.full(3, y)),
+            lambda y: ck_swap_probe.kind(y) / 3.0,
+            lambda y: ck_swap_probe.cast(y) / 3.0,
+            dtype_object,
+            default_module,
+            lambda y: with_locals(y),
+            lambda y: declared(y),
+            declared,
+            lambda y: loop(y) * 1.0,
+            loop,
+            lambda y: ck_swap_probe.table[0](y),
+            lambda y: ck_swap_probe.draw(y, y),
+            lambda y: colorsys.shade(y),
+        ]
+        results = []
+        for formula in formulas:
+            graph = Graph(
+                variables_lists={"variables": [{"name": "out", "inputs": {"y": "basket"}, "formula": formula}]},
+                external_source_names=["basket"],
+            )
+            kernel = compile_kernel(graph, "variables.out").kernel
+            results.append(float(np.asarray(kernel(1.6)[0]).ravel()[0]))
+        print(json.dumps(results))
+    '''), encoding="utf-8")
+
+    env = _shared_cache_env(tmp_path)
+    runs = []
+    for run, cache in (("first", "nbcache"), ("second", "nbcache"), ("fresh", "nbcache-fresh")):
+        env["RUN"] = run
+        env["NUMBA_CACHE_DIR"] = str(tmp_path / cache)
+        runs.append(json.loads(_run_probe(probe, env)))
+    assert all(len(results) == len(_SWAP_KINDS) for results in runs)
+    return runs
+
+
+@pytest.mark.parametrize("kind", _SWAP_KINDS)
+def test_a_value_swapped_between_processes_does_not_serve_a_stale_kernel(swap_results, kind):
+    """A kernel compiles again when a value that its formula reaches is another one in the next process.
+
+    The formula's code is the same in both processes. What differs is a function, a class, a type or a module that
+    the formula reaches through a module attribute or a default argument, or the types that a dispatcher was declared
+    with. The second process shares the first process's NUMBA_CACHE_DIR and must return what a kernel compiled on an
+    empty cache returns. A kernel loaded from the first process's cache would return the first process's result.
+    """
+    index = _SWAP_KINDS.index(kind)
+    first, second, fresh = (results[index] for results in swap_results)
+    assert first != fresh, "the two runs must compute different results for the test to show anything"
+    assert second == fresh, f"the kernel compiled in the first process was served: got {second}, expected {fresh}"
 
 
 # A formula with a cache of its own leaves the kernel uncached.

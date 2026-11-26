@@ -121,8 +121,10 @@ A method's source is copied into the generated code, which runs in a namespace o
 module or a function that the method reads as a global, such as ``np`` or a jitted helper, is therefore not defined in
 that namespace. The first call of the method fails with a ``TypingError`` whose text includes
 ``NameError: name 'np' is not defined``. Pass each such global to ``make_structref`` in its ``ns`` argument, as in
-``ns={"np": np}``. The values in ``ns`` that a method reads become part of the method's fingerprint, which the section
-on `numbox.utils.fingerprint`_ describes. A new value therefore changes the generated code, which is compiled again.
+``ns={"np": np}``. The values in ``ns`` that a method reads become part of the method's fingerprint, and so do the
+attributes that it reads through a module in ``ns``, as in ``helpers.SCALE``. The section on
+`numbox.utils.fingerprint`_ describes the fingerprint. A new value therefore changes the generated code, which is
+compiled again.
 
 After you edit a struct's method
 ''''''''''''''''''''''''''''''''
@@ -257,6 +259,8 @@ the value to a ``DeriveWAP``. :func:`~numbox.core.work.work.make_work` calls ``r
 receives from Python. A tuple that mixes ``DeriveWAP`` values with other function values is subject to further limits,
 which the :ref:`work page <derive_mixed_function_values>` lists.
 
+.. _cres_module_level_constant:
+
 Holding the value as a module-level constant
 ''''''''''''''''''''''''''''''''''''''''''''
 
@@ -277,19 +281,49 @@ third file, ``constant.py``, shows this form:
 
     print(twice(4.0))   # 4.0
 
-This form gives a direct call, which LLVM can inline, and an exception raised in the body propagates as it does through
-an argument. numba caches ``twice`` too. numbox declares the body's numba entry point by its symbol name and links the
-body's compiled code into ``twice``, so ``twice`` holds no address that changes between processes. numba itself refuses
-to cache a caller that holds one of numba's own function values as a constant, and it warns that the caller uses dynamic
-globals.
+An exception raised in the body propagates as it does through an argument, and numba caches ``twice`` too. numbox
+registers the body's numba entry point under an alias, a symbol name that is the same in every process. ``twice`` holds
+a declaration of that name and a call to it. It therefore holds no address that changes between processes and no copy of
+the body, and LLVM cannot inline the call. numba itself refuses to cache a caller that holds one of numba's own function
+values as a constant, and it warns that the caller uses dynamic globals.
 
-The cost is that the cache entry of ``twice`` holds its own copy of the body. The copy can go stale, as the cached
-caller of a struct's method does (`after you edit a struct's method <After you edit a struct's method_>`_). After you
-edit ``checked_sqrt`` in ``ops.py``, ``twice`` may keep running the old body. Delete the cache files of ``twice`` after
-every edit of the body, here ``constant.twice-6.py312.nbi`` and ``constant.twice-6.py312.1.nbc``. Unless the inlining
-matters, pass the value as an argument instead: ``apply`` calls whichever value it is passed, so it always runs the
-current body. The proxy page covers the same form for ``.as_func`` (:ref:`holding the function as a module-level
-constant <proxy_module_level_constant>`).
+A function that ``numba.pycc`` compiles ahead of time holds a copy of the body instead, because the loader of an
+ahead-of-time module cannot resolve a name that numbox registers at run time. ``numba.pycc`` compiles only the exported
+function that way. A jitted function or a ``cres`` function that the exported function calls is compiled in the same
+way as for the running process, and if it holds a ``cres`` value as a module-level constant, the module fails to import
+with an undefined symbol. Read the value in the exported function and pass it to a jitted function as an argument, in
+the way that ``apply`` takes it in the example above.
+
+numbox computes the alias as it does for a proxied function: from the function's code and the values it captures, from
+its module and name, and from the signature and the options passed to ``cres``. After you edit ``checked_sqrt`` in
+``ops.py``, the alias changes. numbox then discards the cache entry of ``twice`` with a
+:class:`~numbox.core.proxy.proxy.StaleProxyCacheWarning`, and numba compiles ``twice`` again. The proxy page shows the
+warning under :ref:`Caching <proxy_caching>` and describes strict mode there.
+
+``twice`` always calls the function that ``checked_sqrt`` names. If a second ``cres`` function in the process computes
+the same alias, numbox registers it under a name of its own. That happens after a module reload, when a function that
+calls ``cres`` runs twice with equal arguments, when one function is passed to ``cres`` twice with the same signature
+and options, and for two functions that differ only in a value that the alias leaves out, such as a captured ufunc or
+``math`` function. In a process where two functions share an alias, numbox does not load a cached caller that holds
+either as a constant, and numba compiles that caller again with the same warning. The proxy page explains the rule under
+:ref:`If two functions share an alias <proxy_shared_alias>`. If such a function is passed as an argument instead, in the
+way that ``apply`` takes it in the example above, the caller's cache entry loads in every process.
+
+A cache entry that numbox 0.7.9 or earlier wrote for a caller such as ``twice`` holds a copy of the body and names no
+alias, so the check does not cover it. Delete such an entry once after the upgrade, as the proxy page explains under
+:ref:`holding the function as a module-level constant <proxy_module_level_constant>`.
+
+Delete the cache files of ``twice`` before a downgrade to numbox 0.7.9 or earlier as well. A cache entry that a later
+release wrote refers to the alias, and the older release does not register it. If the process imports
+``numbox.core.proxy.proxy``, as every use of a numbox binding does, the older release discards the entry with a
+warning and compiles ``twice`` again. In any other process, numba loads the entry, and the process ends in a
+segmentation fault without a message.
+
+Only a value that ``cres`` or ``@proxy`` made has an alias. A ``DeriveWAP`` that you construct from a compile result,
+or that :func:`~numbox.utils.derive_wap.rewrap_derive` returns, has none. For such a value held as a constant, numbox
+links the body's compiled code into the caller, and the caller's cache entry holds its own copy of the body. After an
+edit to the body in another file, the cached caller may keep running the old body without a warning. Compile the
+function with ``cres`` instead, or delete the caller's cache files after every edit of the body.
 
 .. automodule:: numbox.utils.derive_wap
    :members:
@@ -474,6 +508,8 @@ in a module that the script imports.
    :show-inheritance:
    :undoc-members:
 
+.. _utils_fingerprint:
+
 numbox.utils.fingerprint
 ------------------------
 
@@ -490,8 +526,35 @@ new code, which is compiled again. The fingerprint of a function is built from:
 - the value of each global that it reads by name;
 - the value of each module attribute that it reads, such as ``cfg.SCALE``, when the value is a number, a string,
   an array or another kind of data, or a dispatcher;
+- each function or class that it reads as a module attribute, as in ``helpers.op(x)``. Only the fingerprint of a struct
+  method, a formula, a derive and a ``digest`` has this item. The alias of a ``@proxy`` or ``cres`` function leaves it
+  out. The item holds one of two things:
+
+  - the function's own fingerprint, for a function that numba compiles from the function's own content. These are a
+    Python function, such as a ``@register_jitable`` helper, a ``cres`` function, a numba ``ExternalFunction`` and a
+    ctypes function pointer;
+  - the module and name, such as ``numpy.sum``, for a function or a class that numba compiles from an implementation
+    of its own. These are a builtin function, a NumPy ufunc, and a function or a class of NumPy, numba, numbox or
+    the standard library. The value has a name if its module provides it under the value's own name. The name is
+    included only if the module that holds the attribute is outside the value's own top-level package, so
+    ``numpy.sum`` read as ``np.sum`` adds nothing, and ``numpy.sum`` read as ``helpers.op`` adds its name. The name of
+    a module that an attribute holds is included in the same way, such as ``math`` read as ``helpers.lib``;
+
+- the type that a numba type or a NumPy dtype object stands for, for each one that it reads as a module attribute,
+  as in ``helpers.T(x)`` where ``helpers.T`` holds ``numba.float32`` or ``np.dtype("float32")``. A type that a module
+  of NumPy, numba, numbox or the standard library holds, such as ``numba.float64`` read through ``numba``, adds
+  nothing. The fingerprints that have the item above have this one;
+- the same for each attribute that it reads through a module among its default arguments, as in
+  ``def f(x, m=helpers)``, in the fingerprints that have the two items above;
 - for each function or dispatcher among these values, that function's own fingerprint, and the options that a
-  dispatcher compiles under.
+  dispatcher compiles under. The fingerprint of a struct method, a formula, a derive and a ``digest`` also holds the
+  ``locals`` of a dispatcher and the signatures that it was declared with.
+
+The fingerprint leaves out an ``@intrinsic`` and a class of your own, such as a jitclass, that the function reads as a
+module attribute. It never holds the implementation of an ``@overload``.
+
+numbox reads these values when it computes the fingerprint. A program that rebinds one of them later in the same
+process, before numba compiles the code, caches code that the fingerprint does not describe.
 
 An edit to any of these changes the fingerprint. Such edits include those that leave numba's own key unchanged: a new
 literal or default value, a renamed attribute or global, and a new value of a global. Renaming a local variable or
@@ -533,10 +596,16 @@ When a function reads a value without a fingerprint
 Some values have no form that means the same thing in another process, so numbox cannot fingerprint them. The ones that
 jitted code reads most often are a numba type used as a global, such as ``float64`` or ``intp``, numba's ``prange``, a
 class and a NumPy dtype. A builtin function imported by name, such as ``sqrt`` after ``from math import sqrt``, has
-none, and neither has an ``@intrinsic``. No jitted helper of ``numbox.utils.lowlevel``, such as ``array_data_p``,
-``load_at``, ``store_at`` or ``get_str_from_p_as_int``, has a fingerprint. numbox's bindings, such as ``strlen``, do, so
-a function that calls a binding keeps its fingerprint. A jitted function that reads a value without a fingerprint has
-none itself.
+none, and neither has an ``@intrinsic``, a ``@guvectorize`` function or a ``@stencil`` function. No jitted helper of
+``numbox.utils.lowlevel``, such as ``array_data_p``, ``load_at``, ``store_at`` or ``get_str_from_p_as_int``, has a
+fingerprint. numbox's bindings, such as ``strlen``, do, so a function that calls a binding keeps its fingerprint. A
+jitted function that reads a value without a fingerprint has none itself. A struct method, a formula or a derive that
+calls a jitted function without a fingerprint has none either, whether it imports the function by name or calls it
+through a module, as in ``helpers.step(x)``. The jitted helpers of numbox are the one exception: when they are called
+through their module, as in ``lowlevel.array_data_p(a)``, the caller keeps its fingerprint.
+A struct method, a formula or a derive also has no fingerprint if it reads, through a module attribute, a numba type
+that names an object of the process by its address, such as the type of a jitclass instance. The same holds if it
+calls a dispatcher that was declared with such a type.
 
 When a struct method, a ``compile_kernel`` formula or a derive reads such a value, numbox cannot distinguish one version
 of the function from another. The code that depends on the function then compiles without an on-disk cache: it compiles
@@ -544,8 +613,14 @@ again in every process and never runs a stale version, and numbox gives no warni
 find out whether it compiles without a cache. A struct that compiles without a cache has none named after its anchor. To
 keep such a struct cached, do not import a value that never changes, such as a numba type or a builtin function, by
 name. Reach it through its module instead, as in ``math.sqrt`` after ``import math`` or ``numba.float64`` after
-``import numba``. The fingerprint leaves out a module attribute whose value is not data, so the method then reads no
-value without a fingerprint, and it has a fingerprint of its own.
+``import numba``. The fingerprint leaves out a type that a module of numba holds, and a builtin function that its own
+module holds, so the method then reads no value without a fingerprint, and it has a fingerprint of its own.
+
+numbox finds the module attributes that a function reads by their names. It looks up every attribute name in the
+function's code, such as ``sum`` in ``values.sum()``, in each module that the function uses. A function that calls
+``values.sum()`` and reads ``helpers.SCALE`` therefore folds ``helpers.sum`` as well, if that module has an attribute
+named ``sum``. The fingerprint then changes with a value that the function never reads, and the function has no
+fingerprint if that value has none.
 
 The fingerprint leaves out a value that a module provides only through a module-level ``__getattr__``. A change to such
 a value therefore does not change the fingerprint. Delete the cache files of the code that depends on such a value after
@@ -563,6 +638,14 @@ reads by name. It puts the name of each value's type in place of a value without
 out every module attribute. A later change to such a value, or to a module attribute that the callback reads, therefore
 leaves the anchor's name unchanged. The registration then loads the code compiled before the change, and numbox gives no
 warning.
+
+A callback that calls a helper without a fingerprint through a module, as in ``helpers.step(x)``, can also keep
+running old code. A struct method, a formula or a derive that does so compiles without a cache. A SQLite registration
+stays cached, and ``digest`` computes for the callback the fingerprint that the alias of a ``@proxy`` function has. That
+fingerprint holds the data that the callback reads as module attributes, such as ``config.SCALE``, and each dispatcher
+among them that has a fingerprint. It leaves out every other function, class and type that the callback reads as a
+module attribute, and the helper is one of them. A change to such a function, class or type leaves the anchor's name
+unchanged.
 
 For a SQLite callback, the weaker fingerprint is the common case. A step callback receives the number of SQL arguments
 as ``argc`` and the address of SQLite's array of pointers to the argument values as ``argv_pp``, as the docstring of

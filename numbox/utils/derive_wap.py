@@ -23,9 +23,9 @@ the exception of a derive propagates.
 """
 # The decorators below belong to numba's public extension API, except lower_constant, which numba.extending does not
 # re-export. What they register against is not public: FunctionModel, CompileResultWAP, Conversion, box_function_type
-# and lower_get_wrapper_address are outside numba.extending, and the constant lowering calls context.declare_function
-# and context.active_code_library directly. The module patches nothing in numba; it only registers implementations
-# for its own types.
+# and lower_get_wrapper_address are outside numba.extending, and the constant lowering calls context.call_conv,
+# context.declare_function and context.active_code_library directly. The module patches nothing in numba; it only
+# registers implementations for its own types.
 from numba.core import cgutils, types
 from numba.core.imputils import lower_cast, lower_constant
 from numba.core.typeconv import Conversion
@@ -191,12 +191,27 @@ def lower_constant_derive_function_type(context, builder, typ, pyval):
     """Lower a :class:`DeriveWAP` that jitted code reads as a compile-time constant, such as a module-level global.
 
     The lowered value holds the numba entry point as a symbol, so an exception raised in the body propagates, and numba
-    can cache a caller that only calls the value. The cache entry of such a caller holds its own copy of the body's
-    compiled code. The cached caller may continue to run the old body after an edit to the body in another module, and
-    neither numba nor numbox issues a warning; deleting the caller's cache files is the only remedy. A caller that calls
-    a proxied function through its dispatcher is not affected, because the cache guard of ``@proxy`` discards its stale
-    cache entry when it loads. The function has no fallback to a fixed address. A value of this type is always called
-    through its numba entry point, so an entry point that does not resolve fails the compilation.
+    can cache a caller that only calls the value. Which symbol it holds depends on the value.
+
+    A value that carries an alias for its numba entry point is lowered as a declaration of that alias. A value that
+    :func:`~numbox.utils.highlevel.cres` returns carries one, and so does the ``.as_func`` of a ``@proxy`` function.
+    The caller's code then holds a call to the alias and no copy of the body. The alias changes when the body changes,
+    so the cache check of ``numbox.core.proxy.proxy`` discards the caller's cache entry after an edit to the body, as it
+    discards the entry of a caller that calls a proxied function. LLVM cannot inline the body into such a caller.
+    A function that ``numba.pycc`` compiles ahead of time is lowered as the next paragraph describes even if the value
+    carries an alias, because the loader of an ahead-of-time module cannot resolve a name that numbox registers at run
+    time. A jitted function that such a module links in was compiled in the same way as for the running process. A
+    constant that it reads is therefore a declaration of the alias in the module as well, and the module then fails to
+    import.
+
+    Any other value has no alias: a ``DeriveWAP`` constructed from a compile result, or one that :func:`rewrap_derive`
+    returns. It is lowered as a declaration of numba's own name for the entry point, and the body's compiled library
+    is linked into the caller. The cache entry of such a caller holds its own copy of the body's compiled code.
+    The cached caller may continue to run the old body after an edit to the body in another module, and neither numba
+    nor numbox issues a warning; deleting the caller's cache files is the only remedy.
+
+    The function has no fallback to a fixed address. A value of this type is always called through its numba entry
+    point, so an entry point that does not resolve fails the compilation.
     """
     typ = typ.get_precise()
     assert typ.check_signature(pyval.signature())
@@ -206,23 +221,38 @@ def lower_constant_derive_function_type(context, builder, typ, pyval):
         builder, pyval.__wrapper_address__(), info=str(typ))
     sfunc.py_addr = context.add_dynamic_addr(
         builder, id(pyval), info=type(pyval).__name__)
-    # jit_addr is declared as a symbol, and the compile result's library is linked in, as numba does when it casts a
-    # dispatcher to a FunctionType. The symbol also makes the caller cacheable. A caller that only calls the value
-    # leaves the globals of c_addr and py_addr unused, LLVM removes them before numba scans the final module, and
-    # numba finds no dynamic global. A fixed address for jit_addr would be such a global, used by the call, and numba
-    # would refuse to cache the caller rather than store an address that differs in every process.
-    fn = context.declare_function(builder.module, pyval.cres.fndesc)
+    # jit_addr is declared as a symbol in both branches below, and the symbol makes the caller cacheable. A caller that
+    # only calls the value leaves the globals of c_addr and py_addr unused. LLVM removes them before numba scans the
+    # final module, so numba finds no dynamic global. A fixed address for jit_addr would be such a global, and the call
+    # would use it. numba would then not cache the caller, because the address differs in every process.
+    fndesc = pyval.cres.fndesc
+    alias = getattr(pyval, "_numbox_jit_alias", None)
+    if alias is not None and not context.aot_mode:
+        # The declaration has the type and the argument attributes that numba's declare_function gives the entry point,
+        # under the alias in place of numba's name. numbox registers the alias in every process with
+        # llvmlite.binding.add_symbol, so the caller's object imports the alias and holds nothing else of the body.
+        fnty = context.call_conv.get_function_type(fndesc.restype, fndesc.argtypes)
+        fn = cgutils.get_or_insert_function(builder.module, fnty, alias)
+        # numba 0.64 and later pass each declaration of an entry point to this hook. On s390x, the hook marks every
+        # integer argument and result of fewer than 64 bits as sign-extended or zero-extended, which that platform's
+        # calling convention requires of the caller. numba 0.63 has no such hook.
+        apply_target_attributes = getattr(context, "apply_target_attributes", None)
+        if apply_target_attributes is not None:
+            apply_target_attributes(fn, fndesc.argtypes, fndesc.restype)
+        context.call_conv.decorate_function(fn, fndesc.args, fndesc.argtypes, noalias=fndesc.noalias)
+    else:
+        # The compile result's library is linked in, as numba does when it casts a dispatcher to a FunctionType. The
+        # caller's cached binary includes the body's code from this linked library, so that binary can become stale.
+        # A body small enough for LLVM to inline leaves no separate definition, and the caller continues to run the
+        # old body. A larger body is linked in as a weak linkonce_odr definition. Its mangled name holds numba's
+        # per-process abi tag v<uid>, which numba's cache key does not cover. The caller runs that embedded copy when
+        # the body's name in the loading process differs from it, and it runs the body's current definition when the
+        # names match. The name comes from the process that last compiled the body and is stored in the body's own
+        # cache entry. The first process that compiles the body after an edit therefore determines the outcome for
+        # every later process.
+        fn = context.declare_function(builder.module, fndesc)
+        context.active_code_library.add_linking_library(pyval.cres.library)
     sfunc.jit_addr = builder.bitcast(fn, context.get_value_type(types.voidptr))
-    # The caller's cached binary includes the body's code from this linked library, so that binary can become stale.
-    # LLVM inlines the body here, not numba. The numba-IR inline='always' that @proxy puts on its generated wrapper
-    # applies only where a jitted caller calls the dispatcher, and a constant reference never reaches it. A body small
-    # enough for LLVM to inline leaves no separate definition, and the caller continues to run the old body. A larger
-    # body is linked in as a weak linkonce_odr definition. Its mangled name holds numba's per-process abi tag v<uid>,
-    # which numba's cache key does not cover. The caller runs that embedded copy when the body's name in the loading
-    # process differs from it, and it runs the body's current definition when the names match. The name comes from the
-    # process that last compiled the body and is stored in the body's own cache entry. The first process that compiles
-    # the body after an edit therefore determines the outcome for every later process.
-    context.active_code_library.add_linking_library(pyval.cres.library)
     return sfunc._getvalue()
 
 

@@ -872,5 +872,27 @@ def test_make_graph_uncanonical_jit_flags_drop_the_kernel_cache(monkeypatch):
     )
 
 
+def test_a_derive_fingerprint_follows_a_named_function_that_a_module_attribute_holds():
+    """The fingerprint of a derive that calls ``helpers.op`` changes with the ufunc that the attribute holds.
+
+    The graph maker is cached under a name that hashes the fingerprint. With one fingerprint for both, the next
+    process would load the maker that was compiled for the first function.
+    """
+    import types
+
+    from numbox.core.work.builder import _derive_fingerprint
+
+    helpers = types.ModuleType("helpers")
+    ns = {"helpers": helpers}
+    exec("def derive(x):\n    return helpers.op(x)\n", ns)  # nosec B102 - fixed test snippet
+    texts = []
+    for op in (numpy.sin, numpy.cos):
+        helpers.op = op
+        text, _, kernel_safe = _derive_fingerprint(ns["derive"])
+        assert kernel_safe
+        texts.append(text)
+    assert texts[0] != texts[1]
+
+
 if __name__ == "__main__":
     collect_and_run_tests(__name__)

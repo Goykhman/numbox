@@ -131,5 +131,87 @@ def test_digest_folds_dufunc_jit_flags():
     assert plain == digest("StateType", (vectorize(cb),))
 
 
+def test_digest_varies_with_a_named_function_that_a_module_attribute_holds():
+    """The digest of a callback that calls ``helpers.op`` changes with the builtin function that the attribute holds.
+
+    That holds for a Python function and for a dispatcher. With one digest for both, a SQLite registration in the next
+    process would load the code that was compiled for the first function.
+    """
+    import math
+    import types
+
+    helpers = types.ModuleType("helpers")
+
+    def callback(x):
+        return helpers.op(x)
+
+    for fn in (callback, njit(callback)):
+        digests = []
+        for op in (math.sin, math.cos):
+            helpers.op = op
+            digests.append(digest("subject", [fn]))
+        assert digests[0] != digests[1]
+
+
+def test_digest_of_a_callback_that_calls_a_helper_without_a_fingerprint_through_a_module_holds_the_data_it_reads():
+    """A callback that calls ``helpers.step``, which has no fingerprint, keeps ``helpers.SCALE`` in its digest.
+
+    numbox compiles a struct or a kernel without a cache when such a helper leaves a function without a fingerprint.
+    A digest only names code, so a SQLite registration stays cached. The registration in the next process would load
+    the code compiled for the first value of ``helpers.SCALE`` if both values gave one digest. The digest does not
+    depend on ``helpers.UNUSED``, which the callback does not read. A cloudpickle of a ``@vectorize`` callback would
+    hold ``helpers.UNUSED``.
+    """
+    import types
+
+    from numba import float64
+
+    helpers = types.ModuleType("helpers")
+
+    @njit
+    def step(x):
+        return float64(x)  # A numba type read by name has no fingerprint, so step has none.
+
+    def callback(x):
+        return helpers.step(x) * helpers.SCALE
+
+    helpers.step = step
+    for fn in (callback, njit(callback), vectorize(callback)):
+        digests = []
+        for scale, unused in ((2.0, 1), (2.0, 2), (3.0, 2)):
+            helpers.SCALE, helpers.UNUSED = scale, unused
+            digests.append(digest("subject", [fn]))
+        assert digests[0] == digests[1] != digests[2]
+
+
+def test_digest_changes_with_a_jitted_function_in_a_tuple_that_calls_a_helper_without_a_fingerprint():
+    """The digest of a callback that calls ``helpers.OPS[0]`` changes with the body of the function in the tuple.
+
+    The function in the tuple calls ``low.raw``, which has no fingerprint, through a module. The callback then has no
+    fingerprint of the kind that turns a cache off, and its digest folds the tuple as it did before that rule.
+    """
+    import types
+
+    from numba import float64
+
+    low = types.ModuleType("low")
+    helpers = types.ModuleType("helpers")
+
+    @njit
+    def raw(x):
+        return float64(x)  # A numba type read by name has no fingerprint, so raw has none.
+
+    low.raw = raw
+
+    def callback(x):
+        return helpers.OPS[0](x)
+
+    digests = []
+    for factor in (2.0, 3.0):
+        helpers.OPS = (njit(lambda x, factor=factor: factor * low.raw(x)),)
+        digests.append(digest("subject", [callback]))
+    assert digests[0] != digests[1]
+
+
 if __name__ == '__main__':
     collect_and_run_tests(__name__)

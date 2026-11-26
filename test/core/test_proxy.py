@@ -547,6 +547,135 @@ def test_proxy_as_func_as_a_jitted_constant_propagates_a_raising_body():
         call_constant(1.0)
 
 
+def test_proxy_publishes_the_numba_entry_point_under_the_companion_alias():
+    """``.as_func`` carries the companion alias, and a caller that reads it as a constant declares that name.
+
+    The companion is the alias with ``_jit`` appended. numbox registers the body's numba entry point under it, so the
+    name resolves to the address that ``.as_func`` recorded, not to the C entry point that the alias itself names. The
+    caller's LLVM IR must declare the companion. If the body's library were linked into the caller instead, the IR
+    would declare numba's own name for the entry point, and the caller's cached code would refer to no alias that the
+    cache check could test.
+    """
+    from llvmlite import binding as ll
+
+    @proxy(float64(float64))
+    def tripled(x):
+        return 3.0 * x
+
+    from numbox.core.proxy.proxy import _is_shared_jit_name
+
+    as_func = tripled.as_func
+    companion = tripled._numbox_proxy_alias + "_jit"
+    assert as_func._numbox_jit_alias == companion
+    assert not _is_shared_jit_name(companion), "the only claim of an alias was rejected by the cache check"
+    assert not _is_shared_jit_name(tripled._numbox_proxy_alias), "the alias itself was taken for a companion"
+    assert ll.address_of_symbol(companion) == as_func.jit_address, (
+        "the companion does not resolve to the body's numba entry point"
+    )
+    assert ll.address_of_symbol(tripled._numbox_proxy_alias) != as_func.jit_address, (
+        "the alias and its companion name one entry point, so one of the two calling conventions is wrong"
+    )
+
+    @njit(float64(float64))
+    def call_constant(x):
+        return as_func(x)
+
+    assert call_constant(2.0) == 6.0
+    llvm_ir = next(iter(call_constant.inspect_llvm().values()))
+    assert re.search(rf"declare [^\n]*@{companion}\(", llvm_ir), (
+        "the caller of the constant does not declare the companion alias"
+    )
+
+
+def test_a_body_registered_twice_gets_a_companion_of_its_own_and_the_first_is_not_repointed():
+    """A second registration of one alias leaves the first companion where it was and gets a name of its own.
+
+    The alias itself is pointed at the new compilation, as ``test_one_body_registered_twice_keeps_its_alias`` checks.
+    The companion is not. A caller that reads ``.as_func`` as a constant holds no copy of the body, so the name is all
+    that connects the caller to the body, and two bodies whose fingerprints are equal can still differ. If the second
+    registration took over the first companion, a caller compiled later against the first ``.as_func`` would run the
+    second body. Both names are retired, because another process may register the two in the other order.
+    """
+    from llvmlite import binding as ll
+    from numbox.core.proxy.proxy import _is_shared_jit_name
+
+    first = _make_scaling_binding(5.0)
+    second = _make_scaling_binding(5.0)
+    assert first._numbox_proxy_alias == second._numbox_proxy_alias, "the scenario needs two registrations of one alias"
+    companion = first._numbox_proxy_alias + "_jit"
+    own = second.as_func._numbox_jit_alias
+
+    assert first.as_func._numbox_jit_alias == companion
+    assert re.fullmatch(re.escape(companion) + r"_\d+", own), own
+    assert ll.address_of_symbol(companion) == first.as_func.jit_address, "the first companion was repointed"
+    assert ll.address_of_symbol(own) == second.as_func.jit_address
+    assert _is_shared_jit_name(companion) and _is_shared_jit_name(own), (
+        "a name that two registrations share still passes the cache check, so a warm caller can be served the wrong one"
+    )
+
+    as_func = second.as_func
+
+    @njit(float64(float64))
+    def call_constant(x):
+        return as_func(x)
+
+    assert call_constant(3.0) == 15.0
+
+
+def test_two_colliding_bodies_read_as_constants_each_run_their_own_body():
+    """Two bodies that compute one alias each run their own code when a jitted caller reads them as constants.
+
+    The two bodies close over ctypes pointers built from raw addresses, which have no fingerprint, so both compute one
+    alias. The second body's ``.as_func`` must carry a companion of its own. With the companion of the shared alias, its
+    caller would run the first body and return ``floor(2.5)`` instead of the expected ``ceil(2.5)``. The cache check
+    must also reject both companions, because a cached caller refers to a companion, and another process may build the
+    two bodies in the other order.
+    """
+    import ctypes
+
+    from llvmlite import binding as ll
+    from numbox.core.proxy.proxy import AliasCollisionWarning, _is_shared_jit_name
+
+    libm = open_libm()
+    if libm is None:
+        pytest.skip("No math library discoverable to take two distinct symbol addresses from")
+    proto = ctypes.CFUNCTYPE(ctypes.c_double, ctypes.c_double)
+
+    def make(symbol):
+        fp = proto(ctypes.cast(getattr(libm, symbol), ctypes.c_void_p).value)
+
+        @proxy(float64(float64))
+        def body(x):
+            return fp(x)
+        return body
+
+    first = make("floor")
+    with pytest.warns(AliasCollisionWarning, match="fingerprint alike"):
+        second = make("ceil")
+    floor_func, ceil_func = first.as_func, second.as_func
+
+    @njit(float64(float64))
+    def const_floor(x):
+        return floor_func(x)
+
+    @njit(float64(float64))
+    def const_ceil(x):
+        return ceil_func(x)
+
+    assert const_floor(2.5) == 2.0
+    assert const_ceil(2.5) == 3.0, "the body that lost the collision was lowered against the other body's entry point"
+
+    shared = first._numbox_proxy_alias + "_jit"
+    own = ceil_func._numbox_jit_alias
+    assert floor_func._numbox_jit_alias == shared
+    assert own != shared
+    assert ll.address_of_symbol(shared) == floor_func.jit_address
+    assert ll.address_of_symbol(own) == ceil_func.jit_address
+    assert _is_shared_jit_name(shared) and _is_shared_jit_name(own), (
+        "a companion still identifies a body, so a warm caller of the constant can be served the wrong one"
+    )
+
+
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
 def test_proxy_dispatcher_call_still_discards_a_raising_body():
     """A call through the dispatcher returns ``0.0`` when the body raises, on every numba version.
@@ -1100,7 +1229,44 @@ def test_one_symbol_reached_through_two_prototypes_is_not_one_body():
     )
 
 
-def test_a_body_that_lost_a_collision_does_not_serve_a_warm_caller(tmp_path):
+def test_the_alias_of_a_set_valued_jit_option_is_the_same_under_every_hash_seed(tmp_path):
+    """A function with a set-valued jit option, such as ``fastmath={"nnan", "ninf"}``, has one alias in every process.
+
+    The alias hashes the jit options. The ``repr`` of a set lists its members in an order that follows the
+    interpreter's string hash seed, which differs from one process to the next. If the alias hashed that text, the
+    function would have a new alias in each process. Every cached caller would then be discarded and compiled again in
+    every run. Each child prints the set as well, so the test can verify that the seeds ordered it differently.
+    """
+    script = tmp_path / "alias_of_a_set_option.py"
+    script.write_text(textwrap.dedent('''
+        from numba import float64
+
+        from numbox.core.proxy.proxy import _stable_cfunc_alias
+
+
+        def body(x):
+            return x + 1.0
+
+
+        flags = {"nnan", "ninf", "nsz", "arcp"}
+        print(_stable_cfunc_alias(body, float64(float64), {"fastmath": flags}))
+        print(flags)
+    '''), encoding="utf-8")
+    aliases, orders = set(), set()
+    for seed in ("1", "2", "3"):
+        env = dict(os.environ, PYTHONHASHSEED=seed, NUMBA_CACHE_DIR=str(tmp_path / "nbcache"),
+                   PYTHONPATH=os.pathsep.join(sys.path))
+        done = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, env=env, timeout=300)
+        assert done.returncode == 0, done.stderr
+        alias, order = done.stdout.splitlines()
+        aliases.add(alias)
+        orders.add(order)
+    assert len(orders) > 1, "the three seeds ordered the set alike, so the test would pass without exercising the alias"
+    assert len(aliases) == 1, f"the alias follows the hash seed: {sorted(aliases)}"
+
+
+@pytest.mark.parametrize("route", ["dispatcher", "constant"])
+def test_a_body_that_lost_a_collision_does_not_serve_a_warm_caller(tmp_path, route):
     """A cached caller of a collision's losing body is discarded in a process that builds the pair in the other order.
 
     numbox names the losing body after the number of aliases that this process has published, so the same name can
@@ -1116,10 +1282,15 @@ def test_a_body_that_lost_a_collision_does_not_serve_a_warm_caller(tmp_path):
     discarded a cached entry, because a process that compiled the caller again for another reason would also print
     3.0. The first process must report no discard. If the cache were already stale before the test, the discard in the
     second process would not depend on the order.
+
+    In the ``constant`` case, the caller reads the binding's ``.as_func`` as a module-level constant instead of calling
+    the dispatcher. Its cached code refers to the companion of the process-local name, so the case checks that numbox
+    retires the companion with the name.
     """
     if open_libm() is None:
         pytest.skip("No math library discoverable to take two distinct symbol addresses from")
 
+    call = "ceil_binding(x)" if route == "dispatcher" else "CEIL(x)"
     pkg = tmp_path / "order_pkg"
     pkg.mkdir()
     (pkg / "colliding_pair.py").write_text(textwrap.dedent('''
@@ -1149,15 +1320,17 @@ def test_a_body_that_lost_a_collision_does_not_serve_a_warm_caller(tmp_path):
             ceil_binding = make("ceil")
             floor_binding = make("floor")
     '''), encoding="utf-8")
-    (pkg / "caller_pair.py").write_text(textwrap.dedent('''
+    (pkg / "caller_pair.py").write_text(textwrap.dedent(f'''
         from numba import njit
         from numba.core.types import float64
 
         from colliding_pair import ceil_binding
 
+        CEIL = ceil_binding.as_func
+
         @njit(float64(float64), cache=True)
         def caller(x):
-            return ceil_binding(x)
+            return {call}
     '''), encoding="utf-8")
     (pkg / "run_pair.py").write_text(textwrap.dedent('''
         import warnings
@@ -1366,21 +1539,24 @@ class _EntryCountingLock:
 
 
 class _ProbingLl:
-    """A replacement for ``llvmlite.binding`` in ``proxy.py`` that probes the lock at each ``add_symbol`` call.
+    """A replacement for ``llvmlite.binding`` in ``proxy.py`` that probes the lock at an ``add_symbol`` call.
 
-    Every other attribute comes from the real module.
+    One decoration registers names under two locks, so only a call that registers a name matching ``pattern`` is
+    probed. Every other attribute comes from the real module.
     """
 
-    def __init__(self, real, probe, where):
+    def __init__(self, real, probe, where, pattern):
         self.real = real
         self.probe = probe
         self.where = where
+        self.pattern = pattern
 
     def __getattr__(self, name):
         return getattr(self.real, name)
 
     def add_symbol(self, name, address):
-        self.probe.at(self.where)
+        if re.search(self.pattern, name):
+            self.probe.at(self.where)
         return self.real.add_symbol(name, address)
 
 
@@ -1422,7 +1598,7 @@ def test_a_colliding_body_takes_its_name_under_the_registry_lock(monkeypatch):
 
     monkeypatch.setattr(proxy_module, "_opaque_values_match", spy_match)
     monkeypatch.setattr(
-        proxy_module, "ll", _ProbingLl(ll, probe, "while the minted name was being registered")
+        proxy_module, "ll", _ProbingLl(ll, probe, "while the minted name was being registered", r"_c\d+$")
     )
 
     def make(addr):
@@ -1456,6 +1632,86 @@ def test_a_colliding_body_takes_its_name_under_the_registry_lock(monkeypatch):
         f"decides the name and the store that takes it are not held apart by one critical "
         f"section; another thread can hold the lock in the gap and mint the same name"
     )
+
+
+def test_a_claim_after_a_reload_of_the_proxy_module_does_not_take_over_a_registered_name(tmp_path):
+    """After ``importlib.reload`` of the proxy module, a new function still gets a name that no function holds.
+
+    The reload starts the module's count of claims again at zero, and llvmlite's table of registered symbols keeps the
+    names. A claim that trusted the count would register the first name again and point it at the new function. A
+    caller compiled afterwards that holds the first function as a constant would then run the new one. The two
+    functions here capture ``numpy.sin`` and ``numpy.cos``, which the alias leaves out, so both compute one alias.
+    The reload runs in a child process, because it replaces the module's classes for every later test.
+    """
+    script = tmp_path / "claim_after_reload.py"
+    script.write_text(textwrap.dedent('''
+        import importlib
+
+        import numpy
+        from numba import float64, njit
+
+        import numbox.core.proxy.proxy
+        from numbox.utils.highlevel import cres
+
+
+        def make(op):
+            @cres(float64(float64))
+            def body(x):
+                return op(x)
+            return body
+
+
+        sine = make(numpy.sin)
+        importlib.reload(numbox.core.proxy.proxy)
+        cosine = make(numpy.cos)
+
+
+        @njit
+        def call_sine(x):
+            return sine(x)
+
+
+        print(sine._numbox_jit_alias, cosine._numbox_jit_alias, call_sine(0.0))
+    '''), encoding="utf-8")
+    env = dict(os.environ, NUMBA_CACHE_DIR=str(tmp_path / "nbcache"), PYTHONPATH=os.pathsep.join(sys.path))
+    done = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, env=env, timeout=300)
+    assert done.returncode == 0, done.stderr
+    first, second, result = done.stdout.split()
+    assert second == first + "_1", "the two functions did not compute one alias, or the second took the first's name"
+    assert result == "0.0", "after the reload, the caller of the first function ran the second"
+
+
+def test_a_second_claim_of_an_alias_takes_its_name_under_the_claim_lock(monkeypatch):
+    """A later claim of an alias reads the count of claims and registers its own name in one critical section.
+
+    The count decides the name. If two threads read the count before either stored it, both would register one name.
+    The second registration would replace the first, and a caller that holds the first function as a constant would
+    run the second. The test probes the lock at the registration and counts the acquisitions, as
+    ``test_a_colliding_body_takes_its_name_under_the_registry_lock`` does for the alias itself.
+    """
+    from llvmlite import binding as ll
+
+    import numbox.core.proxy.proxy as proxy_module
+    from numbox.core.proxy.proxy import _JIT_ALIAS_LOCK
+
+    first = _make_scaling_binding(11.0)
+    probe = _AliasLockProbe(_JIT_ALIAS_LOCK)
+    monkeypatch.setattr(proxy_module, "ll", _ProbingLl(ll, probe, "at the registration", r"_jit_\d+$"))
+    counted = _EntryCountingLock(_JIT_ALIAS_LOCK)
+    monkeypatch.setattr(proxy_module, "_JIT_ALIAS_LOCK", counted)
+    probe.armed = True
+    try:
+        second = _make_scaling_binding(11.0)
+    finally:
+        probe.armed = False
+
+    assert second.as_func._numbox_jit_alias != first.as_func._numbox_jit_alias, (
+        "the second claim took no name of its own, so it never registered one"
+    )
+    assert probe.excluded == {"at the registration": True}, (
+        f"another thread could claim the alias while the name was being registered: {probe.excluded}"
+    )
+    assert counted.entries == 1, f"the claim entered its lock {counted.entries} times"
 
 
 class _TrapCompileHeld:

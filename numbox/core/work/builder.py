@@ -18,9 +18,9 @@ from numbox.core.configurations import jit_options as jit_options_
 from numbox.core.work.lowlevel_work_utils import ll_make_work
 from numbox.utils.fingerprint import (
     _Unfingerprintable, _effective_flags, _fingerprint_function,
-    _fingerprint_function_best_effort, _flags_canon, _loaded_global_names,
+    _fingerprint_function_best_effort, _flags_canon, _loaded_global_names, _signature_identity, _type_identity,
 )
-from numbox.utils.highlevel import cres, _signature_identity, _type_identity
+from numbox.utils.highlevel import cres
 from numbox.utils.preprocessing import _anchor_or_error, _anchor_root, _cached_at_or_uncached, _orphan_anchor_sweep
 
 
@@ -130,7 +130,7 @@ def _derive_fingerprint(derive) -> tuple[str, bool, bool]:
     cannot fingerprint.
     """
     try:
-        fingerprint = _fingerprint_function(derive, set())
+        fingerprint = _fingerprint_function(derive, set(), fold_named=True)
     except (_Unfingerprintable, RecursionError):
         return _fingerprint_function_best_effort(derive), False, False
     # The check reads the instruction stream (_loaded_global_names), not co_names, because co_names also holds

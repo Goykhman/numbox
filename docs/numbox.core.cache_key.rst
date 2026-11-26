@@ -284,8 +284,9 @@ compiles the caller again at its next call.
 numbox handles two such cases itself. A keyed caller compiles again after an upgrade of numbox from one release to
 another, because the key holds numbox's version. numbox also repairs a cached caller of a function decorated with its
 ``@proxy`` after an edit to that function, whether or not the caller is keyed. The section "After you edit a proxied
-function" of the :doc:`proxy page <numbox.core.proxy>` describes the repair. The repair does not cover
-:ref:`a caller that holds the function as a module-level constant <proxy_module_level_constant>`.
+function" of the :doc:`proxy page <numbox.core.proxy>` describes the repair. The repair also covers a caller that holds
+the function's ``.as_func``, or a ``cres`` function, as
+:ref:`a module-level constant <proxy_module_level_constant>`.
 
 The key also leaves out the values of the globals that a function reads. numba compiles a global's value into the
 code as a constant, so a cached function still uses the value from the run that compiled it. A global whose value comes

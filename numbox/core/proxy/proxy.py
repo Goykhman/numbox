@@ -6,10 +6,12 @@ C symbol that the loaded library may lack. numbox registers each compiled functi
 every process. It also checks the entries of numba's CPU cache as numba loads them. If an entry refers to an alias
 that this process cannot call, numbox discards the entry, and numba compiles the caller again. The warning and error
 classes report what the check finds, and :class:`AliasCollisionWarning` reports two functions that computed the same
-alias.
+alias. :func:`~numbox.utils.highlevel.cres` registers the numba entry point of each function that it compiles under
+a name made from such an alias, so the check also covers a cached caller that holds a ``cres`` function as a constant.
 """
 import hashlib
 import inspect
+import re
 import struct
 import threading
 import warnings
@@ -67,6 +69,16 @@ def _body_fingerprint(func, opaque=None):
         return _fingerprint_function_best_effort(func, opaque)
 
 
+def _seed_independent(option):
+    """Return a jit option's value in a form whose ``repr`` is the same in every process.
+
+    The ``repr`` of a set lists its members in an order that follows the interpreter's string hash seed, which differs
+    between processes. A set such as ``fastmath={"nnan", "ninf"}`` is therefore replaced by a sorted list. Any other
+    value is returned unchanged.
+    """
+    return sorted(option, key=repr) if isinstance(option, (set, frozenset)) else option
+
+
 def _stable_cfunc_alias(func, main_sig, jit_options=None, opaque=None):
     """Return the alias of ``func``'s compiled body: an LLVM symbol name that is the same in every process.
 
@@ -97,7 +109,7 @@ def _stable_cfunc_alias(func, main_sig, jit_options=None, opaque=None):
     raw = (
         f"{func.__module__ or ''}.{func.__qualname__}.{main_sig}."
         f"{_body_fingerprint(func, opaque)}."
-        f"{sorted((jit_options or {}).items(), key=repr)!r}"
+        f"{sorted(((k, _seed_independent(v)) for k, v in (jit_options or {}).items()), key=repr)!r}"
     ).encode("utf-8")
     safe_name = "".join(c if c.isascii() and c.isalnum() else "_" for c in func.__name__)
     return f"{_ALIAS_PREFIX}{safe_name}_{hashlib.sha256(raw).hexdigest()[:16]}"
@@ -238,6 +250,69 @@ def _publish_cfunc_alias(alias, address, opaque):
     return distinct
 
 
+# _JIT_ALIAS_CLAIMS maps each alias to the number of names that _claim_jit_alias has made from it in this process. The
+# count is only the number at which the search for an unregistered name starts. llvmlite's table of registered symbols
+# is the record of the names in use, because a reload of this module empties the dict and does not change the table.
+# _JIT_ALIAS_LOCK makes the search and the registration that depends on it atomic, for the reason given at
+# _ALIAS_LOCK: both run in plain Python at decoration. The lock is a separate one, because a claim reads and writes
+# nothing that _publish_cfunc_alias decides on.
+_JIT_ALIAS_CLAIMS = {}
+_JIT_ALIAS_LOCK = threading.Lock()
+
+# A name that _claim_jit_alias returns: an alias, then _jit, then an underscore and a number for a later claim.
+_JIT_NAME = re.compile(r"_[0-9a-f]{16}_jit(_\d+)?$")
+
+
+def _claim_jit_alias(alias, jit_address):
+    """Register a compiled function's numba entry point, and return the name that it is registered under.
+
+    ``alias`` is the function's alias from :func:`_stable_cfunc_alias`. A jitted caller that reads the function as a
+    compile-time constant declares the returned name and calls it (see ``numbox.utils.derive_wap``). The first function
+    in this process that claims ``alias`` is registered under ``alias`` with ``_jit`` appended. Each later function
+    that claims the same alias is registered under a name of its own, which is that name with an underscore and a
+    number appended. :func:`_is_shared_jit_name` then reports both names, so the cache check discards a cached caller
+    that refers to either. A name that :func:`_publish_cfunc_alias` returns ends in the 16 hex digits of an alias or,
+    after an alias collision, in ``_c`` and a number, so it equals none of these names.
+    """
+    with _JIT_ALIAS_LOCK:
+        claims = _JIT_ALIAS_CLAIMS.get(alias, 0)
+        name = f"{alias}_jit_{claims}" if claims else f"{alias}_jit"
+        # A name is never registered a second time. llvmlite.binding.add_symbol replaces the address of a name for the
+        # whole process, so a caller compiled later against the first function's name would call the second function.
+        # Two functions can compute one alias although their code differs, because the fingerprint in the alias leaves
+        # some values out. A caller of a constant holds no copy of the function and refers to it only by name. Each
+        # function therefore keeps the name it received, and a caller always calls the function that it holds. A
+        # function registered again after a module reload receives a new name as well, because this module cannot
+        # distinguish it from a second function.
+        while ll.address_of_symbol(name):
+            claims += 1
+            name = f"{alias}_jit_{claims}"
+        _JIT_ALIAS_CLAIMS[alias] = claims + 1
+        ll.add_symbol(name, jit_address)
+    return name
+
+
+def _is_shared_jit_name(name):
+    """Return whether this process shows that another process may give ``name`` to another function.
+
+    ``name`` is a name from :func:`_claim_jit_alias`. The function reads only the claims that this process has made. If
+    two functions compute one alias and each process creates only one of them, the result is ``False`` in both
+    processes, and numba loads a cached caller that refers to the name in both. The proxy page documents this
+    limitation.
+
+    A name with a number belongs to a later claim of its alias. The number is a count, which is not a property of the
+    function, so another process may give the name to another function. The name without a number belongs to the first
+    claim. It identifies no function either once a second claim exists, because another process may make the two
+    claims in the other order. The second claim is always registered under the name with the number 1, so the function
+    tests whether llvmlite's table holds that name and keeps no record of its own. The result is ``False`` for any
+    other name.
+    """
+    match = _JIT_NAME.search(name)
+    if match is None:
+        return False
+    return match.group(1) is not None or bool(ll.address_of_symbol(f"{name}_1"))
+
+
 def _register_absent_alias_trap(func, main_sig, jit_options=None):
     """Register a trap under the alias that :func:`proxy` computes for ``func``, whose C symbol is absent.
 
@@ -246,7 +321,9 @@ def _register_absent_alias_trap(func, main_sig, jit_options=None):
     The cache check discards such a caller before numba loads it, because the alias is in ``_ABSENT_ALIASES``. A caller
     calls the trap only if the check did not inspect its entry. Without the trap, the entry would refer to an
     unregistered symbol, and the process would crash without a message. With the trap, the call prints the error to
-    stderr and returns zero.
+    stderr and returns zero. No trap is registered under the name that :func:`_claim_jit_alias` makes from the alias.
+    A caller that holds the binding's ``.as_func`` as a constant refers to that name. If numba loads such a caller
+    without the check, the caller therefore refers to an unregistered symbol.
 
     If a proxied body is already published under the alias in this process, the function registers no trap and warns
     with :class:`AliasCollisionWarning`.
@@ -329,11 +406,12 @@ def proxy(sig, jit_options: Optional[dict] = None):
     the main signature and ``jit_options``. An edit to any of these renames the alias. numbox then discards each cached
     caller that refers to the old alias, and numba compiles the caller again. numbox warns once for each discarded entry
     with :class:`StaleProxyCacheWarning`, or raises :class:`StaleProxyCacheError` in the strict mode that
-    ``NUMBOX_PROXY_CACHE_STRICT`` enables. A jitted caller that reads ``.as_func`` from a module-level variable embeds a
-    copy of the function instead, and the check cannot see that copy. After an edit, such a cached caller can continue
-    to run the old code without a warning, so delete its cache files after every edit. If the C symbol of a
-    :func:`proxy_if_available` binding is missing, such a caller can return the missing binding's result or crash with
-    a segmentation fault.
+    ``NUMBOX_PROXY_CACHE_STRICT`` enables. A jitted caller that reads ``.as_func`` from a module-level variable refers
+    to the alias with ``_jit`` appended. That name is registered for the function's numba entry point, and the check
+    covers such a caller in the same way. If a second function in the process computes the same alias, numbox gives it a
+    name of its own. numbox then discards cached callers that hold either function as a constant, so each caller runs
+    the function that it holds. A cache entry that numbox 0.7.9 or earlier wrote for such a caller holds a copy of the
+    function and names no alias, so the check cannot test it. Delete such an entry once after an upgrade.
 
     Decoration raises a ``ValueError`` if the function's first decorator line is above line 8 of its file, or if its
     module defines a global named ``__`` followed by the function's name. A function that takes ``*args`` or
@@ -359,11 +437,13 @@ def proxy(sig, jit_options: Optional[dict] = None):
         # Under NUMBA_DISABLE_JIT=1, njit returns the Python function itself, which has no get_compile_result, so the
         # decoration fails here with an AttributeError.
         cres = func_jit.get_compile_result(main_sig)
+        as_func = DeriveWAP(cres)
         # Callers call the body through an alias that is the same in every process, not through numba's name for the
         # body's C entry point. That name contains a tag from a per-process counter (see _stable_cfunc_alias).
         opaque = []
+        stable_alias = _stable_cfunc_alias(func, main_sig, jit_options, opaque)
         cfunc_alias = _publish_cfunc_alias(
-            _stable_cfunc_alias(func, main_sig, jit_options, opaque),
+            stable_alias,
             cres.library.get_pointer_to_function(cres.fndesc.llvm_cfunc_wrapper_name),
             opaque,
         )
@@ -435,7 +515,10 @@ def {func_proxy_name}({func_args_str}):
         # unchanged.
         dispatcher.py_func.__doc__ = func.__doc__
         dispatcher.__doc__ = func.__doc__
-        dispatcher.as_func = DeriveWAP(cres)
+        dispatcher.as_func = as_func
+        # The constant lowering in numbox.utils.derive_wap declares the numba entry point under this name, so a cached
+        # caller that reads .as_func as a constant imports a name that the cache check can test.
+        as_func._numbox_jit_alias = _claim_jit_alias(stable_alias, as_func.jit_address)
         # The fingerprint walker in numbox.utils.fingerprint folds a proxied function by this alias. Without the tag,
         # it would walk into the wrapper's @intrinsic, which has no canonical form, and the digest of a callback that
         # calls a proxied function would fall back to a coarser form without any warning.
@@ -507,10 +590,11 @@ class StaleProxyCacheWarning(RuntimeWarning):
     """Warning that numbox discarded a cached function because it refers to an alias that this process cannot call.
 
     numba then compiles the function again and saves the new code over the stale entry. An alias is stale if the
-    proxied function, its signature or its ``jit_options`` changed after the caller was cached, if a
-    :func:`proxy_if_available` binding is absent in this process, or if an alias collision retired the alias. To make
-    the warning an error, call ``warnings.filterwarnings("error", category=StaleProxyCacheWarning)``, or run pytest
-    with ``-W error::numbox.core.proxy.proxy.StaleProxyCacheWarning``. The interpreter's own ``-W`` option and
+    function behind it, its signature or its jit options changed after the caller was cached, if a
+    :func:`proxy_if_available` binding is absent in this process, or if two functions in this process computed the
+    alias. The function behind an alias is a proxied function or one that :func:`~numbox.utils.highlevel.cres` compiled.
+    To make the warning an error, call ``warnings.filterwarnings("error", category=StaleProxyCacheWarning)``, or run
+    pytest with ``-W error::numbox.core.proxy.proxy.StaleProxyCacheWarning``. The interpreter's own ``-W`` option and
     ``PYTHONWARNINGS`` cannot name this class. Python reads them at startup, before site-packages is on the module
     path, so the class cannot be imported, and Python ignores the filter. ``-W error::RuntimeWarning`` works, because
     the class derives from ``RuntimeWarning``.
@@ -533,6 +617,10 @@ class StaleProxyCacheError(RuntimeError):
     stale entry stays on disk for inspection. By default, numbox discards the entry with the warning, and numba
     overwrites it with the code it compiles again. To recover, delete the caller's numba cache files, or unset
     ``NUMBOX_PROXY_CACHE_STRICT``.
+
+    Deleting the files does not stop the error if two functions in the process share the alias. numbox then finds each
+    new entry of the caller stale as well, so every strict run after the run that writes the entry raises the error.
+    In that case, unset ``NUMBOX_PROXY_CACHE_STRICT``, or pass the function to the caller as an argument.
     """
 
 
@@ -648,13 +736,13 @@ def _undefined_symbols(object_code):
 
 
 def _stale_proxy_aliases(payload, libdata_of_payload):
-    """Return the sorted ``@proxy`` aliases that a serialized code library imports and that this process cannot call.
+    """Return the sorted numbox aliases that a serialized code library imports and that this process cannot call.
 
     A non-empty result means that numba must not load the payload. The result holds every stale alias that the object
-    imports, so the warning names them all. An alias is stale if this process has not registered it, or if it is in
-    ``_ABSENT_ALIASES``. ``libdata_of_payload`` extracts the library data from the payload. Only entries that numba
-    loads are passed to this function. An entry that numba compiles again because its own source changed produces no
-    warning.
+    imports, so the warning names them all. An alias is stale if this process has not registered it, if it is in
+    ``_ABSENT_ALIASES``, or if :func:`_is_shared_jit_name` reports it. ``libdata_of_payload`` extracts the library data
+    from the payload. Only entries that numba loads are passed to this function. An entry that numba compiles again
+    because its own source changed produces no warning.
 
     If reading the payload raises, the result is empty, and numbox warns once per process with
     :class:`UnvalidatedProxyCacheWarning`. In strict mode, numbox raises :class:`UnvalidatedProxyCacheError` instead.
@@ -685,7 +773,9 @@ def _stale_proxy_aliases(payload, libdata_of_payload):
         # the objects numba emits on each platform.
         return sorted(
             s for s in _undefined_symbols(object_code)
-            if s.startswith(_ALIAS_PREFIX) and (s in _ABSENT_ALIASES or not ll.address_of_symbol(s))
+            if s.startswith(_ALIAS_PREFIX) and (
+                s in _ABSENT_ALIASES or not ll.address_of_symbol(s) or _is_shared_jit_name(s)
+            )
         )
     except Exception as exc:
         # This handler runs on every cache load of the two wrapped cache implementations. An unexpected error, from a
@@ -693,7 +783,7 @@ def _stale_proxy_aliases(payload, libdata_of_payload):
         # unchecked instead of breaking unrelated caching. In strict mode, the handler raises an error.
         if strict:
             raise UnvalidatedProxyCacheError(
-                f"numbox: could not check a numba cache payload for stale @proxy aliases ({exc!r}); "
+                f"numbox: could not check a numba cache payload for stale numbox aliases ({exc!r}); "
                 f"{_PROXY_CACHE_STRICT_ENV} is set, so the load was aborted rather than proceeding unchecked"
             ) from exc
         # numbox reports the skipped check once per process with this warning. A skip without a warning would be
@@ -703,7 +793,7 @@ def _stale_proxy_aliases(payload, libdata_of_payload):
         if not _unvalidated_reported:
             _unvalidated_reported = True
             warnings.warn(
-                f"numbox: could not check a numba cache payload for stale @proxy aliases ({exc!r}); it was "
+                f"numbox: could not check a numba cache payload for stale numbox aliases ({exc!r}); it was "
                 "loaded unchecked. Later payloads in this process are checked, but not reported again.",
                 UnvalidatedProxyCacheWarning, stacklevel=3,
             )
@@ -728,15 +818,15 @@ def _guarded_rebuild(orig_rebuild, libdata_of_payload):
             filename_base = getattr(self, 'filename_base', '?')
             if _strict_cache_mode():
                 raise StaleProxyCacheError(
-                    f"numbox: {filename_base} references @proxy cfunc alias(es) this process cannot call "
-                    f"({', '.join(stale)}); {_PROXY_CACHE_STRICT_ENV} is set, so the stale entry was left on disk for "
-                    "inspection instead of being discarded and recompiled"
+                    f"numbox: {filename_base} references numbox alias(es) that this process cannot call or that two "
+                    f"of its functions share ({', '.join(stale)}); {_PROXY_CACHE_STRICT_ENV} is set, so the stale "
+                    "entry was left on disk for inspection instead of being discarded and recompiled"
                 )
             warnings.warn(
                 "numbox: discarding a stale numba cache entry and recompiling: "
-                f"{filename_base} references @proxy cfunc alias(es) this process "
-                "cannot call (the proxied body, signature or jit_options changed since the caller was "
-                "cached, or the binding is no longer available): "
+                f"{filename_base} references numbox alias(es) this process "
+                "cannot call (the compiled body, signature or jit_options changed since the caller was "
+                "cached, the binding is no longer available, or two functions in this process share the alias): "
                 + ", ".join(stale),
                 StaleProxyCacheWarning,
                 stacklevel=3,
@@ -751,7 +841,8 @@ def _install_cache_alias_guard():
 
     The two implementations are ``CompileResultCacheImpl`` and ``CodeLibraryCacheImpl``, and the check then covers
     every cache load through them in this process. A cached caller of a proxied function imports that function's
-    module, which imports this one, so the check is installed before such a caller loads. A cached function that refers
+    module, which imports this one, so the check is installed before such a caller loads. The same holds for a cached
+    caller of a ``cres`` function, because ``numbox.utils.highlevel`` imports this module. A cached function that refers
     to no alias may load before this module is imported, and it needs no check. numba's ``CUDACacheImpl`` derives from
     ``CacheImpl`` directly, so CUDA cache loads are not checked. If numba lacks one of the two classes, nothing is
     installed.

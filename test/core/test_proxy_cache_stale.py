@@ -7,9 +7,10 @@ then crashes, as ``test_stale_proxy_alias_is_discarded_and_recompiled`` describe
 such an entry with a warning and that numba compiles the caller again, for ``@njit`` and ``@guvectorize`` callers, for a
 binding whose C symbol disappears, and in strict mode. Each scenario also includes a binding that is never edited,
 with a caller in the same file and cache directory. That caller must load from the cache without a warning, so a fix
-that disabled caching or discarded the whole directory fails. Other tests record a known limitation: a caller that
-reads ``.as_func`` as a module-level constant holds the body's code instead of the alias, so the cache check cannot
-detect it. The in-process behavior of aliases, collisions and traps is tested in ``test_proxy.py``.
+that disabled caching or discarded the whole directory fails. Other tests cover a caller that reads ``.as_func`` as a
+module-level constant. Its code refers to the companion alias, under which numbox publishes the body's numba entry
+point, and numbox repairs it in the same way. The in-process behavior of aliases, collisions and traps is tested in
+``test_proxy.py``.
 """
 import os
 import subprocess
@@ -300,12 +301,13 @@ _CONST_NEW_BODY = {"const_scale": "16.0", "disp_scale": "17.0", "const_offset": 
 def _write_const_caller_scenario(tmp_path):
     """Write the two bindings, four cached callers and the probe script, and return the probe's path.
 
-    A ``const_*`` caller reads a binding's ``.as_func`` as a module-level constant. numbox lowers the constant by
-    linking the body's compiled library into the caller, so the caller's object holds the body's machine code and
-    refers to no alias. A ``disp_*`` caller calls the dispatcher, and its code refers to the alias that the cache check
-    looks for. Both routes call the edited binding and the unchanged one. The callers of the unchanged binding are the
-    control: a repair of the constant route that stopped caching it would make ``const_offset`` compile again. The
-    signatures are explicit, so every caller compiles at import, inside the probe's warning capture.
+    A ``const_*`` caller reads a binding's ``.as_func`` as a module-level constant. numbox lowers the constant as a
+    declaration of the companion alias, the name under which the body's numba entry point is published, so the
+    caller's object imports that name. A ``disp_*`` caller calls the dispatcher, and its code refers to the alias of
+    the body's C entry point. The cache check looks for both names. Both routes call the edited binding and the
+    unchanged one. The callers of the unchanged binding are the control: a repair of the constant route that stopped
+    caching it would make ``const_offset`` compile again. The signatures are explicit, so every caller compiles at
+    import, inside the probe's warning capture.
     """
     _write_binding(tmp_path / _EDITED, "scale", "x * 2.0")
     _write_binding(tmp_path / "proxied_binding_stable.py", "offset", "x + 100.0")
@@ -382,9 +384,9 @@ def _write_const_caller_scenario(tmp_path):
 def test_a_const_reference_caller_becomes_cacheable(tmp_path):
     """numba caches a ``cache=True`` caller that reads a proxied binding's ``.as_func`` as a compile-time constant.
 
-    numbox lowers the constant by declaring the body's entry point as a symbol and linking the body's library into the
-    caller. The globals that hold the value's other addresses are unused, and LLVM removes them before numba checks the
-    module for dynamic globals. Otherwise numba would refuse to cache the caller on every run, with ``Cannot cache
+    numbox lowers the constant by declaring the body's numba entry point as a symbol, the companion alias. The globals
+    that hold the value's other addresses are unused, and LLVM removes them before numba checks the module for dynamic
+    globals. Otherwise numba would refuse to cache the caller on every run, with ``Cannot cache
     compiled function "const_scale" as it uses dynamic globals``, and every process would compile it again. The test
     asserts that no such warning appears and that the cache holds the caller's index and data files. ``disp_offset``,
     a dispatcher caller of the unchanged binding, must also load from the cache in the second run.
@@ -412,55 +414,419 @@ def test_a_const_reference_caller_becomes_cacheable(tmp_path):
     )
 
 
-def test_a_const_reference_caller_serves_a_stale_body_after_an_edit(tmp_path):
-    """After an edit, a caller that reads ``.as_func`` as a constant still returns the old result, without a warning.
+def test_a_const_reference_caller_is_repaired_after_an_edit(tmp_path):
+    """After an edit, numbox discards a cached caller that reads ``.as_func`` as a constant, and it runs the new body.
 
-    The test records a known limitation. When numbox lowers the constant, it links the body's machine code into the
-    caller's object, so the object does not contain the ``numbox_pxy_`` prefix, and the cache check returns early. If
-    the body changes and the cache is not cleared, the constant caller returns the old result. In the same process, the
-    dispatcher caller and a direct call of the binding return the new one. The only ``StaleProxyCacheWarning`` names
-    the dispatcher caller, which numbox repaired, and a later run returns the old result without a warning.
+    The edit renames the body's alias and the companion alias. The caller's cached object imports the old companion,
+    which the new process does not register. The cache check therefore discards the entry with a
+    ``StaleProxyCacheWarning`` that names the caller and the old companion, and numba compiles the caller again. The
+    dispatcher caller is repaired in the same run. If the constant were lowered with the body's code linked into the
+    caller, the caller's object would import no alias, and ``const_scale`` would return 11.0, the old body's result,
+    without a warning.
 
-    If the cache check is extended to a body linked into a caller, ``const_scale`` will return the new result, and the
-    first assertion will fail. Such a failure means that the limitation no longer exists. It is not a regression.
-    ``const_offset`` and ``disp_offset`` remain the control: a repair that discarded the whole directory would make
-    them compile again.
+    ``const_offset`` and ``disp_offset`` are the control: a repair that discarded the whole directory would make them
+    compile again. A third run loads every caller from the cache without a warning, so the repair costs one
+    compilation, not one in every later process.
     """
     probe = _write_const_caller_scenario(tmp_path)
     env = _probe_env(tmp_path, "nbcache")
-    assert _results(_warm(probe, env), _CONST_OLD_BODY) == _CONST_OLD_BODY
+    cold = _warm(probe, env)
+    assert _results(cold, _CONST_OLD_BODY) == _CONST_OLD_BODY
+    stale_companion = cold["ALIAS_edited"] + "_jit"
 
     _edit_body(tmp_path)
     fields = _fields(_run_probe(probe, env))
 
-    assert fields["RESULT_const_scale"] == _CONST_OLD_BODY["const_scale"], (
-        f"the const caller healed -- if the guard now covers a linked-in body this test has done its job: "
-        f"{_results(fields, _CONST_NEW_BODY)}"
+    assert _results(fields, _CONST_NEW_BODY) == _CONST_NEW_BODY, (
+        f"a caller did not reach the new body: {_results(fields, _CONST_NEW_BODY)}"
     )
-    assert fields["STATS_const_scale"] == "served", f"the old number came from somewhere else: {fields}"
-    assert fields["RESULT_disp_scale"] == _CONST_NEW_BODY["disp_scale"], (
-        f"the dispatcher-path caller did not heal: {fields['RESULT_disp_scale']}"
-    )
-    assert fields["RESULT_direct"] == _CONST_NEW_BODY["direct"], (
-        f"calling the binding itself did not reach the new body: {fields['RESULT_direct']}"
+    assert fields["STATS_const_scale"] == "compiled" and fields["STATS_disp_scale"] == "compiled", (
+        f"a caller of the edited binding was not compiled again: {_stats(fields, _CONST_FNS)}"
     )
     assert fields["STATS_const_offset"] == "served" and fields["STATS_disp_offset"] == "served", (
         f"the untouched binding's callers were invalidated too: {_stats(fields, _CONST_FNS)}"
     )
-    assert "const_callers.disp_scale-" in fields["WARNINGS"], (
-        f"the one entry that was discarded went unannounced: {fields['WARNINGS']}"
+    assert "const_callers.const_scale-" in fields["WARNINGS"], (
+        f"the discard of the const caller went unannounced: {fields['WARNINGS']}"
     )
-    assert "const_callers.const_scale-" not in fields["WARNINGS"], (
-        f"the caller serving the old number was named after all: {fields['WARNINGS']}"
+    assert stale_companion in fields["WARNINGS"], f"no warning named {stale_companion}: {fields['WARNINGS']}"
+    assert "const_callers.disp_scale-" in fields["WARNINGS"], (
+        f"the discard of the dispatcher caller went unannounced: {fields['WARNINGS']}"
     )
 
-    again = _fields(_run_probe(probe, env))
-    assert again["RESULT_const_scale"] == _CONST_OLD_BODY["const_scale"], (
-        f"the stale entry healed itself on a later run: {again['RESULT_const_scale']}"
+    healed = _fields(_run_probe(probe, env))
+    assert _results(healed, _CONST_NEW_BODY) == _CONST_NEW_BODY, _results(healed, _CONST_NEW_BODY)
+    assert _stats(healed, _CONST_FNS) == dict.fromkeys(_CONST_FNS, "served"), (
+        f"the recompile was not written back: {_stats(healed, _CONST_FNS)}"
     )
-    assert "StaleProxyCacheWarning" not in again["WARNINGS"], (
-        f"every later run is silent about the entry it is still serving: {again['WARNINGS']}"
+    assert "StaleProxyCacheWarning" not in healed["WARNINGS"], f"the repair repeats forever: {healed['WARNINGS']}"
+
+
+def _write_cres_const_scenario(tmp_path):
+    """Write two ``cres`` functions, two cached callers that hold them as constants, and the probe; return its path.
+
+    The functions and their callers are in two files, so an edit to a function leaves the callers' file unchanged.
+    Neither file imports ``numbox.core.proxy``. The probe reports whether the cache check is installed, because the
+    import of ``numbox.utils.highlevel`` alone must install it. Without the check, a cached caller that imports an
+    alias this process has not registered would crash the process when numba loads it.
+    """
+    (tmp_path / "cres_ops.py").write_text(textwrap.dedent('''
+        """Two functions compiled with cres. The edit changes the first and leaves the second as the control."""
+        from numba.core.types import float64
+
+        from numbox.utils.highlevel import cres
+
+
+        @cres(float64(float64), cache=True)
+        def scale(x):
+            return x * 2.0
+
+
+        @cres(float64(float64), cache=True)
+        def offset(x):
+            return x + 100.0
+    '''), encoding="utf-8")
+    (tmp_path / "cres_const_callers.py").write_text(textwrap.dedent('''
+        """Cached callers that read the two functions as module-level constants, in a file the edit never touches."""
+        from numba import njit
+        from numba.core.types import float64
+
+        from cres_ops import offset, scale
+
+
+        @njit(float64(float64), cache=True)
+        def const_scale(x):
+            return scale(x) + 1.0
+
+
+        @njit(float64(float64), cache=True)
+        def const_offset(x):
+            return offset(x) + 3.0
+    '''), encoding="utf-8")
+
+    probe = tmp_path / "cres_const_probe.py"
+    probe.write_text(textwrap.dedent('''
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            import cres_const_callers
+            fns = {name: getattr(cres_const_callers, name) for name in ("const_scale", "const_offset")}
+            for name, fn in fns.items():
+                print(f"RESULT_{name}", fn(5.0), flush=True)
+
+        for name, fn in fns.items():
+            hits = sum(fn.stats.cache_hits.values())
+            misses = sum(fn.stats.cache_misses.values())
+            state = "served" if hits and not misses else "compiled" if misses and not hits else f"{hits}/{misses}"
+            print(f"STATS_{name}", state, flush=True)
+
+        import cres_ops
+        from numba.core import caching
+
+        print("ALIAS_scale", cres_ops.scale._numbox_jit_alias, flush=True)
+        print("GUARD", getattr(caching, "_numbox_proxy_alias_guard", False), flush=True)
+        print("WARNINGS", " | ".join(f"{w.category.__name__}: {w.message}".replace("\\n", " ") for w in caught))
+        print("DONE ok", flush=True)
+    '''), encoding="utf-8")
+    return probe
+
+
+_CRES_CONST_FNS = ("const_scale", "const_offset")
+
+
+def test_a_caller_of_a_cres_constant_is_repaired_after_an_edit(tmp_path):
+    """After an edit to a ``cres`` function, numbox discards a cached caller that holds it as a constant.
+
+    ``cres`` publishes the function's numba entry point under an alias, and the caller's cached object imports that
+    name. The edit renames the alias, so the cache check discards the caller's entry with a ``StaleProxyCacheWarning``
+    that names the caller and the old alias, and numba compiles the caller again. If the function's code were linked
+    into the caller instead, ``const_scale`` would keep returning 11.0, the old function's result, without a warning.
+
+    ``const_offset`` is the control: its function is in the edited file but is unchanged, so its alias is the same and
+    the caller must still load from the cache. A third run loads both callers from the cache without a warning.
+    """
+    probe = _write_cres_const_scenario(tmp_path)
+    env = _probe_env(tmp_path, "nbcache")
+
+    cold = _warm(probe, env)
+    assert _results(cold, _CRES_CONST_FNS) == {"const_scale": "11.0", "const_offset": "108.0"}
+    assert cold["GUARD"] == "True", "the cache check is not installed in a process that only uses cres"
+    warm = _warm(probe, env)
+    assert _stats(warm, _CRES_CONST_FNS) == dict.fromkeys(_CRES_CONST_FNS, "served"), (
+        f"a caller of a cres constant did not cache: {_stats(warm, _CRES_CONST_FNS)}\n{warm['WARNINGS']}"
     )
+
+    _rewrite(tmp_path / "cres_ops.py", "x * 2.0", "x * 3.0")
+    fields = _fields(_run_probe(probe, env))
+
+    assert _results(fields, _CRES_CONST_FNS) == {"const_scale": "16.0", "const_offset": "108.0"}, (
+        f"the caller did not reach the new function: {_results(fields, _CRES_CONST_FNS)}"
+    )
+    assert _stats(fields, _CRES_CONST_FNS) == {"const_scale": "compiled", "const_offset": "served"}, (
+        f"the edit did not invalidate exactly the caller of the edited function: {_stats(fields, _CRES_CONST_FNS)}"
+    )
+    assert "cres_const_callers.const_scale-" in fields["WARNINGS"], (
+        f"the discard of the caller went unannounced: {fields['WARNINGS']}"
+    )
+    assert cold["ALIAS_scale"] in fields["WARNINGS"], f"no warning named {cold['ALIAS_scale']}: {fields['WARNINGS']}"
+    assert fields["ALIAS_scale"] != cold["ALIAS_scale"], "the edit did not rename the alias"
+
+    healed = _fields(_run_probe(probe, env))
+    assert _results(healed, _CRES_CONST_FNS) == {"const_scale": "16.0", "const_offset": "108.0"}
+    assert _stats(healed, _CRES_CONST_FNS) == dict.fromkeys(_CRES_CONST_FNS, "served"), (
+        f"the recompile was not written back: {_stats(healed, _CRES_CONST_FNS)}"
+    )
+    assert "StaleProxyCacheWarning" not in healed["WARNINGS"], f"the repair repeats forever: {healed['WARNINGS']}"
+
+
+def _write_shared_alias_scenario(tmp_path):
+    """Write a factory that makes two ``cres`` functions with one alias, a cached caller of one, and the probe.
+
+    The two functions call ``twin_helpers.op``, a module attribute that holds ``numpy.sin`` for one and ``numpy.cos``
+    for the other. numba compiles the ufunc into each function, but the alias leaves a ufunc out, so both functions
+    compute one alias. ``TWINS`` selects which of them the process makes: ``alone`` makes only the sine, and
+    ``sin_first`` and ``cos_first`` make both in that order. The caller holds the sine as a constant.
+    """
+    (tmp_path / "twin_helpers.py").write_text(textwrap.dedent('''
+        """A module attribute that holds a ufunc. The functions in twin_ops read it, and the factory there rebinds it."""
+        import numpy
+
+        op = numpy.sin
+    '''), encoding="utf-8")
+    (tmp_path / "twin_ops.py").write_text(textwrap.dedent('''
+        """Two functions that one factory makes. Their code is equal, and they differ in the ufunc compiled in."""
+        import os
+
+        import numpy
+        from numba.core.types import float64
+
+        import twin_helpers
+        from numbox.utils.highlevel import cres
+
+
+        def make(op):
+            twin_helpers.op = op
+
+            @cres(float64(float64))
+            def twin(x):
+                return twin_helpers.op(x)
+            return twin
+
+
+        order = os.environ["TWINS"]
+        COS = make(numpy.cos) if order == "cos_first" else None
+        SIN = make(numpy.sin)
+        if order == "sin_first":
+            COS = make(numpy.cos)
+    '''), encoding="utf-8")
+    (tmp_path / "twin_callers.py").write_text(textwrap.dedent('''
+        """A cached caller that reads the sine as a module-level constant."""
+        from numba import njit
+        from numba.core.types import float64
+
+        from twin_ops import SIN
+
+
+        @njit(float64(float64), cache=True)
+        def call_sin(x):
+            return SIN(x)
+    '''), encoding="utf-8")
+
+    probe = tmp_path / "twin_probe.py"
+    probe.write_text(textwrap.dedent('''
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            import twin_callers
+            print("RESULT_call_sin", twin_callers.call_sin(0.0), flush=True)
+
+        fn = twin_callers.call_sin
+        hits = sum(fn.stats.cache_hits.values())
+        misses = sum(fn.stats.cache_misses.values())
+        state = "served" if hits and not misses else "compiled" if misses and not hits else f"{hits}/{misses}"
+        print("STATS_call_sin", state, flush=True)
+
+        import twin_ops
+
+        print("ALIAS_sin", twin_ops.SIN._numbox_jit_alias, flush=True)
+        print("ALIAS_cos", getattr(twin_ops.COS, "_numbox_jit_alias", "none"), flush=True)
+        print("WARNINGS", " | ".join(f"{w.category.__name__}: {w.message}".replace("\\n", " ") for w in caught))
+        print("DONE ok", flush=True)
+    '''), encoding="utf-8")
+    return probe
+
+
+@pytest.mark.parametrize("order", ["sin_first", "cos_first"])
+def test_a_caller_of_a_constant_is_not_served_another_function_with_the_same_alias(tmp_path, order):
+    """A cached caller that holds a function as a constant never runs another function that computes the same alias.
+
+    The caller is cached in a process that makes only the sine, and a second run there serves it from the cache. The
+    next process makes the cosine as well, which computes the same alias. The caller must still return ``sin(0.0)``,
+    and numbox must discard its cache entry instead of loading it. The entry refers to the alias's name, and that name
+    belongs to whichever function the process made first. The name resolves to the cosine in the order ``cos_first``,
+    so a caller loaded from the cache would return 1.0. In the order ``sin_first``, the name would resolve to the
+    cosine only if the second registration replaced the first.
+
+    A further run in the same process shape must discard the entry again. The entry that the previous run wrote refers
+    to a name that two functions share, or to a name used only in the process that wrote it.
+    """
+    probe = _write_shared_alias_scenario(tmp_path)
+    env = _probe_env(tmp_path, "nbcache")
+
+    env["TWINS"] = "alone"
+    cold = _warm(probe, env)
+    assert cold["RESULT_call_sin"] == "0.0"
+    warm = _warm(probe, env)
+    assert warm["STATS_call_sin"] == "served", f"the caller of a constant did not cache: {warm['WARNINGS']}"
+
+    env["TWINS"] = order
+    for run in ("first", "second"):
+        fields = _fields(_run_probe(probe, env))
+        assert fields["ALIAS_sin"].split("_jit")[0] == fields["ALIAS_cos"].split("_jit")[0], (
+            "the two functions did not compute one alias, so the test would pass without exercising the rule"
+        )
+        assert fields["RESULT_call_sin"] == "0.0", (
+            f"on the {run} run with both functions, the caller of the sine ran the cosine\n{fields['WARNINGS']}"
+        )
+        assert fields["STATS_call_sin"] == "compiled", (
+            f"on the {run} run, the caller was loaded from the cache although two functions share its alias"
+        )
+        assert "twin_callers.call_sin-" in fields["WARNINGS"], f"the discard went unannounced: {fields['WARNINGS']}"
+
+
+def test_strict_mode_raises_for_a_shared_alias_in_every_run_and_names_the_cause(tmp_path):
+    """In strict mode, loading a cached caller whose constant shares its alias raises an error that names the cause.
+
+    The process creates two functions that compute one alias, so numbox does not load the cached caller of either
+    function. The alias is registered and the process can call it. An error that named only an alias that the process
+    cannot call would lead the user to look for a missing function, so the error must name the sharing as a possible
+    cause.
+
+    Deleting the caller's cache files does not stop the error, as the docstring of ``StaleProxyCacheError`` states. The
+    next strict run compiles the caller and writes a new entry. The following run finds that entry stale for the same
+    reason and raises the error again.
+    """
+    probe = _write_shared_alias_scenario(tmp_path)
+    env = _probe_env(tmp_path, "nbcache")
+    env["TWINS"] = "alone"
+    _warm(probe, env)
+
+    env["TWINS"] = "sin_first"
+    env["NUMBOX_PROXY_CACHE_STRICT"] = "1"
+    r = _run_probe(probe, env)
+    assert r.returncode != 0 and "StaleProxyCacheError" in r.stderr, (
+        f"strict mode loaded or repaired a caller whose alias two functions share\n{_report(r)}"
+    )
+    message = r.stderr[r.stderr.index("StaleProxyCacheError"):]
+    assert "two of its functions share" in message, f"the error does not name the sharing as a cause\n{_report(r)}"
+
+    entries = list((tmp_path / "nbcache").rglob("twin_callers.call_sin-*"))
+    assert entries, "the scenario wrote no cache entry for the caller, so there is nothing to delete"
+    for entry in entries:
+        entry.unlink()
+    fresh = _fields(_run_probe(probe, env))
+    assert (fresh["RESULT_call_sin"], fresh["STATS_call_sin"]) == ("0.0", "compiled"), fresh
+    again = _run_probe(probe, env)
+    assert again.returncode != 0 and "StaleProxyCacheError" in again.stderr, (
+        f"the strict run after the one that wrote a new entry did not raise\n{_report(again)}"
+    )
+
+
+def _write_rebound_constant_scenario(tmp_path):
+    """Write a module whose constant holds one of two ``cres`` functions, a cached caller of the constant, and the probe.
+
+    ``CONSTANT`` selects the functions that the process creates and the one that ``VALUE`` holds. ``one`` and ``two``
+    create both functions and bind ``VALUE`` to the first and to the second, respectively. ``two_only`` creates only
+    the second function and binds ``VALUE`` to it. The caller's own file is the same in every run, so numba's cache
+    index does not change.
+    """
+    (tmp_path / "rebound_ops.py").write_text(textwrap.dedent('''
+        """Two functions and a constant that holds one of them. An environment variable selects which."""
+        import os
+
+        from numba.core.types import float64
+
+        from numbox.utils.highlevel import cres
+
+
+        def plus_one(x):
+            return x + 1.0
+
+
+        def plus_two(x):
+            return x + 2.0
+
+
+        chosen = os.environ["CONSTANT"]
+        ONE = None if chosen == "two_only" else cres(float64(float64))(plus_one)
+        TWO = cres(float64(float64))(plus_two)
+        VALUE = ONE if chosen == "one" else TWO
+    '''), encoding="utf-8")
+    (tmp_path / "rebound_callers.py").write_text(textwrap.dedent('''
+        """A cached caller that reads the constant of another module."""
+        from numba import njit
+        from numba.core.types import float64
+
+        from rebound_ops import VALUE
+
+
+        @njit(float64(float64), cache=True)
+        def call_value(x):
+            return VALUE(x)
+    '''), encoding="utf-8")
+
+    probe = tmp_path / "rebound_probe.py"
+    probe.write_text(textwrap.dedent('''
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            import rebound_callers
+            print("RESULT_call_value", rebound_callers.call_value(0.0), flush=True)
+
+        fn = rebound_callers.call_value
+        hits = sum(fn.stats.cache_hits.values())
+        misses = sum(fn.stats.cache_misses.values())
+        state = "served" if hits and not misses else "compiled" if misses and not hits else f"{hits}/{misses}"
+        print("STATS_call_value", state, flush=True)
+        print("WARNINGS", " | ".join(f"{w.category.__name__}: {w.message}".replace("\\n", " ") for w in caught))
+        print("DONE ok", flush=True)
+    '''), encoding="utf-8")
+    return probe
+
+
+def test_a_cached_caller_follows_a_rebound_constant_only_when_the_old_function_is_gone(tmp_path):
+    """A cached caller of a constant that another module rebinds is repaired only if the old function is not created.
+
+    numba treats a global as a constant and does not record its value in the cache index, so numba alone loads the
+    caller's entry in every run in which the caller's file is unchanged. The entry refers to the name of the function
+    that the constant held when the entry was written. numbox discards the entry in a process that registers no
+    function under that name. The name is registered in a process that still creates the old function. numba then loads
+    the entry, and the caller calls the old function although the constant holds the new one. The proxy page documents
+    this limitation.
+    """
+    probe = _write_rebound_constant_scenario(tmp_path)
+    env = _probe_env(tmp_path, "nbcache")
+
+    env["CONSTANT"] = "one"
+    cold = _warm(probe, env)
+    assert cold["RESULT_call_value"] == "1.0"
+    warm = _warm(probe, env)
+    assert warm["STATS_call_value"] == "served", f"the caller of a constant did not cache: {warm['WARNINGS']}"
+
+    env["CONSTANT"] = "two"
+    kept = _fields(_run_probe(probe, env))
+    assert (kept["STATS_call_value"], kept["RESULT_call_value"]) == ("served", "1.0"), (
+        f"the documented limitation no longer holds; update the proxy page\n{kept}"
+    )
+
+    env["CONSTANT"] = "two_only"
+    repaired = _fields(_run_probe(probe, env))
+    assert repaired["RESULT_call_value"] == "2.0", f"the caller ran a function that the process never made\n{repaired}"
+    assert repaired["STATS_call_value"] == "compiled"
+    assert "rebound_callers.call_value-" in repaired["WARNINGS"], f"the discard went unannounced: {repaired['WARNINGS']}"
 
 
 def _rewrite(path, old, new):
@@ -596,8 +962,8 @@ def _write_optional_binding(tmp_path):
     """Write a fake library whose ``scale`` attribute exists only if ``SYMBOL_PRESENT`` is ``1``, and a binding over it.
 
     The two tests below share the binding. One calls it through its dispatcher, whose code refers to the alias. The
-    other reads ``.as_func`` as a compile-time constant, which leaves no alias for the cache check to find. One helper
-    writes the binding for both, so the two tests compare the same binding.
+    other reads ``.as_func`` as a compile-time constant, whose code refers to the companion alias. One helper writes
+    the binding for both, so the two tests compare the same binding.
     """
     (tmp_path / "fakelib.py").write_text(textwrap.dedent('''
         """Stands in for a C library whose symbol is present in one process and gone in the next."""
@@ -675,24 +1041,18 @@ def test_a_binding_that_disappeared_is_discarded_rather_than_called(tmp_path):
     assert "StaleProxyCacheWarning" in fields["WARNINGS"], f"the discard was not announced: {fields['WARNINGS']}"
 
 
-def test_a_const_reference_caller_calls_a_binding_that_disappeared(tmp_path):
-    """A caller that reads a vanished binding's ``.as_func`` as a constant loads from the cache and returns its result.
+def test_a_const_reference_caller_of_a_binding_that_disappeared_is_discarded(tmp_path):
+    """A cached caller that reads a vanished binding's ``.as_func`` as a constant is discarded, not loaded.
 
-    The test records a known limitation. When numbox lowers the constant, it links the body's machine code into the
-    caller's object, so the object refers to no ``numbox_pxy_`` alias. The cache check returns early, and the cached
-    entry loads in a process without the binding. The caller returns the vanished binding's result, while the same
-    source with an empty cache fails with the ``TypingError`` of the test above. Strict mode does not detect the case
-    either, because the cache check finds no alias in the entry.
+    The caller's cached object imports the companion alias of the binding's numba entry point. In a process without
+    the binding, nothing registers that name, so the cache check discards the entry with a ``StaleProxyCacheWarning``.
+    The recompile then fails with the ``TypingError`` that the same source gives with an empty cache, because the
+    module-level variable holds ``None``. In strict mode, the stale entry raises ``StaleProxyCacheError`` instead.
 
-    The defect is in the constant lowering, which links the body into the caller. If that lowering is changed to
-    discard such a caller, the cached run will fail as the run with an empty cache does, and the assertions will fail.
-    Such a failure means that the limitation no longer exists. It is not a regression.
-
-    A user may write this form deliberately, in the belief that it is safe. If the binding is absent, an unguarded
-    ``scale.as_func`` raises ``AttributeError`` at import, and a caller defined inside an ``if hasattr(...)`` block, as
-    the proxy page shows, is not defined; both forms are safe. A guard written as a conditional expression turns that
-    import failure into a wrong result. A body that called a real C symbol would crash the process with a segmentation
-    fault and an empty stderr, so this body calls no C symbol, and the test can assert on the result.
+    The caller guards the constant with a conditional expression, so its module imports where the binding is absent.
+    If the cached entry loaded there, the caller would return the vanished binding's result, 11.0, and a body that
+    called a real C symbol would crash the process with a segmentation fault and an empty stderr. This body calls no
+    C symbol, so a regression shows as a result that the test can assert on, not as a crash.
     """
     _write_optional_binding(tmp_path)
     (tmp_path / "const_optional_caller.py").write_text(textwrap.dedent('''
@@ -741,15 +1101,15 @@ def test_a_const_reference_caller_calls_a_binding_that_disappeared(tmp_path):
     cold = _fields(_run_probe(probe, cold_env))
     assert cold.get("RAISED") == "TypingError", f"a cold cache did not reach the clean typing error: {cold}"
 
-    assert warm.get("RESULT") == "11.0", f"the warm run stopped serving the vanished binding: {warm}"
-    assert warm["STATS"] == "served", f"that number was recompiled rather than loaded from the cache: {warm}"
-    assert "StaleProxyCacheWarning" not in warm["WARNINGS"], f"the guard saw the const route after all: {warm}"
+    assert "RESULT" not in warm, f"the vanished binding was called and returned {warm.get('RESULT')}"
+    assert warm.get("RAISED") == "TypingError", f"the warm run failed in another way than the cold one: {warm}"
+    assert "StaleProxyCacheWarning" in warm["WARNINGS"], f"the discard was not announced: {warm}"
 
+    # The failed recompile wrote nothing, so the stale entry is still on disk for the strict run.
     strict_env = dict(env)
     strict_env["NUMBOX_PROXY_CACHE_STRICT"] = "1"
-    strict = _run_probe(probe, strict_env)
-    assert strict.returncode == 0, f"strict mode caught the entry the default missed\n{_report(strict)}"
-    assert _fields(strict)["RESULT"] == "11.0", f"strict mode changed the answer without stopping\n{_report(strict)}"
+    strict = _fields(_run_probe(probe, strict_env))
+    assert strict.get("RAISED") == "StaleProxyCacheError", f"strict mode did not stop at the stale entry: {strict}"
 
 
 def test_the_mach_o_reader_strips_the_leading_underscore(tmp_path):
