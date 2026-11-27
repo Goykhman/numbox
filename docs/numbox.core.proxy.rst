@@ -63,7 +63,7 @@ disables it. It also disables caching when numba can write no cache for numbox's
 not cached either (:doc:`numbox.core.configurations`). Under ``NUMBA_OPT=0``, a debugging setting, numba does not cache
 a caller of a proxied function and warns that the caller uses dynamic globals; the caller then compiles on every run.
 
-A function that you decorate inside another function, such as a factory that makes one proxied function for each value
+A function that you define inside another function, such as a factory that makes one proxied function for each value
 it receives, has its body cached but its wrapper compiled in every process. numba's cache cannot distinguish the
 wrappers of two such functions, because they share a name, a line and their code, and differ only in the body that they
 call. The wrapper is small and compiles quickly, but the compile time grows with the number of such functions that a

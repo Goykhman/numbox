@@ -128,9 +128,8 @@ def _call_proxied_alias(context, builder, main_sig, alias_name, args):
     return builder.call(f, args)
 
 
-# _TEMPLATE_NAMED_WRAPPERS holds a (module name, wrapper name) pair for each wrapper that this process compiles under
-# the template's qualified name, such as "__body" (see wrap in proxy). A wrapper claims its pair under the lock before
-# it compiles, so that of two threads that decorate two functions of one name at once, only one gets that name.
+# _TEMPLATE_NAMED_WRAPPERS holds the (module name, wrapper name) pairs that wrappers in this process claimed (see wrap
+# in proxy). A wrapper claims its pair under the lock before it compiles.
 _TEMPLATE_NAMED_WRAPPERS = set()
 _TEMPLATE_NAMED_LOCK = threading.Lock()
 

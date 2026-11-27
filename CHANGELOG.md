@@ -86,8 +86,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Two cached `@proxy` functions of one name at module level, such as a function that a module defines twice, each run
   their own body when passed to a jitted function as a first-class function value. Before, a process that loaded one
   function's wrapper from the cache and compiled the other's could give both one symbol name, and the call of the first
-  could run the second one's body. numbox now caches only the wrapper of the first function of a name that the process
-  decorates in a module outside any other function, and compiles the wrapper of each later one in every process.
+  could run the second one's body. numbox now compiles the later function's wrapper in every process, as the proxy page
+  describes.
 
 ## [0.7.9] - 2026-11-05
 
