@@ -128,6 +128,11 @@ def _call_proxied_alias(context, builder, main_sig, alias_name, args):
     return builder.call(f, args)
 
 
+# _TEMPLATE_NAMED_WRAPPERS holds a (module name, wrapper name) pair for each wrapper that this process compiled under
+# the template's qualified name, such as "__body" (see wrap in proxy).
+_TEMPLATE_NAMED_WRAPPERS = set()
+
+
 def _njit_named(qualname):
     """Return a decorator that sets a wrapper's ``__qualname__`` to ``qualname`` and then applies :func:`numbox_njit`.
 
@@ -402,8 +407,10 @@ def proxy(sig, jit_options: Optional[dict] = None):
     signature given as a string fails with an ``AttributeError``. ``jit_options`` is passed to ``njit`` for the
     function and for the wrapper that numbox generates around it. A value that is not a ``dict`` is ignored. The
     function is cached only if ``jit_options`` enables caching, as ``{"cache": True}`` and
-    ``numbox.core.configurations.jit_options`` do. For a function defined inside another function, such as the
-    product of a factory, numbox caches the function but compiles the wrapper in every process.
+    ``numbox.core.configurations.jit_options`` do. For a function defined inside another function, such as the product
+    of a factory, numbox caches the function but compiles the wrapper in every process. It does the same for a function
+    at module level if the process already decorated a function of the same name in the same module, as when a module
+    defines a function twice.
 
     The decorator returns the dispatcher of the wrapper. The dispatcher's name is ``__`` followed by the function's
     name, and its docstring is the function's docstring. A call through the dispatcher, from Python or from jitted
@@ -501,10 +508,17 @@ def {func_proxy_name}({func_args_str}):
         # numba finds the address of a function passed as a first-class value by that name, so a jitted caller could
         # then run the other function's body. No Python definition produces a qualified name with the component
         # "<proxy>", and no wrapper whose qualified name has that component is cached.
-        nested = bool(func.__code__.co_flags & inspect.CO_NESTED)
-        wrapper_opts = {**jit_opts, 'cache': False} if nested else jit_opts
+        #
+        # The same holds for two functions of one name at module level, such as a function that a module defines
+        # twice, or a method of a class that has the name of a function. Their wrappers share the template's qualified
+        # name. If the process loads one of them from the cache and compiles the other, both can have one symbol name.
+        # So only the first wrapper of a name in a module that the process makes gets the template's qualified name and
+        # the cache. Every later one is compiled as the wrapper of a nested function is.
+        wrapper_key = (inspect.getmodule(func).__name__, func_proxy_name)
+        uncached = bool(func.__code__.co_flags & inspect.CO_NESTED) or wrapper_key in _TEMPLATE_NAMED_WRAPPERS
+        wrapper_opts = {**jit_opts, 'cache': False} if uncached else jit_opts
         wrapper_njit = numbox_njit
-        if nested:
+        if uncached:
             wrapper_njit = _njit_named(f"{func.__qualname__}.<proxy>.{func_proxy_name}")
         # In this namespace, the template's njit compiles as numbox_njit does, so numbox keys the wrapper's cache as it
         # keys the body's. The template still contains the text "@njit(", which the anchor code below searches for.
@@ -546,6 +560,8 @@ def {func_proxy_name}({func_args_str}):
         code = compile(prefixed, inspect.getfile(func), mode='exec')
         exec(code, ns)  # nosec B102 - JIT codegen of internal source
         dispatcher = ns[func_proxy_name]
+        if not uncached:
+            _TEMPLATE_NAMED_WRAPPERS.add(wrapper_key)
         # When numba builds a dispatcher, functools.update_wrapper copies the docstring of its py_func, which for the
         # wrapper is None. Both are then assigned the function's docstring, so that help() and autodoc show it. numba
         # copies the docstring again if it rebuilds the dispatcher from py_func. The wrapper's code objects remain

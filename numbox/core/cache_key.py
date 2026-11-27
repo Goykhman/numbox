@@ -277,6 +277,12 @@ def explain_cache_key(func) -> dict:
     cache = getattr(func, "_cache", None)
     keyed = getattr(cache, "_numbox_keyed", None)
     if keyed is None:
+        # numbox compiles some @proxy wrappers without a cache, under a qualified name with the component "<proxy>".
+        if "<proxy>" in getattr(getattr(func, "py_func", None), "__qualname__", "").split("."):
+            raise ValueError(
+                f"{func!r} is the wrapper of a @proxy function, which numbox compiles in every process without an "
+                "on-disk cache; pass the function's .as_func to see the key of its body"
+            )
         raise ValueError(
             f"{func!r} has no cache numbox keys: it is cached under numba's key alone, or not cached; decorate it "
             "with numbox_njit or numbox_cfunc and cache=True"

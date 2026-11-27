@@ -83,6 +83,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   function's generated wrapper, and such a call of the second function ran the first function's body, without a
   warning. A jitted function that called the second function by name ran the right body. numbox now compiles the
   wrapper of a `@proxy` function that is defined inside another function in every process, and caches only its body.
+- Two cached `@proxy` functions of one name at module level, such as a function that a module defines twice, each run
+  their own body when passed to a jitted function as a first-class function value. Before, a process that loaded one
+  function's wrapper from the cache and compiled the other's could give both one symbol name, and the call of the first
+  could run the second one's body. numbox now compiles in every process the wrapper of each later function of a name
+  that the process decorates in a module.
 
 ## [0.7.9] - 2026-11-05
 

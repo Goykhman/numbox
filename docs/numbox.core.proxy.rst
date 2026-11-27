@@ -63,11 +63,14 @@ disables it. It also disables caching when numba can write no cache for numbox's
 not cached either (:doc:`numbox.core.configurations`). Under ``NUMBA_OPT=0``, a debugging setting, numba does not cache
 a caller of a proxied function and warns that the caller uses dynamic globals; the caller then compiles on every run.
 
-A function that you decorate inside another function, such as a factory that makes one proxied function for each
-value it receives, has its body cached but its wrapper compiled in every process. numba's cache cannot distinguish the
-wrappers of two such functions, because they share a name, a line and their code, and differ only in the body that
-they call. The wrapper is small and compiles quickly, but the compile time grows with the number of such functions
-that a process makes.
+A function that you decorate inside another function, such as a factory that makes one proxied function for each value
+it receives, has its body cached but its wrapper compiled in every process. numba's cache cannot distinguish the
+wrappers of two such functions, because they share a name, a line and their code, and differ only in the body that they
+call. The wrapper is small and compiles quickly, but the compile time grows with the number of such functions that a
+process makes. A function at module level is treated the same way if the process already decorated a function of the
+same name in the same module, as when a module defines a function twice. The wrappers of the two functions share a name
+too. Otherwise, in a process that loaded one of them from the cache and compiled the other, a jitted function that
+received the first as a first-class function value could run the second one's body.
 :func:`~numbox.core.cache_key.explain_cache_key` raises a ``ValueError`` for the dispatcher of such a function; pass
 its ``.as_func`` to see the key of its body.
 
