@@ -411,7 +411,7 @@ def proxy(sig, jit_options: Optional[dict] = None):
     ``numbox.core.configurations.jit_options`` do. For a function defined inside another function, such as the product
     of a factory, numbox caches the function but compiles the wrapper in every process. numbox treats a function at
     module level in the same way if the process already decorated another function of its name in its module, as when a
-    module defines a function twice. That other function counts only if it is not nested in another function.
+    module defines a function twice. numbox does not consider an earlier function that is nested in another function.
 
     The decorator returns the dispatcher of the wrapper. The dispatcher's name is ``__`` followed by the function's
     name, and its docstring is the function's docstring. A call through the dispatcher, from Python or from jitted
