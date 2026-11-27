@@ -368,8 +368,8 @@ def test_cached_factory_functions_each_run_their_own_body(tmp_path):
     warm process makes a third product. A wrapper loaded from the cache keeps the symbol name it received in the cold
     process. A wrapper compiled under the same qualified name could receive that name too, and numba passes a function
     as a first-class value by that name. Each function is called from Python, from a jitted function that takes it as a
-    dispatcher and from one that takes it as a first-class function. The bodies load from the cache in the warm process.
-    The module-level wrapper is cached, and no wrapper of a product is saved.
+    dispatcher and from one that takes it as a first-class function. The bodies that the cold process cached load from
+    the cache in the warm process. The module-level wrapper is cached, and no wrapper of a product is saved.
     """
     script = tmp_path / "factory_products.py"
     script.write_text(textwrap.dedent('''
