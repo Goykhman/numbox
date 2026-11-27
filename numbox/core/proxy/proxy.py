@@ -409,9 +409,9 @@ def proxy(sig, jit_options: Optional[dict] = None):
     function and for the wrapper that numbox generates around it. A value that is not a ``dict`` is ignored. The
     function is cached only if ``jit_options`` enables caching, as ``{"cache": True}`` and
     ``numbox.core.configurations.jit_options`` do. For a function defined inside another function, such as the product
-    of a factory, numbox caches the function but compiles the wrapper in every process. It does the same for a function
-    at module level if the process already decorated a function of the same name in the same module that is not nested
-    in another function, as when a module defines a function twice.
+    of a factory, numbox caches the function but compiles the wrapper in every process. numbox treats a function at
+    module level in the same way if the process already decorated a function of the same name in the same module that is
+    not nested in another function, as when a module defines a function twice.
 
     The decorator returns the dispatcher of the wrapper. The dispatcher's name is ``__`` followed by the function's
     name, and its docstring is the function's docstring. A call through the dispatcher, from Python or from jitted
@@ -512,11 +512,12 @@ def {func_proxy_name}({func_args_str}):
         #
         # The same holds for two functions of one name at module level, such as a function that a module defines twice,
         # or a method of a class that has the name of a function. Their wrappers share the template's qualified name. If
-        # the process loads one of them from the cache and compiles the other, both can have one symbol name. So of the
-        # functions of one name in a module that are not nested in another function, only the first that the process
-        # decorates gets the template's qualified name and the cache. Every later one is compiled as the wrapper of a
-        # nested function is. A nested function never claims the name. A decoration that fails after the claim leaves
-        # the name claimed, so a later function of that name gets a wrapper without a cache.
+        # the process loads one of them from the cache and compiles the other, both can have one symbol name. Therefore,
+        # of the functions of one name in a module that are not nested in another function, only the first that the
+        # process decorates gets a wrapper with the template's qualified name and an on-disk cache. The wrapper of every
+        # later function is compiled in the same way as the wrapper of a nested function. A nested function never claims
+        # the name. A decoration that fails after the claim leaves the name claimed, so a later function of that name
+        # gets a wrapper without a cache.
         uncached = bool(func.__code__.co_flags & inspect.CO_NESTED)
         if not uncached:
             wrapper_key = (inspect.getmodule(func).__name__, func_proxy_name)
