@@ -405,13 +405,13 @@ def proxy(sig, jit_options: Optional[dict] = None):
     ``sig`` is a numba signature such as ``float64(float64)``, or a list of signatures for a function with default
     arguments. The first signature in a list is the main signature. Each further signature describes a call that omits
     trailing defaulted parameters, and it types each omitted parameter as numba's ``Omitted`` of its default value. A
-    signature given as a string fails with an ``AttributeError``. ``jit_options`` is passed to ``njit`` for the
-    function and for the wrapper that numbox generates around it. A value that is not a ``dict`` is ignored. The
-    function is cached only if ``jit_options`` enables caching, as ``{"cache": True}`` and
+    signature given as a string fails with an ``AttributeError``. ``jit_options`` is passed to ``njit`` for the function
+    and for the wrapper that numbox generates around it. A value that is not a ``dict`` is ignored. The function is
+    cached only if ``jit_options`` enables caching, as ``{"cache": True}`` and
     ``numbox.core.configurations.jit_options`` do. For a function defined inside another function, such as the product
     of a factory, numbox caches the function but compiles the wrapper in every process. numbox treats a function at
-    module level in the same way if the process already decorated a function of the same name in the same module that is
-    not nested in another function, as when a module defines a function twice.
+    module level in the same way if the process already decorated another function of its name in its module, as when a
+    module defines a function twice. That other function counts only if it is not nested in another function.
 
     The decorator returns the dispatcher of the wrapper. The dispatcher's name is ``__`` followed by the function's
     name, and its docstring is the function's docstring. A call through the dispatcher, from Python or from jitted

@@ -362,14 +362,14 @@ def test_cached_factory_functions_each_run_their_own_body(tmp_path):
     """Cached proxied functions that one factory makes each run their own body, in a cold and in a warm process.
 
     The wrappers that ``@proxy`` generates for the products of one factory share a module, a qualified name, a first
-    line and their bytecode, so numba would keep them in one index file under one key, and the second product would load
-    the first one's wrapper. numbox therefore compiles such a wrapper in every process, under a qualified name that
-    contains the product's own. The module also defines a cached ``@proxy`` function of the same name at module level,
-    and the warm process makes a third product. A wrapper loaded from the cache keeps the symbol name it received in the
-    cold process, and a wrapper compiled under the same qualified name could receive that name too, by which numba
-    passes a function as a first-class value. Each function is called from Python, from a jitted function that takes it
-    as a dispatcher and from one that takes it as a first-class function. The bodies load from the cache in the warm
-    process, the module-level wrapper is cached, and no wrapper of a product is saved.
+    line and their bytecode. numba would keep them in one index file under one key, so the second product would load the
+    first one's wrapper. numbox therefore compiles such a wrapper in every process, under a qualified name that contains
+    the product's own. The module also defines a cached ``@proxy`` function of the same name at module level, and the
+    warm process makes a third product. A wrapper loaded from the cache keeps the symbol name it received in the cold
+    process. A wrapper compiled under the same qualified name could receive that name too, and numba passes a function
+    as a first-class value by that name. Each function is called from Python, from a jitted function that takes it as a
+    dispatcher and from one that takes it as a first-class function. The bodies load from the cache in the warm process.
+    The module-level wrapper is cached, and no wrapper of a product is saved.
     """
     script = tmp_path / "factory_products.py"
     script.write_text(textwrap.dedent('''
@@ -465,11 +465,11 @@ def test_two_module_level_functions_of_one_name_each_run_their_own_body_as_a_fir
     """Two cached proxied functions of one name at module level each run their own body when passed as a value.
 
     The module defines ``body`` twice, the first time only when ``BOTH`` is set. The wrappers of both have the name
-    ``__body``. In a process that loaded one of them from the cache and compiled the other, both could have one symbol
-    name, by which numba passes a function as a first-class value, and the call of the first would run the second body.
-    The first run caches only the second function's wrapper, and the second run defines both. numbox therefore gives the
-    template's name and the cache only to the wrapper of the first function of a name in a module, not nested in another
-    function, that a process decorates.
+    ``__body``. Suppose a process loaded one of them from the cache and compiled the other. Both could then have one
+    symbol name. numba passes a function as a first-class value by that name, so the call of the first would run the
+    second body. The first run caches only the second function's wrapper, and the second run defines both. numbox
+    therefore gives the template's name and the cache only to the wrapper of the first function of a name in a module,
+    not nested in another function, that a process decorates.
     """
     script = tmp_path / "defined_twice.py"
     script.write_text(textwrap.dedent('''
@@ -546,12 +546,13 @@ def test_the_first_product_of_a_factory_gets_an_uncached_wrapper():
 
 
 def test_two_threads_that_decorate_two_functions_of_one_name_give_the_template_name_to_one(tmp_path, monkeypatch):
-    """Of two threads that decorate two module-level functions of one name at once, one wrapper gets the template's name.
+    """One wrapper gets the template's name when two threads decorate two functions of one name at once.
 
-    Each thread holds the compile of its wrapper until both have started theirs, so both decide on a name before either
-    wrapper exists. The first wrapper of a name claims it under a lock before it compiles, so the other thread finds it
-    claimed. If the claim waited for the compile, both wrappers would get the name ``__body`` and the cache, and a
-    process that loaded one of them from the cache could give the other its symbol name.
+    The two functions are defined at module level in one module. Each thread holds the compile of its wrapper until both
+    have started theirs, so both decide on a name before either wrapper exists. The first wrapper of a name claims it
+    under a lock before it compiles, so the other thread finds it claimed. If the claim waited for the compile, both
+    wrappers would get the name ``__body`` and the cache. A process that loaded one of them from the cache could then
+    give the other its symbol name.
     """
     import importlib.util
     import threading
