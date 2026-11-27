@@ -511,12 +511,13 @@ def {func_proxy_name}({func_args_str}):
         # then run the other function's body. No Python definition produces a qualified name with the component
         # "<proxy>", and no wrapper whose qualified name has that component is cached.
         #
-        # The same holds for two functions of one name at module level, such as a function that a module defines
-        # twice, or a method of a class that has the name of a function. Their wrappers share the template's qualified
-        # name. If the process loads one of them from the cache and compiles the other, both can have one symbol name.
-        # So only the first wrapper of a name in a module that the process makes gets the template's qualified name and
-        # the cache. Every later one is compiled as the wrapper of a nested function is. A decoration that fails after
-        # the claim leaves the name claimed, so a later wrapper of that name is compiled without a cache.
+        # The same holds for two functions of one name at module level, such as a function that a module defines twice,
+        # or a method of a class that has the name of a function. Their wrappers share the template's qualified name. If
+        # the process loads one of them from the cache and compiles the other, both can have one symbol name. So of the
+        # functions of one name in a module that are not nested in another function, only the first that the process
+        # decorates gets the template's qualified name and the cache. Every later one is compiled as the wrapper of a
+        # nested function is. A nested function never claims the name. A decoration that fails after the claim leaves
+        # the name claimed, so a later function of that name gets a wrapper without a cache.
         uncached = bool(func.__code__.co_flags & inspect.CO_NESTED)
         if not uncached:
             wrapper_key = (inspect.getmodule(func).__name__, func_proxy_name)

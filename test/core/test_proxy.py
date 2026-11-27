@@ -466,9 +466,10 @@ def test_two_module_level_functions_of_one_name_each_run_their_own_body_as_a_fir
 
     The module defines ``body`` twice, the first time only when ``BOTH`` is set. The wrappers of both have the name
     ``__body``. In a process that loaded one of them from the cache and compiled the other, both could have one symbol
-    name, by which numba passes a function as a first-class value, and the call of the first would run the second
-    body. The first run caches only the second function's wrapper, and the second run defines both. numbox therefore
-    gives the template's name and the cache only to the first wrapper of a name in a module that a process makes.
+    name, by which numba passes a function as a first-class value, and the call of the first would run the second body.
+    The first run caches only the second function's wrapper, and the second run defines both. numbox therefore gives the
+    template's name and the cache only to the wrapper of the first function of a name in a module, not nested in another
+    function, that a process decorates.
     """
     script = tmp_path / "defined_twice.py"
     script.write_text(textwrap.dedent('''
