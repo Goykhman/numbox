@@ -128,9 +128,11 @@ def _call_proxied_alias(context, builder, main_sig, alias_name, args):
     return builder.call(f, args)
 
 
-# _TEMPLATE_NAMED_WRAPPERS holds a (module name, wrapper name) pair for each wrapper that this process compiled under
-# the template's qualified name, such as "__body" (see wrap in proxy).
+# _TEMPLATE_NAMED_WRAPPERS holds a (module name, wrapper name) pair for each wrapper that this process compiles under
+# the template's qualified name, such as "__body" (see wrap in proxy). A wrapper claims its pair under the lock before
+# it compiles, so that of two threads that decorate two functions of one name at once, only one gets that name.
 _TEMPLATE_NAMED_WRAPPERS = set()
+_TEMPLATE_NAMED_LOCK = threading.Lock()
 
 
 def _njit_named(qualname):
@@ -513,9 +515,14 @@ def {func_proxy_name}({func_args_str}):
         # twice, or a method of a class that has the name of a function. Their wrappers share the template's qualified
         # name. If the process loads one of them from the cache and compiles the other, both can have one symbol name.
         # So only the first wrapper of a name in a module that the process makes gets the template's qualified name and
-        # the cache. Every later one is compiled as the wrapper of a nested function is.
-        wrapper_key = (inspect.getmodule(func).__name__, func_proxy_name)
-        uncached = bool(func.__code__.co_flags & inspect.CO_NESTED) or wrapper_key in _TEMPLATE_NAMED_WRAPPERS
+        # the cache. Every later one is compiled as the wrapper of a nested function is. A decoration that fails after
+        # the claim leaves the name claimed, so a later wrapper of that name is compiled without a cache.
+        uncached = bool(func.__code__.co_flags & inspect.CO_NESTED)
+        if not uncached:
+            wrapper_key = (inspect.getmodule(func).__name__, func_proxy_name)
+            with _TEMPLATE_NAMED_LOCK:
+                uncached = wrapper_key in _TEMPLATE_NAMED_WRAPPERS
+                _TEMPLATE_NAMED_WRAPPERS.add(wrapper_key)
         wrapper_opts = {**jit_opts, 'cache': False} if uncached else jit_opts
         wrapper_njit = numbox_njit
         if uncached:
@@ -560,8 +567,6 @@ def {func_proxy_name}({func_args_str}):
         code = compile(prefixed, inspect.getfile(func), mode='exec')
         exec(code, ns)  # nosec B102 - JIT codegen of internal source
         dispatcher = ns[func_proxy_name]
-        if not uncached:
-            _TEMPLATE_NAMED_WRAPPERS.add(wrapper_key)
         # When numba builds a dispatcher, functools.update_wrapper copies the docstring of its py_func, which for the
         # wrapper is None. Both are then assigned the function's docstring, so that help() and autodoc show it. numba
         # copies the docstring again if it rebuilds the dispatcher from py_func. The wrapper's code objects remain

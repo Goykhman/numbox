@@ -524,6 +524,90 @@ def test_two_module_level_functions_of_one_name_each_run_their_own_body_as_a_fir
     assert run("0") == second_only
 
 
+def test_the_first_product_of_a_factory_gets_an_uncached_wrapper():
+    """The wrapper of a nested function is uncached even when no other wrapper of its name exists in the module.
+
+    No other function in this module has the name ``scaled_by_a_lone_factory``, so the rule for a later wrapper of a
+    name does not apply to the first product. Only the nesting keeps its wrapper out of the cache. A cached wrapper
+    under the template's name would make a warm process that calls the factory with another value find an entry for
+    another alias, which strict mode refuses.
+    """
+    def make(scale):
+        @proxy(float64(float64), jit_options={"cache": True})
+        def scaled_by_a_lone_factory(x):
+            return x * scale
+        return scaled_by_a_lone_factory
+
+    first = make(2.0)
+    assert first(1.0) == 2.0
+    assert type(first._cache).__name__ == "NullCache", "the wrapper of the first product was cached"
+    assert first.py_func.__qualname__.endswith(".<proxy>.__scaled_by_a_lone_factory")
+
+
+def test_two_threads_that_decorate_two_functions_of_one_name_give_the_template_name_to_one(tmp_path, monkeypatch):
+    """Of two threads that decorate two module-level functions of one name at once, one wrapper gets the template's name.
+
+    Each thread holds the compile of its wrapper until both have started theirs, so both decide on a name before either
+    wrapper exists. The first wrapper of a name claims it under a lock before it compiles, so the other thread finds it
+    claimed. If the claim waited for the compile, both wrappers would get the name ``__body`` and the cache, and a
+    process that loaded one of them from the cache could give the other its symbol name.
+    """
+    import importlib.util
+    import threading
+
+    from numbox.core.proxy import proxy as proxy_module
+
+    path = tmp_path / "two_bodies_for_threads.py"
+    path.write_text(textwrap.dedent('''
+        """Two module-level functions of one name, decorated by the test.
+
+        The docstring moves the functions below line 8.
+        """
+
+
+        def body(x):
+            return x + 100.0
+
+
+        first = body
+
+
+        def body(x):
+            return x + 200.0
+
+
+        second = body
+    '''), encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("two_bodies_for_threads", path)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    barrier = threading.Barrier(2, timeout=60)
+    real_njit = proxy_module.numbox_njit
+
+    def njit_after_both_threads_decided(*args, **kwargs):
+        barrier.wait()
+        return real_njit(*args, **kwargs)
+
+    monkeypatch.setattr(proxy_module, "numbox_njit", njit_after_both_threads_decided)
+    wrappers, errors = [], []
+
+    def decorate(func):
+        try:
+            wrappers.append(proxy(float64(float64), jit_options={"cache": True})(func))
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=decorate, args=(func,)) for func in (module.first, module.second)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not errors, errors
+    assert sorted(w.py_func.__qualname__ for w in wrappers) == ["__body", "body.<proxy>.__body"]
+    assert sorted(w(1.0) for w in wrappers) == [101.0, 201.0]
+
+
 def test_explain_cache_key_names_the_body_for_an_uncached_wrapper():
     """``explain_cache_key`` refuses the dispatcher of a proxied function whose wrapper has no cache, and names ``.as_func``.
 
