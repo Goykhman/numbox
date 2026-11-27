@@ -44,40 +44,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   now calls that function by its symbol name and holds no copy of its code. LLVM therefore cannot inline the call, which
   then costs the same as a call of a function passed as an argument. A cache entry that numbox 0.7.9 or earlier wrote
   for such a caller still holds the copy. Delete the cache files of each such caller once after the upgrade. The proxy
-  page lists the files. A caller decorated with `numbox_njit` needs no step.
+  page lists the files. A caller decorated with `numbox_njit` needs no step. ([#54])
 - A module that `numba.pycc` builds ahead of time fails to import with an undefined symbol if an exported function calls
   a jitted function that reads such a module-level variable. Read the value in the exported function and pass it to the
-  jitted function as an argument.
+  jitted function as an argument. ([#54])
 - A struct method, a `compile_kernel` formula or a work-builder derive compiles without a cache if it calls, through a
   module attribute as in `helpers.step(x)`, a function that numbox cannot fingerprint. Examples are an `@njit` function
   that reads a numba type as a global, and every `@guvectorize` or `@stencil` function. Before, such code was cached,
   and numbox loaded it after the function changed. Code that imports such a function by name already compiled without a
   cache. The jitted helpers of `numbox.utils.lowlevel` are the exception, so their callers remain cached. A SQLite
-  registration cannot disable its cache, so its cached code still does not change with such a function.
+  registration cannot disable its cache, so its cached code still does not change with such a function. ([#54])
 
 ### Fixed
 
 - A `cache=True` function that reads a `cres` function or the `.as_func` of a `@proxy` function from a module-level
   variable compiles again after an edit to that function. numbox discards the stale cache entry with a
   `StaleProxyCacheWarning`. Before, the caller continued to run the code from before the edit, without a warning.
+  ([#54])
 - The code that numbox generates and caches for a struct method, a `compile_kernel` formula or a work-builder derive
   compiles again when a function that the user's code calls through a module attribute changes, as in `helpers.step(x)`.
   That holds after an edit to a Python function such as a `@register_jitable` helper. It also holds when the attribute
   holds another value than in the run that cached the code, such as `numpy.cos` in place of `numpy.sin`. The value can
   be a function, a module, a numba type, a NumPy dtype object, or a class of NumPy, numba, numbox or the standard
   library. Before, numbox loaded the cached code in these cases. The utils page lists what the fingerprint still leaves
-  out.
+  out. ([#54])
 - The same generated code also compiles again after each of three more changes. The first is a change to an attribute of
   a module that the user's function takes as a default argument. The second is a change to an attribute of a module that
   a struct method reaches only through `ns`. The third is a change to the `locals`, the declared signatures or the
   declared `@vectorize` loops of a jitted function that the user's function calls. Before, numbox loaded the cached code
-  in these cases.
+  in these cases. ([#54])
 - The code of a SQLite registration compiles again after a change from the two entries above if the changed value is
   reached by a callback for which `digest` computes a full fingerprint. `digest` computes a weaker fingerprint for a
   callback that reads a value without a fingerprint. A callback that reads its arguments in the usual way, with
   `_cast_int_to_void_p` as a global, is such a callback. The weaker fingerprint covers none of these changes, as before.
   A registration therefore still loads its cached code after a change that only such callbacks reach. The utils page
-  describes this in the section "If a SQLite function keeps returning old results".
+  describes this in the section "If a SQLite function keeps returning old results". ([#54])
 - Two cached `@proxy` functions that one factory function makes each run their own body when called from Python or
   passed to a jitted function as an argument. Before, the second function loaded the cache entry of the first
   function's generated wrapper, and such a call of the second function ran the first function's body, without a
@@ -1394,3 +1395,4 @@ No user-facing changes. The release removes a demonstration block that ran only 
 [#50]: https://github.com/Goykhman/numbox/pull/50
 [#51]: https://github.com/Goykhman/numbox/pull/51
 [#53]: https://github.com/Goykhman/numbox/pull/53
+[#54]: https://github.com/Goykhman/numbox/pull/54
