@@ -72,7 +72,7 @@ in the same module that is not nested in another function, as when a module defi
 the two functions share a name too. Otherwise, in a process that loaded one of them from the cache and compiled the
 other, a jitted function that received the first function as a first-class function value could run the body of the
 second function. :func:`~numbox.core.cache_key.explain_cache_key` raises a ``ValueError`` for the dispatcher of such a
-function; pass its ``.as_func`` to see the key of its body.
+function. If the body is cached, pass the function's ``.as_func`` to see the key of the body.
 
 .. _proxy_where_the_function_may_start:
 

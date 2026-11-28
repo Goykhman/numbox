@@ -443,22 +443,110 @@ def test_cached_factory_functions_each_run_their_own_body(tmp_path):
 
 
 def test_a_nested_function_with_a_reassigned_qualname_gets_an_uncached_wrapper():
-    """numbox reads the nesting of a function from its code, so a product whose ``__qualname__`` was reassigned counts.
+    """numbox reads the nesting of a function from its code, so a product with a reassigned ``__qualname__`` is nested.
 
     The factory sets each product's ``__qualname__`` to a name without ``<locals>`` before it decorates the product.
     The two wrappers still share a module, a name, a first line and their bytecode. If numbox read the nesting from the
-    qualified name, it would cache both wrappers under one key, and the second product would run the first body.
+    qualified name, it would treat the first product as a function at module level and cache its wrapper. The test
+    checks both products. No other test uses the function's name, so no earlier claim of the name in this module
+    affects how the first product is compiled.
     """
     def make(scale):
-        def body(x):
+        def reassigned_body(x):
             return x * scale
-        body.__qualname__ = f"scaled_by_{int(scale)}"
-        return proxy(float64(float64), jit_options={"cache": True})(body)
+        reassigned_body.__qualname__ = f"scaled_by_{int(scale)}"
+        return proxy(float64(float64), jit_options={"cache": True})(reassigned_body)
 
     double, triple = make(2.0), make(3.0)
     assert (double(1.0), triple(1.0)) == (2.0, 3.0)
-    assert type(triple._cache).__name__ == "NullCache", "the wrapper of a nested function was cached"
-    assert triple.py_func.__qualname__ == "scaled_by_3.<proxy>.__body"
+    for product, qualname in ((double, "scaled_by_2"), (triple, "scaled_by_3")):
+        assert type(product._cache).__name__ == "NullCache", f"the wrapper of {qualname} was cached"
+        assert product.py_func.__qualname__ == f"{qualname}.<proxy>.__reassigned_body"
+
+
+def test_two_modules_that_each_define_a_function_of_one_name_both_get_cached_wrappers(tmp_path):
+    """A function at module level claims its wrapper's name in its own module only.
+
+    Two modules each define a proxied function ``body`` at module level, and one process imports both. Each function
+    is the first function of that name in its module, so the wrapper of each has the template's qualified name and a
+    cache.
+    """
+    for module, offset in (("claim_module_a", 100.0), ("claim_module_b", 200.0)):
+        (tmp_path / f"{module}.py").write_text(textwrap.dedent(f'''
+            """A module that defines one proxied function.
+
+            The docstring moves the decorator to line 8 or later.
+            """
+            from numba.core.types import float64
+            from numbox.core.proxy.proxy import proxy
+
+
+            @proxy(float64(float64), jit_options={{"cache": True}})
+            def body(x):
+                return x + {offset}
+        '''), encoding="utf-8")
+    script = tmp_path / "import_both.py"
+    script.write_text(textwrap.dedent('''
+        import claim_module_a
+        import claim_module_b
+
+        for module in (claim_module_a, claim_module_b):
+            print(module.body(1.0), type(module.body._cache).__name__, module.body.py_func.__qualname__)
+    '''), encoding="utf-8")
+    env = dict(os.environ, NUMBA_CACHE_DIR=str(tmp_path / "nbcache"), PYTHONPATH=os.pathsep.join([str(tmp_path), *sys.path]))
+    done = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, env=env, timeout=300)
+    assert done.returncode == 0, done.stderr
+    rows = [line.split() for line in done.stdout.splitlines()]
+    assert [(value, qualname) for value, _, qualname in rows] == [("101.0", "__body"), ("201.0", "__body")]
+    assert [cache for _, cache, _ in rows].count("NullCache") == 0, f"a wrapper was compiled without a cache: {rows}"
+
+
+def test_a_reload_of_the_proxy_module_keeps_the_claimed_wrapper_names(tmp_path):
+    """A name that a wrapper claimed before ``importlib.reload`` of the proxy module stays claimed after it.
+
+    The script defines ``body`` at module level, reloads the proxy module and defines ``body`` again. The second
+    function is the later function of that name in the module, so its wrapper is compiled under its own qualified name
+    and without a cache. If the reload emptied the record of claimed names, the second wrapper would take the
+    template's name and a cache, and the two wrappers could share a symbol name. The reload runs in a child process,
+    because it replaces the module's classes for every later test.
+    """
+    script = tmp_path / "claim_then_reload.py"
+    script.write_text(textwrap.dedent('''
+        """Define body, reload the proxy module, and define body again.
+
+        The docstring moves the first decorator to line 8 or later.
+        """
+        import importlib
+
+        from numba.core.types import float64
+        import numbox.core.proxy.proxy
+
+
+        @numbox.core.proxy.proxy.proxy(float64(float64), jit_options={"cache": True})
+        def body(x):
+            return x + 100.0
+
+
+        first = body
+        importlib.reload(numbox.core.proxy.proxy)
+
+
+        @numbox.core.proxy.proxy.proxy(float64(float64), jit_options={"cache": True})
+        def body(x):
+            return x + 200.0
+
+
+        for function in (first, body):
+            print(function(1.0), type(function._cache).__name__, function.py_func.__qualname__)
+    '''), encoding="utf-8")
+    env = dict(os.environ, NUMBA_CACHE_DIR=str(tmp_path / "nbcache"), PYTHONPATH=os.pathsep.join(sys.path))
+    done = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, env=env, timeout=300)
+    assert done.returncode == 0, done.stderr
+    (first_value, first_cache, first_name), (second_value, second_cache, second_name) = (
+        line.split() for line in done.stdout.splitlines()
+    )
+    assert (first_value, first_name) == ("101.0", "__body") and first_cache != "NullCache"
+    assert (second_value, second_cache, second_name) == ("201.0", "NullCache", "body.<proxy>.__body")
 
 
 def test_two_module_level_functions_of_one_name_each_run_their_own_body_as_a_first_class_value(tmp_path):

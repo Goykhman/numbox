@@ -129,9 +129,10 @@ def _call_proxied_alias(context, builder, main_sig, alias_name, args):
 
 
 # _TEMPLATE_NAMED_WRAPPERS holds the (module name, wrapper name) pairs that wrappers in this process claimed (see wrap
-# in proxy). A wrapper claims its pair under the lock before it compiles.
-_TEMPLATE_NAMED_WRAPPERS = set()
-_TEMPLATE_NAMED_LOCK = threading.Lock()
+# in proxy). A wrapper claims its pair under the lock before it compiles. A reload of this module preserves the set and
+# the lock, so a pair claimed before the reload remains claimed.
+_TEMPLATE_NAMED_WRAPPERS = globals().get("_TEMPLATE_NAMED_WRAPPERS", set())
+_TEMPLATE_NAMED_LOCK = globals().get("_TEMPLATE_NAMED_LOCK", threading.Lock())
 
 
 def _njit_named(qualname):
