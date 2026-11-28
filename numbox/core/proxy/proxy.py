@@ -128,6 +128,28 @@ def _call_proxied_alias(context, builder, main_sig, alias_name, args):
     return builder.call(f, args)
 
 
+# _TEMPLATE_NAMED_WRAPPERS holds the (module name, wrapper name) pairs that wrappers in this process claimed (see wrap
+# in proxy). A wrapper claims its pair under the lock before it compiles. A reload of this module preserves the set and
+# the lock, so a pair claimed before the reload remains claimed.
+_TEMPLATE_NAMED_WRAPPERS = globals().get("_TEMPLATE_NAMED_WRAPPERS", set())
+_TEMPLATE_NAMED_LOCK = globals().get("_TEMPLATE_NAMED_LOCK", threading.Lock())
+
+
+def _njit_named(qualname):
+    """Return a decorator that sets a wrapper's ``__qualname__`` to ``qualname`` and then applies :func:`numbox_njit`.
+
+    The decorator takes the arguments of :func:`numbox_njit`.
+    """
+    def decorator(*args, **kwargs):
+        decorate = numbox_njit(*args, **kwargs)
+
+        def wrap(wrapper):
+            wrapper.__qualname__ = qualname
+            return decorate(wrapper)
+        return wrap
+    return decorator
+
+
 # This list holds a reference to each trap cfunc below for the life of the process. numba does not unload compiled code
 # when a CFunc object is collected, so the address that add_symbol publishes remains valid without the reference. The
 # list is a precaution against a numba release that would unload such code.
@@ -384,10 +406,13 @@ def proxy(sig, jit_options: Optional[dict] = None):
     ``sig`` is a numba signature such as ``float64(float64)``, or a list of signatures for a function with default
     arguments. The first signature in a list is the main signature. Each further signature describes a call that omits
     trailing defaulted parameters, and it types each omitted parameter as numba's ``Omitted`` of its default value. A
-    signature given as a string fails with an ``AttributeError``. ``jit_options`` is passed to ``njit`` for the
-    function and for the wrapper that numbox generates around it. A value that is not a ``dict`` is ignored. The
-    function is cached only if ``jit_options`` enables caching, as ``{"cache": True}`` and
-    ``numbox.core.configurations.jit_options`` do.
+    signature given as a string fails with an ``AttributeError``. ``jit_options`` is passed to ``njit`` for the function
+    and for the wrapper that numbox generates around it. A value that is not a ``dict`` is ignored. The function is
+    cached only if ``jit_options`` enables caching, as ``{"cache": True}`` and
+    ``numbox.core.configurations.jit_options`` do. For a function defined inside another function, such as the product
+    of a factory, numbox caches the function but compiles the wrapper in every process. numbox treats a function at
+    module level in the same way if the process already decorated another function of its name in its module, as when a
+    module defines a function twice. numbox does not consider an earlier function that is nested in another function.
 
     The decorator returns the dispatcher of the wrapper. The dispatcher's name is ``__`` followed by the function's
     name, and its docstring is the function's docstring. A call through the dispatcher, from Python or from jitted
@@ -469,12 +494,47 @@ def _{func_proxy_name}(typingctx, {func_names_args_str}):
 def {func_proxy_name}({func_args_str}):
     return _{func_proxy_name}({func_names_args_str})
 """
-        # In this namespace, the template's njit is numbox_njit, so numbox keys the wrapper's cache as it keys the
-        # body's. The template still contains the text "@njit(", which the anchor code below searches for.
+        # A function defined inside another function, such as the products of a factory, gets a wrapper that numbox
+        # compiles without a cache. The wrappers of two products share a module, a qualified name, a first line and
+        # their bytecode, and they have no closure, so numba would keep them in one index file under one key. The alias
+        # that each wrapper calls reaches its code only through the @intrinsic, a global that numba's key does not hold,
+        # so the second product would load the entry of the first and run the first body. The body itself stays cached.
+        # numbox reads the nesting from the CO_NESTED flag of the function's code, which a reassigned __qualname__ or
+        # functools.wraps does not change.
+        #
+        # Such a wrapper is also compiled under a qualified name that contains the function's qualified name and the
+        # component "<proxy>", as in "make.<locals>.body.<proxy>.__body". numba names a compiled function after its module,
+        # its qualified name and a counter of the process, and a function loaded from the cache keeps the name it
+        # received in the process that cached it. Under the template's qualified name, "__body", a wrapper compiled in
+        # this process could receive the name of a cached wrapper of a function with the same name in the same module.
+        # numba finds the address of a function passed as a first-class value by that name, so a jitted caller could
+        # then run the other function's body. No Python definition produces a qualified name with the component
+        # "<proxy>", and no wrapper whose qualified name has that component is cached.
+        #
+        # The same holds for two functions of one name at module level, such as a function that a module defines twice,
+        # or a method of a class that has the name of a function. Their wrappers share the template's qualified name. If
+        # the process loads one of them from the cache and compiles the other, both can have one symbol name. Therefore,
+        # of the functions of one name in a module that are not nested in another function, only the first that the
+        # process decorates gets a wrapper with the template's qualified name and an on-disk cache. The wrapper of every
+        # later function is compiled in the same way as the wrapper of a nested function. A nested function never claims
+        # the name. A decoration that fails after the claim leaves the name claimed, so a later function of that name
+        # gets a wrapper without a cache.
+        uncached = bool(func.__code__.co_flags & inspect.CO_NESTED)
+        if not uncached:
+            wrapper_key = (inspect.getmodule(func).__name__, func_proxy_name)
+            with _TEMPLATE_NAMED_LOCK:
+                uncached = wrapper_key in _TEMPLATE_NAMED_WRAPPERS
+                _TEMPLATE_NAMED_WRAPPERS.add(wrapper_key)
+        wrapper_opts = {**jit_opts, 'cache': False} if uncached else jit_opts
+        wrapper_njit = numbox_njit
+        if uncached:
+            wrapper_njit = _njit_named(f"{func.__qualname__}.<proxy>.{func_proxy_name}")
+        # In this namespace, the template's njit compiles as numbox_njit does, so numbox keys the wrapper's cache as it
+        # keys the body's. The template still contains the text "@njit(", which the anchor code below searches for.
         ns = {
             **inspect.getmodule(func).__dict__,
             **{
-                'cgutils': cgutils, 'intrinsic': intrinsic, 'ir': ir, 'jit_opts': jit_opts, 'njit': numbox_njit,
+                'cgutils': cgutils, 'intrinsic': intrinsic, 'ir': ir, 'jit_opts': wrapper_opts, 'njit': wrapper_njit,
                 'sig': sig, 'main_sig': main_sig, '_call_proxied_alias': _call_proxied_alias
             }
         }
